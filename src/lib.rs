@@ -49,7 +49,6 @@ use futures::{
     sink::SinkExt,
     stream::{Fuse, Stream},
 };
-use libp2p::swarm::NetworkBehaviour;
 use tracing::Span;
 use tracing_futures::Instrument;
 
@@ -89,12 +88,14 @@ pub use self::{
 pub use cid::Cid;
 pub use ipfs_bitswap::Block;
 pub use libp2p::{
-    core::{
-        connection::ListenerId, multiaddr::multiaddr, multiaddr::Protocol, Multiaddr, PeerId,
-        PublicKey,
-    },
+    core::connection::ListenerId,
     identity::Keypair,
+    identity::PublicKey,
     kad::{record::Key, Quorum},
+    multiaddr::multiaddr,
+    multiaddr::Protocol,
+    swarm::NetworkBehaviour,
+    Multiaddr, PeerId,
 };
 
 /// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
