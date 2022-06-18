@@ -50,11 +50,6 @@ use futures::{
     stream::{Fuse, Stream},
 };
 
-use libp2p::{
-    gossipsub::{error::PublishError, MessageId},
-    swarm::NetworkBehaviour,
-};
-
 use tracing::Span;
 use tracing_futures::Instrument;
 
@@ -95,6 +90,7 @@ pub use cid::Cid;
 pub use ipfs_bitswap::Block;
 pub use libp2p::{
     core::connection::ListenerId,
+    gossipsub::{error::PublishError, MessageId},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},
