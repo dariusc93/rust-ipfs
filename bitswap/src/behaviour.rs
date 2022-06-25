@@ -8,10 +8,10 @@
 use crate::block::Block;
 use crate::ledger::{Ledger, Message, Priority};
 use crate::protocol::{BitswapConfig, MessageWrapper};
-use cid::Cid;
 use fnv::FnvHashSet;
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use hash_hasher::HashedMap;
+use libipld::Cid;
 use libp2p_core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
 use libp2p_swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p_swarm::handler::OneShotHandler;
@@ -169,7 +169,7 @@ impl Bitswap {
     ///
     /// Called from a Strategy.
     pub fn send_block(&mut self, peer_id: PeerId, block: Block) {
-        trace!("queueing block to be sent to {}: {}", peer_id, block.cid);
+        trace!("queueing block to be sent to {}: {}", peer_id, block.cid());
         if let Some(ledger) = self.connected_peers.get_mut(&peer_id) {
             ledger.add_block(block);
         }

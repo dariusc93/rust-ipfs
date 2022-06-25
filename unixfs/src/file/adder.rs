@@ -1,11 +1,12 @@
-use cid::Cid;
+use libipld::{
+    multihash::{Code, MultihashDigest},
+    Cid,
+};
 
 use crate::pb::{FlatUnixFs, PBLink, UnixFs, UnixFsType};
 use alloc::borrow::Cow;
 use core::fmt;
 use quick_protobuf::{MessageWrite, Writer};
-
-use sha2::{Digest, Sha256};
 
 /// File tree builder. Implements [`core::default::Default`] which tracks the recent defaults.
 ///
@@ -312,7 +313,7 @@ fn render_and_hash(flat: &FlatUnixFs<'_>) -> (Cid, Vec<u8>) {
     let mut writer = Writer::new(&mut out);
     flat.write_message(&mut writer)
         .expect("unsure how this could fail");
-    let mh = multihash::wrap(multihash::Code::Sha2_256, &Sha256::digest(&out));
+    let mh = Code::Sha2_256.digest(&out);
     let cid = Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0");
     (cid, out)
 }
@@ -642,9 +643,9 @@ mod tests {
 
     use super::{BalancedCollector, Chunker, FileAdder};
     use crate::test_support::FakeBlockstore;
-    use cid::Cid;
     use core::convert::TryFrom;
     use hex_literal::hex;
+    use libipld::Cid;
 
     #[test]
     fn test_size_chunker() {

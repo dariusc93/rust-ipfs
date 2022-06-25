@@ -1,8 +1,8 @@
 //! [`IpfsPath`] related functionality for content addressed paths with links.
 
 use crate::error::{Error, TryError};
-use cid::Cid;
 use core::convert::{TryFrom, TryInto};
+use libipld::Cid;
 use libp2p::PeerId;
 use std::fmt;
 use std::str::FromStr;

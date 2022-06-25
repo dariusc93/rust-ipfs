@@ -8,8 +8,12 @@ use crate::subscription::{SubscriptionFuture, SubscriptionRegistry};
 use crate::IpfsTypes;
 
 use anyhow::anyhow;
-use cid::Cid;
+// use cid::Cid;
 use ipfs_bitswap::{Bitswap, BitswapEvent};
+use libipld::{
+    multibase::{self, Base},
+    Cid,
+};
 use libp2p::core::{Multiaddr, PeerId};
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Key, Record};
@@ -17,9 +21,9 @@ use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
 // use libp2p::mdns::{MdnsEvent, TokioMdns};
 use libp2p::ping::{Ping, PingEvent};
 // use libp2p::swarm::toggle::Toggle;
+use libp2p::autonat;
 use libp2p::gossipsub::GossipsubEvent;
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess};
-use multibase::Base;
 use std::{convert::TryInto, sync::Arc};
 use tokio::task;
 
@@ -33,6 +37,7 @@ pub struct Behaviour<Types: IpfsTypes> {
     ping: Ping,
     identify: Identify,
     pubsub: Pubsub,
+    autonat: autonat::Behaviour,
     pub swarm: SwarmApi,
     #[behaviour(ignore)]
     repo: Arc<Repo<Types>>,
@@ -340,7 +345,7 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<BitswapEvent> for Behaviour<
                         Err(e) => {
                             debug!(
                                 "Got block {} from peer {} but failed to store it: {}",
-                                block.cid,
+                                block.cid(),
                                 peer_id.to_base58(),
                                 e
                             );
@@ -377,6 +382,10 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<BitswapEvent> for Behaviour<
             BitswapEvent::ReceivedCancel(..) => {}
         }
     }
+}
+
+impl<Types: IpfsTypes> NetworkBehaviourEventProcess<autonat::Event> for Behaviour<Types> {
+    fn inject_event(&mut self, _: autonat::Event) {}
 }
 
 impl<Types: IpfsTypes> NetworkBehaviourEventProcess<PingEvent> for Behaviour<Types> {
@@ -462,7 +471,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         for (addr, peer_id) in &options.bootstrap {
             kademlia.add_address(peer_id, addr.to_owned());
         }
-
+        let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
         let bitswap = Bitswap::default();
         let ping = Ping::default();
         let identify = Identify::new(
@@ -486,6 +495,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
             bitswap,
             ping,
             identify,
+            autonat,
             pubsub,
             swarm,
         })
@@ -533,7 +543,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
     // FIXME: it would be best if get_providers is called only in case the already connected
     // peers don't have it
     pub fn want_block(&mut self, cid: Cid) {
-        let key = cid.hash().as_bytes().to_owned();
+        let key = cid.hash().to_bytes();
         self.kademlia.get_providers(key.into());
         self.bitswap.want_block(cid, 1);
     }
@@ -575,7 +585,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
     }
 
     pub fn get_providers(&mut self, cid: Cid) -> SubscriptionFuture<KadResult, String> {
-        let key = Key::from(cid.hash().as_bytes().to_owned());
+        let key = Key::from(cid.hash().to_bytes());
         self.kad_subscriptions
             .create_subscription(self.kademlia.get_providers(key).into(), None)
     }
@@ -584,7 +594,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         &mut self,
         cid: Cid,
     ) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
-        let key = Key::from(cid.hash().as_bytes().to_owned());
+        let key = Key::from(cid.hash().to_bytes());
         match self.kademlia.start_providing(key) {
             Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
             Err(e) => {

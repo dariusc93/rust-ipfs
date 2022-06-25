@@ -1,7 +1,7 @@
-use cid::Cid;
 use futures::future::{pending, select, Either, FutureExt};
 use futures::future::{AbortHandle, Abortable};
 use ipfs::Node;
+use libipld::Cid;
 use tokio::{
     task,
     time::{sleep, timeout},

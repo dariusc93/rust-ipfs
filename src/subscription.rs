@@ -4,12 +4,12 @@
 //! sharing the same unique numeric identifier, the `SubscriptionId`.
 
 use crate::{p2p::MultiaddrWithPeerId, RepoEvent};
-use cid::Cid;
 use core::fmt::Debug;
 use core::hash::Hash;
 use core::pin::Pin;
 use futures::channel::mpsc::Sender;
 use futures::future::Future;
+use libipld::Cid;
 use libp2p::kad::QueryId;
 use std::collections::HashMap;
 use std::convert::TryFrom;
