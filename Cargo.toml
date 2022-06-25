@@ -28,16 +28,16 @@ bytes = { default-features = false, version = "1" }
 libipld = "0.13"
 trust-dns-resolver = "0.21"
 either = { default-features = false, version = "1.5" }
-futures = { default-features = false, version = "0.3.9", features = ["alloc", "std"] }
+futures = { default-features = false, version = "0.3", features = ["alloc", "std"] }
 hash_hasher = "2.0.3"
 ipfs-unixfs = { version = "0.2", path = "unixfs" }
 libp2p = { default-features = false, features = ["gossipsub", "autonat", "relay", "identify", "kad", "tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio"], version = "0.45.1" }
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
 thiserror = { default-features = false, version = "1.0" }
-tokio = { default-features = false, features = ["fs", "macros", "rt-multi-thread", "sync"], version = "1.0" }
+tokio = { default-features = false, features = ["fs", "macros", "rt-multi-thread", "sync"], version = "1" }
 tokio-stream = { version = "0.1", features = ["fs"] }
-tokio-util = { version = "0.6" }
+tokio-util = { version = "0.7" }
 tracing = { default-features = false, features = ["log"], version = "0.1" }
 tracing-futures = { default-features = false, features = ["std-future", "std", "futures-03"], version = "0.2" }
 void = { default-features = false, version = "1.0" }
