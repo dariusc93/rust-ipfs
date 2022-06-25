@@ -18,11 +18,11 @@ use libp2p::core::{Multiaddr, PeerId};
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Key, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
-// use libp2p::mdns::{MdnsEvent, TokioMdns};
+use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::ping::{Ping, PingEvent};
-// use libp2p::swarm::toggle::Toggle;
 use libp2p::autonat;
 use libp2p::gossipsub::GossipsubEvent;
+use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess};
 use std::{convert::TryInto, sync::Arc};
 use tokio::task;
@@ -31,7 +31,7 @@ use tokio::task;
 #[derive(libp2p::NetworkBehaviour)]
 #[behaviour(event_process = true)]
 pub struct Behaviour<Types: IpfsTypes> {
-    // mdns: Toggle<TokioMdns>,
+    mdns: Toggle<Mdns>,
     kademlia: Kademlia<MemoryStore>,
     bitswap: Bitswap,
     ping: Ping,
@@ -63,7 +63,7 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<void::Void> for Behaviour<Ty
     fn inject_event(&mut self, _event: void::Void) {}
 }
 
-/*
+
 impl<Types: IpfsTypes> NetworkBehaviourEventProcess<MdnsEvent> for Behaviour<Types> {
     fn inject_event(&mut self, event: MdnsEvent) {
         match event {
@@ -75,14 +75,18 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<MdnsEvent> for Behaviour<Typ
             }
             MdnsEvent::Expired(list) => {
                 for (peer, _) in list {
-                    trace!("mdns: Expired peer {}", peer.to_base58());
-                    self.remove_peer(&peer);
+                    // if let Some(mdns) = self.pubsub().behaviour().mdns.as_ref() {
+                    //     if !mdns.has_node(&peer) {
+                            trace!("mdns: Expired peer {}", peer.to_base58());
+                            self.remove_peer(&peer);
+                    // }
+                    // }
                 }
             }
         }
     }
 }
-*/
+
 
 impl<Types: IpfsTypes> NetworkBehaviourEventProcess<KademliaEvent> for Behaviour<Types> {
     fn inject_event(&mut self, event: KademliaEvent) {
@@ -449,14 +453,16 @@ impl<Types: IpfsTypes> Behaviour<Types> {
     pub async fn new(options: SwarmOptions, repo: Arc<Repo<Types>>) -> Result<Self, Error> {
         info!("net: starting with peer id {}", options.peer_id);
 
-        /*
+        
         let mdns = if options.mdns {
-            Some(TokioMdns::new().expect("Failed to create mDNS service"))
+            let mut config = MdnsConfig::default();
+            config.enable_ipv6 = true;
+            Mdns::new(config).await.ok()
         } else {
             None
         }
         .into();
-        */
+        
 
         let store = MemoryStore::new(options.peer_id.to_owned());
 
@@ -489,7 +495,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
 
         Ok(Behaviour {
             repo,
-            // mdns,
+            mdns,
             kademlia,
             kad_subscriptions: Default::default(),
             bitswap,
