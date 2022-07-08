@@ -85,7 +85,7 @@ pub use self::{
 pub use ipfs_bitswap::Block;
 use libipld::{Cid, Ipld, IpldCodec};
 pub use libp2p::{
-    core::connection::ListenerId,
+    core::transport::ListenerId,
     gossipsub::{error::PublishError, MessageId},
     identity::Keypair,
     identity::PublicKey,

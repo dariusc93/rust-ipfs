@@ -11,7 +11,8 @@ use std::task::{Context, Poll};
 use crate::error::Error;
 
 use libp2p::core::{
-    connection::{ConnectedPoint, ConnectionId, ListenerId},
+    connection::{ConnectedPoint, ConnectionId},
+    transport::ListenerId,
     Multiaddr, PeerId,
 };
 
