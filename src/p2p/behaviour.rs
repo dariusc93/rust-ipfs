@@ -74,12 +74,12 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<MdnsEvent> for Behaviour<Typ
             }
             MdnsEvent::Expired(list) => {
                 for (peer, _) in list {
-                    // if let Some(mdns) = self.pubsub().behaviour().mdns.as_ref() {
-                    //     if !mdns.has_node(&peer) {
+                    if let Some(mdns) = self.mdns.as_ref() {
+                        if !mdns.has_node(&peer) {
                             trace!("mdns: Expired peer {}", peer.to_base58());
                             self.remove_peer(&peer);
-                    // }
-                    // }
+                        }
+                    }
                 }
             }
         }
