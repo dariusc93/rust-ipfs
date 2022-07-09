@@ -24,6 +24,7 @@ use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::ping::{Ping, PingEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess};
+use std::convert::TryFrom;
 use std::{convert::TryInto, sync::Arc};
 use tokio::task;
 
@@ -472,8 +473,9 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         }
         let mut kademlia = Kademlia::with_config(options.peer_id.to_owned(), store, kad_config);
 
-        for (addr, peer_id) in &options.bootstrap {
-            kademlia.add_address(peer_id, addr.to_owned());
+        for addr in &options.bootstrap {
+            let addr = MultiaddrWithPeerId::try_from(addr.clone())?;
+            kademlia.add_address(&addr.peer_id, addr.multiaddr.as_ref().clone());
         }
         let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
         let bitswap = Bitswap::default();
@@ -485,7 +487,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         let pubsub = Pubsub::new(options.keypair)?;
         let mut swarm = SwarmApi::default();
 
-        for (addr, _peer_id) in &options.bootstrap {
+        for addr in &options.bootstrap {
             if let Ok(addr) = addr.to_owned().try_into() {
                 swarm.bootstrappers.insert(addr);
             }

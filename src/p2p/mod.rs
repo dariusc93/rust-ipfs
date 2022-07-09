@@ -28,7 +28,7 @@ pub struct SwarmOptions {
     /// The peer address of the local node created from the keypair.
     pub peer_id: PeerId,
     /// The peers to connect to on startup.
-    pub bootstrap: Vec<(Multiaddr, PeerId)>,
+    pub bootstrap: Vec<Multiaddr>,
     /// Enables mdns for peer discovery and announcement when true.
     pub mdns: bool,
     /// Custom Kademlia protocol name, see [`IpfsOptions::kad_protocol`].

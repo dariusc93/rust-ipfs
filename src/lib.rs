@@ -139,7 +139,7 @@ pub struct IpfsOptions {
     pub keypair: Keypair,
 
     /// Nodes used as bootstrap peers.
-    pub bootstrap: Vec<(Multiaddr, PeerId)>,
+    pub bootstrap: Vec<Multiaddr>,
 
     /// Enables mdns for peer discovery and announcement when true.
     pub mdns: bool,
