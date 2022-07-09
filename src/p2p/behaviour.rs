@@ -22,6 +22,9 @@ use libp2p::kad::record::{store::MemoryStore, Key, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::ping::{Ping, PingEvent};
+use libp2p::relay::v2::relay::{Relay, Event as RelayEvent};
+use libp2p::relay::v2::{client::{Client as RelayCleint, Event as RelayCleintEvent}};
+use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess};
 use std::convert::TryFrom;
@@ -39,6 +42,9 @@ pub struct Behaviour<Types: IpfsTypes> {
     identify: Identify,
     pubsub: Pubsub,
     autonat: autonat::Behaviour,
+    relay: Toggle<Relay>,
+    relay_client: Toggle<RelayCleint>,
+    dcutr: Toggle<Dcutr>, 
     pub swarm: SwarmApi,
     #[behaviour(ignore)]
     repo: Arc<Repo<Types>>,
@@ -389,7 +395,27 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<BitswapEvent> for Behaviour<
 }
 
 impl<Types: IpfsTypes> NetworkBehaviourEventProcess<autonat::Event> for Behaviour<Types> {
-    fn inject_event(&mut self, _: autonat::Event) {}
+    fn inject_event(&mut self, event: autonat::Event) {
+        trace!("Autonat: {:?}", event);
+    }
+}
+
+impl<Types: IpfsTypes> NetworkBehaviourEventProcess<RelayEvent> for Behaviour<Types> {
+    fn inject_event(&mut self, event: RelayEvent) {
+        trace!("Relay Event: {:?}", event);
+    }
+}
+
+impl<Types: IpfsTypes> NetworkBehaviourEventProcess<RelayCleintEvent> for Behaviour<Types> {
+    fn inject_event(&mut self, event: RelayCleintEvent) {
+        trace!("Relay Client Event: {:?}", event);
+    }
+}
+
+impl<Types: IpfsTypes> NetworkBehaviourEventProcess<DcutrEvent> for Behaviour<Types> {
+    fn inject_event(&mut self, event: DcutrEvent) {
+        trace!("Dcutr Event: {:?}", event);
+    }
 }
 
 impl<Types: IpfsTypes> NetworkBehaviourEventProcess<PingEvent> for Behaviour<Types> {
@@ -468,6 +494,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         let mut kad_config = KademliaConfig::default();
         kad_config.disjoint_query_paths(true);
         kad_config.set_query_timeout(std::time::Duration::from_secs(300));
+
         if let Some(protocol) = options.kad_protocol {
             kad_config.set_protocol_name(protocol.into_bytes());
         }
@@ -493,6 +520,12 @@ impl<Types: IpfsTypes> Behaviour<Types> {
             }
         }
 
+        let dcutr = Toggle::from(options.dcutr.then(|| Dcutr::new()));
+
+        //TODO: Work on custom transport for relay
+        let relay = None.into();
+        let relay_client = None.into();
+        
         Ok(Behaviour {
             repo,
             mdns,
@@ -504,6 +537,9 @@ impl<Types: IpfsTypes> Behaviour<Types> {
             autonat,
             pubsub,
             swarm,
+            dcutr,
+            relay,
+            relay_client
         })
     }
 

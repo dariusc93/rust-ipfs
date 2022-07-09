@@ -144,6 +144,9 @@ pub struct IpfsOptions {
     /// Enables mdns for peer discovery and announcement when true.
     pub mdns: bool,
 
+    /// Enables dcutr
+    pub dcutr: bool,
+
     /// Custom Kademlia protocol name. When set to `None`, the global DHT name is used instead of
     /// the LAN dht name.
     ///
@@ -172,6 +175,7 @@ impl fmt::Debug for IpfsOptions {
             .field("bootstrap", &self.bootstrap)
             .field("keypair", &DebuggableKeypair(&self.keypair))
             .field("mdns", &self.mdns)
+            .field("dcutr", &self.dcutr)
             .field("kad_protocol", &self.kad_protocol)
             .field("listening_addrs", &self.listening_addrs)
             .field("span", &self.span)
@@ -188,6 +192,7 @@ impl IpfsOptions {
             ipfs_path: env::temp_dir(),
             keypair: Keypair::generate_ed25519(),
             mdns: Default::default(),
+            dcutr: Default::default(),
             bootstrap: Default::default(),
             // default to lan kad for go-ipfs use in tests
             kad_protocol: Some("/ipfs/lan/kad/1.0.0".to_owned()),

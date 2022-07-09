@@ -5,6 +5,7 @@ use crate::{IpfsOptions, IpfsTypes};
 
 use libp2p::identity::Keypair;
 use libp2p::Swarm;
+use libp2p::relay::v2::relay::Relay;
 use libp2p::{Multiaddr, PeerId};
 use std::sync::Arc;
 use tracing::Span;
@@ -33,6 +34,13 @@ pub struct SwarmOptions {
     pub mdns: bool,
     /// Custom Kademlia protocol name, see [`IpfsOptions::kad_protocol`].
     pub kad_protocol: Option<String>,
+    /// Relay Server
+    pub relay_server: Option<()>,
+    /// Relay client
+    pub relay_client: Option<()>,
+    /// Enables dcutr
+    pub dcutr: bool,
+
 }
 
 impl From<&IpfsOptions> for SwarmOptions {
@@ -42,13 +50,18 @@ impl From<&IpfsOptions> for SwarmOptions {
         let bootstrap = options.bootstrap.clone();
         let mdns = options.mdns;
         let kad_protocol = options.kad_protocol.clone();
-
+        let dcutr = options.dcutr;
+        let relay_server = None;
+        let relay_client = None;
         SwarmOptions {
             keypair,
             peer_id,
             bootstrap,
             mdns,
             kad_protocol,
+            relay_server,
+            relay_client,
+            dcutr,
         }
     }
 }
