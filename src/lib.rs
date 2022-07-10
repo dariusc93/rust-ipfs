@@ -147,6 +147,15 @@ pub struct IpfsOptions {
     /// Enables dcutr
     pub dcutr: bool,
 
+    /// Enables relay client.
+    pub relay: bool,
+
+    /// Enables relay server
+    pub relay_server: bool,
+
+    /// Relay server to use
+    pub relay_addr: Option<Multiaddr>,
+
     /// Custom Kademlia protocol name. When set to `None`, the global DHT name is used instead of
     /// the LAN dht name.
     ///
@@ -164,6 +173,25 @@ pub struct IpfsOptions {
     /// with this span or spans referring to this as their parent. Setting this other than `None`
     /// default is useful when running multiple nodes.
     pub span: Option<Span>,
+}
+
+impl Default for IpfsOptions {
+    fn default() -> Self {
+        Self {
+            ipfs_path: env::temp_dir(),
+            keypair: Keypair::generate_ed25519(),
+            mdns: Default::default(),
+            dcutr: Default::default(),
+            bootstrap: Default::default(),
+            relay: Default::default(),
+            relay_addr: Default::default(),
+            relay_server: Default::default(),
+            // default to lan kad for go-ipfs use in tests
+            kad_protocol: None,
+            listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap(), "/ip6/::/tcp/0".parse().unwrap()],
+            span: None,
+        }
+    }
 }
 
 impl fmt::Debug for IpfsOptions {
@@ -188,17 +216,10 @@ impl IpfsOptions {
     ///
     /// Also used from examples.
     pub fn inmemory_with_generated_keys() -> Self {
-        Self {
-            ipfs_path: env::temp_dir(),
-            keypair: Keypair::generate_ed25519(),
-            mdns: Default::default(),
-            dcutr: Default::default(),
-            bootstrap: Default::default(),
-            // default to lan kad for go-ipfs use in tests
-            kad_protocol: Some("/ipfs/lan/kad/1.0.0".to_owned()),
-            listening_addrs: vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()],
-            span: None,
-        }
+        let mut config = IpfsOptions::default();
+        config.kad_protocol = Some("/ipfs/lan/kad/1.0.0".to_owned());
+        config.listening_addrs = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
+        config
     }
 }
 
@@ -212,6 +233,7 @@ impl<I: Borrow<Keypair>> fmt::Debug for DebuggableKeypair<I> {
         let kind = match self.get_ref() {
             Keypair::Ed25519(_) => "Ed25519",
             Keypair::Rsa(_) => "Rsa",
+            _ => "Unknown"
         };
 
         write!(fmt, "Keypair::{}", kind)
@@ -399,8 +421,12 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             .await?;
 
         let IpfsOptions {
-            listening_addrs, ..
+            listening_addrs, relay, relay_addr, ..
         } = options;
+        
+        let mut listening_addrs = listening_addrs.clone();
+
+        if relay && relay_addr.is_some() { listening_addrs.push(relay_addr.unwrap()) };
 
         let mut fut = IpfsFuture {
             repo_events: repo_events.fuse(),

@@ -5,7 +5,6 @@ use crate::{IpfsOptions, IpfsTypes};
 
 use libp2p::identity::Keypair;
 use libp2p::Swarm;
-use libp2p::relay::v2::relay::Relay;
 use libp2p::{Multiaddr, PeerId};
 use std::sync::Arc;
 use tracing::Span;
@@ -35,9 +34,9 @@ pub struct SwarmOptions {
     /// Custom Kademlia protocol name, see [`IpfsOptions::kad_protocol`].
     pub kad_protocol: Option<String>,
     /// Relay Server
-    pub relay_server: Option<()>,
+    pub relay_server: bool,
     /// Relay client
-    pub relay_client: Option<()>,
+    pub relay: bool,
     /// Enables dcutr
     pub dcutr: bool,
 
@@ -51,8 +50,8 @@ impl From<&IpfsOptions> for SwarmOptions {
         let mdns = options.mdns;
         let kad_protocol = options.kad_protocol.clone();
         let dcutr = options.dcutr;
-        let relay_server = None;
-        let relay_client = None;
+        let relay_server = options.relay_server;
+        let relay = options.relay;
         SwarmOptions {
             keypair,
             peer_id,
@@ -60,7 +59,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             mdns,
             kad_protocol,
             relay_server,
-            relay_client,
+            relay,
             dcutr,
         }
     }
@@ -74,11 +73,13 @@ pub async fn create_swarm<TIpfsTypes: IpfsTypes>(
 ) -> Result<TSwarm<TIpfsTypes>, Error> {
     let peer_id = options.peer_id;
 
-    // Set up an encrypted TCP transport over the Mplex protocol.
-    let transport = transport::build_transport(options.keypair.clone())?;
+    let keypair = options.keypair.clone();
 
     // Create a Kademlia behaviour
-    let behaviour = behaviour::build_behaviour(options, repo).await?;
+    let (behaviour, relay_transport) = behaviour::build_behaviour(options, repo).await?;
+
+    // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
+    let transport = transport::build_transport(keypair, relay_transport)?;
 
     // Create a Swarm
     let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer_id)

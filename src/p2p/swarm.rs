@@ -598,7 +598,7 @@ mod tests {
     fn build_swarm() -> (PeerId, libp2p::swarm::Swarm<SwarmApi>) {
         let key = Keypair::generate_ed25519();
         let peer_id = key.public().to_peer_id();
-        let transport = build_transport(key).unwrap();
+        let transport = build_transport(key, None).unwrap();
 
         let swarm = SwarmBuilder::new(transport, SwarmApi::default(), peer_id)
             .executor(Box::new(ThreadLocalTokio))

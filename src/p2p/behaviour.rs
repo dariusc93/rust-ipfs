@@ -22,8 +22,9 @@ use libp2p::kad::record::{store::MemoryStore, Key, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::ping::{Ping, PingEvent};
+use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::relay::{Relay, Event as RelayEvent};
-use libp2p::relay::v2::{client::{Client as RelayCleint, Event as RelayCleintEvent}};
+use libp2p::relay::v2::{client::{Client as RelayClient, Event as RelayCleintEvent}};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess};
@@ -43,7 +44,7 @@ pub struct Behaviour<Types: IpfsTypes> {
     pubsub: Pubsub,
     autonat: autonat::Behaviour,
     relay: Toggle<Relay>,
-    relay_client: Toggle<RelayCleint>,
+    relay_client: Toggle<RelayClient>,
     dcutr: Toggle<Dcutr>, 
     pub swarm: SwarmApi,
     #[behaviour(ignore)]
@@ -476,7 +477,7 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<GossipsubEvent> for Behaviou
 
 impl<Types: IpfsTypes> Behaviour<Types> {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
-    pub async fn new(options: SwarmOptions, repo: Arc<Repo<Types>>) -> Result<Self, Error> {
+    pub async fn new(options: SwarmOptions, repo: Arc<Repo<Types>>) -> Result<(Self, Option<ClientTransport>), Error> {
         info!("net: starting with peer id {}", options.peer_id);
 
         let mdns = if options.mdns {
@@ -498,6 +499,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         if let Some(protocol) = options.kad_protocol {
             kad_config.set_protocol_name(protocol.into_bytes());
         }
+
         let mut kademlia = Kademlia::with_config(options.peer_id.to_owned(), store, kad_config);
 
         for addr in &options.bootstrap {
@@ -507,10 +509,14 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
         let bitswap = Bitswap::default();
         let ping = Ping::default();
+        let peer_id = options.keypair.public().into();
+
+        //TODO: Provide custom protocol and agent name via IpfsOptions
         let identify = Identify::new(
             IdentifyConfig::new("/ipfs/0.1.0".into(), options.keypair.public())
                 .with_agent_version("rust-ipfs".into()),
         );
+
         let pubsub = Pubsub::new(options.keypair)?;
         let mut swarm = SwarmApi::default();
 
@@ -520,13 +526,21 @@ impl<Types: IpfsTypes> Behaviour<Types> {
             }
         }
 
+        // Maybe have this enable in conjunction with RelayClient? 
         let dcutr = Toggle::from(options.dcutr.then(|| Dcutr::new()));
 
+        let relay = Toggle::from(options.relay_server.then(|| Relay::new(peer_id, Default::default())));
+
         //TODO: Work on custom transport for relay
-        let relay = None.into();
-        let relay_client = None.into();
-        
-        Ok(Behaviour {
+        let (transport, relay_client) = match options.relay {
+            true => {
+                let (transport, client) = RelayClient::new_transport_and_behaviour(peer_id);
+                (Some(transport), Some(client).into())
+            }
+            false => (None, None.into())
+        }.into();
+
+        Ok((Behaviour {
             repo,
             mdns,
             kademlia,
@@ -540,7 +554,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
             dcutr,
             relay,
             relay_client
-        })
+        }, transport))
     }
 
     pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
@@ -771,6 +785,6 @@ impl<Types: IpfsTypes> Behaviour<Types> {
 pub async fn build_behaviour<TIpfsTypes: IpfsTypes>(
     options: SwarmOptions,
     repo: Arc<Repo<TIpfsTypes>>,
-) -> Result<Behaviour<TIpfsTypes>, Error> {
+) -> Result<(Behaviour<TIpfsTypes>, Option<ClientTransport>), Error> {
     Behaviour::new(options, repo).await
 }

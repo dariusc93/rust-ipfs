@@ -404,11 +404,11 @@ impl NetworkBehaviour for Pubsub {
                 }) => {
                     let topic = message.topic.clone();
                     let msg = Arc::new(PubsubMessage::from(message));
-                    let mut buffer = None;
+                    // let mut buffer = None;
                     if let Entry::Occupied(oe) = self.streams.entry(topic.clone()) {
-                        let sent = buffer.take().unwrap_or_else(|| Arc::clone(&msg));
+                        // let sent = buffer.take().unwrap_or_else(|| Arc::clone(&msg));
 
-                        if let Err(se) = oe.get().unbounded_send(sent) {
+                        if let Err(se) = oe.get().unbounded_send(msg.clone()) {
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
@@ -418,7 +418,7 @@ impl NetworkBehaviour for Pubsub {
                                     .unwrap_or_default(),
                                 "Failed to unsubscribe following SendError"
                             );
-                            buffer = Some(se.into_inner());
+                            let _ = Some(se.into_inner());
                         }
                     } else {
                         // we had unsubscribed from the topic after Gossipsub had received the
