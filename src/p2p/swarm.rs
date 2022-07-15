@@ -292,12 +292,12 @@ impl NetworkBehaviour for SwarmApi {
         }
 
         let removed = self.connections.remove(&closed_addr);
-
-        debug_assert!(
-            removed.is_some(),
-            "connection was not tracked but it should had been: {}",
-            closed_addr
-        );
+        if removed.is_some() {
+            debug!(
+                "connection was not tracked but it should had been: {}",
+                closed_addr
+            );
+        }
 
         self.connected_times.remove(peer_id);
 
