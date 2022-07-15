@@ -37,7 +37,7 @@ pub fn build_transport(keypair: identity::Keypair, relay: Option<ClientTransport
     let multiplex_upgrade = SelectUpgrade::new(yamux_config, MplexConfig::new());
 
     //TODO: Cleanup 
-    let tcp_config = GenTcpConfig::default().nodelay(true);
+    let tcp_config = GenTcpConfig::default().nodelay(true).port_reuse(true);
 
     let tcp_transport = TokioTcpTransport::new(tcp_config.clone());
     let ws_transport = libp2p::websocket::WsConfig::new(TokioTcpTransport::new(
