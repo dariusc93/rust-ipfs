@@ -6,6 +6,7 @@ use crate::{IpfsOptions, IpfsTypes};
 use libp2p::identity::Keypair;
 use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
+use std::convert::TryInto;
 use std::sync::Arc;
 use tracing::Span;
 
@@ -83,6 +84,7 @@ pub async fn create_swarm<TIpfsTypes: IpfsTypes>(
 
     // Create a Swarm
     let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer_id)
+        .dial_concurrency_factor(8.try_into().unwrap())
         .executor(Box::new(SpannedExecutor(span)))
         .build();
 
