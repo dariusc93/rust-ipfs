@@ -17,7 +17,7 @@ use libipld::{
 use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
 use libp2p::gossipsub::GossipsubEvent;
-use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
+use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent, IdentifyInfo};
 use libp2p::kad::record::{store::MemoryStore, Key, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
@@ -465,7 +465,20 @@ impl<Types: IpfsTypes> NetworkBehaviourEventProcess<PingEvent> for Behaviour<Typ
 
 impl<Types: IpfsTypes> NetworkBehaviourEventProcess<IdentifyEvent> for Behaviour<Types> {
     fn inject_event(&mut self, event: IdentifyEvent) {
-        trace!("identify: {:?}", event);
+        match event {
+            IdentifyEvent::Received { peer_id, info: IdentifyInfo {
+                listen_addrs,
+                protocols,
+                ..
+            }} => {
+                if protocols.iter().any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME) {
+                    for addr in listen_addrs {
+                        self.autonat.add_server(peer_id, Some(addr));
+                    }
+                }
+            },
+            event => trace!("identify: {:?}", event)
+        }
     }
 }
 
