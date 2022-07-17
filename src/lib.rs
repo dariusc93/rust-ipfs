@@ -291,6 +291,10 @@ enum IpfsEvent {
     Connections(Channel<Vec<Connection>>),
     /// Disconnect
     Disconnect(MultiaddrWithPeerId, Channel<()>),
+    /// Ban Peer
+    Ban(PeerId, Channel<()>),
+    /// Unban peer
+    Unban(PeerId, Channel<()>),
     /// Request background task to return the listened and external addresses
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
@@ -755,6 +759,34 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             self.to_task
                 .clone()
                 .send(IpfsEvent::Disconnect(target, tx))
+                .await?;
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Bans a peer.
+    pub async fn ban_peer(&self, target: PeerId) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+            self.to_task
+                .clone()
+                .send(IpfsEvent::Ban(target, tx))
+                .await?;
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Unbans a peer.
+    pub async fn unban_peer(&self, target: PeerId) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+            self.to_task
+                .clone()
+                .send(IpfsEvent::Unban(target, tx))
                 .await?;
             rx.await?
         }
@@ -1453,6 +1485,16 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             disconnector.disconnect(&mut self.swarm);
                         }
                         ret.send(Ok(())).ok();
+                    }
+                    IpfsEvent::Ban(peer, ret) => {
+                        let disconnector = self.swarm.behaviour_mut().ban_peer_id(peer);
+                        disconnector.ban(&mut self.swarm);
+                        let _ = ret.send(Ok(()));
+                    }
+                    IpfsEvent::Unban(peer, ret) => {
+                        let disconnector = self.swarm.behaviour_mut().unban_peer_id(peer);
+                        disconnector.unban(&mut self.swarm);
+                        let _ = ret.send(Ok(()));
                     }
                     IpfsEvent::GetAddresses(ret) => {
                         // perhaps this could be moved under `IpfsEvent` or free functions?

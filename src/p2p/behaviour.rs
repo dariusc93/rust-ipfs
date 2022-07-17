@@ -609,6 +609,14 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         self.swarm.disconnect(addr)
     }
 
+    pub fn ban_peer_id(&mut self, peer_id: PeerId) -> Disconnector {
+        self.swarm.ban(peer_id)
+    }
+
+    pub fn unban_peer_id(&mut self, peer_id: PeerId) -> Disconnector {
+        self.swarm.unban(peer_id)
+    }
+
     // FIXME: it would be best if get_providers is called only in case the already connected
     // peers don't have it
     pub fn want_block(&mut self, cid: Cid) {

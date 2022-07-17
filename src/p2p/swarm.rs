@@ -32,6 +32,14 @@ impl Disconnector {
         Swarm::ban_peer_id(swarm, self.peer_id);
         Swarm::unban_peer_id(swarm, self.peer_id);
     }
+
+    pub fn ban<T: NetworkBehaviour>(self, swarm: &mut Swarm<T>) {
+        Swarm::ban_peer_id(swarm, self.peer_id);
+    }
+
+    pub fn unban<T: NetworkBehaviour>(self, swarm: &mut Swarm<T>) {
+        Swarm::unban_peer_id(swarm, self.peer_id);
+    }
 }
 
 // Currently this is swarm::NetworkBehaviourAction<Void, Void>
@@ -144,6 +152,16 @@ impl SwarmApi {
         } else {
             None
         }
+    }
+
+    pub fn ban(&mut self, peer_id: PeerId) -> Disconnector {
+        trace!("request to ban {}", peer_id);
+        Disconnector { peer_id }
+    }
+
+    pub fn unban(&mut self, peer_id: PeerId) -> Disconnector {
+        trace!("request to unban {}", peer_id);
+        Disconnector { peer_id }
     }
 
     pub fn connections_to(&self, peer_id: &PeerId) -> Vec<Multiaddr> {
