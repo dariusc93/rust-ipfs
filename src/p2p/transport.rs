@@ -47,7 +47,10 @@ pub fn build_transport(keypair: identity::Keypair, relay: Option<ClientTransport
     let transport = tcp_transport.or_transport(ws_transport);
     
     let transport_timeout = TransportTimeout::new(transport, Duration::from_secs(30));
+    #[cfg(not(target_os="android"))]
     let transport = TokioDnsConfig::system(transport_timeout)?;
+    #[cfg(target_os="android")]
+    let transport = TokioDnsConfig::custom(transport_timeout, Default::default(), Default::default())?;
 
     let transport = match relay {
         Some(relay) => {
