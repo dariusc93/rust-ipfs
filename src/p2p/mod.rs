@@ -40,7 +40,6 @@ pub struct SwarmOptions {
     pub relay: bool,
     /// Enables dcutr
     pub dcutr: bool,
-
 }
 
 impl From<&IpfsOptions> for SwarmOptions {
@@ -84,7 +83,6 @@ pub async fn create_swarm<TIpfsTypes: IpfsTypes>(
 
     // Create a Swarm
     let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer_id)
-        .dial_concurrency_factor(8.try_into().unwrap())
         .executor(Box::new(SpannedExecutor(span)))
         .build();
 
