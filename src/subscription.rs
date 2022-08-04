@@ -154,9 +154,9 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> SubscriptionRegistry<T, E> 
 
                 // important: drop the held mutexes before panicking so that we can continue using
                 // subscriptions.lock().unwrap().
-                drop(subscriptions);
+                // drop(subscriptions);
 
-                panic!("{}", msg);
+                debug!("{}", msg);
             }
 
             trace!("Woke {} related subscription(s)", awoken);

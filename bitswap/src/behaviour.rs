@@ -273,16 +273,25 @@ impl NetworkBehaviour for Bitswap {
 
         let current_wantlist = self.local_wantlist();
 
-        let ledger = self
-            .connected_peers
-            .get_mut(&source)
-            .expect("Peer not in ledger?!");
+        // we shouldnt be panicing here unless this is actually a bug
+        // let ledger = self
+        //     .connected_peers
+        //     .get_mut(&source)
+        //     .expect("Peer not in ledger?!");
+
+        let mut ledger = match self.connected_peers.get_mut(&source) {
+            Some(ledger) => ledger,
+            None => {
+                debug!("bitswap: Peer {} is not in ledger", source);
+                return;
+            }
+        };
 
         // Process the incoming cancel list.
         for cid in message.cancel() {
             ledger.received_want_list.remove(cid);
 
-            let event = BitswapEvent::ReceivedCancel(source, cid.clone());
+            let event = BitswapEvent::ReceivedCancel(source, *cid);
             self.events
                 .push_back(NetworkBehaviourAction::GenerateEvent(event));
         }
@@ -295,7 +304,7 @@ impl NetworkBehaviour for Bitswap {
         {
             ledger.received_want_list.insert(cid.to_owned(), *priority);
 
-            let event = BitswapEvent::ReceivedWant(source, cid.clone(), *priority);
+            let event = BitswapEvent::ReceivedWant(source, *cid, *priority);
             self.events
                 .push_back(NetworkBehaviourAction::GenerateEvent(event));
         }
