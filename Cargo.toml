@@ -31,7 +31,7 @@ either = { default-features = false, version = "1.5" }
 futures = { default-features = false, version = "0.3", features = ["alloc", "std"] }
 hash_hasher = "2.0.3"
 ipfs-unixfs = { version = "0.2", path = "unixfs" }
-libp2p = { default-features = false, features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket","tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio", "mdns"], version = "0.46.1" }
+libp2p = { default-features = false, features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket","tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio", "mdns", "serde"], version = "0.46.1" }
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
 thiserror = { default-features = false, version = "1.0" }
