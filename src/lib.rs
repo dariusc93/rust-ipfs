@@ -188,7 +188,10 @@ impl Default for IpfsOptions {
             relay_server: Default::default(),
             // default to lan kad for go-ipfs use in tests
             kad_protocol: None,
-            listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap(), "/ip6/::/tcp/0".parse().unwrap()],
+            listening_addrs: vec![
+                "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+                "/ip6/::/tcp/0".parse().unwrap(),
+            ],
             span: None,
         }
     }
@@ -233,7 +236,7 @@ impl<I: Borrow<Keypair>> fmt::Debug for DebuggableKeypair<I> {
         let kind = match self.get_ref() {
             Keypair::Ed25519(_) => "Ed25519",
             Keypair::Rsa(_) => "Rsa",
-            _ => "Unknown"
+            _ => "Unknown",
         };
 
         write!(fmt, "Keypair::{}", kind)
@@ -311,6 +314,7 @@ enum IpfsEvent {
         OneshotSender<Vec<(Cid, ipfs_bitswap::Priority)>>,
     ),
     BitswapStats(OneshotSender<BitswapStats>),
+    SwarmListenOn(Multiaddr, OneshotSender<Result<ListenerId, Error>>),
     AddListeningAddress(Multiaddr, Channel<Multiaddr>),
     RemoveListeningAddress(Multiaddr, Channel<()>),
     Bootstrap(Channel<SubscriptionFuture<KadResult, String>>),
@@ -425,12 +429,9 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             .await?;
 
         let IpfsOptions {
-            listening_addrs, relay, relay_addr, ..
+            listening_addrs,
+            ..
         } = options;
-        
-        let mut listening_addrs = listening_addrs.clone();
-
-        if relay && relay_addr.is_some() { listening_addrs.push(relay_addr.unwrap()) };
 
         let mut fut = IpfsFuture {
             repo_events: repo_events.fuse(),
@@ -456,6 +457,23 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     fn ipns(&self) -> Ipns<Types> {
         Ipns::new(self.clone())
     }
+
+    /// Calls Swarm::liste_on directly
+    pub async fn swarm_listen_on(&self, addr: Multiaddr) -> Result<ListenerId, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::SwarmListenOn(addr, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
 
     /// Puts a block into the ipfs repo.
     ///
@@ -1278,6 +1296,19 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await
     }
 
+        /// Bootstraps the local node to join the DHT: it looks up the node's own ID in the
+        /// DHT and introduces it to the other nodes in it; at least one other node must be
+        /// known in order for the process to succeed. Subsequently, additional queries are
+        /// ran with random keys so that the buckets farther from the closest neighbor also
+        /// get refreshed.
+        pub async fn bootstrap(&self) -> Result<KadResult, Error> {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
+
+            rx.await??.await.map_err(|e| anyhow!(e))
+        }
+
     /// Exit daemon.
     pub async fn exit_daemon(mut self) {
         // FIXME: this is a stopgap measure needed while repo is part of the struct Ipfs instead of
@@ -1467,6 +1498,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                 match inner {
                     IpfsEvent::Connect(target, ret) => {
                         ret.send(self.swarm.behaviour_mut().connect(target)).ok();
+                    }
+                    IpfsEvent::SwarmListenOn(addr, ret) => {
+                        let _ = ret.send(self.swarm.listen_on(addr).map_err(anyhow::Error::from));
                     }
                     IpfsEvent::Addresses(ret) => {
                         let addrs = self.swarm.behaviour_mut().addrs();
@@ -1794,11 +1828,7 @@ mod node {
         /// ran with random keys so that the buckets farther from the closest neighbor also
         /// get refreshed.
         pub async fn bootstrap(&self) -> Result<KadResult, Error> {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
-
-            rx.await??.await.map_err(|e| anyhow!(e))
+            self.ipfs.bootstrap().await
         }
 
         /// Add a known listen address of a peer participating in the DHT to the routing table.

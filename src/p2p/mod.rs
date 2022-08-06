@@ -6,7 +6,6 @@ use crate::{IpfsOptions, IpfsTypes};
 use libp2p::identity::Keypair;
 use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
-use std::convert::TryInto;
 use std::sync::Arc;
 use tracing::Span;
 
