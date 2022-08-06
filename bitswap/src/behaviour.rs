@@ -279,7 +279,7 @@ impl NetworkBehaviour for Bitswap {
         //     .get_mut(&source)
         //     .expect("Peer not in ledger?!");
 
-        let mut ledger = match self.connected_peers.get_mut(&source) {
+        let ledger = match self.connected_peers.get_mut(&source) {
             Some(ledger) => ledger,
             None => {
                 debug!("bitswap: Peer {} is not in ledger", source);
