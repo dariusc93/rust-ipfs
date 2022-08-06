@@ -206,7 +206,13 @@ impl NetworkBehaviour for SwarmApi {
     ) {
         // TODO: could be that the connection is not yet fully established at this point
         trace!("inject_connection_established {} {:?}", peer_id, endpoint);
-        let addr = connection_point_addr(endpoint);
+        let addr = match connection_point_addr(endpoint) {
+            Ok(addr) => addr,
+            Err(e) => {
+                warn!("{e}");
+                return;
+            }
+        };
 
         self.peers.insert(*peer_id);
         let connections = self.connected_peers.entry(*peer_id).or_default();
@@ -215,7 +221,7 @@ impl NetworkBehaviour for SwarmApi {
         let prev = self.connections.insert(addr.clone(), *peer_id);
 
         if let Some(prev) = prev {
-            error!(
+            warn!(
                 "tracked connection was replaced from {} => {}: {}",
                 prev, peer_id, addr
             );
@@ -290,7 +296,10 @@ impl NetworkBehaviour for SwarmApi {
         _remaining_established: usize,
     ) {
         trace!("inject_connection_closed {} {:?}", peer_id, endpoint);
-        let closed_addr = connection_point_addr(endpoint);
+        let closed_addr = match connection_point_addr(endpoint) {
+            Ok(addr) => addr,
+            _ => return
+        };
 
         match self.connected_peers.entry(*peer_id) {
             Entry::Occupied(mut oe) => {
@@ -426,18 +435,16 @@ impl NetworkBehaviour for SwarmApi {
     }
 }
 
-fn connection_point_addr(cp: &ConnectedPoint) -> MultiaddrWithoutPeerId {
+fn connection_point_addr(cp: &ConnectedPoint) -> anyhow::Result<MultiaddrWithoutPeerId> {
     match cp {
         ConnectedPoint::Dialer {
             address,
             role_override: _,
-        } => MultiaddrWithPeerId::try_from(address.to_owned())
-            .expect("dialed address contains peerid in libp2p 0.38")
-            .into(),
-        ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr
+        } => Ok(MultiaddrWithPeerId::try_from(address.to_owned())?
+            .into()),
+        ConnectedPoint::Listener { send_back_addr, .. } => Ok(send_back_addr
             .to_owned()
-            .try_into()
-            .expect("send back address does not contain peerid in libp2p 0.38"),
+            .try_into()?),
     }
 }
 
