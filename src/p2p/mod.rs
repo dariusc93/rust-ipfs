@@ -1,16 +1,15 @@
 //! P2P handling for IPFS nodes.
 use crate::error::Error;
-use crate::repo::Repo;
-use crate::{IpfsOptions, IpfsTypes};
+use crate::{IpfsOptions};
 
 use libp2p::identity::Keypair;
 use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
-use std::sync::Arc;
 use tracing::Span;
 
 pub(crate) mod addr;
 mod behaviour;
+pub use self::behaviour::BehaviourEvent;
 pub(crate) mod pubsub;
 mod swarm;
 mod transport;
@@ -19,7 +18,7 @@ pub use addr::{MultiaddrWithPeerId, MultiaddrWithoutPeerId};
 pub use {behaviour::KadResult, swarm::Connection};
 
 /// Type alias for [`libp2p::Swarm`] running the [`behaviour::Behaviour`] with the given [`IpfsTypes`].
-pub type TSwarm<T> = Swarm<behaviour::Behaviour<T>>;
+pub type TSwarm = Swarm<behaviour::Behaviour>;
 
 /// Defines the configuration for an IPFS swarm.
 pub struct SwarmOptions {
@@ -65,17 +64,16 @@ impl From<&IpfsOptions> for SwarmOptions {
 }
 
 /// Creates a new IPFS swarm.
-pub async fn create_swarm<TIpfsTypes: IpfsTypes>(
+pub async fn create_swarm(
     options: SwarmOptions,
     span: Span,
-    repo: Arc<Repo<TIpfsTypes>>,
-) -> Result<TSwarm<TIpfsTypes>, Error> {
+) -> Result<TSwarm, Error> {
     let peer_id = options.peer_id;
 
     let keypair = options.keypair.clone();
 
     // Create a Kademlia behaviour
-    let (behaviour, relay_transport) = behaviour::build_behaviour(options, repo).await?;
+    let (behaviour, relay_transport) = behaviour::build_behaviour(options).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = transport::build_transport(keypair, relay_transport)?;

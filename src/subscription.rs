@@ -75,9 +75,10 @@ type SubscriptionId = u64;
 pub type Subscriptions<T, E> = HashMap<RequestKind, HashMap<SubscriptionId, Subscription<T, E>>>;
 
 /// A collection of all the live `Subscription`s.
+#[derive(Clone)]
 pub struct SubscriptionRegistry<T: Debug + Clone + PartialEq, E: Debug + Clone> {
     pub(crate) subscriptions: Arc<Mutex<Subscriptions<T, E>>>,
-    shutting_down: AtomicBool,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl<T: Debug + Clone + PartialEq, E: Debug + Clone> fmt::Debug for SubscriptionRegistry<T, E> {

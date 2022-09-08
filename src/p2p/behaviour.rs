@@ -3,58 +3,135 @@ use super::swarm::{Connection, Disconnector, SwarmApi};
 use crate::config::BOOTSTRAP_NODES;
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
-use crate::repo::{BlockPut, Repo};
 use crate::subscription::{SubscriptionFuture, SubscriptionRegistry};
-use crate::IpfsTypes;
 
 use anyhow::anyhow;
 // use cid::Cid;
 use ipfs_bitswap::{Bitswap, BitswapEvent};
 use libipld::{
-    multibase::{self, Base},
     Cid,
 };
-use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
+use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::GossipsubEvent;
-use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent, IdentifyInfo};
+use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Key, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::ping::{Ping, PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
-use libp2p::relay::v2::relay::{Relay, Event as RelayEvent};
-use libp2p::relay::v2::{client::{Client as RelayClient, Event as RelayCleintEvent}};
-use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
+use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
+use libp2p::relay::v2::relay::{Event as RelayEvent, Relay};
 use libp2p::swarm::behaviour::toggle::Toggle;
-use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess};
+use libp2p::swarm::{NetworkBehaviour};
+use libp2p::{autonat};
 use std::convert::TryFrom;
-use std::{convert::TryInto, sync::Arc};
-use tokio::task;
+use std::{convert::TryInto};
 
 /// Behaviour type.
 #[derive(libp2p::NetworkBehaviour)]
-#[behaviour(event_process = true)]
-pub struct Behaviour<Types: IpfsTypes> {
-    mdns: Toggle<Mdns>,
-    kademlia: Kademlia<MemoryStore>,
-    bitswap: Bitswap,
-    ping: Ping,
-    identify: Identify,
-    pubsub: Pubsub,
-    autonat: autonat::Behaviour,
-    relay: Toggle<Relay>,
-    relay_client: Toggle<RelayClient>,
-    dcutr: Toggle<Dcutr>, 
+#[behaviour(out_event = "BehaviourEvent", event_process = false)]
+pub struct Behaviour {
+    pub mdns: Toggle<Mdns>,
+    pub kademlia: Kademlia<MemoryStore>,
+    pub bitswap: Bitswap,
+    pub ping: Ping,
+    pub identify: Identify,
+    pub pubsub: Pubsub,
+    pub autonat: autonat::Behaviour,
+    pub relay: Toggle<Relay>,
+    pub relay_client: Toggle<RelayClient>,
+    pub dcutr: Toggle<Dcutr>,
     pub swarm: SwarmApi,
-    #[behaviour(ignore)]
-    repo: Arc<Repo<Types>>,
-    #[behaviour(ignore)]
-    kad_subscriptions: SubscriptionRegistry<KadResult, String>,
 }
 
+#[derive(Debug)]
+pub enum BehaviourEvent {
+    Mdns(MdnsEvent),
+    Kad(KademliaEvent),
+    Bitswap(BitswapEvent),
+    Ping(PingEvent),
+    Identify(IdentifyEvent),
+    Gossipsub(GossipsubEvent),
+    Autonat(autonat::Event),
+    Relay(RelayEvent),
+    RelayClient(RelayClientEvent),
+    Dcutr(DcutrEvent),
+    Void(void::Void),
+}
+
+impl From<MdnsEvent> for BehaviourEvent {
+    fn from(event: MdnsEvent) -> Self {
+        BehaviourEvent::Mdns(event)
+    }
+}
+
+impl From<KademliaEvent> for BehaviourEvent {
+    fn from(event: KademliaEvent) -> Self {
+        BehaviourEvent::Kad(event)
+    }
+}
+
+impl From<BitswapEvent> for BehaviourEvent {
+    fn from(event: BitswapEvent) -> Self {
+        BehaviourEvent::Bitswap(event)
+    }
+}
+
+impl From<PingEvent> for BehaviourEvent {
+    fn from(event: PingEvent) -> Self {
+        BehaviourEvent::Ping(event)
+    }
+}
+
+impl From<IdentifyEvent> for BehaviourEvent {
+    fn from(event: IdentifyEvent) -> Self {
+        BehaviourEvent::Identify(event)
+    }
+}
+
+impl From<GossipsubEvent> for BehaviourEvent {
+    fn from(event: GossipsubEvent) -> Self {
+        BehaviourEvent::Gossipsub(event)
+    }
+}
+
+impl From<autonat::Event> for BehaviourEvent {
+    fn from(event: autonat::Event) -> Self {
+        BehaviourEvent::Autonat(event)
+    }
+}
+
+impl From<RelayEvent> for BehaviourEvent {
+    fn from(event: RelayEvent) -> Self {
+        BehaviourEvent::Relay(event)
+    }
+}
+
+impl From<RelayClientEvent> for BehaviourEvent {
+    fn from(event: RelayClientEvent) -> Self {
+        BehaviourEvent::RelayClient(event)
+    }
+}
+
+impl From<DcutrEvent> for BehaviourEvent {
+    fn from(event: DcutrEvent) -> Self {
+        BehaviourEvent::Dcutr(event)
+    }
+}
+
+impl From<void::Void> for BehaviourEvent {
+    fn from(event: void::Void) -> Self {
+        BehaviourEvent::Void(event)
+    }
+}
+
+// pub fn process_behaviour<Types: IpfsTypes>(swarm: &mut Swarm<Behaviour<Types>>) {
+//     // match
+// }
+
 /// Represents the result of a Kademlia query.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KadResult {
     /// The query has been exhausted.
     Complete,
@@ -64,438 +141,14 @@ pub enum KadResult {
     Records(Vec<Record>),
 }
 
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<()> for Behaviour<Types> {
-    fn inject_event(&mut self, _event: ()) {}
-}
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<void::Void> for Behaviour<Types> {
-    fn inject_event(&mut self, _event: void::Void) {}
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<MdnsEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: MdnsEvent) {
-        match event {
-            MdnsEvent::Discovered(list) => {
-                for (peer, addr) in list {
-                    trace!("mdns: Discovered peer {}", peer.to_base58());
-                    self.add_peer(peer, addr);
-                }
-            }
-            MdnsEvent::Expired(list) => {
-                for (peer, _) in list {
-                    if let Some(mdns) = self.mdns.as_ref() {
-                        if !mdns.has_node(&peer) {
-                            trace!("mdns: Expired peer {}", peer.to_base58());
-                            self.remove_peer(&peer);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<KademliaEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: KademliaEvent) {
-        use libp2p::kad::{
-            AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
-            GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-            KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*,
-        };
-
-        match event {
-            InboundRequest { request } => {
-                trace!("kad: inbound {:?} request handled", request);
-            }
-            OutboundQueryCompleted { result, id, .. } => {
-                // make sure the query is exhausted
-                if self.kademlia.query(&id).is_none() {
-                    match result {
-                        // these subscriptions return actual values
-                        GetClosestPeers(_) | GetProviders(_) | GetRecord(_) => {}
-                        // we want to return specific errors for the following
-                        Bootstrap(Err(_)) | StartProviding(Err(_)) | PutRecord(Err(_)) => {}
-                        // and the rest can just return a general KadResult::Complete
-                        _ => {
-                            self.kad_subscriptions
-                                .finish_subscription(id.into(), Ok(KadResult::Complete));
-                        }
-                    }
-                }
-
-                match result {
-                    Bootstrap(Ok(BootstrapOk {
-                        peer,
-                        num_remaining,
-                    })) => {
-                        debug!(
-                            "kad: bootstrapped with {}, {} peers remain",
-                            peer, num_remaining
-                        );
-                    }
-                    Bootstrap(Err(BootstrapError::Timeout { .. })) => {
-                        warn!("kad: timed out while trying to bootstrap");
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("kad: timed out while trying to bootstrap".into()),
-                            );
-                        }
-                    }
-                    GetClosestPeers(Ok(GetClosestPeersOk { key: _, peers })) => {
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions
-                                .finish_subscription(id.into(), Ok(KadResult::Peers(peers)));
-                        }
-                    }
-                    GetClosestPeers(Err(GetClosestPeersError::Timeout { key: _, peers: _ })) => {
-                        // don't mention the key here, as this is just the id of our node
-                        warn!("kad: timed out while trying to find all closest peers");
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("timed out while trying to get providers for the given key"
-                                    .into()),
-                            );
-                        }
-                    }
-                    GetProviders(Ok(GetProvidersOk {
-                        key: _,
-                        providers,
-                        closest_peers: _,
-                    })) => {
-                        if self.kademlia.query(&id).is_none() {
-                            let providers = providers.into_iter().collect::<Vec<_>>();
-
-                            self.kad_subscriptions
-                                .finish_subscription(id.into(), Ok(KadResult::Peers(providers)));
-                        }
-                    }
-                    GetProviders(Err(GetProvidersError::Timeout { key, .. })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!("kad: timed out while trying to get providers for {}", key);
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("timed out while trying to get providers for the given key"
-                                    .into()),
-                            );
-                        }
-                    }
-                    StartProviding(Ok(AddProviderOk { key })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        debug!("kad: providing {}", key);
-                    }
-                    StartProviding(Err(AddProviderError::Timeout { key })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!("kad: timed out while trying to provide {}", key);
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("kad: timed out while trying to provide the record".into()),
-                            );
-                        }
-                    }
-                    RepublishProvider(Ok(AddProviderOk { key })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        debug!("kad: republished provider {}", key);
-                    }
-                    RepublishProvider(Err(AddProviderError::Timeout { key })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!("kad: timed out while trying to republish provider {}", key);
-                    }
-                    GetRecord(Ok(GetRecordOk { records, .. })) => {
-                        if self.kademlia.query(&id).is_none() {
-                            let records = records.into_iter().map(|rec| rec.record).collect();
-                            self.kad_subscriptions
-                                .finish_subscription(id.into(), Ok(KadResult::Records(records)));
-                        }
-                    }
-                    GetRecord(Err(GetRecordError::NotFound {
-                        key,
-                        closest_peers: _,
-                    })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!("kad: couldn't find record {}", key);
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("couldn't find a record for the given key".into()),
-                            );
-                        }
-                    }
-                    GetRecord(Err(GetRecordError::QuorumFailed {
-                        key,
-                        records: _,
-                        quorum,
-                    })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!(
-                            "kad: quorum failed {} when trying to get key {}",
-                            quorum, key
-                        );
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("quorum failed when trying to obtain a record for the given key"
-                                    .into()),
-                            );
-                        }
-                    }
-                    GetRecord(Err(GetRecordError::Timeout {
-                        key,
-                        records: _,
-                        quorum: _,
-                    })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!("kad: timed out while trying to get key {}", key);
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("timed out while trying to get a record for the given key"
-                                    .into()),
-                            );
-                        }
-                    }
-                    PutRecord(Ok(PutRecordOk { key }))
-                    | RepublishRecord(Ok(PutRecordOk { key })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        debug!("kad: successfully put record {}", key);
-                    }
-                    PutRecord(Err(PutRecordError::QuorumFailed {
-                        key,
-                        success: _,
-                        quorum,
-                    }))
-                    | RepublishRecord(Err(PutRecordError::QuorumFailed {
-                        key,
-                        success: _,
-                        quorum,
-                    })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!(
-                            "kad: quorum failed ({}) when trying to put record {}",
-                            quorum, key
-                        );
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("kad: quorum failed when trying to put the record".into()),
-                            );
-                        }
-                    }
-                    PutRecord(Err(PutRecordError::Timeout {
-                        key,
-                        success: _,
-                        quorum: _,
-                    })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!("kad: timed out while trying to put record {}", key);
-
-                        if self.kademlia.query(&id).is_none() {
-                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("kad: timed out while trying to put the record".into()),
-                            );
-                        }
-                    }
-                    RepublishRecord(Err(PutRecordError::Timeout {
-                        key,
-                        success: _,
-                        quorum: _,
-                    })) => {
-                        let key = multibase::encode(Base::Base32Lower, key);
-                        warn!("kad: timed out while trying to republish record {}", key);
-                    }
-                }
-            }
-            RoutingUpdated {
-                peer,
-                is_new_peer: _,
-                addresses,
-                bucket_range: _,
-                old_peer: _,
-            } => {
-                trace!("kad: routing updated; {}: {:?}", peer, addresses);
-            }
-            UnroutablePeer { peer } => {
-                trace!("kad: peer {} is unroutable", peer);
-            }
-            RoutablePeer { peer, address } => {
-                trace!("kad: peer {} ({}) is routable", peer, address);
-            }
-            PendingRoutablePeer { peer, address } => {
-                trace!("kad: pending routable peer {} ({})", peer, address);
-            }
-        }
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<BitswapEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: BitswapEvent) {
-        match event {
-            BitswapEvent::ReceivedBlock(peer_id, block) => {
-                let repo = self.repo.clone();
-                let peer_stats = Arc::clone(self.bitswap.stats.get(&peer_id).unwrap());
-                task::spawn(async move {
-                    let bytes = block.data().len() as u64;
-                    let res = repo.put_block(block.clone()).await;
-                    match res {
-                        Ok((_, uniqueness)) => match uniqueness {
-                            BlockPut::NewBlock => peer_stats.update_incoming_unique(bytes),
-                            BlockPut::Existed => peer_stats.update_incoming_duplicate(bytes),
-                        },
-                        Err(e) => {
-                            debug!(
-                                "Got block {} from peer {} but failed to store it: {}",
-                                block.cid(),
-                                peer_id.to_base58(),
-                                e
-                            );
-                        }
-                    };
-                });
-            }
-            BitswapEvent::ReceivedWant(peer_id, cid, priority) => {
-                info!(
-                    "Peer {} wants block {} with priority {}",
-                    peer_id, cid, priority
-                );
-
-                let queued_blocks = self.bitswap().queued_blocks.clone();
-                let repo = self.repo.clone();
-
-                task::spawn(async move {
-                    match repo.get_block_now(&cid).await {
-                        Ok(Some(block)) => {
-                            let _ = queued_blocks.unbounded_send((peer_id, block));
-                        }
-                        Ok(None) => {}
-                        Err(err) => {
-                            warn!(
-                                "Peer {} wanted block {} but we failed: {}",
-                                peer_id.to_base58(),
-                                cid,
-                                err,
-                            );
-                        }
-                    }
-                });
-            }
-            BitswapEvent::ReceivedCancel(..) => {}
-        }
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<autonat::Event> for Behaviour<Types> {
-    fn inject_event(&mut self, event: autonat::Event) {
-        trace!("Autonat: {:?}", event);
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<RelayEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: RelayEvent) {
-        trace!("Relay Event: {:?}", event);
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<RelayCleintEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: RelayCleintEvent) {
-        trace!("Relay Client Event: {:?}", event);
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<DcutrEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: DcutrEvent) {
-        trace!("Dcutr Event: {:?}", event);
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<PingEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: PingEvent) {
-        use libp2p::ping::{PingFailure, PingSuccess};
-        match event {
-            PingEvent {
-                peer,
-                result: Result::Ok(PingSuccess::Ping { rtt }),
-            } => {
-                trace!(
-                    "ping: rtt to {} is {} ms",
-                    peer.to_base58(),
-                    rtt.as_millis()
-                );
-                self.swarm.set_rtt(&peer, rtt);
-            }
-            PingEvent {
-                peer,
-                result: Result::Ok(PingSuccess::Pong),
-            } => {
-                trace!("ping: pong from {}", peer);
-            }
-            PingEvent {
-                peer,
-                result: Result::Err(PingFailure::Timeout),
-            } => {
-                trace!("ping: timeout to {}", peer);
-                self.remove_peer(&peer);
-            }
-            PingEvent {
-                peer,
-                result: Result::Err(PingFailure::Other { error }),
-            } => {
-                error!("ping: failure with {}: {}", peer.to_base58(), error);
-            }
-            PingEvent {
-                peer,
-                result: Result::Err(PingFailure::Unsupported),
-            } => {
-                error!("ping: failure with {}: unsupported", peer.to_base58());
-            }
-        }
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<IdentifyEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: IdentifyEvent) {
-        match event {
-            IdentifyEvent::Received { peer_id, info: IdentifyInfo {
-                listen_addrs,
-                protocols,
-                ..
-            }} => {
-                if protocols.iter().any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME) {
-                    for addr in listen_addrs {
-                        self.autonat.add_server(peer_id, Some(addr));
-                    }
-                }
-            },
-            event => trace!("identify: {:?}", event)
-        }
-    }
-}
-
-impl<Types: IpfsTypes> NetworkBehaviourEventProcess<GossipsubEvent> for Behaviour<Types> {
-    fn inject_event(&mut self, event: GossipsubEvent) {
-        trace!("gossipsub: {:?}", event);
-    }
-}
-
-impl<Types: IpfsTypes> Behaviour<Types> {
+impl Behaviour {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
-    pub async fn new(options: SwarmOptions, repo: Arc<Repo<Types>>) -> Result<(Self, Option<ClientTransport>), Error> {
+    pub async fn new(options: SwarmOptions) -> Result<(Self, Option<ClientTransport>), Error> {
         info!("net: starting with peer id {}", options.peer_id);
 
         let mdns = if options.mdns {
             let mut config = MdnsConfig::default();
-            //tODO: Reenable 
+            //tODO: Reenable
             config.enable_ipv6 = false;
             Mdns::new(config).await.ok()
         } else {
@@ -539,10 +192,14 @@ impl<Types: IpfsTypes> Behaviour<Types> {
             }
         }
 
-        // Maybe have this enable in conjunction with RelayClient? 
+        // Maybe have this enable in conjunction with RelayClient?
         let dcutr = Toggle::from(options.dcutr.then(|| Dcutr::new()));
 
-        let relay = Toggle::from(options.relay_server.then(|| Relay::new(peer_id, Default::default())));
+        let relay = Toggle::from(
+            options
+                .relay_server
+                .then(|| Relay::new(peer_id, Default::default())),
+        );
 
         //TODO: Work on custom transport for relay
         let (transport, relay_client) = match options.relay {
@@ -550,24 +207,25 @@ impl<Types: IpfsTypes> Behaviour<Types> {
                 let (transport, client) = RelayClient::new_transport_and_behaviour(peer_id);
                 (Some(transport), Some(client).into())
             }
-            false => (None, None.into())
-        }.into();
+            false => (None, None.into()),
+        };
 
-        Ok((Behaviour {
-            repo,
-            mdns,
-            kademlia,
-            kad_subscriptions: Default::default(),
-            bitswap,
-            ping,
-            identify,
-            autonat,
-            pubsub,
-            swarm,
-            dcutr,
-            relay,
-            relay_client
-        }, transport))
+        Ok((
+            Behaviour {
+                mdns,
+                kademlia,
+                bitswap,
+                ping,
+                identify,
+                autonat,
+                pubsub,
+                swarm,
+                dcutr,
+                relay,
+                relay_client,
+            },
+            transport,
+        ))
     }
 
     pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
@@ -639,9 +297,12 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         &mut self.bitswap
     }
 
-    pub fn bootstrap(&mut self) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
+    pub fn bootstrap(
+        &mut self,
+        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
+    ) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
         match self.kademlia.bootstrap() {
-            Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+            Ok(id) => Ok(subscriptions.create_subscription(id.into(), None)),
             Err(e) => {
                 error!("kad: can't bootstrap the node: {:?}", e);
                 Err(anyhow!("kad: can't bootstrap the node: {:?}", e))
@@ -653,27 +314,34 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         &mut self.kademlia
     }
 
-    pub fn get_closest_peers(&mut self, id: PeerId) -> SubscriptionFuture<KadResult, String> {
+    pub fn get_closest_peers(
+        &mut self,
+        id: PeerId,
+        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
+    ) -> SubscriptionFuture<KadResult, String> {
         // TODO: why was this base58?
         // let id = id.to_base58();
 
-        self.kad_subscriptions
-            .create_subscription(self.kademlia.get_closest_peers(id).into(), None)
+        subscriptions.create_subscription(self.kademlia.get_closest_peers(id).into(), None)
     }
 
-    pub fn get_providers(&mut self, cid: Cid) -> SubscriptionFuture<KadResult, String> {
+    pub fn get_providers(
+        &mut self,
+        cid: Cid,
+        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
+    ) -> SubscriptionFuture<KadResult, String> {
         let key = Key::from(cid.hash().to_bytes());
-        self.kad_subscriptions
-            .create_subscription(self.kademlia.get_providers(key).into(), None)
+        subscriptions.create_subscription(self.kademlia.get_providers(key).into(), None)
     }
 
     pub fn start_providing(
         &mut self,
         cid: Cid,
+        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
     ) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
         let key = Key::from(cid.hash().to_bytes());
         match self.kademlia.start_providing(key) {
-            Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+            Ok(id) => Ok(subscriptions.create_subscription(id.into(), None)),
             Err(e) => {
                 error!("kad: can't provide a key: {:?}", e);
                 Err(anyhow!("kad: can't provide the key: {:?}", e))
@@ -681,9 +349,13 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         }
     }
 
-    pub fn dht_get(&mut self, key: Key, quorum: Quorum) -> SubscriptionFuture<KadResult, String> {
-        self.kad_subscriptions
-            .create_subscription(self.kademlia.get_record(key, quorum).into(), None)
+    pub fn dht_get(
+        &mut self,
+        key: Key,
+        quorum: Quorum,
+        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
+    ) -> SubscriptionFuture<KadResult, String> {
+        subscriptions.create_subscription(self.kademlia.get_record(key, quorum).into(), None)
     }
 
     pub fn dht_put(
@@ -691,6 +363,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
         key: Key,
         value: Vec<u8>,
         quorum: Quorum,
+        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
     ) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
         let record = Record {
             key,
@@ -699,7 +372,7 @@ impl<Types: IpfsTypes> Behaviour<Types> {
             expires: None,
         };
         match self.kademlia.put_record(record, quorum) {
-            Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+            Ok(id) => Ok(subscriptions.create_subscription(id.into(), None)),
             Err(e) => {
                 error!("kad: can't put a record: {:?}", e);
                 Err(anyhow!("kad: can't provide the record: {:?}", e))
@@ -803,9 +476,8 @@ impl<Types: IpfsTypes> Behaviour<Types> {
 }
 
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
-pub async fn build_behaviour<TIpfsTypes: IpfsTypes>(
+pub async fn build_behaviour(
     options: SwarmOptions,
-    repo: Arc<Repo<TIpfsTypes>>,
-) -> Result<(Behaviour<TIpfsTypes>, Option<ClientTransport>), Error> {
-    Behaviour::new(options, repo).await
+) -> Result<(Behaviour, Option<ClientTransport>), Error> {
+    Behaviour::new(options).await
 }
