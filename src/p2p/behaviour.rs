@@ -8,25 +8,23 @@ use crate::subscription::{SubscriptionFuture, SubscriptionRegistry};
 use anyhow::anyhow;
 // use cid::Cid;
 use ipfs_bitswap::{Bitswap, BitswapEvent};
-use libipld::{
-    Cid,
-};
+use libipld::Cid;
+use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::GossipsubEvent;
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Key, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
-use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
+use libp2p::mdns::{MdnsConfig, MdnsEvent, Mdns};
 use libp2p::ping::{Ping, PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
 use libp2p::relay::v2::relay::{Event as RelayEvent, Relay};
 use libp2p::swarm::behaviour::toggle::Toggle;
-use libp2p::swarm::{NetworkBehaviour};
-use libp2p::{autonat};
+use libp2p::swarm::NetworkBehaviour;
 use std::convert::TryFrom;
-use std::{convert::TryInto};
+use std::convert::TryInto;
 
 /// Behaviour type.
 #[derive(libp2p::NetworkBehaviour)]

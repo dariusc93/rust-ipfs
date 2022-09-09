@@ -254,7 +254,6 @@ impl<I: Borrow<Keypair>> fmt::Debug for DebuggableKeypair<I> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self.get_ref() {
             Keypair::Ed25519(_) => "Ed25519",
-            Keypair::Rsa(_) => "Rsa",
             _ => "Unknown",
         };
 

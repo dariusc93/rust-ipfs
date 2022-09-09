@@ -28,34 +28,75 @@ bytes = { default-features = false, version = "1" }
 libipld = "0.13"
 trust-dns-resolver = "0.21"
 either = { default-features = false, version = "1.5" }
-futures = { default-features = false, version = "0.3", features = ["alloc", "std"] }
+futures = { default-features = false, version = "0.3", features = [
+    "alloc",
+    "std",
+] }
 hash_hasher = "2.0.3"
 ipfs-unixfs = { version = "0.2", path = "unixfs" }
-libp2p = { default-features = false, features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket","tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio", "mdns", "serde"], version = "0.46.1" }
+libp2p = { default-features = false, features = [
+    "gossipsub",
+    "autonat",
+    "relay",
+    "dcutr",
+    "identify",
+    "kad",
+    "websocket",
+    "tcp-tokio",
+    "mplex",
+    "noise",
+    "ping",
+    "yamux",
+    "dns-tokio",
+    # "mdns-tokio",
+    "mdns",
+    "serde",
+], version = "0.47" }
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
 thiserror = { default-features = false, version = "1.0" }
-tokio = { default-features = false, features = ["fs", "macros", "rt-multi-thread", "sync"], version = "1" }
+tokio = { default-features = false, features = [
+    "fs",
+    "macros",
+    "rt-multi-thread",
+    "sync",
+], version = "1" }
 tokio-stream = { version = "0.1", features = ["fs"] }
 tokio-util = { version = "0.7" }
 tracing = { default-features = false, features = ["log"], version = "0.1" }
-tracing-futures = { default-features = false, features = ["std-future", "std", "futures-03"], version = "0.2" }
+tracing-futures = { default-features = false, features = [
+    "std-future",
+    "std",
+    "futures-03",
+], version = "0.2" }
 void = { default-features = false, version = "1.0" }
 fs2 = "0.4.3"
 sled = "0.34"
 once_cell = "1.5.2"
-prost = { default-features = false, version = "0.10" }
+prost = { default-features = false, version = "0.11" }
 
 [build-dependencies]
-prost-build = { default-features = false, version = "0.10" }
+prost-build = { default-features = false, version = "0.11" }
 
 [dev-dependencies]
 criterion = { default-features = false, version = "0.3" }
 hex-literal = { default-features = false, version = "0.3" }
 sha2 = { default-features = false, version = "0.9" }
-tokio = { default-features = false, features = ["io-std", "io-util", "time"], version = "1" }
-tracing-subscriber = { default-features = false, features = ["fmt", "tracing-log", "ansi", "env-filter"], version = "0.2" }
-rand = { default-features = false, version = "0.8", features = ["std", "std_rng"] }
+tokio = { default-features = false, features = [
+    "io-std",
+    "io-util",
+    "time",
+], version = "1" }
+tracing-subscriber = { default-features = false, features = [
+    "fmt",
+    "tracing-log",
+    "ansi",
+    "env-filter",
+], version = "0.2" }
+rand = { default-features = false, version = "0.8", features = [
+    "std",
+    "std_rng",
+] }
 tempfile = "3.1.0"
 
 [[bench]]
@@ -63,7 +104,7 @@ name = "hashed-map-cid"
 harness = false
 
 [workspace]
-members = [ "bitswap", "http", "unixfs" ]
+members = ["bitswap", "http", "unixfs"]
 
 # at least these libp2p components need to be patched if you want to use a local version
 # libp2p = { path = "../libp2p" }
