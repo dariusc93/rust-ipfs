@@ -16,7 +16,7 @@ use libp2p::gossipsub::GossipsubEvent;
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Key, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
-use libp2p::mdns::{MdnsConfig, MdnsEvent, Mdns};
+use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
 use libp2p::ping::{Ping, PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};

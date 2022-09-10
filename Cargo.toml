@@ -48,10 +48,11 @@ libp2p = { default-features = false, features = [
     "ping",
     "yamux",
     "dns-tokio",
-    # "mdns-tokio",
-    "mdns",
+    "mdns-tokio",
+    # "mdns",
+    "rsa",
     "serde",
-], version = "0.47" }
+], version = "0.48.0" }
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
 thiserror = { default-features = false, version = "1.0" }
