@@ -109,7 +109,7 @@ use libp2p::{
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
         GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-        KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*,
+        KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record,
     },
     mdns::MdnsEvent,
     ping::PingSuccess,
@@ -2041,8 +2041,15 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let _ = ret.send(removed);
                     }
                     IpfsEvent::Bootstrap(ret) => {
-                        let mut subscription = self.kad_subscriptions.clone();
-                        let future = self.swarm.behaviour_mut().bootstrap(&mut subscription);
+                        let future = match self.swarm.behaviour_mut().kademlia.bootstrap() {
+                            Ok(id) => {
+                                Ok(self.kad_subscriptions.create_subscription(id.into(), None))
+                            }
+                            Err(e) => {
+                                error!("kad: can't bootstrap the node: {:?}", e);
+                                Err(anyhow!("kad: can't bootstrap the node: {:?}", e))
+                            }
+                        };
                         let _ = ret.send(future);
                     }
                     IpfsEvent::DirectBootstrap(ret) => {
@@ -2059,11 +2066,14 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         self.swarm.behaviour_mut().add_peer(peer_id, addr);
                     }
                     IpfsEvent::GetClosestPeers(peer_id, ret) => {
-                        let mut subscription = self.kad_subscriptions.clone();
-                        let future = self
+                        let id = self
                             .swarm
                             .behaviour_mut()
-                            .get_closest_peers(peer_id, &mut subscription);
+                            .kademlia
+                            .get_closest_peers(peer_id);
+
+                        let future = self.kad_subscriptions.create_subscription(id.into(), None);
+
                         let _ = ret.send(future);
                     }
                     IpfsEvent::GetBitswapPeers(ret) => {
@@ -2090,47 +2100,67 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let addrs = if !locally_known_addrs.is_empty() || local_only {
                             Either::Left(locally_known_addrs)
                         } else {
-                            let mut subscription = self.kad_subscriptions.clone();
-                            Either::Right(
-                                self.swarm
+                            Either::Right({
+                                let id = self
+                                    .swarm
                                     .behaviour_mut()
-                                    .get_closest_peers(peer_id, &mut subscription),
-                            )
+                                    .kademlia
+                                    .get_closest_peers(peer_id);
+
+                                self.kad_subscriptions.create_subscription(id.into(), None)
+                            })
                         };
                         let _ = ret.send(addrs);
                     }
                     IpfsEvent::GetProviders(cid, ret) => {
-                        let mut subscription = self.kad_subscriptions.clone();
-                        let future = self
-                            .swarm
-                            .behaviour_mut()
-                            .get_providers(cid, &mut subscription);
+                        let key = Key::from(cid.hash().to_bytes());
+                        let id = self.swarm.behaviour_mut().kademlia.get_providers(key);
+
+                        let future = self.kad_subscriptions.create_subscription(id.into(), None);
+
                         let _ = ret.send(future);
                     }
                     IpfsEvent::Provide(cid, ret) => {
-                        let mut subscription = self.kad_subscriptions.clone();
-                        let _ = ret.send(
-                            self.swarm
-                                .behaviour_mut()
-                                .start_providing(cid, &mut subscription),
-                        );
+                        let key = Key::from(cid.hash().to_bytes());
+                        let future = match self.swarm.behaviour_mut().kademlia.start_providing(key)
+                        {
+                            Ok(id) => {
+                                Ok(self.kad_subscriptions.create_subscription(id.into(), None))
+                            }
+                            Err(e) => {
+                                error!("kad: can't provide a key: {:?}", e);
+                                Err(anyhow!("kad: can't provide the key: {:?}", e))
+                            }
+                        };
+                        let _ = ret.send(future);
                     }
                     IpfsEvent::DhtGet(key, quorum, ret) => {
-                        let mut subscription = self.kad_subscriptions.clone();
-                        let future =
-                            self.swarm
-                                .behaviour_mut()
-                                .dht_get(key, quorum, &mut subscription);
+                        let id = self.swarm.behaviour_mut().kademlia.get_record(key, quorum);
+
+                        let future = self.kad_subscriptions.create_subscription(id.into(), None);
                         let _ = ret.send(future);
                     }
                     IpfsEvent::DhtPut(key, value, quorum, ret) => {
-                        let mut subscription = self.kad_subscriptions.clone();
-                        let future = self.swarm.behaviour_mut().dht_put(
+                        let record = Record {
                             key,
                             value,
-                            quorum,
-                            &mut subscription,
-                        );
+                            publisher: None,
+                            expires: None,
+                        };
+                        let future = match self
+                            .swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .put_record(record, quorum)
+                        {
+                            Ok(id) => {
+                                Ok(self.kad_subscriptions.create_subscription(id.into(), None))
+                            }
+                            Err(e) => {
+                                error!("kad: can't put a record: {:?}", e);
+                                Err(anyhow!("kad: can't provide the record: {:?}", e))
+                            }
+                        };
                         let _ = ret.send(future);
                     }
                     IpfsEvent::GetBootstrappers(ret) => {
@@ -2174,13 +2204,20 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         self.swarm.behaviour_mut().bitswap().cancel_block(&cid);
                         // currently disabled; see https://github.com/rs-ipfs/rust-ipfs/pull/281#discussion_r465583345
                         // for details regarding the concerns about enabling this functionality as-is
-                        let mut subscription = self.kad_subscriptions.clone();
                         if false {
-                            let _ = ret.send(
-                                self.swarm
-                                    .behaviour_mut()
-                                    .start_providing(cid, &mut subscription),
-                            );
+                            let key = Key::from(cid.hash().to_bytes());
+                            let future =
+                                match self.swarm.behaviour_mut().kademlia.start_providing(key) {
+                                    Ok(id) => Ok(self
+                                        .kad_subscriptions
+                                        .create_subscription(id.into(), None)),
+                                    Err(e) => {
+                                        error!("kad: can't provide a key: {:?}", e);
+                                        Err(anyhow!("kad: can't provide the key: {:?}", e))
+                                    }
+                                };
+
+                            let _ = ret.send(future);
                         } else {
                             let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
                         }
