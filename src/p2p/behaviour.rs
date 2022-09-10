@@ -295,87 +295,8 @@ impl Behaviour {
         &mut self.bitswap
     }
 
-    pub fn bootstrap(
-        &mut self,
-        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
-    ) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
-        match self.kademlia.bootstrap() {
-            Ok(id) => Ok(subscriptions.create_subscription(id.into(), None)),
-            Err(e) => {
-                error!("kad: can't bootstrap the node: {:?}", e);
-                Err(anyhow!("kad: can't bootstrap the node: {:?}", e))
-            }
-        }
-    }
-
     pub fn kademlia(&mut self) -> &mut Kademlia<MemoryStore> {
         &mut self.kademlia
-    }
-
-    pub fn get_closest_peers(
-        &mut self,
-        id: PeerId,
-        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
-    ) -> SubscriptionFuture<KadResult, String> {
-        // TODO: why was this base58?
-        // let id = id.to_base58();
-
-        subscriptions.create_subscription(self.kademlia.get_closest_peers(id).into(), None)
-    }
-
-    pub fn get_providers(
-        &mut self,
-        cid: Cid,
-        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
-    ) -> SubscriptionFuture<KadResult, String> {
-        let key = Key::from(cid.hash().to_bytes());
-        subscriptions.create_subscription(self.kademlia.get_providers(key).into(), None)
-    }
-
-    pub fn start_providing(
-        &mut self,
-        cid: Cid,
-        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
-    ) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
-        let key = Key::from(cid.hash().to_bytes());
-        match self.kademlia.start_providing(key) {
-            Ok(id) => Ok(subscriptions.create_subscription(id.into(), None)),
-            Err(e) => {
-                error!("kad: can't provide a key: {:?}", e);
-                Err(anyhow!("kad: can't provide the key: {:?}", e))
-            }
-        }
-    }
-
-    pub fn dht_get(
-        &mut self,
-        key: Key,
-        quorum: Quorum,
-        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
-    ) -> SubscriptionFuture<KadResult, String> {
-        subscriptions.create_subscription(self.kademlia.get_record(key, quorum).into(), None)
-    }
-
-    pub fn dht_put(
-        &mut self,
-        key: Key,
-        value: Vec<u8>,
-        quorum: Quorum,
-        subscriptions: &mut SubscriptionRegistry<KadResult, String>,
-    ) -> Result<SubscriptionFuture<KadResult, String>, anyhow::Error> {
-        let record = Record {
-            key,
-            value,
-            publisher: None,
-            expires: None,
-        };
-        match self.kademlia.put_record(record, quorum) {
-            Ok(id) => Ok(subscriptions.create_subscription(id.into(), None)),
-            Err(e) => {
-                error!("kad: can't put a record: {:?}", e);
-                Err(anyhow!("kad: can't provide the record: {:?}", e))
-            }
-        }
     }
 
     pub fn get_bootstrappers(&self) -> Vec<Multiaddr> {
