@@ -1,11 +1,15 @@
+#[cfg(not(feature = "external-gossipsub-stream"))]
 use super::pubsub::Pubsub;
+
+#[cfg(feature = "external-gossipsub-stream")]
+use libp2p_helper::gossipsub::GossipsubStream;
+
 use super::swarm::{Connection, Disconnector, SwarmApi};
 use crate::config::BOOTSTRAP_NODES;
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
-use crate::subscription::{SubscriptionFuture, SubscriptionRegistry};
+use crate::subscription::SubscriptionFuture;
 
-use anyhow::anyhow;
 // use cid::Cid;
 use ipfs_bitswap::{Bitswap, BitswapEvent};
 use libipld::Cid;
@@ -14,8 +18,8 @@ use libp2p::core::{Multiaddr, PeerId};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::GossipsubEvent;
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
-use libp2p::kad::record::{store::MemoryStore, Key, Record};
-use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, Quorum};
+use libp2p::kad::record::{store::MemoryStore, Record};
+use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
 use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
 use libp2p::ping::{Ping, PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
@@ -35,7 +39,10 @@ pub struct Behaviour {
     pub bitswap: Bitswap,
     pub ping: Ping,
     pub identify: Identify,
+    #[cfg(not(feature = "external-gossipsub-stream"))]
     pub pubsub: Pubsub,
+    #[cfg(feature = "external-gossipsub-stream")]
+    pub pubsub: GossipsubStream,
     pub autonat: autonat::Behaviour,
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
@@ -161,7 +168,7 @@ impl Behaviour {
         kad_config.set_query_timeout(std::time::Duration::from_secs(300));
 
         if let Some(protocol) = options.kad_protocol {
-            kad_config.set_protocol_name(protocol.into_bytes());
+            kad_config.set_protocol_names(std::iter::once(protocol.into_bytes().into()).collect());
         }
 
         let mut kademlia = Kademlia::with_config(options.peer_id.to_owned(), store, kad_config);
@@ -181,7 +188,12 @@ impl Behaviour {
                 .with_agent_version("rust-ipfs".into()),
         );
 
+        #[cfg(not(feature = "external-gossipsub-stream"))]
         let pubsub = Pubsub::new(options.keypair)?;
+
+        #[cfg(feature = "external-gossipsub-stream")]
+        let pubsub = GossipsubStream::new(options.keypair)?;
+
         let mut swarm = SwarmApi::default();
 
         for addr in &options.bootstrap {
@@ -287,7 +299,13 @@ impl Behaviour {
         //self.kademlia.remove_providing(&hash);
     }
 
+    #[cfg(not(feature = "external-gossipsub-stream"))]
     pub fn pubsub(&mut self) -> &mut Pubsub {
+        &mut self.pubsub
+    }
+
+    #[cfg(feature = "external-gossipsub-stream")]
+    pub fn pubsub(&mut self) -> &mut GossipsubStream {
         &mut self.pubsub
     }
 

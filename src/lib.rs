@@ -77,13 +77,16 @@ use self::{
     subscription::SubscriptionFuture,
 };
 
+#[cfg(feature = "external-gossipsub-stream")]
+pub use libp2p_helper::gossipsub::SubscriptionStream;
+
+#[cfg(not(feature = "external-gossipsub-stream"))]
+pub use self::p2p::pubsub::{PubsubMessage, SubscriptionStream};
+
 pub use self::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{
-        pubsub::{PubsubMessage, SubscriptionStream},
-        Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId,
-    },
+    p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
     repo::{PinKind, PinMode, RepoTypes},
 };
@@ -1983,7 +1986,13 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let _ = ret.send(addresses);
                     }
                     IpfsEvent::PubsubSubscribe(topic, ret) => {
-                        let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribe(topic));
+                        #[cfg(not(feature = "external-gossipsub-stream"))]
+                        let pubsub = self.swarm.behaviour_mut().pubsub().subscribe(topic);
+
+                        #[cfg(feature = "external-gossipsub-stream")]
+                        let pubsub = self.swarm.behaviour_mut().pubsub().subscribe(topic).ok();
+
+                        let _ = ret.send(pubsub);
                     }
                     IpfsEvent::PubsubUnsubscribe(topic, ret) => {
                         let _ = ret.send(self.swarm.behaviour_mut().pubsub().unsubscribe(topic));
