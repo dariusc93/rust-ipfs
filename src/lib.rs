@@ -186,6 +186,10 @@ pub struct IpfsOptions {
     /// Relay server to use
     pub relay_addr: Option<Multiaddr>,
 
+    /// A option to store [`PeerInfo`] only when calling the function. If false, it will be stored when using [`Ipfs::find_peer_info`], otherwise it will store all incoming information
+    /// Note: This may change in the future as this may not be a viable option in the long run.
+    pub store_all_peerinfo: bool,
+
     /// Custom Kademlia protocol name. When set to `None`, the global DHT name is used instead of
     /// the LAN dht name.
     ///
@@ -217,6 +221,7 @@ impl Default for IpfsOptions {
             relay: Default::default(),
             relay_addr: Default::default(),
             relay_server: Default::default(),
+            store_all_peerinfo: Default::default(),
             // default to lan kad for go-ipfs use in tests
             kad_protocol: None,
             listening_addrs: vec![
@@ -470,7 +475,9 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let kad_subscriptions = Default::default();
 
         let IpfsOptions {
-            listening_addrs, ..
+            listening_addrs,
+            store_all_peerinfo,
+            ..
         } = options;
 
         let mut fut = IpfsFuture {
@@ -483,6 +490,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             identity_registry,
             autonat_limit,
             autonat_counter,
+            store_all_peerinfo,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -1428,6 +1436,7 @@ struct IpfsFuture<Types: IpfsTypes> {
     kad_subscriptions: SubscriptionRegistry<KadResult, String>,
     autonat_limit: Arc<AtomicU64>,
     autonat_counter: Arc<AtomicU64>,
+    store_all_peerinfo: bool,
 }
 
 impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
@@ -2002,12 +2011,16 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                     self.autonat_counter.store(counter, Ordering::Relaxed);
                                 }
                             }
-
+                            let store_all_peerinfo = self.store_all_peerinfo;
                             match self.identity_registry.entry(peer_id) {
                                 Entry::Occupied(mut entry) => {
                                     *entry.get_mut() = Some(info.into());
                                 }
-                                Entry::Vacant(_) => {}
+                                Entry::Vacant(entry) => {
+                                    if store_all_peerinfo {
+                                        entry.insert(Some(info.into()));
+                                    }
+                                }
                             }
                         }
                         event => trace!("identify: {:?}", event),
