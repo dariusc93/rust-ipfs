@@ -48,19 +48,23 @@ use futures::{
 };
 
 use ipfs_bitswap::BitswapEvent;
+use p2p::PeerInfo;
 use subscription::SubscriptionRegistry;
 use tracing::Span;
 use tracing_futures::Instrument;
 
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     env, fmt,
     future::Future,
     ops::{Deref, DerefMut, Range},
     path::PathBuf,
     pin::Pin,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -96,6 +100,7 @@ use libipld::{
     Cid, Ipld, IpldCodec,
 };
 pub use libp2p::{
+    self,
     core::transport::ListenerId,
     gossipsub::{error::PublishError, MessageId},
     identity::Keypair,
@@ -166,6 +171,9 @@ pub struct IpfsOptions {
     /// Enables mdns for peer discovery and announcement when true.
     pub mdns: bool,
 
+    /// Enables ipv6 for mdns
+    pub mdns_ipv6: bool,
+
     /// Enables dcutr
     pub dcutr: bool,
 
@@ -203,6 +211,7 @@ impl Default for IpfsOptions {
             ipfs_path: env::temp_dir(),
             keypair: Keypair::generate_ed25519(),
             mdns: Default::default(),
+            mdns_ipv6: Default::default(),
             dcutr: Default::default(),
             bootstrap: Default::default(),
             relay: Default::default(),
@@ -343,6 +352,11 @@ enum IpfsEvent {
     AddPeer(PeerId, Multiaddr),
     GetClosestPeers(PeerId, OneshotSender<SubscriptionFuture<KadResult, String>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
+    FindPeerIdentity(
+        PeerId,
+        bool,
+        OneshotSender<Either<Option<PeerInfo>, SubscriptionFuture<KadResult, String>>>,
+    ),
     FindPeer(
         PeerId,
         bool,
@@ -450,6 +464,11 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
             .await?;
 
+        let autonat_limit = Arc::new(AtomicU64::new(64));
+        let autonat_counter = Arc::new(Default::default());
+        let identity_registry = Default::default();
+        let kad_subscriptions = Default::default();
+
         let IpfsOptions {
             listening_addrs, ..
         } = options;
@@ -459,8 +478,11 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             from_facade: receiver.fuse(),
             swarm,
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
-            kad_subscriptions: Default::default(),
+            kad_subscriptions,
             repo,
+            identity_registry,
+            autonat_limit,
+            autonat_counter,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -855,6 +877,42 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             }
 
             Ok((public_key, addresses))
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Returns [`PeerInfo`] of the given peer id. If it cannot be found locally, there will be an attempt to find it on Kad, otherwise it will return
+    /// Ok(None).
+    pub async fn find_peer_info(&self, peer_id: PeerId) -> Result<PeerInfo, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::FindPeerIdentity(peer_id, false, tx))
+                .await?;
+
+            match rx.await? {
+                Either::Left(info) => info.ok_or_else(|| anyhow!("couldn't find peer {}", peer_id)),
+                Either::Right(future) => {
+                    future.await?;
+
+                    let (tx, rx) = oneshot_channel();
+
+                    self.to_task
+                        .clone()
+                        .send(IpfsEvent::FindPeerIdentity(peer_id, true, tx))
+                        .await?;
+
+                    match rx.await? {
+                        Either::Left(info) => {
+                            info.ok_or_else(|| anyhow!("couldn't find peer {}", peer_id))
+                        }
+                        _ => Err(anyhow!("couldn't find peer {}", peer_id)),
+                    }
+                }
+            }
         }
         .instrument(self.span.clone())
         .await
@@ -1366,7 +1424,10 @@ struct IpfsFuture<Types: IpfsTypes> {
     from_facade: Fuse<Receiver<IpfsEvent>>,
     listening_addresses: HashMap<Multiaddr, (ListenerId, Option<Channel<Multiaddr>>)>,
     repo: Arc<Repo<Types>>,
+    identity_registry: HashMap<PeerId, Option<PeerInfo>>,
     kad_subscriptions: SubscriptionRegistry<KadResult, String>,
+    autonat_limit: Arc<AtomicU64>,
+    autonat_counter: Arc<AtomicU64>,
 }
 
 impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
@@ -1453,7 +1514,6 @@ impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
 
     fn start_add_listener_address(&mut self, addr: Multiaddr, ret: Option<Channel<Multiaddr>>) {
         use libp2p::Swarm;
-        use std::collections::hash_map::Entry;
 
         if starts_unspecified(&addr)
             && self
@@ -1903,25 +1963,51 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         }
                     },
                     SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
-                        IdentifyEvent::Received {
-                            peer_id,
-                            info:
-                                IdentifyInfo {
-                                    listen_addrs,
-                                    protocols,
-                                    ..
-                                },
-                        } => {
+                        IdentifyEvent::Received { peer_id, info } => {
+                            let IdentifyInfo {
+                                listen_addrs,
+                                protocols,
+                                ..
+                            } = info.clone();
+
+                            if protocols
+                                .iter()
+                                .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
+                            {
+                                for addr in &listen_addrs {
+                                    self.swarm
+                                        .behaviour_mut()
+                                        .kademlia()
+                                        .add_address(&peer_id, addr.clone());
+                                }
+                            }
+
+                            #[allow(clippy::collapsible_if)]
                             if protocols
                                 .iter()
                                 .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
                             {
-                                for addr in listen_addrs {
-                                    self.swarm
-                                        .behaviour_mut()
-                                        .autonat
-                                        .add_server(peer_id, Some(addr));
+                                if self.autonat_counter.load(Ordering::Relaxed)
+                                    <= self.autonat_limit.load(Ordering::Relaxed)
+                                {
+                                    for addr in listen_addrs {
+                                        self.swarm
+                                            .behaviour_mut()
+                                            .autonat
+                                            .add_server(peer_id, Some(addr));
+                                    }
+
+                                    let mut counter = self.autonat_counter.load(Ordering::Relaxed);
+                                    counter += 1;
+                                    self.autonat_counter.store(counter, Ordering::Relaxed);
                                 }
+                            }
+
+                            match self.identity_registry.entry(peer_id) {
+                                Entry::Occupied(mut entry) => {
+                                    *entry.get_mut() = Some(info.into());
+                                }
+                                Entry::Vacant(_) => {}
                             }
                         }
                         event => trace!("identify: {:?}", event),
@@ -2094,6 +2180,29 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             .cloned()
                             .collect();
                         let _ = ret.send(peers);
+                    }
+                    IpfsEvent::FindPeerIdentity(peer_id, local_only, ret) => {
+                        let locally_known = match self.identity_registry.entry(peer_id) {
+                            Entry::Occupied(entry) => entry.get().clone(),
+                            Entry::Vacant(entry) => {
+                                entry.insert(None);
+                                None
+                            }
+                        };
+                        let addrs = if locally_known.is_some() || local_only {
+                            Either::Left(locally_known)
+                        } else {
+                            Either::Right({
+                                let id = self
+                                    .swarm
+                                    .behaviour_mut()
+                                    .kademlia
+                                    .get_closest_peers(peer_id);
+
+                                self.kad_subscriptions.create_subscription(id.into(), None)
+                            })
+                        };
+                        let _ = ret.send(addrs);
                     }
                     IpfsEvent::FindPeer(peer_id, local_only, ret) => {
                         let swarm_addrs = self.swarm.behaviour_mut().swarm.connections_to(&peer_id);

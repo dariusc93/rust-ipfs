@@ -154,7 +154,7 @@ impl Behaviour {
         let mdns = if options.mdns {
             let mut config = MdnsConfig::default();
             //tODO: Reenable
-            config.enable_ipv6 = false;
+            config.enable_ipv6 = options.mdns_ipv6;
             Mdns::new(config).await.ok()
         } else {
             None
@@ -203,7 +203,7 @@ impl Behaviour {
         }
 
         // Maybe have this enable in conjunction with RelayClient?
-        let dcutr = Toggle::from(options.dcutr.then(|| Dcutr::new()));
+        let dcutr = Toggle::from(options.dcutr.then(Dcutr::new));
 
         let relay = Toggle::from(
             options
@@ -211,7 +211,6 @@ impl Behaviour {
                 .then(|| Relay::new(peer_id, Default::default())),
         );
 
-        //TODO: Work on custom transport for relay
         let (transport, relay_client) = match options.relay {
             true => {
                 let (transport, client) = RelayClient::new_transport_and_behaviour(peer_id);
