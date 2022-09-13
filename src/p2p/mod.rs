@@ -1,6 +1,6 @@
 //! P2P handling for IPFS nodes.
 use crate::error::Error;
-use crate::{IpfsOptions};
+use crate::IpfsOptions;
 
 use libp2p::identify::IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
@@ -11,6 +11,7 @@ use tracing::Span;
 pub(crate) mod addr;
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
+pub use self::transport::TransportConfig;
 pub(crate) mod pubsub;
 mod swarm;
 mod transport;
@@ -20,7 +21,6 @@ pub use {behaviour::KadResult, swarm::Connection};
 
 /// Type alias for [`libp2p::Swarm`] running the [`behaviour::Behaviour`] with the given [`IpfsTypes`].
 pub type TSwarm = Swarm<behaviour::Behaviour>;
-
 
 /// Abstraction of IdentifyInfo but includes PeerId
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,7 +45,14 @@ pub struct PeerInfo {
 
 impl From<IdentifyInfo> for PeerInfo {
     fn from(info: IdentifyInfo) -> Self {
-        let IdentifyInfo { public_key, protocol_version, agent_version, listen_addrs, protocols, observed_addr } = info;
+        let IdentifyInfo {
+            public_key,
+            protocol_version,
+            agent_version,
+            listen_addrs,
+            protocols,
+            observed_addr,
+        } = info;
         let peer_id = public_key.clone().into();
         Self {
             peer_id,
@@ -54,7 +61,7 @@ impl From<IdentifyInfo> for PeerInfo {
             agent_version,
             listen_addrs,
             protocols,
-            observed_addr
+            observed_addr,
         }
     }
 }
@@ -109,6 +116,7 @@ impl From<&IpfsOptions> for SwarmOptions {
 /// Creates a new IPFS swarm.
 pub async fn create_swarm(
     options: SwarmOptions,
+    config: TransportConfig,
     span: Span,
 ) -> Result<TSwarm, Error> {
     let peer_id = options.peer_id;
@@ -119,7 +127,7 @@ pub async fn create_swarm(
     let (behaviour, relay_transport) = behaviour::build_behaviour(options).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
-    let transport = transport::build_transport(keypair, relay_transport)?;
+    let transport = transport::build_transport(keypair, relay_transport, config)?;
 
     // Create a Swarm
     let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer_id)

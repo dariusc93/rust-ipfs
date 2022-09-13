@@ -298,7 +298,7 @@ impl NetworkBehaviour for SwarmApi {
         trace!("inject_connection_closed {} {:?}", peer_id, endpoint);
         let closed_addr = match connection_point_addr(endpoint) {
             Ok(addr) => addr,
-            _ => return
+            _ => return,
         };
 
         match self.connected_peers.entry(*peer_id) {
@@ -440,11 +440,10 @@ fn connection_point_addr(cp: &ConnectedPoint) -> anyhow::Result<MultiaddrWithout
         ConnectedPoint::Dialer {
             address,
             role_override: _,
-        } => Ok(MultiaddrWithPeerId::try_from(address.to_owned())?
-            .into()),
-        ConnectedPoint::Listener { send_back_addr, .. } => Ok(send_back_addr
-            .to_owned()
-            .try_into()?),
+        } => Ok(MultiaddrWithPeerId::try_from(address.to_owned())?.into()),
+        ConnectedPoint::Listener { send_back_addr, .. } => {
+            Ok(send_back_addr.to_owned().try_into()?)
+        }
     }
 }
 
@@ -623,7 +622,7 @@ mod tests {
     fn build_swarm() -> (PeerId, libp2p::swarm::Swarm<SwarmApi>) {
         let key = Keypair::generate_ed25519();
         let peer_id = key.public().to_peer_id();
-        let transport = build_transport(key, None).unwrap();
+        let transport = build_transport(key, None, Default::default()).unwrap();
 
         let swarm = SwarmBuilder::new(transport, SwarmApi::default(), peer_id)
             .executor(Box::new(ThreadLocalTokio))
