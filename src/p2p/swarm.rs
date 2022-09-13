@@ -145,25 +145,6 @@ impl SwarmApi {
         Some(subscription)
     }
 
-    pub fn disconnect(&mut self, addr: MultiaddrWithPeerId) -> Option<Disconnector> {
-        trace!("request to disconnect {}", addr);
-        if let Some(&peer_id) = self.connections.get(&addr.multiaddr) {
-            Some(Disconnector { peer_id })
-        } else {
-            None
-        }
-    }
-
-    pub fn ban(&mut self, peer_id: PeerId) -> Disconnector {
-        trace!("request to ban {}", peer_id);
-        Disconnector { peer_id }
-    }
-
-    pub fn unban(&mut self, peer_id: PeerId) -> Disconnector {
-        trace!("request to unban {}", peer_id);
-        Disconnector { peer_id }
-    }
-
     pub fn connections_to(&self, peer_id: &PeerId) -> Vec<Multiaddr> {
         self.connected_peers
             .get(peer_id)

@@ -2064,19 +2064,14 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         ret.send(Ok(connections.collect())).ok();
                     }
                     IpfsEvent::Disconnect(addr, ret) => {
-                        if let Some(disconnector) = self.swarm.behaviour_mut().disconnect(addr) {
-                            disconnector.disconnect(&mut self.swarm);
-                        }
-                        ret.send(Ok(())).ok();
+                        let _ = ret.send(self.swarm.disconnect_peer_id(addr.peer_id).map_err(|_| anyhow::anyhow!("Peer was not connected")));
                     }
                     IpfsEvent::Ban(peer, ret) => {
-                        let disconnector = self.swarm.behaviour_mut().ban_peer_id(peer);
-                        disconnector.ban(&mut self.swarm);
+                        self.swarm.ban_peer_id(peer);
                         let _ = ret.send(Ok(()));
                     }
                     IpfsEvent::Unban(peer, ret) => {
-                        let disconnector = self.swarm.behaviour_mut().unban_peer_id(peer);
-                        disconnector.unban(&mut self.swarm);
+                        self.swarm.unban_peer_id(peer);
                         let _ = ret.send(Ok(()));
                     }
                     IpfsEvent::GetAddresses(ret) => {
