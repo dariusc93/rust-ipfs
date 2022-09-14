@@ -6,7 +6,7 @@ use libp2p::swarm::handler::DummyConnectionHandler;
 use libp2p::swarm::{
     self,
     dial_opts::{DialOpts, PeerCondition},
-    ConnectionHandler, DialError, NetworkBehaviour, PollParameters, Swarm,
+    ConnectionHandler, DialError, NetworkBehaviour, PollParameters,
 };
 use std::collections::{hash_map::Entry, HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
@@ -19,27 +19,6 @@ pub struct Connection {
     pub addr: MultiaddrWithPeerId,
     /// Latest ping report on any of the connections.
     pub rtt: Option<Duration>,
-}
-
-/// Disconnected will use banning to disconnect a node. Disconnecting a single peer connection is
-/// not supported at the moment.
-pub struct Disconnector {
-    peer_id: PeerId,
-}
-
-impl Disconnector {
-    pub fn disconnect<T: NetworkBehaviour>(self, swarm: &mut Swarm<T>) {
-        Swarm::ban_peer_id(swarm, self.peer_id);
-        Swarm::unban_peer_id(swarm, self.peer_id);
-    }
-
-    pub fn ban<T: NetworkBehaviour>(self, swarm: &mut Swarm<T>) {
-        Swarm::ban_peer_id(swarm, self.peer_id);
-    }
-
-    pub fn unban<T: NetworkBehaviour>(self, swarm: &mut Swarm<T>) {
-        Swarm::unban_peer_id(swarm, self.peer_id);
-    }
 }
 
 // Currently this is swarm::NetworkBehaviourAction<Void, Void>

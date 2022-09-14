@@ -4,7 +4,7 @@ use super::pubsub::Pubsub;
 #[cfg(feature = "external-gossipsub-stream")]
 use libp2p_helper::gossipsub::GossipsubStream;
 
-use super::swarm::{Connection, Disconnector, SwarmApi};
+use super::swarm::{Connection, SwarmApi};
 use crate::config::BOOTSTRAP_NODES;
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
