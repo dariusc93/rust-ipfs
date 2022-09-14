@@ -201,7 +201,11 @@ pub struct IpfsOptions {
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
+    /// Transport configuration
     pub transport_configuration: Option<crate::p2p::TransportConfig>,
+
+    /// Swarm configuration
+    pub swarm_configuration: Option<crate::p2p::SwarmConfig>,
 
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
@@ -231,6 +235,7 @@ impl Default for IpfsOptions {
                 "/ip6/::/tcp/0".parse().unwrap(),
             ],
             transport_configuration: None,
+            swarm_configuration: None,
             span: None,
         }
     }
@@ -468,8 +473,10 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
         // reordered for less error prone code.
         let swarm_options = SwarmOptions::from(&options);
+        
+        let swarm_config = options.swarm_configuration.unwrap_or_default();
         let transport_config = options.transport_configuration.unwrap_or_default();
-        let swarm = create_swarm(swarm_options, transport_config, exec_span)
+        let swarm = create_swarm(swarm_options, swarm_config, transport_config, exec_span)
             .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
             .await?;
 
