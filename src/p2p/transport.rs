@@ -9,7 +9,7 @@ use libp2p::mplex::MplexConfig;
 use libp2p::noise::{self, NoiseConfig};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::tcp::{GenTcpConfig, TokioTcpTransport};
-use libp2p::yamux::{WindowUpdateMode, YamuxConfig};
+use libp2p::yamux::YamuxConfig;
 use libp2p::{PeerId, Transport};
 use std::io::{self, Error, ErrorKind};
 use std::time::Duration;
@@ -29,13 +29,7 @@ pub struct TransportConfig {
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
-            yamux_config: {
-                let mut config = YamuxConfig::default();
-                config.set_max_buffer_size(16 * 1024 * 1024);
-                config.set_receive_window_size(16 * 1024 * 1024);
-                config.set_window_update_mode(WindowUpdateMode::on_receive());
-                config
-            },
+            yamux_config: YamuxConfig::default(),
             mplex_config: MplexConfig::new(),
             no_delay: true,
             port_reuse: true,
