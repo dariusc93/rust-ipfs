@@ -15,6 +15,7 @@ use tracing::Span;
 pub(crate) mod addr;
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
+pub use self::behaviour::{RelayConfig, RateLimit};
 pub use self::transport::TransportConfig;
 pub(crate) mod pubsub;
 mod swarm;
@@ -86,6 +87,8 @@ pub struct SwarmOptions {
     pub kad_protocol: Option<String>,
     /// Relay Server
     pub relay_server: bool,
+    /// Relay Server Configuration
+    pub relay_server_config: Option<RelayConfig>,
     /// Relay client
     pub relay: bool,
     /// Enables dcutr
@@ -102,6 +105,7 @@ impl From<&IpfsOptions> for SwarmOptions {
         let kad_protocol = options.kad_protocol.clone();
         let dcutr = options.dcutr;
         let relay_server = options.relay_server;
+        let relay_server_config = options.relay_server_config.clone();
         let relay = options.relay;
         SwarmOptions {
             keypair,
@@ -111,6 +115,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             mdns_ipv6,
             kad_protocol,
             relay_server,
+            relay_server_config,
             relay,
             dcutr,
         }

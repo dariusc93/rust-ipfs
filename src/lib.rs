@@ -48,7 +48,7 @@ use futures::{
 };
 
 use ipfs_bitswap::BitswapEvent;
-use p2p::PeerInfo;
+use p2p::{PeerInfo, RelayConfig};
 use subscription::SubscriptionRegistry;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -183,6 +183,9 @@ pub struct IpfsOptions {
     /// Enables relay server
     pub relay_server: bool,
 
+    /// Relay server config
+    pub relay_server_config: Option<RelayConfig>,
+
     /// Relay server to use
     pub relay_addr: Option<Multiaddr>,
 
@@ -206,7 +209,7 @@ pub struct IpfsOptions {
 
     /// Swarm configuration
     pub swarm_configuration: Option<crate::p2p::SwarmConfig>,
-
+    
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
@@ -227,6 +230,7 @@ impl Default for IpfsOptions {
             relay: Default::default(),
             relay_addr: Default::default(),
             relay_server: Default::default(),
+            relay_server_config: Default::default(),
             store_all_peerinfo: Default::default(),
             // default to lan kad for go-ipfs use in tests
             kad_protocol: None,

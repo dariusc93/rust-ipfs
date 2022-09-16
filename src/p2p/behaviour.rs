@@ -3,6 +3,7 @@ use super::pubsub::Pubsub;
 
 #[cfg(feature = "external-gossipsub-stream")]
 use libp2p_helper::gossipsub::GossipsubStream;
+use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
 use crate::config::BOOTSTRAP_NODES;
@@ -24,11 +25,12 @@ use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
 use libp2p::ping::{Ping, PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
-use libp2p::relay::v2::relay::{Event as RelayEvent, Relay};
+use libp2p::relay::v2::relay::{rate_limiter, Event as RelayEvent, Relay};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::NetworkBehaviour;
 use std::convert::TryFrom;
 use std::convert::TryInto;
+use std::num::NonZeroU32;
 
 /// Behaviour type.
 #[derive(libp2p::NetworkBehaviour)]
@@ -131,10 +133,6 @@ impl From<void::Void> for BehaviourEvent {
     }
 }
 
-// pub fn process_behaviour<Types: IpfsTypes>(swarm: &mut Swarm<Behaviour<Types>>) {
-//     // match
-// }
-
 /// Represents the result of a Kademlia query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KadResult {
@@ -146,15 +144,84 @@ pub enum KadResult {
     Records(Vec<Record>),
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RelayConfig {
+    pub max_reservations: usize,
+    pub max_reservations_per_peer: usize,
+    pub reservation_duration: std::time::Duration,
+    pub reservation_rate_limiters: Vec<RateLimit>,
+
+    pub max_circuits: usize,
+    pub max_circuits_per_peer: usize,
+    pub max_circuit_duration: std::time::Duration,
+    pub max_circuit_bytes: u64,
+    pub circuit_src_rate_limiters: Vec<RateLimit>,
+}
+
+impl From<RelayConfig> for libp2p::relay::v2::relay::Config {
+    fn from(
+        RelayConfig {
+            max_reservations,
+            max_reservations_per_peer,
+            reservation_duration,
+            reservation_rate_limiters,
+            max_circuits,
+            max_circuits_per_peer,
+            max_circuit_duration,
+            max_circuit_bytes,
+            circuit_src_rate_limiters,
+        }: RelayConfig,
+    ) -> Self {
+        let reservation_rate_limiters = reservation_rate_limiters
+            .iter()
+            .map(|rate| {
+                rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
+                    limit: rate.limit,
+                    interval: rate.interval,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let circuit_src_rate_limiters = circuit_src_rate_limiters
+            .iter()
+            .map(|rate| {
+                rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
+                    limit: rate.limit,
+                    interval: rate.interval,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        libp2p::relay::v2::relay::Config {
+            max_reservations,
+            max_reservations_per_peer,
+            reservation_duration,
+            reservation_rate_limiters,
+            max_circuits,
+            max_circuits_per_peer,
+            max_circuit_duration,
+            max_circuit_bytes,
+            circuit_src_rate_limiters,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RateLimit {
+    limit: NonZeroU32,
+    interval: std::time::Duration,
+}
+
 impl Behaviour {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
     pub async fn new(options: SwarmOptions) -> Result<(Self, Option<ClientTransport>), Error> {
         info!("net: starting with peer id {}", options.peer_id);
 
         let mdns = if options.mdns {
-            let mut config = MdnsConfig::default();
-            //tODO: Reenable
-            config.enable_ipv6 = options.mdns_ipv6;
+            let config = MdnsConfig {
+                enable_ipv6: options.mdns_ipv6,
+                ..Default::default()
+            };
             Mdns::new(config).await.ok()
         } else {
             None
@@ -204,11 +271,15 @@ impl Behaviour {
 
         // Maybe have this enable in conjunction with RelayClient?
         let dcutr = Toggle::from(options.dcutr.then(Dcutr::new));
+        let relay_config = options
+            .relay_server_config
+            .map(|rc| rc.into())
+            .unwrap_or_default();
 
         let relay = Toggle::from(
             options
                 .relay_server
-                .then(|| Relay::new(peer_id, Default::default())),
+                .then(|| Relay::new(peer_id, relay_config)),
         );
 
         let (transport, relay_client) = match options.relay {
