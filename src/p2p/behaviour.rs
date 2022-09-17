@@ -174,21 +174,37 @@ impl From<RelayConfig> for libp2p::relay::v2::relay::Config {
     ) -> Self {
         let reservation_rate_limiters = reservation_rate_limiters
             .iter()
-            .map(|rate| {
-                rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
-                    limit: rate.limit,
-                    interval: rate.interval,
-                })
+            .map(|rate| match rate {
+                RateLimit::PerPeer { limit, interval } => {
+                    rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
+                        limit: *limit,
+                        interval: *interval,
+                    })
+                }
+                RateLimit::PerIp { limit, interval } => {
+                    rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
+                        limit: *limit,
+                        interval: *interval,
+                    })
+                }
             })
             .collect::<Vec<_>>();
 
         let circuit_src_rate_limiters = circuit_src_rate_limiters
             .iter()
-            .map(|rate| {
-                rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
-                    limit: rate.limit,
-                    interval: rate.interval,
-                })
+            .map(|rate| match rate {
+                RateLimit::PerPeer { limit, interval } => {
+                    rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
+                        limit: *limit,
+                        interval: *interval,
+                    })
+                }
+                RateLimit::PerIp { limit, interval } => {
+                    rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
+                        limit: *limit,
+                        interval: *interval,
+                    })
+                }
             })
             .collect::<Vec<_>>();
 
@@ -207,9 +223,15 @@ impl From<RelayConfig> for libp2p::relay::v2::relay::Config {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RateLimit {
-    pub limit: NonZeroU32,
-    pub interval: std::time::Duration,
+pub enum RateLimit {
+    PerPeer {
+        limit: NonZeroU32,
+        interval: std::time::Duration,
+    },
+    PerIp {
+        limit: NonZeroU32,
+        interval: std::time::Duration,
+    },
 }
 
 impl Behaviour {
