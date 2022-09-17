@@ -208,8 +208,8 @@ impl From<RelayConfig> for libp2p::relay::v2::relay::Config {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RateLimit {
-    limit: NonZeroU32,
-    interval: std::time::Duration,
+    pub limit: NonZeroU32,
+    pub interval: std::time::Duration,
 }
 
 impl Behaviour {
