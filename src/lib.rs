@@ -117,7 +117,7 @@ use libp2p::{
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
         GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-        KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record,
+        KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record, KademliaConfig,
     },
     mdns::MdnsEvent,
     ping::PingSuccess,
@@ -210,6 +210,9 @@ pub struct IpfsOptions {
     /// Swarm configuration
     pub swarm_configuration: Option<crate::p2p::SwarmConfig>,
     
+    /// Kad configuration
+    pub kad_configuration: Option<KademliaConfig>,
+
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
@@ -232,6 +235,7 @@ impl Default for IpfsOptions {
             relay_server: Default::default(),
             relay_server_config: Default::default(),
             store_all_peerinfo: Default::default(),
+            kad_configuration: Default::default(),
             // default to lan kad for go-ipfs use in tests
             kad_protocol: None,
             listening_addrs: vec![

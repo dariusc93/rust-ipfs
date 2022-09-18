@@ -252,9 +252,16 @@ impl Behaviour {
 
         let store = MemoryStore::new(options.peer_id.to_owned());
 
-        let mut kad_config = KademliaConfig::default();
-        kad_config.disjoint_query_paths(true);
-        kad_config.set_query_timeout(std::time::Duration::from_secs(300));
+
+        let mut kad_config = match options.kad_config.clone() {
+            Some(config) => config,
+            None => {
+                let mut kad_config = KademliaConfig::default();
+                kad_config.disjoint_query_paths(true);
+                kad_config.set_query_timeout(std::time::Duration::from_secs(300));
+                kad_config
+            }
+        };
 
         if let Some(protocol) = options.kad_protocol {
             kad_config.set_protocol_names(std::iter::once(protocol.into_bytes().into()).collect());
