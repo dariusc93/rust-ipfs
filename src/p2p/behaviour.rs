@@ -252,7 +252,6 @@ impl Behaviour {
 
         let store = MemoryStore::new(options.peer_id.to_owned());
 
-
         let mut kad_config = match options.kad_config.clone() {
             Some(config) => config,
             None => {
@@ -288,7 +287,15 @@ impl Behaviour {
         let pubsub = Pubsub::new(options.keypair)?;
 
         #[cfg(feature = "external-gossipsub-stream")]
-        let pubsub = GossipsubStream::new(options.keypair)?;
+        let pubsub = {
+            let config = gossipsub::GossipsubConfigBuilder::default()
+                .max_transmit_size(256 * 1024)
+                .build()
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let gossipsub = Gossipsub::new(MessageAuthenticity::Signed(option.keypair), config)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            GossipsubStream::from(gossipsub)
+        };
 
         let mut swarm = SwarmApi::default();
 

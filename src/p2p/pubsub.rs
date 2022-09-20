@@ -143,6 +143,7 @@ impl Pubsub {
     pub fn new(keypair: Keypair) -> Result<Self, Error> {
         let (tx, rx) = channel::unbounded();
         let config = gossipsub::GossipsubConfigBuilder::default()
+            .max_transmit_size(256 * 1024)
             .build()
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
