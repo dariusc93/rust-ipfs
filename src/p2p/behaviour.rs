@@ -17,7 +17,7 @@ use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
-use libp2p::gossipsub::GossipsubEvent;
+use libp2p::gossipsub::{GossipsubEvent, MessageAuthenticity};
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
@@ -288,11 +288,11 @@ impl Behaviour {
 
         #[cfg(feature = "external-gossipsub-stream")]
         let pubsub = {
-            let config = gossipsub::GossipsubConfigBuilder::default()
+            let config = libp2p::gossipsub::GossipsubConfigBuilder::default()
                 .max_transmit_size(256 * 1024)
                 .build()
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            let gossipsub = Gossipsub::new(MessageAuthenticity::Signed(option.keypair), config)
+            let gossipsub = libp2p::gossipsub::Gossipsub::new(MessageAuthenticity::Signed(options.keypair), config)
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             GossipsubStream::from(gossipsub)
         };
