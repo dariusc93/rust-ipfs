@@ -138,12 +138,7 @@ pub struct SwarmConfig {
 impl Default for SwarmConfig {
     fn default() -> Self {
         Self {
-            connection: ConnectionLimits::default()
-                .with_max_pending_incoming(Some(128))
-                .with_max_pending_outgoing(Some(128))
-                .with_max_established_incoming(Some(128))
-                .with_max_established_outgoing(Some(128))
-                .with_max_established_per_peer(Some(8)),
+            connection: ConnectionLimits::default(),
             dial_concurrency_factor: 8.try_into().expect("8 > 0"),
             notify_handler_buffer_size: 256.try_into().expect("256 > 0"),
             connection_event_buffer_size: 256,
