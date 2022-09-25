@@ -59,7 +59,7 @@ async fn main() {
     if bootstrappers == BootstrapperOption::RestoreDefault {
         // applications wishing to find content on the global IPFS swarm should restore the latest
         // bootstrappers which are hopefully updated between releases
-        ipfs.restore_bootstrappers().await.unwrap();
+        ipfs.default_bootstrap().await.unwrap();
     } else if let Some(target) = target {
         ipfs.connect(target).await.unwrap();
     } else {

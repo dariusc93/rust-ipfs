@@ -47,8 +47,6 @@ pub struct SwarmApi {
     /// The connections which have been requested, and the swarm/network has requested the
     /// addresses of. Used to keep finishing all of the subscriptions.
     pending_connections: HashMap<PeerId, Vec<MultiaddrWithPeerId>>,
-
-    pub(crate) bootstrappers: HashSet<MultiaddrWithPeerId>,
 }
 
 impl SwarmApi {

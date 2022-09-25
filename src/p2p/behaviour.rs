@@ -292,18 +292,15 @@ impl Behaviour {
                 .max_transmit_size(256 * 1024)
                 .build()
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            let gossipsub = libp2p::gossipsub::Gossipsub::new(MessageAuthenticity::Signed(options.keypair), config)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let gossipsub = libp2p::gossipsub::Gossipsub::new(
+                MessageAuthenticity::Signed(options.keypair),
+                config,
+            )
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
             GossipsubStream::from(gossipsub)
         };
 
-        let mut swarm = SwarmApi::default();
-
-        for addr in &options.bootstrap {
-            if let Ok(addr) = addr.to_owned().try_into() {
-                swarm.bootstrappers.insert(addr);
-            }
-        }
+        let swarm = SwarmApi::default();
 
         // Maybe have this enable in conjunction with RelayClient?
         let dcutr = Toggle::from(options.dcutr.then(Dcutr::new));
@@ -409,100 +406,6 @@ impl Behaviour {
 
     pub fn kademlia(&mut self) -> &mut Kademlia<MemoryStore> {
         &mut self.kademlia
-    }
-
-    pub fn get_bootstrappers(&self) -> Vec<Multiaddr> {
-        self.swarm
-            .bootstrappers
-            .iter()
-            .cloned()
-            .map(|a| a.into())
-            .collect()
-    }
-
-    pub fn add_bootstrapper(
-        &mut self,
-        addr: MultiaddrWithPeerId,
-    ) -> Result<Multiaddr, anyhow::Error> {
-        let ret = addr.clone().into();
-        if self.swarm.bootstrappers.insert(addr.clone()) {
-            let MultiaddrWithPeerId {
-                multiaddr: ma,
-                peer_id,
-            } = addr;
-            self.kademlia.add_address(&peer_id, ma.into());
-            // the return value of add_address doesn't implement Debug
-            trace!(peer_id=%peer_id, "tried to add a bootstrapper");
-        }
-        Ok(ret)
-    }
-
-    pub fn remove_bootstrapper(
-        &mut self,
-        addr: MultiaddrWithPeerId,
-    ) -> Result<Multiaddr, anyhow::Error> {
-        let ret = addr.clone().into();
-        if self.swarm.bootstrappers.remove(&addr) {
-            let peer_id = addr.peer_id;
-            let prefix: Multiaddr = addr.multiaddr.into();
-
-            if let Some(e) = self.kademlia.remove_address(&peer_id, &prefix) {
-                info!(peer_id=%peer_id, status=?e.status, "removed bootstrapper");
-            } else {
-                warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
-            }
-        }
-        Ok(ret)
-    }
-
-    pub fn clear_bootstrappers(&mut self) -> Vec<Multiaddr> {
-        let removed = self.swarm.bootstrappers.drain();
-        let mut ret = Vec::with_capacity(removed.len());
-
-        for addr_with_peer_id in removed {
-            let peer_id = &addr_with_peer_id.peer_id;
-            let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
-
-            if let Some(e) = self.kademlia.remove_address(peer_id, &prefix) {
-                info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
-                ret.push(addr_with_peer_id.into());
-            } else {
-                error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
-            }
-        }
-
-        ret
-    }
-
-    pub fn restore_bootstrappers(&mut self) -> Result<Vec<Multiaddr>, anyhow::Error> {
-        let mut ret = Vec::new();
-
-        for addr in BOOTSTRAP_NODES {
-            let addr = addr
-                .parse::<MultiaddrWithPeerId>()
-                .expect("see test bootstrap_nodes_are_multiaddr_with_peerid");
-            if self.swarm.bootstrappers.insert(addr.clone()) {
-                let MultiaddrWithPeerId {
-                    multiaddr: ma,
-                    peer_id,
-                } = addr.clone();
-
-                // this is intentionally the multiaddr without peerid turned into plain multiaddr:
-                // libp2p cannot dial addresses which include peerids.
-                let ma: Multiaddr = ma.into();
-
-                // same as with add_bootstrapper: the return value from kademlia.add_address
-                // doesn't implement Debug
-                self.kademlia.add_address(&peer_id, ma.clone());
-                trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
-
-                // report with the peerid
-                let reported: Multiaddr = addr.into();
-                ret.push(reported);
-            }
-        }
-
-        Ok(ret)
     }
 }
 

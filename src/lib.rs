@@ -68,7 +68,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::repo::BlockPut;
+use crate::{config::BOOTSTRAP_NODES, repo::BlockPut};
 
 use self::{
     dag::IpldDag,
@@ -117,7 +117,7 @@ use libp2p::{
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
         GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-        KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record, KademliaConfig,
+        KademliaConfig, KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record,
     },
     mdns::MdnsEvent,
     ping::PingSuccess,
@@ -209,7 +209,7 @@ pub struct IpfsOptions {
 
     /// Swarm configuration
     pub swarm_configuration: Option<crate::p2p::SwarmConfig>,
-    
+
     /// Kad configuration
     pub kad_configuration: Option<KademliaConfig>,
 
@@ -343,6 +343,7 @@ enum IpfsEvent {
     Listeners(Channel<Vec<Multiaddr>>),
     /// Connections
     Connections(Channel<Vec<Connection>>),
+    ConnectedPeers(Channel<Vec<PeerId>>),
     /// Disconnect
     Disconnect(MultiaddrWithPeerId, Channel<()>),
     /// Ban Peer
@@ -400,7 +401,7 @@ enum IpfsEvent {
     AddBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
     RemoveBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
     ClearBootstrappers(OneshotSender<Vec<Multiaddr>>),
-    RestoreBootstrappers(Channel<Vec<Multiaddr>>),
+    DefaultBootstrap(Channel<Vec<Multiaddr>>),
     Exit,
 }
 
@@ -481,7 +482,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
         // reordered for less error prone code.
         let swarm_options = SwarmOptions::from(&options);
-        
+
         let swarm_config = options.swarm_configuration.unwrap_or_default();
         let transport_config = options.transport_configuration.unwrap_or_default();
         let swarm = create_swarm(swarm_options, swarm_config, transport_config, exec_span)
@@ -492,6 +493,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let autonat_counter = Arc::new(Default::default());
         let identity_registry = Default::default();
         let kad_subscriptions = Default::default();
+        let bootstraps = Default::default();
 
         let IpfsOptions {
             listening_addrs,
@@ -510,6 +512,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             autonat_limit,
             autonat_counter,
             store_all_peerinfo,
+            bootstraps,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -1319,7 +1322,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Obtain the list of addresses of bootstrapper nodes that are currently used.
-    pub async fn get_bootstrappers(&self) -> Result<Vec<Multiaddr>, Error> {
+    pub async fn get_bootstraps(&self) -> Result<Vec<Multiaddr>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1337,7 +1340,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Extend the list of used bootstrapper nodes with an additional address.
     /// Return value cannot be used to determine if the `addr` was a new bootstrapper, subject to
     /// change.
-    pub async fn add_bootstrapper(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
+    pub async fn add_bootstrap(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1355,7 +1358,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Remove an address from the currently used list of bootstrapper nodes.
     /// Return value cannot be used to determine if the `addr` was an actual bootstrapper, subject to
     /// change.
-    pub async fn remove_bootstrapper(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
+    pub async fn remove_bootstrap(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1371,7 +1374,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Clear the currently used list of bootstrapper nodes, returning the removed addresses.
-    pub async fn clear_bootstrappers(&self) -> Result<Vec<Multiaddr>, Error> {
+    pub async fn clear_bootstrap(&self) -> Result<Vec<Multiaddr>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1388,13 +1391,13 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
     /// Restore the originally configured bootstrapper node list by adding them to the list of the
     /// currently used bootstrapper node address list; returns the restored addresses.
-    pub async fn restore_bootstrappers(&self) -> Result<Vec<Multiaddr>, Error> {
+    pub async fn default_bootstrap(&self) -> Result<Vec<Multiaddr>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::RestoreBootstrappers(tx))
+                .send(IpfsEvent::DefaultBootstrap(tx))
                 .await?;
 
             rx.await?
@@ -1455,6 +1458,7 @@ struct IpfsFuture<Types: IpfsTypes> {
     kad_subscriptions: SubscriptionRegistry<KadResult, String>,
     autonat_limit: Arc<AtomicU64>,
     autonat_counter: Arc<AtomicU64>,
+    bootstraps: HashSet<MultiaddrWithPeerId>,
     store_all_peerinfo: bool,
 }
 
@@ -2078,8 +2082,16 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let connections = self.swarm.behaviour_mut().connections();
                         ret.send(Ok(connections.collect())).ok();
                     }
+                    IpfsEvent::ConnectedPeers(ret) => {
+                        let connections = self.swarm.connected_peers().cloned();
+                        ret.send(Ok(connections.collect())).ok();
+                    }
                     IpfsEvent::Disconnect(addr, ret) => {
-                        let _ = ret.send(self.swarm.disconnect_peer_id(addr.peer_id).map_err(|_| anyhow::anyhow!("Peer was not connected")));
+                        let _ = ret.send(
+                            self.swarm
+                                .disconnect_peer_id(addr.peer_id)
+                                .map_err(|_| anyhow::anyhow!("Peer was not connected")),
+                        );
                     }
                     IpfsEvent::Ban(peer, ret) => {
                         self.swarm.ban_peer_id(peer);
@@ -2308,24 +2320,103 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let _ = ret.send(future);
                     }
                     IpfsEvent::GetBootstrappers(ret) => {
-                        let list = self.swarm.behaviour_mut().get_bootstrappers();
+                        let list = self
+                            .bootstraps
+                            .iter()
+                            .map(MultiaddrWithPeerId::clone)
+                            .map(Multiaddr::from)
+                            .collect::<Vec<_>>();
                         let _ = ret.send(list);
                     }
                     IpfsEvent::AddBootstrapper(addr, ret) => {
-                        let result = self.swarm.behaviour_mut().add_bootstrapper(addr);
-                        let _ = ret.send(result);
+                        let ret_addr = addr.clone().into();
+                        if self.bootstraps.insert(addr.clone()) {
+                            let MultiaddrWithPeerId {
+                                multiaddr: ma,
+                                peer_id,
+                            } = addr;
+
+                            self.swarm
+                                .behaviour_mut()
+                                .kademlia
+                                .add_address(&peer_id, ma.into());
+                            // the return value of add_address doesn't implement Debug
+                            trace!(peer_id=%peer_id, "tried to add a bootstrapper");
+                        }
+                        let _ = ret.send(Ok(ret_addr));
                     }
                     IpfsEvent::RemoveBootstrapper(addr, ret) => {
-                        let result = self.swarm.behaviour_mut().remove_bootstrapper(addr);
-                        let _ = ret.send(result);
+                        let result = addr.clone().into();
+                        if self.bootstraps.remove(&addr) {
+                            let peer_id = addr.peer_id;
+                            let prefix: Multiaddr = addr.multiaddr.into();
+
+                            if let Some(e) = self
+                                .swarm
+                                .behaviour_mut()
+                                .kademlia
+                                .remove_address(&peer_id, &prefix)
+                            {
+                                info!(peer_id=%peer_id, status=?e.status, "removed bootstrapper");
+                            } else {
+                                warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
+                            }
+                        }
+                        let _ = ret.send(Ok(result));
                     }
                     IpfsEvent::ClearBootstrappers(ret) => {
-                        let list = self.swarm.behaviour_mut().clear_bootstrappers();
+                        let removed = self.bootstraps.drain().collect::<Vec<_>>();
+                        let mut list = Vec::with_capacity(removed.len());
+                        for addr_with_peer_id in removed {
+                            let peer_id = &addr_with_peer_id.peer_id;
+                            let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
+
+                            if let Some(e) = self
+                                .swarm
+                                .behaviour_mut()
+                                .kademlia
+                                .remove_address(peer_id, &prefix)
+                            {
+                                info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
+                                list.push(addr_with_peer_id.into());
+                            } else {
+                                error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
+                            }
+                        }
                         let _ = ret.send(list);
                     }
-                    IpfsEvent::RestoreBootstrappers(ret) => {
-                        let list = self.swarm.behaviour_mut().restore_bootstrappers();
-                        let _ = ret.send(list);
+                    IpfsEvent::DefaultBootstrap(ret) => {
+                        let mut rets = Vec::new();
+
+                        for addr in BOOTSTRAP_NODES {
+                            let addr = addr
+                                .parse::<MultiaddrWithPeerId>()
+                                .expect("see test bootstrap_nodes_are_multiaddr_with_peerid");
+                            if self.bootstraps.insert(addr.clone()) {
+                                let MultiaddrWithPeerId {
+                                    multiaddr: ma,
+                                    peer_id,
+                                } = addr.clone();
+
+                                // this is intentionally the multiaddr without peerid turned into plain multiaddr:
+                                // libp2p cannot dial addresses which include peerids.
+                                let ma: Multiaddr = ma.into();
+
+                                // same as with add_bootstrapper: the return value from kademlia.add_address
+                                // doesn't implement Debug
+                                self.swarm
+                                    .behaviour_mut()
+                                    .kademlia
+                                    .add_address(&peer_id, ma.clone());
+                                trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
+
+                                // report with the peerid
+                                let reported: Multiaddr = addr.into();
+                                rets.push(reported);
+                            }
+                        }
+
+                        let _ = ret.send(Ok(rets));
                     }
                     IpfsEvent::Exit => {
                         // FIXME: we could do a proper teardown
@@ -2375,6 +2466,17 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
             done = true;
         }
     }
+}
+
+pub fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> {
+    let mut addr = addr.clone();
+    let peer_id = match addr.pop() {
+        Some(Protocol::P2p(hash)) => {
+            PeerId::from_multihash(hash).map_err(|mh| anyhow::anyhow!("Multihash is not valid"))?
+        }
+        _ => anyhow::bail!("Invalid PeerId"),
+    };
+    Ok(peer_id)
 }
 
 /// Bitswap statistics
