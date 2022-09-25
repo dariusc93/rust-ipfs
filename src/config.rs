@@ -1,10 +1,10 @@
-//! Static configuration (the bootstrap node(s)).
-
-/// The supported bootstrap nodes (/dnsaddr is not yet supported). This will be updated to contain
-/// the latest known supported IPFS bootstrap peers.
-// FIXME: it would be nice to parse these into MultiaddrWithPeerId with const fn.
-pub const BOOTSTRAP_NODES: &[&str] =
-    &["/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"];
+pub const BOOTSTRAP_NODES: &[&str] = &[
+    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+];
 
 #[cfg(test)]
 mod tests {
