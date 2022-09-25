@@ -108,7 +108,8 @@ name = "hashed-map-cid"
 harness = false
 
 [workspace]
-members = ["bitswap", "http", "unixfs"]
+members = ["bitswap", "unixfs"]
+exclude = ["http"]
 
 # at least these libp2p components need to be patched if you want to use a local version
 # libp2p = { path = "../libp2p" }
