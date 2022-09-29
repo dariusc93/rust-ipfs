@@ -2589,7 +2589,7 @@ mod node {
         /// Returns the subscriptions for a `Node`.
         pub fn get_subscriptions(
             &self,
-        ) -> &std::sync::Mutex<subscription::Subscriptions<Block, String>> {
+        ) -> &parking_lot::RwLock<subscription::Subscriptions<Block, String>> {
             &self.ipfs.repo.subscriptions.subscriptions
         }
 

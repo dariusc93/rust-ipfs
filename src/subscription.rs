@@ -11,6 +11,7 @@ use futures::channel::mpsc::Sender;
 use futures::future::Future;
 use libipld::Cid;
 use libp2p::kad::QueryId;
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -77,7 +78,7 @@ pub type Subscriptions<T, E> = HashMap<RequestKind, HashMap<SubscriptionId, Subs
 /// A collection of all the live `Subscription`s.
 #[derive(Clone)]
 pub struct SubscriptionRegistry<T: Debug + Clone + PartialEq, E: Debug + Clone> {
-    pub(crate) subscriptions: Arc<Mutex<Subscriptions<T, E>>>,
+    pub(crate) subscriptions: Arc<RwLock<Subscriptions<T, E>>>,
     shutting_down: Arc<AtomicBool>,
 }
 
@@ -109,8 +110,7 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> SubscriptionRegistry<T, E> 
         }
 
         self.subscriptions
-            .lock()
-            .unwrap()
+            .write()
             .entry(kind.clone())
             .or_default()
             .insert(id, subscription);
@@ -126,7 +126,7 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> SubscriptionRegistry<T, E> 
     /// Finalizes all pending subscriptions of the specified kind with the given `result`.
     ///
     pub fn finish_subscription(&self, req_kind: RequestKind, result: Result<T, E>) {
-        let mut subscriptions = self.subscriptions.lock().unwrap();
+        let mut subscriptions = self.subscriptions.write();
         let related_subs = subscriptions.get_mut(&req_kind);
 
         // find all the matching `Subscription`s and wake up their tasks; only `Pending`
@@ -173,7 +173,7 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> SubscriptionRegistry<T, E> 
         trace!("Shutting down {:?}", self);
 
         let mut cancelled = 0;
-        let mut subscriptions = mem::take(&mut *self.subscriptions.lock().unwrap());
+        let mut subscriptions = mem::take(&mut *self.subscriptions.write());
 
         for (kind, subs) in subscriptions.iter_mut() {
             for (id, sub) in subs.iter_mut() {
@@ -338,7 +338,7 @@ pub struct SubscriptionFuture<T: Debug + PartialEq, E: Debug> {
     /// The type of the request made; the primary key in the `SubscriptionRegistry`.
     kind: RequestKind,
     /// A reference to the subscriptions at the `SubscriptionRegistry`.
-    subscriptions: Arc<Mutex<Subscriptions<T, E>>>,
+    subscriptions: Arc<RwLock<Subscriptions<T, E>>>,
     /// True if the cleanup is already done, false if `Drop` needs to do it
     cleanup_complete: bool,
 }
@@ -349,7 +349,7 @@ impl<T: Debug + PartialEq, E: Debug + PartialEq> Future for SubscriptionFuture<T
     fn poll(mut self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
         use std::collections::hash_map::Entry::*;
 
-        let mut subscriptions = self.subscriptions.lock().unwrap();
+        let mut subscriptions = self.subscriptions.write();
 
         if let Some(related_subs) = subscriptions.get_mut(&self.kind) {
             let (became_empty, ret) = match related_subs.entry(self.id) {
@@ -403,7 +403,7 @@ impl<T: Debug + PartialEq, E: Debug> Drop for SubscriptionFuture<T, E> {
         }
 
         let (sub, is_last) = {
-            let mut subscriptions = self.subscriptions.lock().unwrap();
+            let mut subscriptions = self.subscriptions.write();
             if let Some(subs) = subscriptions.get_mut(&self.kind) {
                 let sub = subs.remove(&self.id);
                 // check if this is the last subscription to this resource
@@ -569,8 +569,7 @@ mod tests {
 
                 let kinds = reg_clone
                     .subscriptions
-                    .lock()
-                    .unwrap()
+                    .read()
                     .keys()
                     .cloned()
                     .collect::<Vec<_>>();
