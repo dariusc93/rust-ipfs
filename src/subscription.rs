@@ -18,7 +18,7 @@ use std::fmt;
 use std::mem;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 use std::task::{Context, Poll, Waker};
 
@@ -203,7 +203,7 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> Drop for SubscriptionRegist
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SubscriptionErr<E: Debug + PartialEq> {
     /// A value returned when a `Subscription` and it's linked `SubscriptionFuture`
     /// is cancelled before completion or when the `Future` is aborted.
@@ -531,7 +531,7 @@ mod tests {
         // the test's subscription registry
         let reg = Arc::new(SubscriptionRegistry::<u32, ()>::default());
         // a collection to hold active subscription futures
-        let subs = Arc::new(Mutex::new(Vec::with_capacity(1024)));
+        let subs = Arc::new(RwLock::new(Vec::with_capacity(1024)));
 
         // the task below creates a random number of subscriptions to a
         // random object in a loop
@@ -550,7 +550,7 @@ mod tests {
                 let count = rand::thread_rng().gen_range(0..KIND_SUB_COUNT);
 
                 if count > 0 {
-                    let mut subs = subs_clone.lock().unwrap();
+                    let mut subs = subs_clone.write();
                     for _ in 0..count {
                         subs.push(task::spawn(
                             reg_clone.create_subscription(kind.into(), None),
@@ -587,7 +587,7 @@ mod tests {
             loop {
                 sleep(Duration::from_millis(CANCEL_WAIT_TIME)).await;
 
-                let subs_unlocked = &mut *subs.lock().unwrap();
+                let subs_unlocked = &mut *subs.write();
                 let count = rand::thread_rng().gen_range(0..subs_unlocked.len());
 
                 for _ in 0..count {

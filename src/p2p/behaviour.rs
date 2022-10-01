@@ -6,7 +6,6 @@ use libp2p_helper::gossipsub::GossipsubStream;
 use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
-use crate::config::BOOTSTRAP_NODES;
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
 use crate::subscription::SubscriptionFuture;
@@ -17,7 +16,7 @@ use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
-use libp2p::gossipsub::{GossipsubEvent, MessageAuthenticity};
+use libp2p::gossipsub::{GossipsubEvent};
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
@@ -29,7 +28,6 @@ use libp2p::relay::v2::relay::{rate_limiter, Event as RelayEvent, Relay};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::NetworkBehaviour;
 use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::num::NonZeroU32;
 
 /// Behaviour type.
