@@ -121,6 +121,7 @@ use libp2p::{
     },
     mdns::MdnsEvent,
     ping::PingSuccess,
+    swarm::{dial_opts::DialOpts, DialError},
 };
 
 /// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
@@ -367,6 +368,7 @@ enum IpfsEvent {
     ),
     BitswapStats(OneshotSender<BitswapStats>),
     SwarmListenOn(Multiaddr, OneshotSender<Result<ListenerId, Error>>),
+    SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(Multiaddr, Channel<Multiaddr>),
     RemoveListeningAddress(Multiaddr, Channel<()>),
     Bootstrap(Channel<SubscriptionFuture<KadResult, String>>),
@@ -798,6 +800,22 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             } else {
                 futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await
             }
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Dials a peer using [`Swarm::dial`].
+    pub async fn dial(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
+        async move {
+            let opt = opt.into();
+            let (tx, rx) = oneshot_channel();
+            self.to_task
+                .clone()
+                .send(IpfsEvent::SwarmDial(opt, tx))
+                .await?;
+
+            rx.await?.map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await
@@ -2069,6 +2087,10 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     }
                     IpfsEvent::SwarmListenOn(addr, ret) => {
                         let _ = ret.send(self.swarm.listen_on(addr).map_err(anyhow::Error::from));
+                    }
+                    IpfsEvent::SwarmDial(opt, ret) => {
+                        let result = self.swarm.dial(opt);
+                        let _ = ret.send(result);
                     }
                     IpfsEvent::Addresses(ret) => {
                         let addrs = self.swarm.behaviour_mut().addrs();
