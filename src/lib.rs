@@ -344,7 +344,8 @@ enum IpfsEvent {
     Listeners(Channel<Vec<Multiaddr>>),
     /// Connections
     Connections(Channel<Vec<Connection>>),
-    ConnectedPeers(Channel<Vec<PeerId>>),
+    /// Connected ppers
+    Connected(Channel<Vec<PeerId>>),
     /// Disconnect
     Disconnect(MultiaddrWithPeerId, Channel<()>),
     /// Ban Peer
@@ -850,6 +851,20 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             self.to_task
                 .clone()
                 .send(IpfsEvent::Connections(tx))
+                .await?;
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Returns the connected peers
+    pub async fn connected(&self) -> Result<Vec<PeerId>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+            self.to_task
+                .clone()
+                .send(IpfsEvent::Connected(tx))
                 .await?;
             rx.await?
         }
@@ -2104,7 +2119,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let connections = self.swarm.behaviour_mut().connections();
                         ret.send(Ok(connections.collect())).ok();
                     }
-                    IpfsEvent::ConnectedPeers(ret) => {
+                    IpfsEvent::Connected(ret) => {
                         let connections = self.swarm.connected_peers().cloned();
                         ret.send(Ok(connections.collect())).ok();
                     }
@@ -2494,7 +2509,7 @@ pub fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> {
     let mut addr = addr.clone();
     let peer_id = match addr.pop() {
         Some(Protocol::P2p(hash)) => {
-            PeerId::from_multihash(hash).map_err(|mh| anyhow::anyhow!("Multihash is not valid"))?
+            PeerId::from_multihash(hash).map_err(|_| anyhow::anyhow!("Multihash is not valid"))?
         }
         _ => anyhow::bail!("Invalid PeerId"),
     };
