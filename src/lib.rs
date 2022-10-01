@@ -653,10 +653,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                 let st = crate::refs::IpldRefs::default()
                     .with_only_unique()
                     .with_existing_blocks()
-                    .refs_of_resolved(
-                        self.to_owned(),
-                        vec![(*cid, ipld.clone())].into_iter(),
-                    )
+                    .refs_of_resolved(self.to_owned(), vec![(*cid, ipld.clone())].into_iter())
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()
                     .boxed();
@@ -889,10 +886,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     pub async fn connected(&self) -> Result<Vec<PeerId>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Connected(tx))
-                .await?;
+            self.to_task.clone().send(IpfsEvent::Connected(tx)).await?;
             rx.await?
         }
         .instrument(self.span.clone())
