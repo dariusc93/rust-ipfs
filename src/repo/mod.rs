@@ -425,7 +425,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
 
     /// Puts a block into the block store.
     pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
-        let cid = block.cid().clone();
+        let cid = *block.cid();
         let (_cid, res) = self.block_store.put(block.clone()).await?;
 
         // FIXME: this doesn't cause actual DHT providing yet, only some
@@ -433,7 +433,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
         // errors when we actually start providing on the DHT
         if let BlockPut::NewBlock = res {
             self.subscriptions
-                .finish_subscription(cid.clone().into(), Ok(block));
+                .finish_subscription(cid.into(), Ok(block));
 
             // sending only fails if no one is listening anymore
             // and that is okay with us.
@@ -441,7 +441,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
 
             self.events
                 .clone()
-                .send(RepoEvent::NewBlock(cid.clone(), tx))
+                .send(RepoEvent::NewBlock(cid, tx))
                 .await
                 .ok();
 
@@ -464,12 +464,12 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
         } else {
             let subscription = self
                 .subscriptions
-                .create_subscription(cid.clone().into(), Some(self.events.clone()));
+                .create_subscription((*cid).into(), Some(self.events.clone()));
             // sending only fails if no one is listening anymore
             // and that is okay with us.
             self.events
                 .clone()
-                .send(RepoEvent::WantBlock(cid.clone()))
+                .send(RepoEvent::WantBlock(*cid))
                 .await
                 .ok();
             Ok(subscription.await?)
@@ -502,10 +502,10 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
                     // sending only fails if the background task has exited
                     self.events
                         .clone()
-                        .send(RepoEvent::RemovedBlock(cid.clone()))
+                        .send(RepoEvent::RemovedBlock(*cid))
                         .await
                         .ok();
-                    Ok(cid.clone())
+                    Ok(*cid)
                 }
             },
             Err(err) => match err {

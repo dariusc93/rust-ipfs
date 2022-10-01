@@ -614,7 +614,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
                 let st = crate::refs::IpldRefs::default()
                     .with_only_unique()
-                    .refs_of_resolved(self, vec![(cid.clone(), ipld.clone())].into_iter())
+                    .refs_of_resolved(self, vec![(*cid, ipld.clone())].into_iter())
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()
                     .instrument(refs_span)
@@ -655,7 +655,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                     .with_existing_blocks()
                     .refs_of_resolved(
                         self.to_owned(),
-                        vec![(cid.clone(), ipld.clone())].into_iter(),
+                        vec![(*cid, ipld.clone())].into_iter(),
                     )
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()
