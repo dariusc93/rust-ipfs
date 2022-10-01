@@ -4,31 +4,32 @@ use libipld::ipld;
 use tokio::task;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
     let opts = IpfsOptions::inmemory_with_generated_keys();
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await.unwrap();
+    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
     task::spawn(fut);
 
     // Create a DAG
     let f1 = ipfs.put_dag(ipld!("block1"));
     let f2 = ipfs.put_dag(ipld!("block2"));
     let (res1, res2) = join!(f1, f2);
-    let root = ipld!([res1.unwrap(), res2.unwrap()]);
-    let cid = ipfs.put_dag(root).await.unwrap();
+    let root = ipld!([res1?, res2?]);
+    let cid = ipfs.put_dag(root).await?;
     let path = IpfsPath::from(cid);
 
     // Query the DAG
-    let path1 = path.sub_path("0").unwrap();
-    let path2 = path.sub_path("1").unwrap();
+    let path1 = path.sub_path("0")?;
+    let path2 = path.sub_path("1")?;
     let f1 = ipfs.get_dag(path1);
     let f2 = ipfs.get_dag(path2);
     let (res1, res2) = join!(f1, f2);
-    println!("Received block with contents: {:?}", res1.unwrap());
-    println!("Received block with contents: {:?}", res2.unwrap());
+    println!("Received block with contents: {:?}", res1?);
+    println!("Received block with contents: {:?}", res2?);
 
     // Exit
     ipfs.exit_daemon().await;
+    Ok(())
 }

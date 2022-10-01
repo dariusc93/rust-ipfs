@@ -6,7 +6,7 @@ use std::process::exit;
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let (bootstrappers, path, target) = match parse_options() {
@@ -50,7 +50,7 @@ async fn main() {
 
     // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
     // and the background task (ipfs::IpfsFuture).
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await.unwrap();
+    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
 
     // The background task must be spawned to use anything other than the repository; most notably,
     // the libp2p.
@@ -59,11 +59,11 @@ async fn main() {
     if bootstrappers == BootstrapperOption::RestoreDefault {
         // applications wishing to find content on the global IPFS swarm should restore the latest
         // bootstrappers which are hopefully updated between releases
-        ipfs.default_bootstrap().await.unwrap();
+        ipfs.default_bootstrap().await?;
     } else if let Some(target) = target {
-        ipfs.connect(target).await.unwrap();
+        ipfs.connect(target).await?;
     } else {
-        let (_, addresses) = ipfs.identity().await.unwrap();
+        let (_, addresses) = ipfs.identity().await?;
         assert!(!addresses.is_empty(), "Zero listening addresses");
 
         eprintln!("Please connect an ipfs node having {} to:\n", path);
@@ -92,7 +92,7 @@ async fn main() {
         // This could be made more performant by polling the stream while writing to stdout.
         match stream.next().await {
             Some(Ok(bytes)) => {
-                stdout.write_all(&bytes).await.unwrap();
+                stdout.write_all(&bytes).await?;
             }
             Some(Err(e)) => {
                 eprintln!("Error: {}", e);
@@ -101,6 +101,7 @@ async fn main() {
             None => break,
         }
     }
+    Ok(())
 }
 
 #[derive(PartialEq)]
