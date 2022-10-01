@@ -128,7 +128,7 @@ impl Bitswap {
     pub fn local_wantlist(&self) -> Vec<(Cid, Priority)> {
         self.wanted_blocks
             .iter()
-            .map(|(cid, prio)| (cid.clone(), *prio))
+            .map(|(cid, prio)| (*cid, *prio))
             .collect()
     }
 

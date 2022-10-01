@@ -64,14 +64,14 @@ impl BlockStore for MemBlockStore {
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
         use std::collections::hash_map::Entry;
         let mut g = self.blocks.lock().await;
-        match g.entry(RepoCid(block.cid().clone())) {
+        match g.entry(RepoCid(*block.cid())) {
             Entry::Occupied(_) => {
                 trace!("already existing block");
-                Ok((block.cid().clone(), BlockPut::Existed))
+                Ok((*block.cid(), BlockPut::Existed))
             }
             Entry::Vacant(ve) => {
                 trace!("new block");
-                let cid = ve.key().0.clone();
+                let cid = ve.key().0;
                 ve.insert(block);
                 Ok((cid, BlockPut::NewBlock))
             }
@@ -80,14 +80,14 @@ impl BlockStore for MemBlockStore {
 
     async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
         match self.blocks.lock().await.remove(&RepoCid(cid.to_owned())) {
-            Some(_block) => Ok(Ok(BlockRm::Removed(cid.clone()))),
-            None => Ok(Err(BlockRmError::NotFound(cid.clone()))),
+            Some(_block) => Ok(Ok(BlockRm::Removed(*cid))),
+            None => Ok(Err(BlockRmError::NotFound(*cid))),
         }
     }
 
     async fn list(&self) -> Result<Vec<Cid>, Error> {
         let guard = self.blocks.lock().await;
-        Ok(guard.iter().map(|(cid, _block)| cid.0.clone()).collect())
+        Ok(guard.iter().map(|(cid, _block)| cid.0).collect())
     }
 
     async fn wipe(&self) {

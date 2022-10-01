@@ -55,7 +55,7 @@ fn subslice_to_range(full: &[u8], sub: &[u8]) -> Option<Range<usize>> {
 }
 
 /// The wrapper returned from [`wrap_node_data`], allows accessing dag-pb nodes Data.
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub struct NodeData<T> {
     inner: T,
     range: Option<Range<usize>>,

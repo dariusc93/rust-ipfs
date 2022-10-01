@@ -43,7 +43,7 @@ impl Ledger {
     pub fn wantlist(&self) -> Vec<(Cid, Priority)> {
         self.received_want_list
             .iter()
-            .map(|(cid, prio)| (cid.clone(), *prio))
+            .map(|(cid, prio)| (*cid, *prio))
             .collect()
     }
 
@@ -56,7 +56,7 @@ impl Ledger {
             self.sent_want_list.remove(cid);
         }
         for (cid, priority) in self.message.want() {
-            self.sent_want_list.insert(cid.clone(), *priority);
+            self.sent_want_list.insert(*cid, *priority);
         }
 
         Some(mem::take(&mut self.message))
@@ -64,7 +64,7 @@ impl Ledger {
 }
 
 /// A bitswap message.
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct Message {
     /// List of wanted blocks.
     want: HashedMap<Cid, Priority>,
