@@ -163,11 +163,11 @@ where
         // apparently impossible bounds on `Iter`, in addition to `Send + 'a`.
         for (origin, ipld) in iplds {
             for (link_name, next_cid) in ipld_links(&origin, ipld) {
-                if unique && !queued_or_visited.insert(next_cid.clone()) {
+                if unique && !queued_or_visited.insert(next_cid) {
                     trace!("skipping already queued {}", next_cid);
                     continue;
                 }
-                work.push_back((0, next_cid, origin.clone(), link_name));
+                work.push_back((0, next_cid, origin, link_name));
             }
         }
     }

@@ -661,7 +661,7 @@ mod tests {
         let cid = Cid::try_from("QmRgutAxd8t7oGkSm4wmeuByG6M51wcTso6cubDdQtuEfL").unwrap();
         let data = hex!("0a0d08021207666f6f6261720a1807");
 
-        let block = Block::new(cid.clone(), data.into()).unwrap();
+        let block = Block::new(cid, data.into()).unwrap();
 
         assert_eq!(single.list().await.unwrap().len(), 0);
 

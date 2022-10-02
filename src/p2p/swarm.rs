@@ -447,8 +447,8 @@ mod tests {
                 tokio::select! {
                     biased;
 
-                    _ = (&mut swarm1).next() => {},
-                    _ = (&mut swarm2).next() => {},
+                    _ = swarm1.next() => {},
+                    _ = swarm2.next() => {},
                     res = (&mut sub) => {
                         // this is currently a success even though the connection is never really
                         // established, the DummyConnectionHandler doesn't do anything nor want the
@@ -549,8 +549,8 @@ mod tests {
         // these two should be attempted in parallel. since we know both of them work, and they are
         // given in this order, we know that in libp2p 0.34 only the first should win, however
         // both should always be finished.
-        connections.push(swarm2.behaviour_mut().connect(targets.0).unwrap());
-        connections.push(swarm2.behaviour_mut().connect(targets.1).unwrap());
+        connections.push_back(swarm2.behaviour_mut().connect(targets.0).unwrap());
+        connections.push_back(swarm2.behaviour_mut().connect(targets.1).unwrap());
         let ready = connections
             // turn the private error type into Option
             .map_err(|e| e.into_inner())
