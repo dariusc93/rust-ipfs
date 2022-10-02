@@ -55,7 +55,7 @@ async fn bitswap_stress_test() {
 
     for (i, node) in nodes.iter().enumerate() {
         if filter(i) {
-            node.put_block(Block::new(cid.clone(), data.clone()).unwrap())
+            node.put_block(Block::new(cid, data.clone()).unwrap())
                 .await
                 .unwrap();
         }

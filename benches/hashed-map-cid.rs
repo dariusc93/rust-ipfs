@@ -19,7 +19,7 @@ const GETS_PER_INSERT: usize = 10;
 fn insert_get<H: BuildHasher + Default>(cids: &Cids) {
     let mut h = HashMap::<Cid, usize, H>::default();
     cids.0.iter().enumerate().for_each(|(i, c)| {
-        h.insert(c.clone(), i);
+        h.insert(*c, i);
     });
 
     cids.0.iter().enumerate().for_each(|(_, c)| {
@@ -43,7 +43,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             Cids(
                 (0..*size)
                     .into_iter()
-                    .map(|i| Cid::new_v0(Code::Sha2_256::digest(&i.to_be_bytes())).unwrap())
+                    .map(|i| Cid::new_v0(Code::Sha2_256.digest(&i.to_be_bytes())).unwrap())
                     .collect(),
             )
         })

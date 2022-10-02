@@ -31,7 +31,7 @@ impl FakeBlockstore {
         let cid = Cid::new_v0(mh).unwrap();
 
         assert!(
-            self.blocks.insert(cid.clone(), block.to_vec()).is_none(),
+            self.blocks.insert(cid, block.to_vec()).is_none(),
             "duplicate cid {}",
             cid
         );

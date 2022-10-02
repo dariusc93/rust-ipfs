@@ -261,7 +261,7 @@ impl FileAdder {
 
         let link = Link {
             depth: 0,
-            target: cid.clone(),
+            target: cid,
             total_size: total_size as u64,
             file_size: input.len() as u64,
         };
@@ -583,7 +583,7 @@ impl BalancedCollector {
                 let index = last_overwrite.map(|i| i + 1).unwrap_or(first_at);
                 pending[index] = Link {
                     depth: level + 1,
-                    target: cid.clone(),
+                    target: cid,
                     total_size: nested_total_size + vec.len() as u64,
                     file_size: nested_size,
                 };

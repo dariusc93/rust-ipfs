@@ -686,16 +686,14 @@ mod tests {
         multihash::{Code, MultihashDigest},
         IpldCodec,
     };
-    use multihash::Sha2_256;
-    use std::env::temp_dir;
 
     #[tokio::test]
     async fn test_mem_blockstore() {
-        let tmp = temp_dir();
+        let tmp = std::env::temp_dir();
         let store = MemBlockStore::new(tmp);
         let data = b"1".to_vec();
         let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
-        let block = Block::new(cid.clone(), data).unwrap();
+        let block = Block::new(cid, data).unwrap();
 
         store.init().await.unwrap();
         store.open().await.unwrap();
@@ -724,7 +722,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_blockstore_list() {
-        let tmp = temp_dir();
+        let tmp = std::env::temp_dir();
         let mem_store = MemBlockStore::new(tmp);
 
         mem_store.init().await.unwrap();
@@ -747,7 +745,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_datastore() {
-        let tmp = temp_dir();
+        let tmp = std::env::temp_dir();
         let store = MemDataStore::new(tmp);
         let col = Column::Ipns;
         let key = [1, 2, 3, 4];

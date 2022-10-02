@@ -136,7 +136,7 @@ async fn dht_get_closest_peers() {
 async fn dht_popular_content_discovery() {
     let peer = Node::new("a").await;
 
-    peer.restore_bootstrappers().await.unwrap();
+    peer.default_bootstrap().await.unwrap();
 
     // the Cid of the IPFS logo
     let cid: Cid = "bafkreicncneocapbypwwe3gl47bzvr3pkpxmmobzn7zr2iaz67df4kjeiq"
