@@ -419,7 +419,7 @@ impl PinStore for FsDataStore {
                 // FIXME: maybe binary search?
                 for cid in references {
                     if let Some(index) = remaining.remove(&cid) {
-                        response[index] = Some((cid, PinKind::IndirectFrom(referring.clone())));
+                        response[index] = Some((cid, PinKind::IndirectFrom(referring)));
 
                         if remaining.is_empty() {
                             break 'out;

@@ -83,7 +83,7 @@ impl FsBlockStore {
             .writes
             .lock()
             .expect("cannot support poisoned")
-            .entry(RepoCid(cid.clone()))
+            .entry(RepoCid(*cid))
         {
             Entry::Occupied(oe) => oe.get().subscribe(),
             Entry::Vacant(_) => return WriteCompletion::NotOngoing,
@@ -433,7 +433,7 @@ fn write_through_tempfile(
         .truncate(true)
         .open(&temp_path)?;
 
-    temp.write_all(&*data)?;
+    temp.write_all(data)?;
     temp.flush()?;
 
     // safe default
@@ -471,7 +471,7 @@ mod tests {
 
         let data = b"1".to_vec();
         let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
-        let block = Block::new(cid.clone(), data).unwrap();
+        let block = Block::new(cid, data).unwrap();
 
         store.init().await.unwrap();
         store.open().await.unwrap();

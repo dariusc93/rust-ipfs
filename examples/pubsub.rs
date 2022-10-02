@@ -1,4 +1,4 @@
-use std::{time::Duration};
+use std::time::Duration;
 
 use futures::pin_mut;
 use ipfs::{Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
