@@ -6,9 +6,9 @@ use crate::repo::RepoTypes;
 use crate::Ipfs;
 
 mod dnslink;
-pub mod ipns_pb {
-    include!(concat!(env!("OUT_DIR"), "/ipns_pb.rs"));
-}
+// pub mod ipns_pb {
+//     include!(concat!(env!("OUT_DIR"), "/ipns_pb.rs"));
+// }
 
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
