@@ -31,13 +31,13 @@ pub async fn spawn_nodes(count: usize, topology: Topology) -> Vec<Node> {
         Topology::Line | Topology::Ring => {
             for i in 0..(count - 1) {
                 nodes[i]
-                    .connect(nodes[i + 1].addrs[0].clone())
+                    .dial(nodes[i + 1].addrs[0].clone())
                     .await
                     .unwrap();
             }
             if topology == Topology::Ring {
                 nodes[count - 1]
-                    .connect(nodes[0].addrs[0].clone())
+                    .dial(nodes[0].addrs[0].clone())
                     .await
                     .unwrap();
             }
@@ -46,14 +46,14 @@ pub async fn spawn_nodes(count: usize, topology: Topology) -> Vec<Node> {
             for i in 0..count {
                 for (j, peer) in nodes.iter().enumerate() {
                     if i != j {
-                        nodes[i].connect(peer.addrs[0].clone()).await.unwrap();
+                        nodes[i].dial(peer.addrs[0].clone()).await.unwrap();
                     }
                 }
             }
         }
         Topology::Star => {
             for node in nodes.iter().skip(1) {
-                nodes[0].connect(node.addrs[0].clone()).await.unwrap();
+                nodes[0].dial(node.addrs[0].clone()).await.unwrap();
             }
         }
         Topology::None => {}

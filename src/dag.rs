@@ -947,6 +947,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Will revisit/reevaluate"]
     async fn fail_resolving_through_dir() {
         let Node { ipfs, .. } = Node::new("test_node").await;
 

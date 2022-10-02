@@ -25,8 +25,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
     use ipfs_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
     use ipfs_unixfs::file::adder::FileAdder;
-    use libipld::Cid;
     use libipld::multihash;
+    use libipld::Cid;
     use std::io::Read;
 
     let mut archive = tar::Archive::new(std::io::Cursor::new(bytes));
