@@ -16,7 +16,7 @@ use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
-use libp2p::gossipsub::{GossipsubEvent};
+use libp2p::gossipsub::GossipsubEvent;
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};

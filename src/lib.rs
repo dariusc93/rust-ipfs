@@ -187,9 +187,6 @@ pub struct IpfsOptions {
     /// Relay server config
     pub relay_server_config: Option<RelayConfig>,
 
-    /// Relay server to use
-    pub relay_addr: Option<Multiaddr>,
-
     /// A option to store [`PeerInfo`] only when calling the function. If false, it will be stored when using [`Ipfs::find_peer_info`], otherwise it will store all incoming information
     /// Note: This may change in the future as this may not be a viable option in the long run.
     pub store_all_peerinfo: bool,
@@ -232,7 +229,6 @@ impl Default for IpfsOptions {
             dcutr: Default::default(),
             bootstrap: Default::default(),
             relay: Default::default(),
-            relay_addr: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
             store_all_peerinfo: Default::default(),
