@@ -5,7 +5,7 @@ use std::num::{NonZeroU8, NonZeroUsize};
 use crate::error::Error;
 use crate::IpfsOptions;
 
-use libp2p::identify::IdentifyInfo;
+use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
 use libp2p::swarm::ConnectionLimits;

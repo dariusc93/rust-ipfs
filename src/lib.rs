@@ -113,14 +113,14 @@ pub use libp2p::{
 };
 
 use libp2p::{
-    identify::{IdentifyEvent, IdentifyInfo},
+    identify::{Event as IdentifyEvent, Info as IdentifyInfo},
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
         GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
         KademliaConfig, KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record,
     },
     mdns::MdnsEvent,
-    ping::PingSuccess,
+    ping::Success as PingSuccess,
     swarm::{dial_opts::DialOpts, DialError},
 };
 
@@ -150,6 +150,7 @@ impl RepoTypes for TestTypes {
 }
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
+// TODO: Refactor
 #[derive(Clone)]
 pub struct IpfsOptions {
     /// The path of the ipfs repo (blockstore and datastore).

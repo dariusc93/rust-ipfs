@@ -50,10 +50,9 @@ libp2p = { default-features = false, features = [
     "yamux",
     "dns-tokio",
     "mdns-tokio",
-    # "mdns",
     "rsa",
     "serde",
-], version = "0.48" }
+], version = "0.49" }
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }

@@ -2,10 +2,10 @@ use crate::p2p::{MultiaddrWithPeerId, MultiaddrWithoutPeerId};
 use crate::subscription::{SubscriptionFuture, SubscriptionRegistry};
 use core::task::{Context, Poll};
 use libp2p::core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
-use libp2p::swarm::handler::DummyConnectionHandler;
 use libp2p::swarm::{
     self,
     dial_opts::{DialOpts, PeerCondition},
+    dummy::ConnectionHandler as DummyConnectionHandler,
     ConnectionHandler, DialError, NetworkBehaviour, PollParameters,
 };
 use std::collections::{hash_map::Entry, HashMap, HashSet, VecDeque};
@@ -27,7 +27,7 @@ type NetworkBehaviourAction = swarm::NetworkBehaviourAction<
     <SwarmApi as NetworkBehaviour>::ConnectionHandler,
 >;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct SwarmApi {
     events: VecDeque<NetworkBehaviourAction>,
 
@@ -136,7 +136,7 @@ impl NetworkBehaviour for SwarmApi {
     type OutEvent = void::Void;
 
     fn new_handler(&mut self) -> Self::ConnectionHandler {
-        Default::default()
+        DummyConnectionHandler
     }
 
     fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
@@ -386,10 +386,9 @@ impl NetworkBehaviour for SwarmApi {
         _: &mut impl PollParameters,
     ) -> Poll<NetworkBehaviourAction> {
         if let Some(event) = self.events.pop_front() {
-            Poll::Ready(event)
-        } else {
-            Poll::Pending
+            return Poll::Ready(event)
         }
+        Poll::Pending
     }
 }
 

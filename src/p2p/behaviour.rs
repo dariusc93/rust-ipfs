@@ -17,11 +17,11 @@ use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::GossipsubEvent;
-use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent};
+use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
 use libp2p::kad::record::{store::MemoryStore, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
 use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
-use libp2p::ping::{Ping, PingEvent};
+use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
 use libp2p::relay::v2::relay::{rate_limiter, Event as RelayEvent, Relay};
@@ -242,7 +242,7 @@ impl Behaviour {
                 enable_ipv6: options.mdns_ipv6,
                 ..Default::default()
             };
-            Mdns::new(config).await.ok()
+            Mdns::new(config).ok()
         } else {
             None
         }
