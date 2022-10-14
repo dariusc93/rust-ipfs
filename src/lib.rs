@@ -2008,7 +2008,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         BitswapEvent::ReceivedCancel(..) => {}
                     },
                     SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
-                        libp2p::ping::PingEvent {
+                        libp2p::ping::Event {
                             peer,
                             result: Result::Ok(PingSuccess::Ping { rtt }),
                         } => {
@@ -2019,28 +2019,28 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             );
                             self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
                         }
-                        libp2p::ping::PingEvent {
+                        libp2p::ping::Event {
                             peer,
                             result: Result::Ok(PingSuccess::Pong),
                         } => {
                             trace!("ping: pong from {}", peer);
                         }
-                        libp2p::ping::PingEvent {
+                        libp2p::ping::Event {
                             peer,
-                            result: Result::Err(libp2p::ping::PingFailure::Timeout),
+                            result: Result::Err(libp2p::ping::Failure::Timeout),
                         } => {
                             trace!("ping: timeout to {}", peer);
                             self.swarm.behaviour_mut().remove_peer(&peer);
                         }
-                        libp2p::ping::PingEvent {
+                        libp2p::ping::Event {
                             peer,
-                            result: Result::Err(libp2p::ping::PingFailure::Other { error }),
+                            result: Result::Err(libp2p::ping::Failure::Other { error }),
                         } => {
                             error!("ping: failure with {}: {}", peer.to_base58(), error);
                         }
-                        libp2p::ping::PingEvent {
+                        libp2p::ping::Event {
                             peer,
-                            result: Result::Err(libp2p::ping::PingFailure::Unsupported),
+                            result: Result::Err(libp2p::ping::Failure::Unsupported),
                         } => {
                             error!("ping: failure with {}: unsupported", peer.to_base58());
                         }
