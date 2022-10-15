@@ -405,12 +405,16 @@ enum IpfsEvent {
     Exit,
 }
 
+type TSwarmEvent = <TSwarm as Stream>::Item;
+type TSwarmEventFn = Arc<dyn Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send>;
+
 /// Configured Ipfs which can only be started.
 pub struct UninitializedIpfs<Types: IpfsTypes> {
     repo: Arc<Repo<Types>>,
     keys: Keypair,
     options: IpfsOptions,
     repo_events: Receiver<RepoEvent>,
+    swarm_event: Option<TSwarmEventFn>,
 }
 
 impl<Types: IpfsTypes> UninitializedIpfs<Types> {
@@ -430,7 +434,17 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             keys,
             options,
             repo_events,
+            swarm_event: None,
         }
+    }
+
+    /// Handle libp2p swarm events 
+    pub fn swarm_events<F>(mut self, func: F) -> Self
+    where
+        F: Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send + 'static,
+    {
+        self.swarm_event = Some(Arc::new(func));
+        self
     }
 
     /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync, and the
@@ -447,6 +461,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             keys,
             repo_events,
             mut options,
+            swarm_event,
         } = self;
 
         let root_span = options
@@ -513,6 +528,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             autonat_counter,
             store_all_peerinfo,
             bootstraps,
+            swarm_event,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -1511,6 +1527,7 @@ struct IpfsFuture<Types: IpfsTypes> {
     autonat_counter: Arc<AtomicU64>,
     bootstraps: HashSet<MultiaddrWithPeerId>,
     store_all_peerinfo: bool,
+    swarm_event: Option<TSwarmEventFn>,
 }
 
 impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
@@ -1659,6 +1676,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                 // exhaust the swarm before possibly causing the swarm to do more work by popping
                 // off the events from Ipfs and ... this looping goes on for a while.
                 done = false;
+                if let Some(handler) = self.swarm_event.clone() {
+                    handler(&mut self.swarm, &inner)
+                }
                 match inner {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         self.complete_listening_address_adding(address);
