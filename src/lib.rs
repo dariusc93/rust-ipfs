@@ -438,13 +438,20 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         }
     }
 
-    /// Handle libp2p swarm events 
+    /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
     where
         F: Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send + 'static,
     {
         self.swarm_event = Some(Arc::new(func));
         self
+    }
+
+    /// Same as [`crate::UninitializedIpfs::start`] except we use [`tokio::spawn`] internally
+    pub async fn spawn_start(self) -> Result<Ipfs<Types>, Error> {
+        let (ipfs, fut) = self.start().await?;
+        tokio::spawn(fut);
+        Ok(ipfs)
     }
 
     /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync, and the
