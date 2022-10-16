@@ -386,7 +386,7 @@ impl NetworkBehaviour for SwarmApi {
         _: &mut impl PollParameters,
     ) -> Poll<NetworkBehaviourAction> {
         if let Some(event) = self.events.pop_front() {
-            return Poll::Ready(event)
+            return Poll::Ready(event);
         }
         Poll::Pending
     }
@@ -562,12 +562,12 @@ mod tests {
                 _ = swarm1.next() => {}
                 _ = swarm2.next() => {}
                 res = &mut ready => {
-
+                    //TODO: Check if this is the correct order from `ready`
                     assert_eq!(
                         res,
                         vec![
-                            Ok(()),
-                            Err(Some("finished connecting to another address".into()))
+                            Err(Some("finished connecting to another address".into())),
+                            Ok(())
                         ]);
 
                     break;
