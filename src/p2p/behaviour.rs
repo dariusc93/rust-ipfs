@@ -291,7 +291,7 @@ impl Behaviour {
                 .build()
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             let gossipsub = libp2p::gossipsub::Gossipsub::new(
-                MessageAuthenticity::Signed(options.keypair),
+                libp2p::gossipsub::MessageAuthenticity::Signed(options.keypair),
                 config,
             )
             .map_err(|e| anyhow::anyhow!("{}", e))?;
