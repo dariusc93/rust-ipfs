@@ -371,7 +371,7 @@ enum IpfsEvent {
     RemoveListeningAddress(Multiaddr, Channel<()>),
     Bootstrap(Channel<SubscriptionFuture<KadResult, String>>),
     DirectBootstrap(Channel<()>),
-    AddPeer(PeerId, Multiaddr),
+    AddPeer(PeerId, Option<Multiaddr>),
     GetClosestPeers(PeerId, OneshotSender<SubscriptionFuture<KadResult, String>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
     FindPeerIdentity(
@@ -1509,6 +1509,41 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         rx.await?
     }
 
+    /// Add a known listen address of a peer participating in the DHT to the routing table.
+    /// This is mandatory in order for the peer to be discoverable by other members of the
+    /// DHT.
+    pub async fn add_peer(
+        &self,
+        peer_id: PeerId,
+        mut addr: Option<Multiaddr>,
+    ) -> Result<(), Error> {
+        // Kademlia::add_address requires the address to not contain the PeerId
+        if let Some(addr) = addr.as_mut() {
+            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                addr.pop();
+            }
+        }
+
+        self.to_task
+            .clone()
+            .send(IpfsEvent::AddPeer(peer_id, addr))
+            .await?;
+
+        Ok(())
+    }
+
+    /// Returns the Bitswap peers for the a `Node`.
+    pub async fn get_bitswap_peers(&self) -> Result<Vec<PeerId>, Error> {
+        let (tx, rx) = oneshot_channel();
+
+        self.to_task
+            .clone()
+            .send(IpfsEvent::GetBitswapPeers(tx))
+            .await?;
+
+        rx.await.map_err(|e| anyhow!(e))
+    }
+
     /// Exit daemon.
     pub async fn exit_daemon(mut self) {
         // FIXME: this is a stopgap measure needed while repo is part of the struct Ipfs instead of
@@ -1694,7 +1729,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         MdnsEvent::Discovered(list) => {
                             for (peer, addr) in list {
                                 trace!("mdns: Discovered peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().add_peer(peer, addr);
+                                self.swarm.behaviour_mut().add_peer(peer, Some(addr));
                             }
                         }
                         MdnsEvent::Expired(list) => {
@@ -2682,35 +2717,6 @@ mod node {
         /// get refreshed.
         pub async fn bootstrap(&self) -> Result<KadResult, Error> {
             self.ipfs.bootstrap().await
-        }
-
-        /// Add a known listen address of a peer participating in the DHT to the routing table.
-        /// This is mandatory in order for the peer to be discoverable by other members of the
-        /// DHT.
-        pub async fn add_peer(&self, peer_id: PeerId, mut addr: Multiaddr) -> Result<(), Error> {
-            // Kademlia::add_address requires the address to not contain the PeerId
-            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-                addr.pop();
-            }
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::AddPeer(peer_id, addr))
-                .await?;
-
-            Ok(())
-        }
-
-        /// Returns the Bitswap peers for the a `Node`.
-        pub async fn get_bitswap_peers(&self) -> Result<Vec<PeerId>, Error> {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::GetBitswapPeers(tx))
-                .await?;
-
-            rx.await.map_err(|e| anyhow!(e))
         }
 
         /// Shuts down the `Node`.

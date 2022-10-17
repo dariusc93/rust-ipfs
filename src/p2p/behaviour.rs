@@ -339,13 +339,11 @@ impl Behaviour {
         ))
     }
 
-    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
-        self.kademlia.add_address(&peer, addr);
+    pub fn add_peer(&mut self, peer: PeerId, addr: Option<Multiaddr>) {
+        if let Some(addr) = addr {
+            self.kademlia.add_address(&peer, addr);
+        }
         self.swarm.add_peer(peer);
-        // FIXME: the call below automatically performs a dial attempt
-        // to the given peer; it is unsure that we want it done within
-        // add_peer, especially since that peer might not belong to the
-        // expected identify protocol
         self.pubsub.add_explicit_peer(&peer);
         self.bitswap.connect(peer);
     }
@@ -353,6 +351,7 @@ impl Behaviour {
     pub fn remove_peer(&mut self, peer: &PeerId) {
         self.swarm.remove_peer(peer);
         self.pubsub.remove_explicit_peer(peer);
+        self.kademlia.remove_peer(peer);
         // TODO self.bitswap.remove_peer(&peer);
     }
 
