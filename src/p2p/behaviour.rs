@@ -347,7 +347,7 @@ impl Behaviour {
         // add_peer, especially since that peer might not belong to the
         // expected identify protocol
         self.pubsub.add_explicit_peer(&peer);
-        // TODO self.bitswap.add_node_to_partial_view(peer);
+        self.bitswap.connect(peer);
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId) {
