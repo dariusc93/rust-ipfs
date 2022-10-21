@@ -19,10 +19,10 @@ async fn main() -> anyhow::Result<()> {
     opts.dcutr = true;
     // Used to connect to relays
     opts.relay = true;
-    opts.kad_protocol = None;
 
     let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
     tokio::spawn(fut);
+
     ipfs.default_bootstrap().await?;
     //Until autorelay is implemented and/or functions to use relay more directly, we will manually listen to the relays (using libp2p bootstrap, though you can add your own)
     let list = ipfs.get_bootstraps().await?;

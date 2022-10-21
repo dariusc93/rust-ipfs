@@ -192,14 +192,6 @@ pub struct IpfsOptions {
     /// Note: This may change in the future as this may not be a viable option in the long run.
     pub store_all_peerinfo: bool,
 
-    /// Custom Kademlia protocol name. When set to `None`, the global DHT name is used instead of
-    /// the LAN dht name.
-    ///
-    /// The name given here is passed to [`libp2p_kad::KademliaConfig::set_protocol_name`].
-    ///
-    /// [`libp2p_kad::KademliaConfig::set_protocol_name`]: https://docs.rs/libp2p-kad/*/libp2p_kad/struct.KademliaConfig.html##method.set_protocol_name
-    pub kad_protocol: Option<String>,
-
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
@@ -234,8 +226,6 @@ impl Default for IpfsOptions {
             relay_server_config: Default::default(),
             store_all_peerinfo: Default::default(),
             kad_configuration: Default::default(),
-            // default to lan kad for go-ipfs use in tests
-            kad_protocol: None,
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
                 "/ip6/::/tcp/0".parse().unwrap(),
@@ -257,7 +247,6 @@ impl fmt::Debug for IpfsOptions {
             .field("keypair", &DebuggableKeypair(&self.keypair))
             .field("mdns", &self.mdns)
             .field("dcutr", &self.dcutr)
-            .field("kad_protocol", &self.kad_protocol)
             .field("listening_addrs", &self.listening_addrs)
             .field("span", &self.span)
             .finish()
@@ -270,7 +259,6 @@ impl IpfsOptions {
     /// Also used from examples.
     pub fn inmemory_with_generated_keys() -> Self {
         let mut config = IpfsOptions::default();
-        config.kad_protocol = Some("/ipfs/lan/kad/1.0.0".to_owned());
         config.listening_addrs = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
         config
     }

@@ -250,7 +250,7 @@ impl Behaviour {
 
         let store = MemoryStore::new(options.peer_id.to_owned());
 
-        let mut kad_config = match options.kad_config.clone() {
+        let kad_config = match options.kad_config.clone() {
             Some(config) => config,
             None => {
                 let mut kad_config = KademliaConfig::default();
@@ -259,10 +259,6 @@ impl Behaviour {
                 kad_config
             }
         };
-
-        if let Some(protocol) = options.kad_protocol {
-            kad_config.set_protocol_names(std::iter::once(protocol.into_bytes().into()).collect());
-        }
 
         let mut kademlia = Kademlia::with_config(options.peer_id.to_owned(), store, kad_config);
 
