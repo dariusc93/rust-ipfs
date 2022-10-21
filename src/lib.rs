@@ -87,6 +87,8 @@ pub use libp2p_helper::gossipsub::SubscriptionStream;
 #[cfg(not(feature = "external-gossipsub-stream"))]
 pub use self::p2p::pubsub::{PubsubMessage, SubscriptionStream};
 
+pub use ipfs_unixfs;
+
 pub use self::{
     error::Error,
     p2p::BehaviourEvent,
