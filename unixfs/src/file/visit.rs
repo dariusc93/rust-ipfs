@@ -187,7 +187,7 @@ impl FileVisit {
                 }
 
                 // reverse to keep the next link we need to traverse as last, where pop() operates.
-                (&mut self.pending[before..]).reverse();
+                self.pending[before..].reverse();
 
                 self.state = traversal;
                 Ok((&[][..], Some(self)))

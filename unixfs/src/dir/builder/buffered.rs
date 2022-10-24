@@ -200,10 +200,10 @@ mod tests {
             Cid::try_from("QmRJHYTNvC3hmd9gJQARxLR1QMEincccBV53bBw524yyq6").unwrap();
 
         builder
-            .put_link("a/b/c/d/e/f/g.txt", five_block_foobar.clone(), 221)
+            .put_link("a/b/c/d/e/f/g.txt", five_block_foobar, 221)
             .unwrap();
         builder
-            .put_link("a/b/c/d/e/h.txt", five_block_foobar.clone(), 221)
+            .put_link("a/b/c/d/e/h.txt", five_block_foobar, 221)
             .unwrap();
         builder
             .put_link("a/b/c/d/e/i.txt", five_block_foobar, 221)
@@ -274,7 +274,7 @@ mod tests {
         opts.wrap_with_directory();
         let mut builder = BufferingTreeBuilder::new(opts);
         builder
-            .put_link("a", five_block_foobar.clone(), 221)
+            .put_link("a", five_block_foobar, 221)
             .unwrap();
         builder.put_link("b", five_block_foobar, 221).unwrap();
 

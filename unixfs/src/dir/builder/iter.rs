@@ -236,7 +236,7 @@ impl PostOrderIterator {
                         Err(e) => return Some(Err(e)),
                     };
 
-                    self.cid = Some(leaf.link.clone());
+                    self.cid = Some(leaf.link);
                     self.total_size = leaf.total_size;
 
                     {
@@ -283,7 +283,7 @@ impl PostOrderIterator {
                         Err(e) => return Some(Err(e)),
                     };
 
-                    self.cid = Some(leaf.link.clone());
+                    self.cid = Some(leaf.link);
                     self.total_size = leaf.total_size;
 
                     return Some(Ok(TreeNode {
