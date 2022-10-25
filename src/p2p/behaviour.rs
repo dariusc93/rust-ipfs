@@ -1,6 +1,7 @@
 #[cfg(not(feature = "external-gossipsub-stream"))]
 use super::pubsub::Pubsub;
 
+use libp2p::kad::store::MemoryStoreConfig;
 #[cfg(feature = "external-gossipsub-stream")]
 use libp2p_helper::gossipsub::GossipsubStream;
 use serde::{Deserialize, Serialize};
@@ -250,7 +251,17 @@ impl Behaviour {
         }
         .into();
 
-        let store = MemoryStore::new(options.peer_id.to_owned());
+        let store = {
+            //TODO: Make customizable
+            //TODO: Use persistent store for kad
+            let config = MemoryStoreConfig {
+                max_records: 65 * 1024,
+                max_provided_keys: 65 * 1024,
+                ..Default::default()
+            };
+
+            MemoryStore::with_config(options.peer_id.to_owned(), config)
+        };
 
         let kad_config = match options.kad_config.clone() {
             Some(config) => config,
