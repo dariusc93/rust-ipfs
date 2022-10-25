@@ -205,6 +205,9 @@ pub struct IpfsOptions {
     /// Swarm configuration
     pub swarm_configuration: Option<crate::p2p::SwarmConfig>,
 
+    /// Identify configuration
+    pub identify_configuration: Option<crate::p2p::IdentifyConfiguration>,
+
     /// Kad configuration
     pub kad_configuration: Option<KademliaConfig>,
 
@@ -235,6 +238,7 @@ impl Default for IpfsOptions {
             store_all_peerinfo: Default::default(),
             kad_configuration: Default::default(),
             ping_configuration: Default::default(),
+            identify_configuration: Default::default(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
                 "/ip6/::/tcp/0".parse().unwrap(),

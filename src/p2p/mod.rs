@@ -17,6 +17,7 @@ use tracing::Span;
 pub(crate) mod addr;
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
+pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::transport::TransportConfig;
 pub(crate) mod pubsub;
@@ -93,6 +94,8 @@ pub struct SwarmOptions {
     pub kad_config: Option<KademliaConfig>,
     /// Ping Configuration
     pub ping_config: Option<PingConfig>,
+    /// identify configuration
+    pub identify_config: Option<IdentifyConfiguration>,
     /// Keep alive
     pub keep_alive: bool,
     /// Relay client
@@ -115,6 +118,7 @@ impl From<&IpfsOptions> for SwarmOptions {
         let kad_config = options.kad_configuration.clone();
         let ping_config = options.ping_configuration.clone();
         let keep_alive = options.keep_alive;
+        let identify_config = options.identify_configuration.clone();
         SwarmOptions {
             keypair,
             peer_id,
@@ -128,6 +132,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             kad_config,
             ping_config,
             keep_alive,
+            identify_config,
         }
     }
 }

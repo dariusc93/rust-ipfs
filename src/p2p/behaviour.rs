@@ -22,7 +22,7 @@ use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as
 use libp2p::kad::record::{store::MemoryStore, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
 use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
-use libp2p::ping::{Behaviour as Ping, Config as PingConfig, Event as PingEvent};
+use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
 use libp2p::relay::v2::relay::{rate_limiter, Event as RelayEvent, Relay};
@@ -31,6 +31,7 @@ use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
+use std::time::Duration;
 
 /// Behaviour type.
 #[derive(libp2p::NetworkBehaviour)]
@@ -157,6 +158,40 @@ pub struct RelayConfig {
     pub max_circuit_duration: std::time::Duration,
     pub max_circuit_bytes: u64,
     pub circuit_src_rate_limiters: Vec<RateLimit>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct IdentifyConfiguration {
+    pub protocol_version: String,
+    pub agent_version: String,
+    pub initial_delay: Duration,
+    pub interval: Duration,
+    pub push_update: bool,
+    pub cache: usize,
+}
+
+impl Default for IdentifyConfiguration {
+    fn default() -> Self {
+        Self {
+            protocol_version: "/ipfs/0.1.0".into(),
+            agent_version: "rust-ipfs".into(),
+            initial_delay: Duration::from_millis(500),
+            interval: Duration::from_secs(5 * 60),
+            push_update: false,
+            cache: 0,
+        }
+    }
+}
+
+impl IdentifyConfiguration {
+    pub fn into(self, publuc_key: libp2p::identity::PublicKey) -> IdentifyConfig {
+        IdentifyConfig::new(self.protocol_version, publuc_key)
+            .with_agent_version(self.agent_version)
+            .with_initial_delay(self.initial_delay)
+            .with_interval(self.interval)
+            .with_push_listen_addr_updates(self.push_update)
+            .with_cache_size(self.cache)
+    }
 }
 
 impl From<RelayConfig> for libp2p::relay::v2::relay::Config {
@@ -288,8 +323,10 @@ impl Behaviour {
 
         //TODO: Provide custom protocol and agent name via IpfsOptions
         let identify = Identify::new(
-            IdentifyConfig::new("/ipfs/0.1.0".into(), options.keypair.public())
-                .with_agent_version("rust-ipfs".into()),
+            options
+                .identify_config
+                .unwrap_or_default()
+                .into(options.keypair.public()),
         );
 
         #[cfg(not(feature = "external-gossipsub-stream"))]
