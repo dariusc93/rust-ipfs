@@ -120,6 +120,7 @@ use libp2p::{
         KademliaConfig, KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record,
     },
     mdns::MdnsEvent,
+    ping::Config as PingConfig,
     ping::Success as PingSuccess,
     swarm::{dial_opts::DialOpts, DialError},
 };
@@ -176,6 +177,9 @@ pub struct IpfsOptions {
     /// Enables ipv6 for mdns
     pub mdns_ipv6: bool,
 
+    /// Keep connection alive
+    pub keep_alive: bool,
+
     /// Enables dcutr
     pub dcutr: bool,
 
@@ -204,6 +208,9 @@ pub struct IpfsOptions {
     /// Kad configuration
     pub kad_configuration: Option<KademliaConfig>,
 
+    /// Ping Configuration
+    pub ping_configuration: Option<PingConfig>,
+
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
@@ -222,10 +229,12 @@ impl Default for IpfsOptions {
             dcutr: Default::default(),
             bootstrap: Default::default(),
             relay: Default::default(),
+            keep_alive: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
             store_all_peerinfo: Default::default(),
             kad_configuration: Default::default(),
+            ping_configuration: Default::default(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
                 "/ip6/::/tcp/0".parse().unwrap(),

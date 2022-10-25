@@ -8,6 +8,7 @@ use crate::IpfsOptions;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
+use libp2p::ping::Config as PingConfig;
 use libp2p::swarm::ConnectionLimits;
 use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
@@ -88,8 +89,12 @@ pub struct SwarmOptions {
     pub relay_server: bool,
     /// Relay Server Configuration
     pub relay_server_config: Option<RelayConfig>,
-    /// Kademlia
+    /// Kademlia Configuration
     pub kad_config: Option<KademliaConfig>,
+    /// Ping Configuration
+    pub ping_config: Option<PingConfig>,
+    /// Keep alive
+    pub keep_alive: bool,
     /// Relay client
     pub relay: bool,
     /// Enables dcutr
@@ -108,6 +113,8 @@ impl From<&IpfsOptions> for SwarmOptions {
         let relay_server_config = options.relay_server_config.clone();
         let relay = options.relay;
         let kad_config = options.kad_configuration.clone();
+        let ping_config = options.ping_configuration.clone();
+        let keep_alive = options.keep_alive;
         SwarmOptions {
             keypair,
             peer_id,
@@ -119,6 +126,8 @@ impl From<&IpfsOptions> for SwarmOptions {
             relay,
             dcutr,
             kad_config,
+            ping_config,
+            keep_alive,
         }
     }
 }

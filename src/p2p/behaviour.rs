@@ -21,11 +21,12 @@ use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as
 use libp2p::kad::record::{store::MemoryStore, Record};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
 use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
-use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
+use libp2p::ping::{Behaviour as Ping, Config as PingConfig, Event as PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
 use libp2p::relay::v2::relay::{rate_limiter, Event as RelayEvent, Relay};
 use libp2p::swarm::behaviour::toggle::Toggle;
+use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
@@ -39,6 +40,7 @@ pub struct Behaviour {
     pub bitswap: Bitswap,
     pub ping: Ping,
     pub identify: Identify,
+    pub keepalive: Toggle<KeepAliveBehaviour>,
     #[cfg(not(feature = "external-gossipsub-stream"))]
     pub pubsub: Pubsub,
     #[cfg(feature = "external-gossipsub-stream")]
@@ -268,7 +270,9 @@ impl Behaviour {
         }
         let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
         let bitswap = Bitswap::default();
-        let ping = Ping::default();
+        let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
+
+        let ping = Ping::new(options.ping_config.unwrap_or_default());
         let peer_id = options.keypair.public().into();
 
         //TODO: Provide custom protocol and agent name via IpfsOptions
@@ -322,6 +326,7 @@ impl Behaviour {
                 mdns,
                 kademlia,
                 bitswap,
+                keepalive,
                 ping,
                 identify,
                 autonat,
