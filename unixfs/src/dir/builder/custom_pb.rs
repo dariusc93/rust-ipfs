@@ -2,7 +2,7 @@
 
 use super::NamedLeaf;
 use crate::pb::UnixFs;
-use libipld::cid::{Cid, Version};
+use libipld::Cid;
 use quick_protobuf::{MessageWrite, Writer, WriterBackend};
 
 /// Newtype which uses the &[Option<(NamedLeaf)>] as Vec<PBLink>.
@@ -71,13 +71,14 @@ struct WriteableCid<'a>(&'a Cid);
 
 impl<'a> MessageWrite for WriteableCid<'a> {
     fn get_size(&self) -> usize {
+        use libipld::cid::Version::*;
         use quick_protobuf::sizeofs::*;
 
-        let hash_len: usize = self.0.hash().size().into();
+        let hash_len = self.0.hash().to_bytes().len();
 
         match self.0.version() {
-            Version::V0 => hash_len,
-            Version::V1 => {
+            V0 => hash_len,
+            V1 => {
                 let version_len = 1;
                 let codec_len = sizeof_varint(self.0.codec());
                 version_len + codec_len + hash_len
@@ -86,9 +87,11 @@ impl<'a> MessageWrite for WriteableCid<'a> {
     }
 
     fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> quick_protobuf::Result<()> {
+        use libipld::cid::Version::*;
+
         match self.0.version() {
-            Version::V0 => { /* cidv0 has only the _multi_hash */ }
-            Version::V1 => {
+            V0 => { /* cidv0 has only the _multi_hash */ }
+            V1 => {
                 // it is possible that CidV1 should not be linked to from a unixfs
                 // directory; at least go-ipfs 0.5 `ipfs files` denies making a cbor link
                 // but happily accepts and does refs over one.

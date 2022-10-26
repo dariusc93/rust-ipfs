@@ -32,13 +32,12 @@ pub mod dagpb;
 /// Support for walking over all UnixFs trees
 pub mod walk;
 
-use libipld::cid;
-
 #[cfg(test)]
 pub(crate) mod test_support;
 
 /// A link could not be transformed into a Cid.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct InvalidCidInLink {
     /// The index of this link, from zero
     pub nth: usize,
@@ -48,11 +47,11 @@ pub struct InvalidCidInLink {
     /// for other kinds.
     pub name: Cow<'static, str>,
     /// Error from the attempted conversion
-    pub source: cid::Error,
+    pub source: libipld::cid::Error,
 }
 
-impl<'a> From<(usize, pb::PBLink<'a>, cid::Error)> for InvalidCidInLink {
-    fn from((nth, link, source): (usize, pb::PBLink<'a>, cid::Error)) -> Self {
+impl<'a> From<(usize, pb::PBLink<'a>, libipld::cid::Error)> for InvalidCidInLink {
+    fn from((nth, link, source): (usize, pb::PBLink<'a>, libipld::cid::Error)) -> Self {
         let hash = match link.Hash {
             Some(Cow::Borrowed(x)) if !x.is_empty() => Cow::Owned(x.to_vec()),
             Some(Cow::Borrowed(_)) | None => Cow::Borrowed(&[][..]),

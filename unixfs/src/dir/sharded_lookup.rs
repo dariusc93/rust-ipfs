@@ -3,9 +3,9 @@ use crate::pb::{FlatUnixFs, PBLink, ParsingFailed, UnixFsType};
 use crate::{InvalidCidInLink, UnexpectedNodeType};
 use alloc::borrow::Cow;
 use alloc::collections::VecDeque;
+use libipld::Cid;
 use core::convert::TryFrom;
 use core::fmt;
-use libipld::Cid;
 
 /// A cache of data structures used while traversing. Reduces allocations when walking over multiple
 /// path segments.

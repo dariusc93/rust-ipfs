@@ -189,6 +189,7 @@ mod tests {
         super::OwnedTreeNode, BufferingTreeBuilder, Metadata, TreeBuildingFailed, TreeOptions,
     };
     use core::convert::TryFrom;
+    use libipld::multihash::{Code, MultihashDigest};
     use libipld::Cid;
 
     #[test]
@@ -296,8 +297,9 @@ mod tests {
     #[test]
     fn single_wrapped_root() {
         // foobar\n
-        let five_block_foobar =
-            Cid::try_from("QmRJHYTNvC3hmd9gJQARxLR1QMEincccBV53bBw524yyq6").unwrap();
+        let five_block_foobar = "QmRJHYTNvC3hmd9gJQARxLR1QMEincccBV53bBw524yyq6"
+            .parse()
+            .unwrap();
 
         let mut opts = TreeOptions::default();
         opts.wrap_with_directory();
@@ -438,7 +440,6 @@ mod tests {
 
     /// Returns a quick and dirty sha2-256 of the given number as a Cidv0
     fn some_cid(number: usize) -> Cid {
-        use libipld::multihash::{Code, MultihashDigest};
         let mh = Code::Sha2_256.digest(&number.to_le_bytes());
         Cid::new_v0(mh).unwrap()
     }

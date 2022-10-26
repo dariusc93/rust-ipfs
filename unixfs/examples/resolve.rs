@@ -1,5 +1,5 @@
+use libipld::Cid;
 use ipfs_unixfs::dir::{resolve, LookupError, ResolveError};
-use libipld::{cid, multibase, Cid};
 use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Error as IoError, Read};
@@ -64,7 +64,7 @@ fn main() {
 
 #[derive(Debug)]
 pub enum PathError {
-    InvalidCid(cid::Error),
+    InvalidCid(libipld::cid::Error),
     InvalidPath,
 }
 
