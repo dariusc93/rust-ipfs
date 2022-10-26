@@ -691,7 +691,7 @@ mod tests {
                         "or": "this",
                     },
                     {
-                        "or": cid.clone(),
+                        "or": cid,
                     },
                     {
                         "5": "or",
@@ -727,7 +727,7 @@ mod tests {
             let p = IpfsPath::try_from(*path).unwrap();
 
             let (resolved, matched_segments) = super::resolve_local_ipld(
-                root.clone(),
+                root,
                 example_doc.clone(),
                 &mut p.iter().peekable(),
             )
@@ -779,7 +779,7 @@ mod tests {
         .unwrap();
 
         let (resolved, matched_segments) =
-            super::resolve_local_ipld(root.clone(), example_doc, &mut p.iter().peekable()).unwrap();
+            super::resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap();
         assert_eq!(resolved.unwrap_complete(), ResolvedNode::Link(root, cid));
         assert_eq!(matched_segments, 5);
 
@@ -894,7 +894,7 @@ mod tests {
         let ipld = ipld!({ "0": cid1 });
         let cid2 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
 
-        let path = IpfsPath::from(cid2.clone()).sub_path("1/a").unwrap();
+        let path = IpfsPath::from(cid2).sub_path("1/a").unwrap();
 
         //let cloned = path.clone();
         let e = dag.resolve(path, true).await.unwrap_err();
@@ -907,7 +907,7 @@ mod tests {
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
         let cid1 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
-        let ipld = ipld!([cid1.clone()]);
+        let ipld = ipld!([cid1]);
         let cid2 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
 
         let path = IpfsPath::from(cid2).sub_path("0/a").unwrap();
@@ -930,11 +930,11 @@ mod tests {
         let (cid, data) = blocks.next().unwrap();
         assert_eq!(blocks.next(), None);
 
-        ipfs.put_block(Block::new(cid.clone(), data.into()).unwrap())
+        ipfs.put_block(Block::new(cid, data).unwrap())
             .await
             .unwrap();
 
-        let path = IpfsPath::from(cid.clone())
+        let path = IpfsPath::from(cid)
             .sub_path("anything-here")
             .unwrap();
 
@@ -947,7 +947,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Will revisit/reevaluate"]
     async fn fail_resolving_through_dir() {
         let Node { ipfs, .. } = Node::new("test_node").await;
 
@@ -962,7 +961,7 @@ mod tests {
 
         let total_size = data.len();
 
-        ipfs.put_block(Block::new(cid.clone(), data.into()).unwrap())
+        ipfs.put_block(Block::new(cid, data).unwrap())
             .await
             .unwrap();
 
