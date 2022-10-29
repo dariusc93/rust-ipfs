@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use clap::Parser;
 use futures::{pin_mut, StreamExt};
 use ipfs::{
     unixfs::ll::{
@@ -14,9 +15,18 @@ use tokio::{
     task,
 };
 
+#[derive(Debug, Parser)]
+#[clap(name = "unixfs-add")]
+struct Opt {
+    file: PathBuf,
+    #[clap(long)]
+    dest: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let path = PathBuf::from("Cargo.toml");
+    let opt = Opt::parse();
+
     tracing_subscriber::fmt::init();
 
     let opts = IpfsOptions::inmemory_with_generated_keys();
@@ -26,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut adder = FileAdder::default();
 
-    let file = tokio::fs::File::open(&path).await?;
+    let file = tokio::fs::File::open(&opt.file).await?;
 
     let mut file_buf = BufReader::with_capacity(adder.size_hint(), file);
 
@@ -71,8 +81,9 @@ async fn main() -> anyhow::Result<()> {
     tree_opts.wrap_with_directory();
     let mut tree = BufferingTreeBuilder::new(tree_opts);
 
-    tree.put_link("Cargo.toml", last_cid, written as u64)
-        .unwrap();
+    let filename = opt.file.file_name().unwrap().to_string_lossy();
+
+    tree.put_link(&filename, last_cid, written as u64)?;
 
     let mut iter = tree.build();
     let mut last_cid = None;
@@ -85,23 +96,33 @@ async fn main() -> anyhow::Result<()> {
 
         last_cid = Some(*node.cid);
     }
-    let last_cid = last_cid.unwrap();
 
-    println!("File located at /ipfs/{last_cid}/Cargo.toml");
+    let last_cid = last_cid.expect("Last cid is always provided");
 
-
+    println!("File located at /ipfs/{last_cid}/{filename}");
     //Fetching file using cat_unixfs
     let stream = ipfs
-        .cat_unixfs(IpfsPath::from(last_cid).sub_path("Cargo.toml")?, None)
+        .cat_unixfs(IpfsPath::from(last_cid).sub_path(&filename)?, None)
         .await?;
 
     pin_mut!(stream);
 
-    let mut stdout = tokio::io::stdout();
+    if let Some(dest) = opt.dest {
+        let mut file = tokio::fs::File::create(&dest).await?;
+        while let Some(data) = stream.next().await {
+            let bytes = data?;
+            file.write_all(&bytes).await?;
+            file.flush().await?;
+        }
 
-    while let Some(data) = stream.next().await {
-        let bytes = data?;
-        stdout.write_all(&bytes).await?;
+        println!("Written file to {}", dest.display());
+    } else {
+        let mut stdout = tokio::io::stdout();
+
+        while let Some(data) = stream.next().await {
+            let bytes = data?;
+            stdout.write_all(&bytes).await?;
+        }
     }
 
     Ok(())
