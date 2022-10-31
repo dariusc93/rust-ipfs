@@ -83,6 +83,7 @@ libp2p-helper = { default-features = false, version = "0.4", optional = true }
 prost-build = { default-features = false, version = "0.11" }
 
 [dev-dependencies]
+bs58 = "0.4"
 criterion = { default-features = false, version = "0.3" }
 hex-literal = { default-features = false, version = "0.3" }
 sha2 = { default-features = false, version = "0.9" }
