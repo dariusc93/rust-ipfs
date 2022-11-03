@@ -290,8 +290,8 @@ impl Behaviour {
             //TODO: Make customizable
             //TODO: Use persistent store for kad
             let config = MemoryStoreConfig {
-                max_records: 65 * 1024,
-                max_provided_keys: 65 * 1024,
+                // max_records: 65 * 1024,
+                // max_provided_keys: 65 * 1024,
                 ..Default::default()
             };
 
