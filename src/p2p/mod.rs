@@ -14,6 +14,8 @@ use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
 use tracing::Span;
 
+pub mod peerbook;
+
 pub(crate) mod addr;
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
@@ -31,24 +33,43 @@ pub use {behaviour::KadResult, swarm::Connection};
 pub type TSwarm = Swarm<behaviour::Behaviour>;
 
 /// Abstraction of IdentifyInfo but includes PeerId
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct PeerInfo {
     /// The peer id of the user
     pub peer_id: PeerId,
+
     /// The public key of the local peer.
     pub public_key: PublicKey,
+
     /// Application-specific version of the protocol family used by the peer,
     /// e.g. `ipfs/1.0.0` or `polkadot/1.0.0`.
     pub protocol_version: String,
+
     /// Name and version of the peer, similar to the `User-Agent` header in
     /// the HTTP protocol.
     pub agent_version: String,
+
     /// The addresses that the peer is listening on.
     pub listen_addrs: Vec<Multiaddr>,
+
     /// The list of protocols supported by the peer, e.g. `/ipfs/ping/1.0.0`.
     pub protocols: Vec<String>,
+
     /// Address observed by or for the remote.
     pub observed_addr: Multiaddr,
+}
+
+impl core::hash::Hash for PeerInfo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.peer_id.hash(state);
+        self.public_key.hash(state);
+    }
+}
+
+impl PartialEq for PeerInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.peer_id == other.peer_id && self.public_key == other.public_key
+    }
 }
 
 impl From<IdentifyInfo> for PeerInfo {
