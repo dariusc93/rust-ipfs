@@ -14,8 +14,6 @@ use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
 use tracing::Span;
 
-pub mod peerbook;
-
 pub(crate) mod addr;
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
