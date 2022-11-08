@@ -33,6 +33,7 @@ pub(crate) fn check_hamtshard_supported(
 ///
 /// The returned walker by default borrows the needle but it can be transformed into owned walker
 /// with `ShardedLookup::with_owned_needle` which will allow moving it between tasks and boundaries.
+#[allow(clippy::result_large_err)]
 pub fn resolve<'needle>(
     block: &[u8],
     needle: &'needle str,

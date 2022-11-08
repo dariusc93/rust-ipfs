@@ -40,13 +40,13 @@ fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
         let mut entry = entry.expect("assuming good tar");
 
         let path_bytes = entry.path_bytes();
-        let tmp_path = std::str::from_utf8(&*path_bytes).unwrap();
+        let tmp_path = std::str::from_utf8(&path_bytes).unwrap();
         path.clear();
         path.push_str(tmp_path);
 
         if let Some(link_name) = entry.link_name_bytes() {
             let link_name =
-                std::str::from_utf8(&*link_name).expect("symlink targets should be utf8");
+                std::str::from_utf8(&link_name).expect("symlink targets should be utf8");
 
             buffer.clear();
             ipfs_unixfs::symlink::serialize_symlink_block(link_name, buffer);

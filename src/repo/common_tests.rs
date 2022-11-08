@@ -35,7 +35,7 @@ impl<T: DataStore> std::ops::Deref for DSTestContext<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &*self.datastore
+        &self.datastore
     }
 }
 

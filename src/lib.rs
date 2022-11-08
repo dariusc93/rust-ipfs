@@ -271,9 +271,10 @@ impl IpfsOptions {
     ///
     /// Also used from examples.
     pub fn inmemory_with_generated_keys() -> Self {
-        let mut config = IpfsOptions::default();
-        config.listening_addrs = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
-        config
+        IpfsOptions {
+            listening_addrs: vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()],
+            ..Default::default()
+        }
     }
 }
 

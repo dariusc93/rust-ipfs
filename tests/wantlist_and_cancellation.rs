@@ -44,7 +44,7 @@ async fn check_cid_subscriptions(ipfs: &Node, cid: &Cid, expected_count: usize) 
         if expected_count > 0 {
             assert_eq!(subs.len(), 1);
         }
-        subs.get(&cid.clone().into()).map(|l| l.len())
+        subs.get(&(*cid).into()).map(|l| l.len())
     };
     // treat None as 0
     assert_eq!(subscription_count.unwrap_or(0), expected_count);
@@ -63,10 +63,9 @@ async fn wantlist_cancellation() {
 
     // start a get_request future
     let ipfs_clone = ipfs.clone();
-    let cid_clone = cid.clone();
     let (abort_handle1, abort_reg) = AbortHandle::new_pair();
     let abortable_req = Abortable::new(
-        async move { ipfs_clone.get_block(&cid_clone).await },
+        async move { ipfs_clone.get_block(&cid).await },
         abort_reg,
     );
     let _get_request1 = task::spawn(abortable_req);
@@ -89,8 +88,7 @@ async fn wantlist_cancellation() {
 
     // fire up an additional get request, this time within the same async task...
     let ipfs_clone = ipfs.clone();
-    let cid_clone = cid.clone();
-    let get_request2 = ipfs_clone.get_block(&cid_clone);
+    let get_request2 = ipfs_clone.get_block(&cid);
     let get_timeout = timeout(Duration::from_millis(100), pending::<()>());
     let get_request2 = match select(get_timeout.boxed(), get_request2.boxed()).await {
         Either::Left((_, fut)) => fut,
@@ -102,8 +100,7 @@ async fn wantlist_cancellation() {
 
     // ...and an additional one within the same task, for good measure
     let ipfs_clone = ipfs.clone();
-    let cid_clone = cid.clone();
-    let get_request3 = ipfs_clone.get_block(&cid_clone);
+    let get_request3 = ipfs_clone.get_block(&cid);
     let get_timeout = timeout(Duration::from_millis(100), pending::<()>());
     let get_request3 = match select(get_timeout.boxed(), get_request3.boxed()).await {
         Either::Left((_, fut)) => fut,

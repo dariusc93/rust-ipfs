@@ -3,9 +3,9 @@ use crate::pb::{FlatUnixFs, PBLink, ParsingFailed, UnixFsType};
 use crate::{InvalidCidInLink, UnexpectedNodeType};
 use alloc::borrow::Cow;
 use alloc::collections::VecDeque;
-use libipld::Cid;
 use core::convert::TryFrom;
 use core::fmt;
+use libipld::Cid;
 
 /// A cache of data structures used while traversing. Reduces allocations when walking over multiple
 /// path segments.
@@ -54,6 +54,7 @@ impl<'needle> ShardedLookup<'needle> {
     }
 
     /// Continues the walk in the DAG of HAMT buckets searching for the original `needle`.
+    #[allow(clippy::result_large_err)]
     pub fn continue_walk(
         mut self,
         next: &[u8],
@@ -109,6 +110,7 @@ impl<'needle> ShardedLookup<'needle> {
     /// Finds or starts a lookup of multiple buckets.
     ///
     /// Returns the found link, the definitive negative or the means to continue the traversal.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn lookup_or_start(
         mut hamt: FlatUnixFs<'_>,
         needle: &'needle str,
@@ -159,6 +161,7 @@ impl<'needle> ShardedLookup<'needle> {
     ///
     ///  - matches the needle uniquely, it will be returned as `Some(cid)`
     ///  - is a bucket, it is pushed back to the work
+    #[allow(clippy::result_large_err)]
     fn partition<'a>(
         iter: impl Iterator<Item = PBLink<'a>>,
         needle: &str,
