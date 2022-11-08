@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
     let topic = "ipfs-chat";
 
     // Initialize the repo and start a daemon
-    let mut opts = IpfsOptions::inmemory_with_generated_keys();
+    let mut opts = IpfsOptions::default();
     // Used to discover peers locally
     // opts.mdns = true;
     // Used, along with relay [client] for hole punching
