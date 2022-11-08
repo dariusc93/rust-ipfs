@@ -7,7 +7,6 @@ use common::{spawn_nodes, Topology};
 const N: usize = 5;
 
 #[tokio::test]
-#[ignore = "Will revisit/reevaluate"]
 async fn check_topology_line() {
     let nodes = spawn_nodes(N, Topology::Line).await;
 
@@ -21,7 +20,6 @@ async fn check_topology_line() {
 }
 
 #[tokio::test]
-#[ignore = "Will revisit/reevaluate"]
 async fn check_topology_ring() {
     let nodes = spawn_nodes(N, Topology::Ring).await;
 
@@ -41,7 +39,6 @@ async fn check_topology_mesh() {
 }
 
 #[tokio::test]
-#[ignore = "Will revisit/reevaluate"]
 async fn check_topology_star() {
     let nodes = spawn_nodes(N, Topology::Star).await;
 
