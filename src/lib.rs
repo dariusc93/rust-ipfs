@@ -916,11 +916,6 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Disconnects a given peer.
-    ///
-    /// At the moment the peer is disconnected by temporarily banning the peer and unbanning it
-    /// right after. This should always disconnect all connections to the peer.
-    ///
-    /// Note: this is rarely needed in pratice as connections will time out if left unused.
     pub async fn disconnect(&self, target: MultiaddrWithPeerId) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();

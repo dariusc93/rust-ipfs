@@ -432,8 +432,8 @@ impl Behaviour {
 
     pub fn stop_providing_block(&mut self, cid: &Cid) {
         info!("Finished providing block {}", cid.to_string());
-        //let hash = Multihash::from_bytes(cid.to_bytes()).unwrap();
-        //self.kademlia.remove_providing(&hash);
+        let key = cid.hash().to_bytes();
+        self.kademlia.stop_providing(&key.into());
     }
 
     #[cfg(not(feature = "external-gossipsub-stream"))]
