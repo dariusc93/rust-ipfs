@@ -2682,6 +2682,17 @@ mod node {
         /// Connects to a peer at the given address.
         pub async fn connect(&self, addr: Multiaddr) -> Result<(), Error> {
             let addr = MultiaddrWithPeerId::try_from(addr).unwrap();
+            if self
+                .ipfs
+                .peers()
+                .await
+                .unwrap_or_default()
+                .iter()
+                .map(|c| c.addr.peer_id)
+                .any(|p| p == addr.peer_id)
+            {
+                return Ok(());
+            }
             self.ipfs.connect(addr).await
         }
 

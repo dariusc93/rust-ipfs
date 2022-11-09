@@ -29,7 +29,6 @@ async fn check_topology_ring() {
 }
 
 #[tokio::test]
-#[ignore = "Will revisit/reevaluate"]
 async fn check_topology_mesh() {
     let nodes = spawn_nodes(N, Topology::Mesh).await;
 
