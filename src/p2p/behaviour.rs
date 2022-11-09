@@ -405,7 +405,7 @@ impl Behaviour {
     }
 
     pub fn addrs(&mut self) -> Vec<(PeerId, Vec<Multiaddr>)> {
-        let peers = self.swarm.peers().cloned().collect::<Vec<_>>();
+        let peers = self.swarm.peers().map(|(k, _)| k).cloned().collect::<Vec<_>>();
         let mut addrs = Vec::with_capacity(peers.len());
         for peer_id in peers.into_iter() {
             let peer_addrs = self.addresses_of_peer(&peer_id);
