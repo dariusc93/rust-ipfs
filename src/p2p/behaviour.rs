@@ -314,6 +314,7 @@ impl Behaviour {
             let addr = MultiaddrWithPeerId::try_from(addr.clone())?;
             kademlia.add_address(&addr.peer_id, addr.multiaddr.as_ref().clone());
         }
+
         let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
         let bitswap = Bitswap::default();
         let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
@@ -321,7 +322,6 @@ impl Behaviour {
         let ping = Ping::new(options.ping_config.unwrap_or_default());
         let peer_id = options.keypair.public().into();
 
-        //TODO: Provide custom protocol and agent name via IpfsOptions
         let identify = Identify::new(
             options
                 .identify_config

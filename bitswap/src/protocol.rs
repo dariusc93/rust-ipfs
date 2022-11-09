@@ -5,10 +5,9 @@ use crate::error::BitswapError;
 ///
 /// - TODO
 use crate::ledger::Message;
-use core::future::Future;
 use core::iter;
-use core::pin::Pin;
 use futures::{
+    future::BoxFuture,
     io::{AsyncRead, AsyncWrite},
     AsyncWriteExt,
 };
@@ -18,9 +17,9 @@ use std::io;
 // Undocumented, but according to JS the bitswap messages have a max size of 512*1024 bytes
 // https://github.com/ipfs/js-ipfs-bitswap/blob/d8f80408aadab94c962f6b88f343eb9f39fa0fcc/src/decision-engine/index.js#L16
 // Increased to 1024*1024
-const MAX_BUF_SIZE: usize = 1_048_576;//524_288;
+const MAX_BUF_SIZE: usize = 1_048_576; //524_288;
 
-type FutureResult<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
+type FutureResult<T, E> = BoxFuture<'static, Result<T, E>>;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BitswapConfig;
