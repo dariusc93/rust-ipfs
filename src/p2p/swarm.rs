@@ -49,11 +49,20 @@ pub struct SwarmApi {
     /// The connections which have been requested, and the swarm/network has requested the
     /// addresses of. Used to keep finishing all of the subscriptions.
     pending_connections: HashMap<PeerId, Vec<MultiaddrWithPeerId>>,
+
+    /// List of supported protocols of local node
+    pub protocols: Vec<Vec<u8>>,
 }
 
 impl SwarmApi {
     pub fn add_peer(&mut self, peer_id: PeerId) {
         self.peers.insert(peer_id, None);
+    }
+
+    pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
+        self.protocols
+            .iter()
+            .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
     }
 
     //Note: This may get pushed into its own behaviour in the near future
@@ -409,8 +418,13 @@ impl NetworkBehaviour for SwarmApi {
     fn poll(
         &mut self,
         _: &mut Context,
-        _: &mut impl PollParameters,
+        params: &mut impl PollParameters,
     ) -> Poll<NetworkBehaviourAction> {
+        let supported_protocols = params.supported_protocols();
+        if supported_protocols.len() != self.protocols.len() {
+            self.protocols = supported_protocols.collect();
+        }
+
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }

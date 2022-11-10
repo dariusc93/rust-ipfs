@@ -423,7 +423,10 @@ impl Behaviour {
         self.swarm.connections()
     }
 
-    pub fn connect(&mut self, addr: MultiaddrWithPeerId) -> Option<Option<SubscriptionFuture<(), String>>> {
+    pub fn connect(
+        &mut self,
+        addr: MultiaddrWithPeerId,
+    ) -> Option<Option<SubscriptionFuture<(), String>>> {
         self.swarm.connect(addr)
     }
 
@@ -439,6 +442,10 @@ impl Behaviour {
         info!("Finished providing block {}", cid.to_string());
         let key = cid.hash().to_bytes();
         self.kademlia.stop_providing(&key.into());
+    }
+
+    pub fn supported_protocols(&self) -> Vec<String> {
+        self.swarm.protocols().collect::<Vec<_>>()
     }
 
     #[cfg(not(feature = "external-gossipsub-stream"))]
