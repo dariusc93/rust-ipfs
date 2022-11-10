@@ -418,7 +418,7 @@ impl Behaviour {
         self.swarm.connections()
     }
 
-    pub fn connect(&mut self, addr: MultiaddrWithPeerId) -> Option<SubscriptionFuture<(), String>> {
+    pub fn connect(&mut self, addr: MultiaddrWithPeerId) -> Option<Option<SubscriptionFuture<(), String>>> {
         self.swarm.connect(addr)
     }
 

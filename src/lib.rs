@@ -330,7 +330,7 @@ enum IpfsEvent {
     /// Connect
     Connect(
         MultiaddrWithPeerId,
-        OneshotSender<Option<SubscriptionFuture<(), String>>>,
+        OneshotSender<Option<Option<SubscriptionFuture<(), String>>>>,
     ),
     /// Addresses
     Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
@@ -832,10 +832,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                 .await?;
             let subscription = rx.await?;
 
-            if let Some(future) = subscription {
-                future.await.map_err(|e| anyhow!(e))
-            } else {
-                futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await
+            match subscription {
+                Some(Some(future)) => future.await.map_err(|e| anyhow!(e)),
+                Some(None) => futures::future::ready(Ok(())).await,
+                None => futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await,
             }
         }
         .instrument(self.span.clone())

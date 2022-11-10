@@ -99,7 +99,10 @@ impl SwarmApi {
         self.roundtrip_times.insert(*peer_id, rtt);
     }
 
-    pub fn connect(&mut self, addr: MultiaddrWithPeerId) -> Option<SubscriptionFuture<(), String>> {
+    pub fn connect(
+        &mut self,
+        addr: MultiaddrWithPeerId,
+    ) -> Option<Option<SubscriptionFuture<(), String>>> {
         let connected_already = self
             .connected_peers
             .get(&addr.peer_id)
@@ -107,7 +110,7 @@ impl SwarmApi {
             .unwrap_or(false);
 
         if connected_already {
-            return None;
+            return Some(None);
         }
 
         trace!("Connecting to {:?}", addr);
@@ -134,7 +137,7 @@ impl SwarmApi {
             .or_insert_with(|| Vec::with_capacity(1))
             .push(addr);
 
-        Some(subscription)
+        Some(Some(subscription))
     }
 
     pub fn connections_to(&self, peer_id: &PeerId) -> Vec<Multiaddr> {
@@ -301,7 +304,7 @@ impl NetworkBehaviour for SwarmApi {
                 closed_addr
             );
         }
-        
+
         //TODO: Maybe mark the peer for removal instead of instantly removing the peer and their info
         //Note: This may get pushed into its own behaviour in the near future
         self.peers.remove(peer_id);
@@ -463,6 +466,7 @@ mod tests {
             let mut sub = swarm2
                 .behaviour_mut()
                 .connect(addr.try_into().unwrap())
+                .unwrap()
                 .unwrap();
 
             loop {
@@ -525,6 +529,7 @@ mod tests {
                     .with(peer3_id),
             )
             .unwrap()
+            .unwrap()
             // remove the private type wrapper
             .map_err(|e| e.into_inner());
 
@@ -571,8 +576,8 @@ mod tests {
         // these two should be attempted in parallel. since we know both of them work, and they are
         // given in this order, we know that in libp2p 0.34 only the first should win, however
         // both should always be finished.
-        connections.push_back(swarm2.behaviour_mut().connect(targets.0).unwrap());
-        connections.push_back(swarm2.behaviour_mut().connect(targets.1).unwrap());
+        connections.push_back(swarm2.behaviour_mut().connect(targets.0).unwrap().unwrap());
+        connections.push_back(swarm2.behaviour_mut().connect(targets.1).unwrap().unwrap());
         let ready = connections
             // turn the private error type into Option
             .map_err(|e| e.into_inner())
