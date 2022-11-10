@@ -334,8 +334,6 @@ enum IpfsEvent {
         MultiaddrWithPeerId,
         OneshotSender<Option<Option<SubscriptionFuture<(), String>>>>,
     ),
-    /// Identity information
-    Identity(PeerId, Channel<PeerInfo>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     /// Addresses
@@ -2196,19 +2194,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                 match inner {
                     IpfsEvent::Connect(target, ret) => {
                         ret.send(self.swarm.behaviour_mut().connect(target)).ok();
-                    }
-                    IpfsEvent::Identity(peer_id, ret) => {
-                        let info = self
-                            .swarm
-                            .behaviour()
-                            .swarm
-                            .peers()
-                            .find(|(k, _)| peer_id.eq(k))
-                            .and_then(|(_, v)| v.clone())
-                            .map(|v| v.into())
-                            .ok_or_else(|| anyhow::anyhow!("Cannot find identity information"));
-
-                        let _ = ret.send(info);
                     }
                     IpfsEvent::Protocol(ret) => {
                         let info = self.swarm.behaviour().supported_protocols();
