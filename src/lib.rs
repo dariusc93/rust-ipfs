@@ -970,12 +970,37 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             match peer_id {
                 Some(peer_id) => {
                     let (tx, rx) = oneshot_channel();
+
                     self.to_task
                         .clone()
-                        .send(IpfsEvent::Identity(peer_id, tx))
+                        .send(IpfsEvent::FindPeerIdentity(peer_id, false, tx))
                         .await?;
 
-                    rx.await?
+                    match rx.await? {
+                        Either::Left(info) => info.ok_or_else(|| {
+                            anyhow!("couldn't find peer {} identity information", peer_id)
+                        }),
+                        Either::Right(future) => {
+                            future.await?;
+
+                            let (tx, rx) = oneshot_channel();
+
+                            self.to_task
+                                .clone()
+                                .send(IpfsEvent::FindPeerIdentity(peer_id, true, tx))
+                                .await?;
+
+                            match rx.await? {
+                                Either::Left(info) => info.ok_or_else(|| {
+                                    anyhow!("couldn't find peer {} identity information", peer_id)
+                                }),
+                                _ => Err(anyhow!(
+                                    "couldn't find peer {} identity information",
+                                    peer_id
+                                )),
+                            }
+                        }
+                    }
                 }
                 None => {
                     let (tx, rx) = oneshot_channel();
@@ -1013,35 +1038,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
     /// Returns [`PeerInfo`] of the given peer id. If it cannot be found locally, there will be an attempt to find it on Kad, otherwise it will return
     /// Ok(None).
+    #[deprecated = "Use Ipfs::identity"]
     pub async fn find_peer_info(&self, peer_id: PeerId) -> Result<PeerInfo, Error> {
         async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::FindPeerIdentity(peer_id, false, tx))
-                .await?;
-
-            match rx.await? {
-                Either::Left(info) => info.ok_or_else(|| anyhow!("couldn't find peer {}", peer_id)),
-                Either::Right(future) => {
-                    future.await?;
-
-                    let (tx, rx) = oneshot_channel();
-
-                    self.to_task
-                        .clone()
-                        .send(IpfsEvent::FindPeerIdentity(peer_id, true, tx))
-                        .await?;
-
-                    match rx.await? {
-                        Either::Left(info) => {
-                            info.ok_or_else(|| anyhow!("couldn't find peer {}", peer_id))
-                        }
-                        _ => Err(anyhow!("couldn't find peer {}", peer_id)),
-                    }
-                }
-            }
+            self.identity(Some(peer_id)).await
         }
         .instrument(self.span.clone())
         .await
