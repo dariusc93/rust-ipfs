@@ -54,7 +54,7 @@ pub struct PeerInfo {
     pub protocols: Vec<String>,
 
     /// Address observed by or for the remote.
-    pub observed_addr: Multiaddr,
+    pub observed_addr: Option<Multiaddr>,
 }
 
 impl core::hash::Hash for PeerInfo {
@@ -81,6 +81,7 @@ impl From<IdentifyInfo> for PeerInfo {
             observed_addr,
         } = info;
         let peer_id = public_key.clone().into();
+        let observed_addr = Some(observed_addr);
         Self {
             peer_id,
             public_key,

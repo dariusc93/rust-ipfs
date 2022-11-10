@@ -1,4 +1,4 @@
-use ipfs::{Ipfs, IpfsOptions, TestTypes, UninitializedIpfs, PublicKey};
+use ipfs::{Ipfs, IpfsOptions, TestTypes, UninitializedIpfs, PublicKey, p2p::PeerInfo};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -10,7 +10,8 @@ async fn main() -> anyhow::Result<()> {
     
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    let (key, addresses) = ipfs.identity().await?;
+    let PeerInfo { public_key: key, listen_addrs: addresses, ..} = ipfs.identity(None).await?;
+    
     if let PublicKey::Ed25519(publickey) = &key {
         println!("Public Key: {}", bs58::encode(publickey.encode()).into_string());
     }

@@ -48,7 +48,7 @@ use futures::{
 };
 
 use ipfs_bitswap::BitswapEvent;
-use p2p::{PeerInfo, RelayConfig};
+use p2p::{IdentifyConfiguration, PeerInfo, RelayConfig};
 use subscription::SubscriptionRegistry;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -307,6 +307,7 @@ pub struct Ipfs<Types: IpfsTypes> {
     span: Span,
     repo: Arc<Repo<Types>>,
     keys: DebuggableKeypair<Keypair>,
+    identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
 }
 
@@ -315,6 +316,7 @@ impl<Types: IpfsTypes> Clone for Ipfs<Types> {
         Ipfs {
             span: self.span.clone(),
             repo: Arc::clone(&self.repo),
+            identify_conf: self.identify_conf.clone(),
             keys: self.keys.clone(),
             to_task: self.to_task.clone(),
         }
@@ -332,6 +334,10 @@ enum IpfsEvent {
         MultiaddrWithPeerId,
         OneshotSender<Option<Option<SubscriptionFuture<(), String>>>>,
     ),
+    /// Identity information
+    Identity(PeerId, Channel<PeerInfo>),
+    /// Node supported protocol
+    Protocol(OneshotSender<Vec<String>>),
     /// Addresses
     Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     /// Local addresses
@@ -490,10 +496,11 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         repo.init().instrument(init_span.clone()).await?;
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
-
+        let id_conf = options.identify_configuration.clone().unwrap_or_default();
         let ipfs = Ipfs {
             span: facade_span,
             repo: repo.clone(),
+            identify_conf: id_conf,
             keys: DebuggableKeypair(keys),
             to_task,
         };
@@ -947,27 +954,58 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await
     }
 
-    /// Returns the local node public key and the listened and externally visible addresses.
-    /// The addresses are suffixed with the P2p protocol containing the node's PeerId.
-    ///
-    /// Public key can be converted to [`PeerId`].
-    pub async fn identity(&self) -> Result<(PublicKey, Vec<Multiaddr>), Error> {
+    pub async fn protocols(&self) -> Result<Vec<String>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
+            self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
+            Ok(rx.await?)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::GetAddresses(tx))
-                .await?;
-            let mut addresses = rx.await?;
-            let public_key = self.keys.get_ref().public();
-            let peer_id = public_key.to_peer_id();
+    /// Returns the peer identity information. If no peer id is supplied the local identity is supplied
+    pub async fn identity(&self, peer_id: Option<PeerId>) -> Result<PeerInfo, Error> {
+        async move {
+            match peer_id {
+                Some(peer_id) => {
+                    let (tx, rx) = oneshot_channel();
+                    self.to_task
+                        .clone()
+                        .send(IpfsEvent::Identity(peer_id, tx))
+                        .await?;
 
-            for addr in &mut addresses {
-                addr.push(Protocol::P2p(peer_id.into()))
+                    rx.await?
+                }
+                None => {
+                    let (tx, rx) = oneshot_channel();
+                    self.to_task
+                        .clone()
+                        .send(IpfsEvent::GetAddresses(tx))
+                        .await?;
+                    let protocols = self.protocols().await?;
+
+                    let mut addresses = rx.await?;
+                    let public_key = self.keys.get_ref().public();
+                    let peer_id = public_key.to_peer_id();
+
+                    for addr in &mut addresses {
+                        addr.push(Protocol::P2p(peer_id.into()))
+                    }
+
+                    let info = PeerInfo {
+                        peer_id,
+                        public_key,
+                        protocol_version: self.identify_conf.protocol_version.clone(),
+                        agent_version: self.identify_conf.agent_version.clone(),
+                        listen_addrs: addresses,
+                        protocols,
+                        observed_addr: None,
+                    };
+
+                    Ok(info)
+                }
             }
-
-            Ok((public_key, addresses))
         }
         .instrument(self.span.clone())
         .await
@@ -2159,6 +2197,24 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     IpfsEvent::Connect(target, ret) => {
                         ret.send(self.swarm.behaviour_mut().connect(target)).ok();
                     }
+                    IpfsEvent::Identity(peer_id, ret) => {
+                        let info = self
+                            .swarm
+                            .behaviour()
+                            .swarm
+                            .peers()
+                            .find(|(k, _)| peer_id.eq(k))
+                            .and_then(|(_, v)| v.clone())
+                            .map(|v| v.into())
+                            .ok_or_else(|| anyhow::anyhow!("Cannot find identity information"));
+
+                        let _ = ret.send(info);
+                    }
+                    IpfsEvent::Protocol(ret) => {
+                        let info = self.swarm.behaviour().supported_protocols();
+
+                        let _ = ret.send(info);
+                    }
                     IpfsEvent::SwarmListenOn(addr, ret) => {
                         let _ = ret.send(self.swarm.listen_on(addr).map_err(anyhow::Error::from));
                     }
@@ -2685,7 +2741,7 @@ mod node {
             let (ipfs, fut): (Ipfs<TestTypes>, _) =
                 UninitializedIpfs::new(opts).start().await.unwrap();
             let bg_task = tokio::task::spawn(fut);
-            let addrs = ipfs.identity().await.unwrap().1;
+            let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 
             Node {
                 ipfs,

@@ -1,5 +1,6 @@
 use futures::pin_mut;
-use futures::stream::StreamExt; // needed for StreamExt::next
+use futures::stream::StreamExt; use ipfs::p2p::PeerInfo;
+// needed for StreamExt::next
 use ipfs::{Error, Ipfs, IpfsOptions, IpfsPath, MultiaddrWithPeerId, TestTypes, UninitializedIpfs};
 use std::env;
 use std::process::exit;
@@ -63,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(target) = target {
         ipfs.connect(target).await?;
     } else {
-        let (_, addresses) = ipfs.identity().await?;
+        let PeerInfo { listen_addrs: addresses, ..} = ipfs.identity(None).await?;
         assert!(!addresses.is_empty(), "Zero listening addresses");
 
         eprintln!("Please connect an ipfs node having {} to:\n", path);
