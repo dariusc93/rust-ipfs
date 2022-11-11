@@ -102,9 +102,8 @@ pub enum BlockRmError {
 }
 
 /// This API is being discussed and evolved, which will likely lead to breakage.
-// FIXME: why is this unpin? doesn't probably need to be since all of the futures are Box::pin'd.
 #[async_trait]
-pub trait BlockStore: Debug + Send + Sync + Unpin + 'static {
+pub trait BlockStore: Debug + Send + Sync + 'static {
     fn new(path: PathBuf) -> Self;
     async fn init(&self) -> Result<(), Error>;
     /// FIXME: redundant and never called during initialization, which is expected to happen during [`init`].
@@ -125,7 +124,7 @@ pub trait BlockStore: Debug + Send + Sync + Unpin + 'static {
 
 #[async_trait]
 /// Generic layer of abstraction for a key-value data store.
-pub trait DataStore: PinStore + Debug + Send + Sync + Unpin + 'static {
+pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     fn new(path: PathBuf) -> Self;
     async fn init(&self) -> Result<(), Error>;
     async fn open(&self) -> Result<(), Error>;
