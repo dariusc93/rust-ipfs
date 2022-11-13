@@ -130,8 +130,6 @@ impl SwarmApi {
 
         let handler = self.new_handler();
         self.events.push_back(NetworkBehaviourAction::Dial {
-            // rationale: this is sort of explicit command, perhaps the old address is no longer
-            // valid. Always would be even better but it's bugged at the moment.
             opts: DialOpts::peer_id(addr.peer_id)
                 .condition(PeerCondition::NotDialing)
                 .build(),
