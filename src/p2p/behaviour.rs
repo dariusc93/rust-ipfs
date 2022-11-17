@@ -270,6 +270,12 @@ pub enum RateLimit {
     },
 }
 
+
+#[derive(Default, Clone, Debug)]
+pub struct KadStoreConfig {
+    memory: Option<MemoryStoreConfig>,
+}
+
 impl Behaviour {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
     pub async fn new(options: SwarmOptions) -> Result<(Self, Option<ClientTransport>), Error> {
@@ -289,11 +295,7 @@ impl Behaviour {
         let store = {
             //TODO: Make customizable
             //TODO: Use persistent store for kad
-            let config = MemoryStoreConfig {
-                // max_records: 65 * 1024,
-                // max_provided_keys: 65 * 1024,
-                ..Default::default()
-            };
+            let config = options.kad_store_config.unwrap_or_default().memory.unwrap_or_default();
 
             MemoryStore::with_config(options.peer_id.to_owned(), config)
         };

@@ -48,7 +48,7 @@ use futures::{
 };
 
 use ipfs_bitswap::BitswapEvent;
-use p2p::{IdentifyConfiguration, PeerInfo, RelayConfig};
+use p2p::{IdentifyConfiguration, KadStoreConfig, PeerInfo, RelayConfig};
 use subscription::SubscriptionRegistry;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -207,6 +207,10 @@ pub struct IpfsOptions {
     /// Kad configuration
     pub kad_configuration: Option<KademliaConfig>,
 
+    /// Kad Store Config
+    /// Note: Only supports MemoryStoreConfig at this time
+    pub kad_store_config: Option<KadStoreConfig>,
+
     /// Ping Configuration
     pub ping_configuration: Option<PingConfig>,
 
@@ -232,6 +236,7 @@ impl Default for IpfsOptions {
             relay_server: Default::default(),
             relay_server_config: Default::default(),
             kad_configuration: Default::default(),
+            kad_store_config: Default::default(),
             ping_configuration: Default::default(),
             identify_configuration: Default::default(),
             listening_addrs: vec![
