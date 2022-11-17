@@ -1,9 +1,4 @@
-#[cfg(not(feature = "external-gossipsub-stream"))]
-use super::pubsub::Pubsub;
-
-use libp2p::kad::store::MemoryStoreConfig;
-#[cfg(feature = "external-gossipsub-stream")]
-use libp2p_helper::gossipsub::GossipsubStream;
+use super::gossipsub::GossipsubStream;
 use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
@@ -19,7 +14,10 @@ use libp2p::core::{Multiaddr, PeerId};
 use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::GossipsubEvent;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
-use libp2p::kad::record::{store::MemoryStore, Record};
+use libp2p::kad::record::{
+    store::{MemoryStore, MemoryStoreConfig},
+    Record,
+};
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
 use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
@@ -43,9 +41,6 @@ pub struct Behaviour {
     pub ping: Ping,
     pub identify: Identify,
     pub keepalive: Toggle<KeepAliveBehaviour>,
-    #[cfg(not(feature = "external-gossipsub-stream"))]
-    pub pubsub: Pubsub,
-    #[cfg(feature = "external-gossipsub-stream")]
     pub pubsub: GossipsubStream,
     pub autonat: autonat::Behaviour,
     pub relay: Toggle<Relay>,
@@ -270,7 +265,6 @@ pub enum RateLimit {
     },
 }
 
-
 #[derive(Default, Clone, Debug)]
 pub struct KadStoreConfig {
     pub memory: Option<MemoryStoreConfig>,
@@ -295,7 +289,11 @@ impl Behaviour {
         let store = {
             //TODO: Make customizable
             //TODO: Use persistent store for kad
-            let config = options.kad_store_config.unwrap_or_default().memory.unwrap_or_default();
+            let config = options
+                .kad_store_config
+                .unwrap_or_default()
+                .memory
+                .unwrap_or_default();
 
             MemoryStore::with_config(options.peer_id.to_owned(), config)
         };
@@ -331,10 +329,6 @@ impl Behaviour {
                 .into(options.keypair.public()),
         );
 
-        #[cfg(not(feature = "external-gossipsub-stream"))]
-        let pubsub = Pubsub::new(options.keypair)?;
-
-        #[cfg(feature = "external-gossipsub-stream")]
         let pubsub = {
             let config = libp2p::gossipsub::GossipsubConfigBuilder::default()
                 .max_transmit_size(512 * 1024)
@@ -450,12 +444,6 @@ impl Behaviour {
         self.swarm.protocols().collect::<Vec<_>>()
     }
 
-    #[cfg(not(feature = "external-gossipsub-stream"))]
-    pub fn pubsub(&mut self) -> &mut Pubsub {
-        &mut self.pubsub
-    }
-
-    #[cfg(feature = "external-gossipsub-stream")]
     pub fn pubsub(&mut self) -> &mut GossipsubStream {
         &mut self.pubsub
     }

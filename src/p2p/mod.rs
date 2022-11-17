@@ -21,7 +21,7 @@ pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::KadStoreConfig;
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::transport::TransportConfig;
-pub(crate) mod pubsub;
+pub(crate) mod gossipsub;
 mod swarm;
 mod transport;
 
