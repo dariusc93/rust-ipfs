@@ -273,7 +273,7 @@ pub enum RateLimit {
 
 #[derive(Default, Clone, Debug)]
 pub struct KadStoreConfig {
-    memory: Option<MemoryStoreConfig>,
+    pub memory: Option<MemoryStoreConfig>,
 }
 
 impl Behaviour {
