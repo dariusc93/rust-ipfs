@@ -1043,11 +1043,9 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Ok(None).
     #[deprecated = "Use Ipfs::identity"]
     pub async fn find_peer_info(&self, peer_id: PeerId) -> Result<PeerInfo, Error> {
-        async move {
-            self.identity(Some(peer_id)).await
-        }
-        .instrument(self.span.clone())
-        .await
+        async move { self.identity(Some(peer_id)).await }
+            .instrument(self.span.clone())
+            .await
     }
 
     /// Subscribes to a given topic. Can be done at most once without unsubscribing in the between.
