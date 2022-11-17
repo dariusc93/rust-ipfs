@@ -215,13 +215,15 @@ pub(crate) fn could_be_bound_from_ephemeral(
     }
 }
 
+#[allow(dead_code)]
 /// Returns the last peer id in a Multiaddr
-pub fn peer_id_from_multiaddr(mut addr: Multiaddr) -> Option<PeerId> {
+pub(crate) fn peer_id_from_multiaddr(addr: Multiaddr) -> Option<PeerId> {
     let (peer, _) = extract_peer_id_from_multiaddr(addr);
     peer
 }
 
-pub fn extract_peer_id_from_multiaddr(mut addr: Multiaddr) -> (Option<PeerId>, Multiaddr) {
+#[allow(dead_code)]
+pub(crate) fn extract_peer_id_from_multiaddr(mut addr: Multiaddr) -> (Option<PeerId>, Multiaddr) {
     match addr.pop() {
         Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
             Ok(id) => (Some(id), addr),
