@@ -170,6 +170,7 @@ pub struct SwarmConfig {
     pub dial_concurrency_factor: NonZeroU8,
     pub notify_handler_buffer_size: NonZeroUsize,
     pub connection_event_buffer_size: usize,
+    pub max_inbound_stream: usize,
 }
 
 impl Default for SwarmConfig {
@@ -179,6 +180,7 @@ impl Default for SwarmConfig {
             dial_concurrency_factor: 8.try_into().expect("8 > 0"),
             notify_handler_buffer_size: 256.try_into().expect("256 > 0"),
             connection_event_buffer_size: 256,
+            max_inbound_stream: 128,
         }
     }
 }
@@ -207,6 +209,7 @@ pub async fn create_swarm(
         .connection_event_buffer_size(swarm_config.connection_event_buffer_size)
         .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
         .executor(Box::new(SpannedExecutor(span)))
+        .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
         .build();
 
     Ok(swarm)
