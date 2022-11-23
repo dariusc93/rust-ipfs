@@ -44,7 +44,7 @@ use futures::{
         oneshot::{channel as oneshot_channel, Sender as OneshotSender},
     },
     sink::SinkExt,
-    stream::{Fuse, Stream},
+    stream::{BoxStream, Fuse, Stream},
 };
 
 use ipfs_bitswap::BitswapEvent;
@@ -799,6 +799,25 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         unixfs::cat(self, starting_point, range)
             .instrument(self.span.clone())
             .await
+    }
+
+    /// Add a file through a stream of data
+    pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> Result<IpfsPath, Error> {
+        unixfs::add_file(self, path, None)
+            .instrument(self.span.clone())
+            .await
+    }
+
+    /// Add a file through a stream of data
+    pub async fn add_unixfs(&self, stream: BoxStream<'static, Vec<u8>>) -> Result<IpfsPath, Error> {
+        unixfs::add(self, stream, None)
+            .instrument(self.span.clone())
+            .await
+    }
+
+    /// Add a file through a stream of data
+    pub async fn get_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'static, Vec<u8>>, Error> {
+        anyhow::bail!("Unimplemented")
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dnslink resolution.

@@ -5,9 +5,10 @@
 
 pub use ipfs_unixfs as ll;
 
+mod add;
 mod cat;
+pub use add::{add, add_file, AddOption};
 pub use cat::{cat, StartingPoint, TraversalFailed};
-
 #[cfg(test)]
 mod tests {
     #[test]
