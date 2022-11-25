@@ -7,8 +7,11 @@ use libp2p::dns::TokioDnsConfig;
 use libp2p::identity;
 use libp2p::mplex::MplexConfig;
 use libp2p::noise::{self, NoiseConfig};
+use libp2p::quic::tokio::Transport as TokioQuicTransport;
+use libp2p::quic::Config as QuicConfig;
 use libp2p::relay::v2::client::transport::ClientTransport;
-use libp2p::tcp::{Config as GenTcpConfig, tokio::Transport as TokioTcpTransport};
+use libp2p::swarm::derive_prelude::EitherOutput;
+use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
 use libp2p::yamux::YamuxConfig;
 use libp2p::{PeerId, Transport};
 use std::io::{self, Error, ErrorKind};
@@ -65,6 +68,10 @@ pub fn build_transport(
         .nodelay(no_delay)
         .port_reuse(port_reuse);
 
+    let mut quic_config = QuicConfig::new(&keypair);
+    quic_config.handshake_timeout = Duration::from_secs(1);
+    let quic_transport = TokioQuicTransport::new(quic_config);
+
     let tcp_transport = TokioTcpTransport::new(tcp_config.clone());
     let ws_transport = libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
 
@@ -99,6 +106,13 @@ pub fn build_transport(
             .map_err(|err| Error::new(ErrorKind::Other, err))
             .boxed(),
     };
+
+    let transport = OrTransport::new(quic_transport, transport)
+        .map(|either_output, _| match either_output {
+            EitherOutput::First((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+            EitherOutput::Second((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+        })
+        .boxed();
 
     Ok(transport)
 }
