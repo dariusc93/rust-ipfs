@@ -8,7 +8,7 @@ use libp2p::identity;
 use libp2p::mplex::MplexConfig;
 use libp2p::noise::{self, NoiseConfig};
 use libp2p::relay::v2::client::transport::ClientTransport;
-use libp2p::tcp::{GenTcpConfig, TokioTcpTransport};
+use libp2p::tcp::{Config as GenTcpConfig, tokio::Transport as TokioTcpTransport};
 use libp2p::yamux::YamuxConfig;
 use libp2p::{PeerId, Transport};
 use std::io::{self, Error, ErrorKind};

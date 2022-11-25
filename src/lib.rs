@@ -115,7 +115,7 @@ use libp2p::{
         GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
         KademliaConfig, KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record,
     },
-    mdns::MdnsEvent,
+    mdns::Event as MdnsEvent,
     ping::Config as PingConfig,
     ping::Success as PingSuccess,
     swarm::{dial_opts::DialOpts, DialError},
@@ -816,7 +816,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Add a file through a stream of data
-    pub async fn get_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'static, Vec<u8>>, Error> {
+    pub async fn get_unixfs(&self, _: IpfsPath) -> Result<BoxStream<'static, Vec<u8>>, Error> {
         anyhow::bail!("Unimplemented")
     }
 

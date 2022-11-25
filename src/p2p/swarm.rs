@@ -621,8 +621,7 @@ mod tests {
         let peer_id = key.public().to_peer_id();
         let transport = build_transport(key, None, Default::default()).unwrap();
 
-        let swarm = SwarmBuilder::new(transport, SwarmApi::default(), peer_id)
-            .executor(Box::new(ThreadLocalTokio))
+        let swarm = SwarmBuilder::with_executor(transport, SwarmApi::default(), peer_id, ThreadLocalTokio)
             .build();
         (peer_id, swarm)
     }
