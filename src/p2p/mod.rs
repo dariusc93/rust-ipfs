@@ -203,12 +203,10 @@ pub async fn create_swarm(
     let transport = transport::build_transport(keypair, relay_transport, transport_config)?;
 
     // Create a Swarm
-    let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer_id)
-        .connection_limits(swarm_config.connection)
+    let swarm = libp2p::swarm::SwarmBuilder::with_executor(transport, behaviour, peer_id, SpannedExecutor(span)).connection_limits(swarm_config.connection)
         .notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
         .connection_event_buffer_size(swarm_config.connection_event_buffer_size)
         .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
-        .executor(Box::new(SpannedExecutor(span)))
         .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
         .build();
 
@@ -217,7 +215,7 @@ pub async fn create_swarm(
 
 struct SpannedExecutor(Span);
 
-impl libp2p::core::Executor for SpannedExecutor {
+impl libp2p::swarm::Executor for SpannedExecutor {
     fn exec(
         &self,
         future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static + Send>>,

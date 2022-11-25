@@ -19,7 +19,7 @@ use libp2p::kad::record::{
     Record,
 };
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
-use libp2p::mdns::{MdnsConfig, MdnsEvent, TokioMdns as Mdns};
+use libp2p::mdns::{Config as MdnsConfig, Event as MdnsEvent, tokio::Behaviour as Mdns};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
@@ -32,7 +32,7 @@ use std::num::NonZeroU32;
 use std::time::Duration;
 
 /// Behaviour type.
-#[derive(libp2p::NetworkBehaviour)]
+#[derive(NetworkBehaviour)]
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct Behaviour {
     pub mdns: Toggle<Mdns>,
@@ -139,6 +139,8 @@ pub enum KadResult {
     Peers(Vec<PeerId>),
     /// The query successfully returns a `GetRecord` result.
     Records(Vec<Record>),
+    ///
+    Record(Record),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

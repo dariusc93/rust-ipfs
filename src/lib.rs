@@ -1787,7 +1787,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             InboundRequest { request } => {
                                 trace!("kad: inbound {:?} request handled", request);
                             }
-                            OutboundQueryCompleted { result, id, .. } => {
+                            OutboundQueryProgressed { result, id, .. } => {
                                 // make sure the query is exhausted
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
                                     match result {
@@ -1853,10 +1853,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             );
                                         }
                                     }
-                                    GetProviders(Ok(GetProvidersOk {
+                                    GetProviders(Ok(GetProvidersOk::FoundProviders{
                                         key: _,
                                         providers,
-                                        closest_peers: _,
                                     })) => {
                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
                                             let providers =
@@ -1868,6 +1867,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                             );
                                         }
                                     }
+                                    GetProviders(Ok(GetProvidersOk::FinishedWithNoAdditionalRecord { .. })) => {},
                                     GetProviders(Err(GetProvidersError::Timeout {
                                         key, ..
                                     })) => {
@@ -1911,16 +1911,17 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                             key
                                         );
                                     }
-                                    GetRecord(Ok(GetRecordOk { records, .. })) => {
+                                    GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            let records =
-                                                records.into_iter().map(|rec| rec.record).collect();
+                                            // let records =
+                                            //     records.into_iter().map(|rec| rec.record).collect();
                                             self.kad_subscriptions.finish_subscription(
                                                 id.into(),
-                                                Ok(KadResult::Records(records)),
+                                                Ok(KadResult::Record(record.record)),
                                             );
                                         }
                                     }
+                                    GetRecord(Ok(GetRecordOk::FinishedWithNoAdditionalRecord { .. })) => {},
                                     GetRecord(Err(GetRecordError::NotFound {
                                         key,
                                         closest_peers: _,
@@ -1956,9 +1957,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                         }
                                     }
                                     GetRecord(Err(GetRecordError::Timeout {
-                                        key,
-                                        records: _,
-                                        quorum: _,
+                                        key
                                     })) => {
                                         let key = multibase::encode(Base::Base32Lower, key);
                                         warn!("kad: timed out while trying to get key {}", key);
@@ -2442,8 +2441,8 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         };
                         let _ = ret.send(future);
                     }
-                    IpfsEvent::DhtGet(key, quorum, ret) => {
-                        let id = self.swarm.behaviour_mut().kademlia.get_record(key, quorum);
+                    IpfsEvent::DhtGet(key,_, ret) => {
+                        let id = self.swarm.behaviour_mut().kademlia.get_record(key);
 
                         let future = self.kad_subscriptions.create_subscription(id.into(), None);
                         let _ = ret.send(future);

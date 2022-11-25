@@ -634,7 +634,7 @@ mod tests {
     // use tokio, but from a futures-executor threadpool, which is outside of tokio context.
     struct ThreadLocalTokio;
 
-    impl libp2p::core::Executor for ThreadLocalTokio {
+    impl libp2p::swarm::Executor for ThreadLocalTokio {
         fn exec(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) {
             tokio::task::spawn(future);
         }
