@@ -63,7 +63,6 @@ tokio = { default-features = false, features = [
     "sync",
 ], version = "1" }
 tokio-stream = { version = "0.1", features = ["fs"] }
-tokio-util = { version = "0.7" }
 tokio-util = { version = "0.7", features = ["full"] }
 tracing = { default-features = false, features = ["log"], version = "0.1" }
 tracing-futures = { default-features = false, features = [
