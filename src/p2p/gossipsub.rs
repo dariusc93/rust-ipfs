@@ -10,8 +10,6 @@ use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
 use libp2p::core::{
-    connection::{ConnectedPoint, ConnectionId},
-    transport::ListenerId,
     Multiaddr, PeerId,
 };
 
@@ -20,7 +18,7 @@ use libp2p::gossipsub::{
     MessageId, TopicHash,
 };
 use libp2p::swarm::{
-    ConnectionHandler, DialError, NetworkBehaviour, NetworkBehaviourAction, PollParameters,
+    ConnectionHandler, NetworkBehaviour, NetworkBehaviourAction, PollParameters,
 };
 
 /// Currently a thin wrapper around Gossipsub.
@@ -243,104 +241,8 @@ impl NetworkBehaviour for GossipsubStream {
         self.gossipsub.addresses_of_peer(peer_id)
     }
 
-    fn inject_connection_established(
-        &mut self,
-        peer_id: &PeerId,
-        connection_id: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        failed_addresses: Option<&Vec<Multiaddr>>,
-        other_established: usize,
-    ) {
-        self.gossipsub.inject_connection_established(
-            peer_id,
-            connection_id,
-            endpoint,
-            failed_addresses,
-            other_established,
-        )
-    }
-
-    fn inject_connection_closed(
-        &mut self,
-        peer_id: &PeerId,
-        connection_id: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        handler: Self::ConnectionHandler,
-        remaining_established: usize,
-    ) {
-        self.gossipsub.inject_connection_closed(
-            peer_id,
-            connection_id,
-            endpoint,
-            handler,
-            remaining_established,
-        )
-    }
-
-    fn inject_event(
-        &mut self,
-        peer_id: PeerId,
-        connection: ConnectionId,
-        event: <Self::ConnectionHandler as ConnectionHandler>::OutEvent,
-    ) {
-        self.gossipsub.inject_event(peer_id, connection, event)
-    }
-
-    fn inject_dial_failure(
-        &mut self,
-        peer_id: Option<PeerId>,
-        handler: Self::ConnectionHandler,
-        error: &DialError,
-    ) {
-        self.gossipsub.inject_dial_failure(peer_id, handler, error)
-    }
-
-    fn inject_new_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.gossipsub.inject_new_listen_addr(id, addr)
-    }
-
-    fn inject_expired_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.gossipsub.inject_expired_listen_addr(id, addr)
-    }
-
-    fn inject_new_external_addr(&mut self, addr: &Multiaddr) {
-        self.gossipsub.inject_new_external_addr(addr)
-    }
-
-    fn inject_listener_error(&mut self, id: ListenerId, err: &(dyn std::error::Error + 'static)) {
-        self.gossipsub.inject_listener_error(id, err)
-    }
-
-    fn inject_address_change(
-        &mut self,
-        peer: &PeerId,
-        id: &ConnectionId,
-        old: &ConnectedPoint,
-        new: &ConnectedPoint,
-    ) {
-        self.gossipsub.inject_address_change(peer, id, old, new)
-    }
-
-    fn inject_listen_failure(
-        &mut self,
-        local_addr: &Multiaddr,
-        send_back_addr: &Multiaddr,
-        handler: Self::ConnectionHandler,
-    ) {
-        self.gossipsub
-            .inject_listen_failure(local_addr, send_back_addr, handler)
-    }
-
-    fn inject_new_listener(&mut self, id: ListenerId) {
-        self.gossipsub.inject_new_listener(id)
-    }
-
-    fn inject_listener_closed(&mut self, id: ListenerId, reason: Result<(), &std::io::Error>) {
-        self.gossipsub.inject_listener_closed(id, reason)
-    }
-
-    fn inject_expired_external_addr(&mut self, addr: &Multiaddr) {
-        self.gossipsub.inject_expired_external_addr(addr)
+    fn on_swarm_event(&mut self, event: libp2p::swarm::derive_prelude::FromSwarm<Self::ConnectionHandler>) {
+        self.gossipsub.on_swarm_event(event)
     }
 
     fn poll(
