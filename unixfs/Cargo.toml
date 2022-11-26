@@ -5,7 +5,7 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 name = "ipfs-unixfs"
 readme = "README.md"
-repository = "https://github.com/rs-ipfs/rust-ipfs"
+repository = "https://github.com/dariusc93/rust-ipfs"
 version = "0.2.0"
 
 [features]
