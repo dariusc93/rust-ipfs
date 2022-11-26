@@ -1,4 +1,6 @@
 //! P2P handling for IPFS nodes.
+mod provider_stream;
+
 use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
 
