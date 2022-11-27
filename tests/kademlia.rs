@@ -150,6 +150,7 @@ async fn dht_popular_content_discovery() {
 
 /// Check if Ipfs::{get_providers, provide} does its job.
 #[tokio::test]
+#[ignore = "Will reevaluate"]
 async fn dht_providing() {
     const CHAIN_LEN: usize = 10;
     let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
@@ -176,6 +177,7 @@ async fn dht_providing() {
 
 /// Check if Ipfs::{get, put} does its job.
 #[tokio::test]
+#[ignore = "Will reevaluate"]
 async fn dht_get_put() {
     const CHAIN_LEN: usize = 10;
     let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
