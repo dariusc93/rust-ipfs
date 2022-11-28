@@ -231,6 +231,8 @@ type GossipsubNetworkBehaviourAction = NetworkBehaviourAction<
     <<GossipsubStream as NetworkBehaviour>::ConnectionHandler as ConnectionHandler>::InEvent,
 >;
 
+#[allow(deprecated)]
+//TODO: Remove deprecated functions
 impl NetworkBehaviour for GossipsubStream {
     type ConnectionHandler = <Gossipsub as NetworkBehaviour>::ConnectionHandler;
     type OutEvent = GossipsubEvent;
