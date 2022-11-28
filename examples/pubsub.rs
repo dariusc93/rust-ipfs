@@ -25,21 +25,31 @@ async fn main() -> anyhow::Result<()> {
 
     ipfs.default_bootstrap().await?;
     //Until autorelay is implemented and/or functions to use relay more directly, we will manually listen to the relays (using libp2p bootstrap, though you can add your own)
-    let list = ipfs.get_bootstraps().await?;
-    for addr in list {
-        let circuit = addr.with(Protocol::P2pCircuit);
-        ipfs.swarm_listen_on(circuit).await?;
-    }
-    if ipfs.direct_bootstrap().await.is_err() {
-        //Due to no peers added to kad, we will not be able to bootstrap
-    }
+
+    tokio::spawn({
+        let ipfs = ipfs.clone();
+        async move {
+            let list = ipfs.get_bootstraps().await?;
+            for addr in list {
+                let circuit = addr.with(Protocol::P2pCircuit);
+                ipfs.swarm_listen_on(circuit).await?;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+
+            if ipfs.bootstrap().await.is_err() {
+                //Due to no peers added to kad, we will not be able to bootstrap
+            }
+            Ok::<_, anyhow::Error>(())
+        }
+    });
+
     let stream = ipfs.pubsub_subscribe(topic.to_string()).await?;
     pin_mut!(stream);
 
-    {
+    tokio::spawn({
         let ipfs = ipfs.clone();
-        tokio::spawn(async move { if let Err(_) = topic_discovery(ipfs, topic).await {} });
-    }
+        async move { if let Err(_) = topic_discovery(ipfs, topic).await {} }
+    });
 
     tokio::task::yield_now().await;
 
@@ -54,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
             },
             data = stream.next() => {
                 if let Some(msg) = data {
-                    println!("{}: {}", msg.source.unwrap(), String::from_utf8_lossy(&msg.data));
+                    println!("{}", String::from_utf8_lossy(&msg.data));
                 }
             }
         }
