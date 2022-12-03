@@ -12,7 +12,7 @@ version = "0.2.0"
 default = ["filetime"]
 
 [dependencies]
-libipld = "0.14"
+libipld = "0.15"
 either = { default-features = false, version = "1.5" }
 filetime = { optional = true, version = "0.2.12" }
 quick-protobuf = { default-features = false, features = [
