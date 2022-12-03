@@ -19,6 +19,7 @@ impl Default for AddOption {
     }
 }
 
+#[inline]
 pub async fn add_file<'a, Types, MaybeOwned, P: AsRef<Path>>(
     ipfs: MaybeOwned,
     path: P,
@@ -39,6 +40,7 @@ where
     add(ipfs, stream.boxed(), opt).await
 }
 
+#[inline]
 pub async fn add<'a, Types, MaybeOwned>(
     ipfs: MaybeOwned,
     mut stream: BoxStream<'a, Vec<u8>>,

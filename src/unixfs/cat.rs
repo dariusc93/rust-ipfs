@@ -15,6 +15,7 @@ use std::ops::Range;
 /// be helpful in some contexts, like the http.
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
+#[inline]
 pub async fn cat<'a, Types, MaybeOwned>(
     ipfs: MaybeOwned,
     starting_point: impl Into<StartingPoint>,
