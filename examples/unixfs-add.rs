@@ -1,19 +1,9 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use futures::{pin_mut, StreamExt};
-use ipfs::{
-    unixfs::ll::{
-        dir::builder::{BufferingTreeBuilder, TreeOptions},
-        file::adder::FileAdder,
-    },
-    Block,
-};
-use ipfs::{Ipfs, IpfsOptions, IpfsPath, TestTypes, UninitializedIpfs};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    task,
-};
+use futures::StreamExt;
+
+use ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsOptions, TestTypes, UninitializedIpfs};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-add")]
@@ -29,99 +19,43 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let opts = IpfsOptions::inmemory_with_generated_keys();
+    let opts = IpfsOptions {
+        mdns: true,
+        ..Default::default()
+    };
 
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
-    task::spawn(fut);
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).spawn_start().await?;
 
-    let mut adder = FileAdder::default();
+    let mut stream = ipfs.add_file_unixfs(opt.file).await?;
 
-    let file = tokio::fs::File::open(&opt.file).await?;
-
-    let mut file_buf = BufReader::with_capacity(adder.size_hint(), file);
-
-    let mut written = 0;
-    let mut last_cid = None;
-
-    {
-        let ipfs = ipfs.clone();
-        loop {
-            match file_buf.fill_buf().await? {
-                buffer if buffer.is_empty() => {
-                    let blocks = adder.finish();
-                    for (cid, block) in blocks {
-                        let block = Block::new(cid, block)?;
-                        let cid = ipfs.put_block(block).await?;
-                        last_cid = Some(cid);
-                    }
-                    break;
+    while let Some(status) = stream.next().await {
+        match status {
+            UnixfsStatus::ProgressStatus {
+                written,
+                total_size,
+            } => match total_size {
+                Some(size) => println!("{written} out of {size} stored"),
+                None => println!("{written} been stored"),
+            },
+            UnixfsStatus::FailedStatus {
+                written,
+                total_size,
+                error,
+            } => {
+                match total_size {
+                    Some(size) => println!("failed with {written} out of {size} stored"),
+                    None => println!("failed with {written} stored"),
                 }
-                buffer => {
-                    let mut total = 0;
 
-                    while total < buffer.len() {
-                        let (blocks, consumed) = adder.push(&buffer[total..]);
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let _cid = ipfs.put_block(block).await?;
-                            // last_cid = Some(_cid);
-                        }
-                        total += consumed;
-                        written += consumed;
-                    }
-                    file_buf.consume(total);
+                if let Some(error) = error {
+                    anyhow::bail!(error);
+                } else {
+                    anyhow::bail!("Unknown error while writting to blockstore");
                 }
             }
-        }
-    }
-
-    let last_cid = last_cid.unwrap();
-
-    let mut tree_opts = TreeOptions::default();
-    tree_opts.wrap_with_directory();
-    let mut tree = BufferingTreeBuilder::new(tree_opts);
-
-    let filename = opt.file.file_name().unwrap().to_string_lossy();
-
-    tree.put_link(&filename, last_cid, written as u64)?;
-
-    let mut iter = tree.build();
-    let mut last_cid = None;
-
-    while let Some(node) = iter.next_borrowed() {
-        let node = node?;
-        let block = Block::new(*node.cid, node.block.into())?;
-
-        ipfs.put_block(block).await?;
-
-        last_cid = Some(*node.cid);
-    }
-
-    let last_cid = last_cid.expect("Last cid is always provided");
-
-    println!("File located at /ipfs/{last_cid}/{filename}");
-    //Fetching file using cat_unixfs
-    let stream = ipfs
-        .cat_unixfs(IpfsPath::from(last_cid).sub_path(&filename)?, None)
-        .await?;
-
-    pin_mut!(stream);
-
-    if let Some(dest) = opt.dest {
-        let mut file = tokio::fs::File::create(&dest).await?;
-        while let Some(data) = stream.next().await {
-            let bytes = data?;
-            file.write_all(&bytes).await?;
-            file.flush().await?;
-        }
-
-        println!("Written file to {}", dest.display());
-    } else {
-        let mut stdout = tokio::io::stdout();
-
-        while let Some(data) = stream.next().await {
-            let bytes = data?;
-            stdout.write_all(&bytes).await?;
+            UnixfsStatus::CompletedStatus { path, written, .. } => {
+                println!("{written} been stored with path {path}");
+            }
         }
     }
 

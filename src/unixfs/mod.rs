@@ -9,6 +9,27 @@ mod add;
 mod cat;
 pub use add::{add, add_file, AddOption};
 pub use cat::{cat, StartingPoint, TraversalFailed};
+
+use crate::IpfsPath;
+
+#[derive(Debug)]
+pub enum UnixfsStatus {
+    ProgressStatus {
+        written: usize,
+        total_size: Option<usize>,
+    },
+    CompletedStatus {
+        path: IpfsPath,
+        written: usize,
+        total_size: Option<usize>,
+    },
+    FailedStatus {
+        written: usize,
+        total_size: Option<usize>,
+        error: Option<anyhow::Error>,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

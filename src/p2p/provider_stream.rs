@@ -13,6 +13,7 @@ pub struct ProviderStream {
 }
 
 impl ProviderStream {
+    #[allow(dead_code)]
     pub fn new(rx: UnboundedReceiver<PeerId>) -> Self {
         Self {
             finished: false,

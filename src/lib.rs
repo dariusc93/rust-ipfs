@@ -52,6 +52,7 @@ use p2p::{IdentifyConfiguration, KadStoreConfig, PeerInfo, RelayConfig};
 use subscription::SubscriptionRegistry;
 use tracing::Span;
 use tracing_futures::Instrument;
+use unixfs::UnixfsStatus;
 
 use std::{
     borrow::Borrow,
@@ -59,7 +60,7 @@ use std::{
     env, fmt,
     future::Future,
     ops::{Deref, DerefMut, Range},
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -804,21 +805,31 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Add a file through a stream of data
-    pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> Result<IpfsPath, Error> {
+    pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
+        &self,
+        path: P,
+    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
         unixfs::add_file(self, path, None)
             .instrument(self.span.clone())
             .await
     }
 
     /// Add a file through a stream of data
-    pub async fn add_unixfs(&self, stream: BoxStream<'static, Vec<u8>>) -> Result<IpfsPath, Error> {
-        unixfs::add(self, stream, None)
+    pub async fn add_unixfs(
+        &self,
+        stream: BoxStream<'static, Vec<u8>>,
+    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
+        unixfs::add(self, None, stream, None)
             .instrument(self.span.clone())
             .await
     }
 
     /// Add a file through a stream of data
-    pub async fn get_unixfs(&self, _: IpfsPath) -> Result<BoxStream<'static, Vec<u8>>, Error> {
+    pub async fn get_unixfs<P: AsRef<Path>>(
+        &self,
+        _: IpfsPath,
+        _dest: P,
+    ) -> Result<BoxStream<'_, Vec<u8>>, Error> {
         anyhow::bail!("Unimplemented")
     }
 
@@ -1855,7 +1866,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             );
                                         }
                                     }
-                                    GetProviders(Ok(GetProvidersOk::FoundProviders{
+                                    GetProviders(Ok(GetProvidersOk::FoundProviders {
                                         key: _,
                                         providers,
                                     })) => {
@@ -1869,7 +1880,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                             );
                                         }
                                     }
-                                    GetProviders(Ok(GetProvidersOk::FinishedWithNoAdditionalRecord { .. })) => {},
+                                    GetProviders(Ok(
+                                        GetProvidersOk::FinishedWithNoAdditionalRecord { .. },
+                                    )) => {}
                                     GetProviders(Err(GetProvidersError::Timeout {
                                         key, ..
                                     })) => {
@@ -1923,7 +1936,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                             );
                                         }
                                     }
-                                    GetRecord(Ok(GetRecordOk::FinishedWithNoAdditionalRecord { .. })) => {},
+                                    GetRecord(Ok(
+                                        GetRecordOk::FinishedWithNoAdditionalRecord { .. },
+                                    )) => {}
                                     GetRecord(Err(GetRecordError::NotFound {
                                         key,
                                         closest_peers: _,
@@ -1958,9 +1973,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             );
                                         }
                                     }
-                                    GetRecord(Err(GetRecordError::Timeout {
-                                        key
-                                    })) => {
+                                    GetRecord(Err(GetRecordError::Timeout { key })) => {
                                         let key = multibase::encode(Base::Base32Lower, key);
                                         warn!("kad: timed out while trying to get key {}", key);
 
@@ -2443,7 +2456,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         };
                         let _ = ret.send(future);
                     }
-                    IpfsEvent::DhtGet(key,_, ret) => {
+                    IpfsEvent::DhtGet(key, _, ret) => {
                         let id = self.swarm.behaviour_mut().kademlia.get_record(key);
 
                         let future = self.kad_subscriptions.create_subscription(id.into(), None);
