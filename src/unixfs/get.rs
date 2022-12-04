@@ -30,8 +30,6 @@ where
     let mut walker = Walker::new(*cid, root_name);
 
     let stream = async_stream::stream! {
-        let ipfs = ipfs.clone();
-        let path = path.clone();
         let mut cache = None;
         let mut total_size = None;
         let mut written = 0;
