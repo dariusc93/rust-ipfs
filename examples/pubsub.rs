@@ -46,10 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let stream = ipfs.pubsub_subscribe(topic.to_string()).await?;
     pin_mut!(stream);
 
-    tokio::spawn({
-        let ipfs = ipfs.clone();
-        async move { if let Err(_) = topic_discovery(ipfs, topic).await {} }
-    });
+    tokio::spawn(topic_discovery(ipfs.clone(), topic));
 
     tokio::task::yield_now().await;
 
@@ -78,7 +75,7 @@ async fn topic_discovery(ipfs: Ipfs<TestTypes>, topic: &str) -> anyhow::Result<(
     let cid = ipfs.put_dag(ipld!(topic)).await?;
     ipfs.provide(cid).await?;
     loop {
-        if let Err(_) = ipfs.get_providers(cid).await {}
+        ipfs.get_providers(cid).await?;
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
