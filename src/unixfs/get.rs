@@ -8,7 +8,6 @@ use crate::{Ipfs, IpfsPath, IpfsTypes};
 
 use super::UnixfsStatus;
 
-#[inline]
 pub async fn get<'a, Types, MaybeOwned, P: AsRef<Path>>(
     ipfs: MaybeOwned,
     path: IpfsPath,
@@ -18,10 +17,6 @@ where
     Types: IpfsTypes,
     MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
 {
-    let dest = dest.as_ref();
-    if dest.is_file() {
-        anyhow::bail!(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
-    }
     let mut file = tokio::fs::File::create(dest).await?;
     let ipfs = ipfs.borrow().clone();
 
@@ -51,16 +46,11 @@ where
             };
             let block_data = block.data();
 
-            match walker.next(&block_data, &mut cache) {
+            match walker.next(block_data, &mut cache) {
                 Ok(ContinuedWalk::Bucket(..)) => {}
                 Ok(ContinuedWalk::File(segment, _, _, _, size)) => {
 
                     if segment.is_first() {
-
-                        if let Err(e) = file.set_len(size).await {
-                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
-                            return;
-                        }
                         total_size = Some(size as usize);
                         yield UnixfsStatus::ProgressStatus { written, total_size };
                     }
@@ -75,7 +65,7 @@ where
                     while n < total {
                         let next = &slice[n..];
                         n += next.len();
-                        if let Err(e) = file.write_all(&next).await {
+                        if let Err(e) = file.write_all(next).await {
                             yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
                             return;
                         }
