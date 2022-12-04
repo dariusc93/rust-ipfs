@@ -1,9 +1,11 @@
-use std::{path::PathBuf, convert::TryInto};
+use std::{convert::TryInto, path::PathBuf};
 
 use clap::Parser;
 use futures::StreamExt;
 
-use ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsOptions, TestTypes, UninitializedIpfs, IpfsPath, Multiaddr};
+use ipfs::{
+    unixfs::UnixfsStatus, Ipfs, IpfsOptions, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs,
+};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-add")]
@@ -11,9 +13,10 @@ struct Opt {
     path: IpfsPath,
     dest: PathBuf,
     #[clap(long)]
-    connect: Option<Multiaddr>
+    connect: Option<Multiaddr>,
+    #[clap(long)]
+    default_bootstrap: bool,
 }
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,7 +31,9 @@ async fn main() -> anyhow::Result<()> {
 
     let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).spawn_start().await?;
 
-    ipfs.default_bootstrap().await?;
+    if opt.default_bootstrap {
+        ipfs.default_bootstrap().await?;
+    }
 
     if let Some(addr) = opt.connect {
         ipfs.connect(addr.try_into()?).await?;
