@@ -81,7 +81,7 @@ impl DataStore for FsDataStore {
     }
 
     async fn wipe(&self) {
-        todo!()
+        
     }
 }
 

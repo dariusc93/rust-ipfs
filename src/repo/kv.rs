@@ -89,7 +89,6 @@ impl DataStore for KvDataStore {
 
     /// Wipes the datastore.
     async fn wipe(&self) {
-        todo!()
     }
 }
 
