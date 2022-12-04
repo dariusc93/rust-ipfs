@@ -13,7 +13,7 @@ pub async fn get<'a, Types, MaybeOwned, P: AsRef<Path>>(
     ipfs: MaybeOwned,
     path: IpfsPath,
     dest: P,
-) -> anyhow::Result<BoxStream<'a, anyhow::Result<UnixfsStatus>>>
+) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
 where
     Types: IpfsTypes,
     MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
@@ -34,7 +34,7 @@ where
 
     let mut walker = Walker::new(*cid, root_name);
 
-    let stream = async_stream::try_stream! {
+    let stream = async_stream::stream! {
         let ipfs = ipfs.clone();
         let path = path.clone();
         let mut cache = None;
@@ -42,16 +42,25 @@ where
         let mut written = 0;
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = ipfs.get_block(next).await?;
+            let block = match ipfs.get_block(next).await {
+                Ok(block) => block,
+                Err(e) => {
+                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                    return;
+                } 
+            };
             let block_data = block.data();
 
-            match walker.next(&block_data, &mut cache)? {
-                ContinuedWalk::Bucket(..) => {}
-                ContinuedWalk::File(segment, _, path, metadata, size) => {
+            match walker.next(&block_data, &mut cache) {
+                Ok(ContinuedWalk::Bucket(..)) => {}
+                Ok(ContinuedWalk::File(segment, _, _, _, size)) => {
 
                     if segment.is_first() {
 
-                        file.set_len(size).await?;
+                        if let Err(e) = file.set_len(size).await {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                            return;
+                        }
                         total_size = Some(size as usize);
                         yield UnixfsStatus::ProgressStatus { written, total_size };
                     }
@@ -66,20 +75,29 @@ where
                     while n < total {
                         let next = &slice[n..];
                         n += next.len();
-                        file.write_all(&next).await?;
-                        file.sync_all().await?;
+                        if let Err(e) = file.write_all(&next).await {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                            return;
+                        }
+                        if let Err(e) = file.sync_all().await {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                            return;
+                        }
 
                         written += n;
                         yield UnixfsStatus::ProgressStatus { written, total_size };
                     }
 
                     if segment.is_last() {
-                        file.flush().await?;
                         yield UnixfsStatus::ProgressStatus { written, total_size };
                     }
                 },
-                ContinuedWalk::Directory( .. ) | ContinuedWalk::RootDirectory( .. ) => {}, //TODO
-                ContinuedWalk::Symlink( .. ) => {},
+                Ok(ContinuedWalk::Directory( .. )) | Ok(ContinuedWalk::RootDirectory( .. )) => {}, //TODO
+                Ok(ContinuedWalk::Symlink( .. )) => {},
+                Err(e) => {
+                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                    return;
+                }
             };
         };
 
