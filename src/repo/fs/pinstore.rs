@@ -21,7 +21,7 @@ use tokio_util::either::Either;
 #[async_trait]
 impl PinStore for FsDataStore {
     async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
-        let path = pin_path(self.path.clone(), cid);
+        let path = pin_path(self.path.join("pins"), cid);
 
         if read_direct_or_recursive(path).await?.is_some() {
             return Ok(true);
@@ -40,7 +40,8 @@ impl PinStore for FsDataStore {
         while let Some(recursive) = StreamExt::try_next(&mut st).await? {
             // TODO: it might be much better to just deserialize the vec one by one and comparing while
             // going
-            let (_, references) = read_recursively_pinned(self.path.clone(), recursive).await?;
+            let (_, references) =
+                read_recursively_pinned(self.path.join("pins"), recursive).await?;
 
             // if we always wrote down the cids in some order we might be able to binary search?
             if references.into_iter().any(move |x| x == *cid) {
@@ -54,7 +55,7 @@ impl PinStore for FsDataStore {
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
         let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
 
-        let mut path = pin_path(self.path.clone(), target);
+        let mut path = pin_path(self.path.join("pins"), target);
 
         let span = tracing::Span::current();
 
@@ -90,7 +91,7 @@ impl PinStore for FsDataStore {
 
         let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
 
-        let mut path = pin_path(self.path.clone(), target);
+        let mut path = pin_path(self.path.join("pins"), target);
 
         let span = tracing::Span::current();
 
@@ -149,7 +150,7 @@ impl PinStore for FsDataStore {
     async fn remove_direct_pin(&self, target: &Cid) -> Result<(), Error> {
         let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
 
-        let mut path = pin_path(self.path.clone(), target);
+        let mut path = pin_path(self.path.join("pins"), target);
 
         let span = tracing::Span::current();
 
@@ -184,7 +185,7 @@ impl PinStore for FsDataStore {
     async fn remove_recursive_pin(&self, target: &Cid, _: References<'_>) -> Result<(), Error> {
         let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
 
-        let mut path = pin_path(self.path.clone(), target);
+        let mut path = pin_path(self.path.join("pins"), target);
 
         let span = tracing::Span::current();
 
@@ -241,7 +242,7 @@ impl PinStore for FsDataStore {
         // no locking, dirty reads are probably good enough until gc
         let cids = self.list_pinfiles().await;
 
-        let path = self.path.clone();
+        let path = self.path.join("pins");
 
         let requirement = PinModeRequirement::from(requirement);
 
@@ -345,7 +346,7 @@ impl PinStore for FsDataStore {
 
         let (mut response, mut remaining) = if check_direct {
             // find the recursive and direct ones by just seeing if the files exist
-            let base = self.path.clone();
+            let base = self.path.join("pins");
             tokio::task::spawn_blocking(move || {
                 for (i, cid) in ids.into_iter().enumerate() {
                     let mut path = pin_path(base.clone(), &cid);
@@ -408,7 +409,7 @@ impl PinStore for FsDataStore {
                         Ok(None)
                     })
                 })
-                .map_ok(|cid| read_recursively_pinned(self.path.clone(), cid))
+                .map_ok(|cid| read_recursively_pinned(self.path.join("pins"), cid))
                 .try_buffer_unordered(4);
 
             futures::pin_mut!(recursives);
@@ -444,7 +445,7 @@ impl FsDataStore {
     async fn list_pinfiles(
         &self,
     ) -> impl futures::stream::Stream<Item = Result<(Cid, PinMode), Error>> + 'static {
-        let stream = match tokio::fs::read_dir(self.path.clone()).await {
+        let stream = match tokio::fs::read_dir(self.path.join("pins")).await {
             Ok(st) => Either::Left(ReadDirStream::new(st)),
             // make this into a stream which will only yield the initial error
             Err(e) => Either::Right(futures::stream::once(futures::future::ready(Err(e)))),

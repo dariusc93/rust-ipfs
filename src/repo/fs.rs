@@ -47,8 +47,7 @@ pub struct FsDataStore {
 /// DataStore trait itself.
 #[async_trait]
 impl DataStore for FsDataStore {
-    fn new(mut root: PathBuf) -> Self {
-        root.push("pins");
+    fn new(root: PathBuf) -> Self {
         FsDataStore {
             path: root,
             lock: Arc::new(Semaphore::new(1)),
@@ -80,9 +79,7 @@ impl DataStore for FsDataStore {
         Err(anyhow::anyhow!("not implemented"))
     }
 
-    async fn wipe(&self) {
-        
-    }
+    async fn wipe(&self) {}
 }
 
 #[derive(Debug)]

@@ -520,7 +520,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
         let data_store = &self.data_store;
         let key = ipns.to_owned();
         // FIXME: needless vec<u8> creation
-        let bytes = data_store.get(Column::Ipns, &key.to_bytes()[..]).await?;
+        let bytes = data_store.get(Column::Ipns, &key.to_bytes()).await?;
         match bytes {
             Some(ref bytes) => {
                 let string = String::from_utf8_lossy(bytes);
@@ -537,7 +537,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
         let value = string.as_bytes();
         // FIXME: needless vec<u8> creation
         self.data_store
-            .put(Column::Ipns, &ipns.to_bytes()[..], value)
+            .put(Column::Ipns, &ipns.to_bytes(), value)
             .await
     }
 
@@ -546,7 +546,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
         // FIXME: us needing to clone the peerid is wasteful to pass it as a reference only to be
         // cloned again
         self.data_store
-            .remove(Column::Ipns, &ipns.to_bytes()[..])
+            .remove(Column::Ipns, &ipns.to_bytes())
             .await
     }
 
