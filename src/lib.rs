@@ -997,7 +997,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await
     }
 
-    /// Returns the peer identity information. If no peer id is supplied the local identity is supplied
+    /// Returns the peer identity information. If no peer id is supplied the local node identity is used.
     pub async fn identity(&self, peer_id: Option<PeerId>) -> Result<PeerInfo, Error> {
         async move {
             match peer_id {
@@ -1067,15 +1067,6 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         }
         .instrument(self.span.clone())
         .await
-    }
-
-    /// Returns [`PeerInfo`] of the given peer id. If it cannot be found locally, there will be an attempt to find it on Kad, otherwise it will return
-    /// Ok(None).
-    #[deprecated = "Use Ipfs::identity"]
-    pub async fn find_peer_info(&self, peer_id: PeerId) -> Result<PeerInfo, Error> {
-        async move { self.identity(Some(peer_id)).await }
-            .instrument(self.span.clone())
-            .await
     }
 
     /// Subscribes to a given topic. Can be done at most once without unsubscribing in the between.
