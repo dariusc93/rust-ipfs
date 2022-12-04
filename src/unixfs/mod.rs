@@ -6,6 +6,7 @@
 pub use ipfs_unixfs as ll;
 
 mod add;
+mod get;
 mod cat;
 pub use add::{add, add_file, AddOption};
 pub use cat::{cat, StartingPoint, TraversalFailed};
