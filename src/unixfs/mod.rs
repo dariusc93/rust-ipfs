@@ -10,6 +10,7 @@ mod get;
 mod cat;
 pub use add::{add, add_file, AddOption};
 pub use cat::{cat, StartingPoint, TraversalFailed};
+pub use get::get;
 
 use crate::IpfsPath;
 

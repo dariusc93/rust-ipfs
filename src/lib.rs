@@ -827,10 +827,12 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Add a file through a stream of data
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
-        _: IpfsPath,
-        _dest: P,
-    ) -> Result<BoxStream<'_, Vec<u8>>, Error> {
-        anyhow::bail!("Unimplemented")
+        path: IpfsPath,
+        dest: P,
+    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
+        unixfs::get(self, path, dest)
+            .instrument(self.span.clone())
+            .await
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dnslink resolution.
