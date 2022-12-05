@@ -807,7 +807,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             .await
     }
 
-    /// Add a file through a stream of data
+    /// Add a file from a path to the blockstore
     pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
         &self,
         path: P,
@@ -817,7 +817,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             .await
     }
 
-    /// Add a file through a stream of data
+    /// Add a file through a stream of data to the blockstore
     pub async fn add_unixfs(
         &self,
         stream: BoxStream<'static, Vec<u8>>,
@@ -827,7 +827,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             .await
     }
 
-    /// Add a file through a stream of data
+    /// Retreive a file and saving it to a path. 
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
         path: IpfsPath,
