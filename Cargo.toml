@@ -112,13 +112,13 @@ tempfile = "3.1.0"
 
 clap = { version = "4.0", features = ["derive"] }
 
-[[bench]]
-name = "hashed-map-cid"
-harness = false
+# [[bench]]
+# name = "hashed-map-cid"
+# harness = false
 
 [workspace]
 members = ["bitswap", "unixfs"]
-exclude = ["http"]
+exclude = ["archived"]
 
 # at least these libp2p components need to be patched if you want to use a local version
 # libp2p = { path = "../libp2p" }

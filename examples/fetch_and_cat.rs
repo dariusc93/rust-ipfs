@@ -1,9 +1,9 @@
 use clap::Parser;
 use futures::pin_mut;
-use futures::stream::StreamExt; 
+use futures::stream::StreamExt;
 use rust_ipfs::p2p::PeerInfo;
 // needed for StreamExt::next
-use rust_ipfs::{Ipfs, IpfsOptions, IpfsPath, TestTypes, UninitializedIpfs, Multiaddr};
+use rust_ipfs::{Ipfs, IpfsOptions, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs};
 use std::process::exit;
 use tokio::io::AsyncWriteExt;
 
@@ -17,13 +17,10 @@ struct Opt {
     default_bootstrappers: bool,
 }
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    println!(
-        "Usage: fetch_and_cat [--default-bootstrappers] <IPFS_PATH | CID> [MULTIADDR]"
-    );
+    println!("Usage: fetch_and_cat [--default-bootstrappers] <IPFS_PATH | CID> [MULTIADDR]");
     println!();
     println!(
         "Example will try to find the file by the given IPFS_PATH and print its contents to stdout."
@@ -33,15 +30,9 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "1. When --default-bootstrappers is given, use default bootstrappers to find the content"
     );
-    println!(
-        "2. When IPFS_PATH and MULTIADDR are given, connect to MULTIADDR to get the file"
-    );
-    println!(
-        "3. When only IPFS_PATH is given, wait to be connected to by another ipfs node"
-    );
+    println!("2. When IPFS_PATH and MULTIADDR are given, connect to MULTIADDR to get the file");
+    println!("3. When only IPFS_PATH is given, wait to be connected to by another ipfs node");
     println!();
-
-
 
     let opt = Opt::parse();
 
@@ -70,7 +61,10 @@ async fn main() -> anyhow::Result<()> {
     } else if let Some(target) = opt.target {
         ipfs.connect(target.try_into()?).await?;
     } else {
-        let PeerInfo { listen_addrs: addresses, ..} = ipfs.identity(None).await?;
+        let PeerInfo {
+            listen_addrs: addresses,
+            ..
+        } = ipfs.identity(None).await?;
         assert!(!addresses.is_empty(), "Zero listening addresses");
 
         eprintln!("Please connect an ipfs node having {} to:\n", opt.path);
