@@ -17,7 +17,7 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
-use ipfs::{Ipfs, IpfsTypes};
+use rust_ipfs::{Ipfs, IpfsTypes};
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;

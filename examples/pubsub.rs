@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use futures::pin_mut;
-use ipfs::{Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
 use libipld::ipld;
 use libp2p::futures::StreamExt;
 use tokio::io::AsyncBufReadExt;

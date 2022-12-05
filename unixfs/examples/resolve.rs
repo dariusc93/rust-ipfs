@@ -1,4 +1,4 @@
-use ipfs_unixfs::dir::{resolve, LookupError, ResolveError};
+use rust_unixfs::dir::{resolve, LookupError, ResolveError};
 use libipld::Cid;
 use std::convert::TryFrom;
 use std::fmt;
@@ -153,7 +153,7 @@ impl IpfsPath {
 
 #[allow(clippy::result_large_err)]
 fn walk(blocks: ShardedBlockStore, mut path: IpfsPath) -> Result<Option<Cid>, Error> {
-    use ipfs_unixfs::dir::MaybeResolved::*;
+    use rust_unixfs::dir::MaybeResolved::*;
 
     let mut buf = Vec::new();
     let mut root = path.take_root().unwrap();

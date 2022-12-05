@@ -1,4 +1,4 @@
-use ipfs::{Ipfs, IpfsOptions, TestTypes, UninitializedIpfs, PublicKey, p2p::PeerInfo};
+use rust_ipfs::{Ipfs, IpfsOptions, TestTypes, UninitializedIpfs, PublicKey, p2p::PeerInfo};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

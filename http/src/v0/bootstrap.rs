@@ -1,5 +1,5 @@
 use crate::v0::support::{with_ipfs, MaybeTimeoutExt, StringError, StringSerialized};
-use ipfs::{Ipfs, IpfsTypes, MultiaddrWithPeerId};
+use rust_ipfs::{Ipfs, IpfsTypes, MultiaddrWithPeerId};
 use serde::{Deserialize, Serialize};
 use warp::{query, Filter, Rejection, Reply};
 

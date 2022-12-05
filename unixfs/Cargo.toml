@@ -1,12 +1,12 @@
 [package]
 authors = ["Rust-IPFS contributors"]
 description = "UnixFs tree support"
-edition = "2018"
+edition = "2021"
 license = "MIT OR Apache-2.0"
-name = "ipfs-unixfs"
+name = "rust-unixfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
-version = "0.2.0"
+version = "0.3.0-alpha"
 
 [features]
 default = ["filetime"]

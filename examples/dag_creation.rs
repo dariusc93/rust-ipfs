@@ -1,5 +1,5 @@
 use futures::join;
-use ipfs::{Ipfs, IpfsOptions, IpfsPath, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsOptions, IpfsPath, TestTypes, UninitializedIpfs};
 use libipld::ipld;
 use tokio::task;
 

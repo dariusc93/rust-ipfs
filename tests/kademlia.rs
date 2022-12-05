@@ -1,9 +1,9 @@
-use ipfs::{p2p::MultiaddrWithPeerId, Block, Node};
 use libipld::{
     multihash::{Code, MultihashDigest},
     Cid, IpldCodec,
 };
 use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
+use rust_ipfs::{p2p::MultiaddrWithPeerId, Block, Node};
 use tokio::time::timeout;
 
 use std::{convert::TryInto, time::Duration};

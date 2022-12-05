@@ -1,7 +1,7 @@
 use futures::future::{pending, select, Either, FutureExt};
 use futures::future::{AbortHandle, Abortable};
-use ipfs::Node;
 use libipld::Cid;
+use rust_ipfs::Node;
 use tokio::{
     task,
     time::{sleep, timeout},
@@ -64,10 +64,7 @@ async fn wantlist_cancellation() {
     // start a get_request future
     let ipfs_clone = ipfs.clone();
     let (abort_handle1, abort_reg) = AbortHandle::new_pair();
-    let abortable_req = Abortable::new(
-        async move { ipfs_clone.get_block(&cid).await },
-        abort_reg,
-    );
+    let abortable_req = Abortable::new(async move { ipfs_clone.get_block(&cid).await }, abort_reg);
     let _get_request1 = task::spawn(abortable_req);
 
     // verify that the requested Cid is in the wantlist

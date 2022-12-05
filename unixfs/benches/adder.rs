@@ -47,7 +47,7 @@
 use criterion::{
     criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode, Throughput,
 };
-use ipfs_unixfs::file::adder::{Chunker, FileAdder};
+use rust_unixfs::file::adder::{Chunker, FileAdder};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("adder");

@@ -2,8 +2,8 @@ use crate::v0::support::{with_ipfs, MaybeTimeoutExt, StringError};
 use cid::{self, Cid};
 use futures::future::ready;
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
-use ipfs::ipld::{decode_ipld, Ipld};
-use ipfs::{Ipfs, IpfsTypes};
+use rust_ipfs::ipld::{decode_ipld, Ipld};
+use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::convert::TryFrom;
@@ -16,8 +16,8 @@ use options::RefsOptions;
 mod format;
 use format::EdgeFormatter;
 
-use ipfs::dag::ResolveError;
-pub use ipfs::path::IpfsPath;
+use rust_ipfs::dag::ResolveError;
+pub use rust_ipfs::path::IpfsPath;
 
 use crate::v0::support::{HandledErr, StreamResponse};
 
@@ -129,7 +129,7 @@ async fn refs_paths<T: IpfsTypes>(
     impl Stream<Item = Result<ipfs::refs::Edge, ipfs::ipld::BlockError>> + Send + 'static,
     ResolveError,
 > {
-    use ipfs::dag::ResolvedNode;
+    use rust_ipfs::dag::ResolvedNode;
 
     let dag = ipfs.dag();
 
@@ -211,8 +211,8 @@ mod tests {
     use super::{local, refs_paths, Edge, IpfsPath};
     use cid::{self, Cid};
     use futures::stream::TryStreamExt;
-    use ipfs::ipld::{decode_ipld, validate};
-    use ipfs::{Block, Node};
+    use rust_ipfs::ipld::{decode_ipld, validate};
+    use rust_ipfs::{Block, Node};
     use std::collections::HashSet;
     use std::convert::TryFrom;
 

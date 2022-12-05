@@ -1,5 +1,5 @@
 use super::support::{with_ipfs, StringError};
-use ipfs::{Ipfs, IpfsTypes, MultiaddrWithPeerId};
+use rust_ipfs::{Ipfs, IpfsTypes, MultiaddrWithPeerId};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::BTreeMap;

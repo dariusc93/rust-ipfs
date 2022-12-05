@@ -1,5 +1,5 @@
 use libipld::Cid;
-use ipfs_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
+use rust_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
 use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Error as IoError, Read, Write};
@@ -106,7 +106,7 @@ fn walk(blocks: ShardedBlockStore, start: &Cid) -> Result<(u64, u64), Error> {
 enum Error {
     OpeningFailed(IoError),
     Other(IoError),
-    Traversal(ipfs_unixfs::file::FileReadFailed),
+    Traversal(rust_unixfs::file::FileReadFailed),
 }
 
 impl From<IoError> for Error {

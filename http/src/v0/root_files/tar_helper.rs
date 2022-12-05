@@ -7,7 +7,7 @@
 ///! `Bytes` (copying) code.
 use super::GetError;
 use bytes::{buf::BufMut, Bytes, BytesMut};
-use ipfs::unixfs::ll::Metadata;
+use rust_ipfs::unixfs::ll::Metadata;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use tar::{EntryType, Header};

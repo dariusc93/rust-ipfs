@@ -2,9 +2,9 @@ use std::num::NonZeroU16;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
-use ipfs::{Ipfs, IpfsOptions, IpfsTypes, UninitializedIpfs};
-use ipfs::{Multiaddr, Protocol};
 use ipfs_http::{config, v0};
+use rust_ipfs::{Ipfs, IpfsOptions, IpfsTypes, UninitializedIpfs};
+use rust_ipfs::{Multiaddr, Protocol};
 
 #[macro_use]
 extern crate tracing;

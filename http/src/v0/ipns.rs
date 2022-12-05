@@ -1,5 +1,5 @@
 use crate::v0::support::{with_ipfs, StringError, StringSerialized};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes};
+use rust_ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use serde::{Deserialize, Serialize};
 use warp::{query, Filter, Rejection, Reply};
 

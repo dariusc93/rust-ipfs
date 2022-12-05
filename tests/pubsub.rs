@@ -1,6 +1,6 @@
 use futures::future::pending;
 use futures::stream::StreamExt;
-use ipfs::Node;
+use rust_ipfs::Node;
 use std::time::Duration;
 use tokio::time::timeout;
 

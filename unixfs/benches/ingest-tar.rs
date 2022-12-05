@@ -24,8 +24,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
 fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
     use libipld::Cid;
-    use ipfs_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
-    use ipfs_unixfs::file::adder::FileAdder;
+    use rust_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
+    use rust_unixfs::file::adder::FileAdder;
     use sha2::{Digest, Sha256};
     use std::io::Read;
 
@@ -49,7 +49,7 @@ fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
                 std::str::from_utf8(&link_name).expect("symlink targets should be utf8");
 
             buffer.clear();
-            ipfs_unixfs::symlink::serialize_symlink_block(link_name, buffer);
+            rust_unixfs::symlink::serialize_symlink_block(link_name, buffer);
 
             let len = buffer.len();
 
@@ -121,7 +121,7 @@ fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
                 }
             }
         } else {
-            tree.set_metadata(&path[..path.len() - 1], ipfs_unixfs::Metadata::default())
+            tree.set_metadata(&path[..path.len() - 1], rust_unixfs::Metadata::default())
                 .unwrap();
         }
     }

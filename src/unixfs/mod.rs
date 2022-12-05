@@ -3,7 +3,7 @@
 //! Adding files and directory structures is supported but not exposed via an API. See examples and
 //! `ipfs-http`.
 
-pub use ipfs_unixfs as ll;
+pub use rust_unixfs as ll;
 
 mod add;
 mod get;
@@ -42,7 +42,7 @@ mod tests {
         // QmSy5pnHk1EnvE5dmJSyFKG5unXLGjPpBuJJCBQkBTvBaW.
         let content = "\u{8}\u{2}\u{12}\u{12}Here is some data\n\u{18}\u{12}";
 
-        let mut adder = ipfs_unixfs::file::adder::FileAdder::default();
+        let mut adder = rust_unixfs::file::adder::FileAdder::default();
         let (mut blocks, consumed) = adder.push(content.as_bytes());
         assert_eq!(consumed, content.len(), "should had consumed all content");
         assert_eq!(

@@ -1,7 +1,7 @@
 use crate::v0::support::option_parsing::ParseError;
 use crate::v0::support::{StringError, StringSerialized};
 use futures::future::try_join_all;
-use ipfs::{Cid, Ipfs, IpfsTypes};
+use rust_ipfs::{Cid, Ipfs, IpfsTypes};
 use serde::Serialize;
 use std::convert::TryFrom;
 use warp::{reply, Filter, Rejection, Reply};

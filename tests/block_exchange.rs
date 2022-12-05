@@ -1,8 +1,8 @@
-use ipfs::Block;
 use libipld::{
     multihash::{Code, MultihashDigest},
     Cid, IpldCodec,
 };
+use rust_ipfs::Block;
 use std::time::Duration;
 use tokio::time::timeout;
 

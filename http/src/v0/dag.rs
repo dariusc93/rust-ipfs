@@ -4,8 +4,8 @@ use crate::v0::support::{
 };
 use cid::{Cid, Codec};
 use futures::stream::Stream;
-use ipfs::{Ipfs, IpfsTypes};
 use mime::Mime;
+use rust_ipfs::{Ipfs, IpfsTypes};
 
 use serde::Deserialize;
 use serde_json::json;
@@ -123,7 +123,7 @@ async fn inner_resolve<T: IpfsTypes>(
     ipfs: Ipfs<T>,
     opts: ResolveOptions,
 ) -> Result<impl Reply, Rejection> {
-    use ipfs::IpfsPath;
+    use rust_ipfs::IpfsPath;
     use std::convert::TryFrom;
 
     let path = IpfsPath::try_from(opts.arg.as_str()).map_err(StringError::from)?;

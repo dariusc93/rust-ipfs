@@ -4,9 +4,9 @@ use crate::v0::support::{
 use async_stream::try_stream;
 use bytes::Bytes;
 use futures::stream::TryStream;
-use ipfs::unixfs::ll::walk::{self, ContinuedWalk, Walker};
-use ipfs::unixfs::{ll::file::FileReadFailed, TraversalFailed};
-use ipfs::{dag::ResolveError, Block, Ipfs, IpfsPath, IpfsTypes};
+use rust_ipfs::unixfs::ll::walk::{self, ContinuedWalk, Walker};
+use rust_ipfs::unixfs::{ll::file::FileReadFailed, TraversalFailed};
+use rust_ipfs::{dag::ResolveError, Block, Ipfs, IpfsPath, IpfsTypes};
 use serde::Deserialize;
 use std::fmt;
 use std::path::Path;
@@ -255,8 +255,8 @@ mod tests {
     use cid::Cid;
     use futures::stream::{FuturesOrdered, TryStreamExt};
     use hex_literal::hex;
-    use ipfs::{Block, Ipfs, IpfsTypes, Node};
     use multihash::Sha2_256;
+    use rust_ipfs::{Block, Ipfs, IpfsTypes, Node};
     use std::convert::TryFrom;
     use std::io::Read;
     use std::path::PathBuf;

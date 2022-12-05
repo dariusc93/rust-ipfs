@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn multiple_consecutive_ephemeral_listening_addresses() {
-    let node = ipfs::Node::new("test_node").await;
+    let node = rust_ipfs::Node::new("test_node").await;
 
     let target = libp2p::build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16));
 
@@ -14,7 +14,7 @@ async fn multiple_consecutive_ephemeral_listening_addresses() {
 
 #[tokio::test]
 async fn multiple_concurrent_ephemeral_listening_addresses_on_same_ip() {
-    let node = ipfs::Node::new("test_node").await;
+    let node = rust_ipfs::Node::new("test_node").await;
 
     let target = libp2p::build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16));
 
@@ -44,7 +44,7 @@ async fn multiple_concurrent_ephemeral_listening_addresses_on_same_ip() {
 #[tokio::test]
 #[cfg(not(target_os = "macos"))]
 async fn multiple_concurrent_ephemeral_listening_addresses_on_different_ip() {
-    let node = ipfs::Node::new("test_node").await;
+    let node = rust_ipfs::Node::new("test_node").await;
 
     // it doesnt work on mac os x as 127.0.0.2 is not enabled by default.
     let first =
@@ -61,7 +61,7 @@ async fn multiple_concurrent_ephemeral_listening_addresses_on_different_ip() {
 
 #[tokio::test]
 async fn adding_unspecified_addr_resolves_with_first() {
-    let node = ipfs::Node::new("test_node").await;
+    let node = rust_ipfs::Node::new("test_node").await;
     // there is no test in trying to match this with others as ... that would be quite
     // perilous.
     node.add_listening_address(libp2p::build_multiaddr!(Ip4([0, 0, 0, 0]), Tcp(0u16)))
@@ -71,7 +71,7 @@ async fn adding_unspecified_addr_resolves_with_first() {
 
 #[tokio::test]
 async fn listening_for_multiple_unspecified_addresses() {
-    let node = ipfs::Node::new("test_node").await;
+    let node = rust_ipfs::Node::new("test_node").await;
     // there is no test in trying to match this with others as ... that would be quite
     // perilous.
     let target = libp2p::build_multiaddr!(Ip4([0, 0, 0, 0]), Tcp(0u16));
@@ -95,7 +95,7 @@ async fn listening_for_multiple_unspecified_addresses() {
 
 #[tokio::test]
 async fn remove_listening_address() {
-    let node = ipfs::Node::new("test_node").await;
+    let node = rust_ipfs::Node::new("test_node").await;
 
     let unbound = libp2p::build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16));
     let first = node.add_listening_address(unbound.clone()).await.unwrap();
@@ -119,8 +119,8 @@ fn remove_listening_address_before_completing() {
 
 #[tokio::test]
 async fn pre_configured_listening_addrs() {
-    use ipfs::{IpfsOptions, MultiaddrWithPeerId, MultiaddrWithoutPeerId, Node};
     use libp2p::Multiaddr;
+    use rust_ipfs::{IpfsOptions, MultiaddrWithPeerId, MultiaddrWithoutPeerId, Node};
     use std::convert::TryFrom;
 
     let mut opts = IpfsOptions::inmemory_with_generated_keys();

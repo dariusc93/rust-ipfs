@@ -5,9 +5,9 @@ use crate::v0::support::{
 use bytes::Buf;
 use cid::{Cid, Codec, Version};
 use futures::stream::{FuturesOrdered, Stream, StreamExt};
-use ipfs::error::Error;
-use ipfs::{Ipfs, IpfsTypes};
 use mime::Mime;
+use rust_ipfs::error::Error;
+use rust_ipfs::{Ipfs, IpfsTypes};
 
 use multihash::Multihash;
 use serde::{Deserialize, Serialize};

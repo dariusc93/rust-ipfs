@@ -4,7 +4,7 @@ use crate::{
 };
 use async_stream::stream;
 use futures::stream::Stream;
-use ipfs_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
+use rust_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
 use libipld::Cid;
 use std::borrow::Borrow;
 use std::ops::Range;

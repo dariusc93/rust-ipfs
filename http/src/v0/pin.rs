@@ -1,6 +1,6 @@
 use crate::v0::support::option_parsing::ParseError;
 use crate::v0::support::{with_ipfs, StringError, StringSerialized};
-use ipfs::{Cid, Ipfs, IpfsTypes, PinKind, PinMode};
+use rust_ipfs::{Cid, Ipfs, IpfsTypes, PinKind, PinMode};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;

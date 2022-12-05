@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::path::{IpfsPath, SlashedPath};
 use crate::repo::RepoTypes;
 use crate::{Block, Ipfs};
-use ipfs_unixfs::{
+use rust_unixfs::{
     dagpb::{wrap_node_data, NodeData},
     dir::{Cache, ShardedLookup},
     resolve, MaybeResolved,
@@ -505,7 +505,7 @@ fn resolve_local_dagpb<'a>(
                 segment_index: 0,
             })
         }
-        Err(ipfs_unixfs::ResolveError::UnexpectedType(ut)) if ut.is_file() => {
+        Err(rust_unixfs::ResolveError::UnexpectedType(ut)) if ut.is_file() => {
             // this might even be correct: files we know are not supported, however not sure if
             // symlinks are, let alone custom unxifs types should such exist
             Err(RawResolveLocalError::NotFound {
@@ -921,7 +921,7 @@ mod tests {
     async fn fail_resolving_through_file() {
         let Node { ipfs, .. } = Node::new("test_node").await;
 
-        let mut adder = ipfs_unixfs::file::adder::FileAdder::default();
+        let mut adder = rust_unixfs::file::adder::FileAdder::default();
         let (mut blocks, _) = adder.push(b"foobar\n");
         assert_eq!(blocks.next(), None);
 
@@ -950,7 +950,7 @@ mod tests {
     async fn fail_resolving_through_dir() {
         let Node { ipfs, .. } = Node::new("test_node").await;
 
-        let mut adder = ipfs_unixfs::file::adder::FileAdder::default();
+        let mut adder = rust_unixfs::file::adder::FileAdder::default();
         let (mut blocks, _) = adder.push(b"foobar\n");
         assert_eq!(blocks.next(), None);
 
@@ -965,10 +965,10 @@ mod tests {
             .await
             .unwrap();
 
-        let mut opts = ipfs_unixfs::dir::builder::TreeOptions::default();
+        let mut opts = rust_unixfs::dir::builder::TreeOptions::default();
         opts.wrap_with_directory();
 
-        let mut tree = ipfs_unixfs::dir::builder::BufferingTreeBuilder::new(opts);
+        let mut tree = rust_unixfs::dir::builder::BufferingTreeBuilder::new(opts);
         tree.put_link("something/best-file-in-the-world", cid, total_size as u64)
             .unwrap();
 

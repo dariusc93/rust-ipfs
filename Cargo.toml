@@ -1,12 +1,12 @@
 [package]
 authors = ["Rust-IPFS contributors"]
-edition = "2018"
+edition = "2021"
 license = "MIT OR Apache-2.0"
-name = "ipfs"
+name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.2.1"
+version = "0.3.0-alpha"
 
 [features]
 default = ["port_mapping"]
@@ -23,7 +23,7 @@ anyhow = "1.0"
 async-stream = { default-features = false, version = "0.3" }
 async-trait = { default-features = false, version = "0.1" }
 base64 = { default-features = false, features = ["alloc"], version = "0.13" }
-ipfs-bitswap = { version = "0.1", path = "bitswap" }
+ipfs-bitswap = { version = "0.3.0-alpha", path = "bitswap" }
 byteorder = { default-features = false, version = "1.3" }
 bytes = { default-features = false, version = "1" }
 libipld = "0.15"
@@ -34,7 +34,7 @@ futures = { default-features = false, version = "0.3", features = [
     "std",
 ] }
 hash_hasher = "2.0.3"
-ipfs-unixfs = { version = "0.2", path = "unixfs" }
+rust-unixfs = { version = "0.3.0-alpha", path = "unixfs" }
 libp2p = { default-features = false, features = [
     "gossipsub",
     "autonat",

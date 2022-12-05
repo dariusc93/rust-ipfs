@@ -3,7 +3,7 @@ use std::{convert::TryInto, path::PathBuf};
 use clap::Parser;
 use futures::StreamExt;
 
-use ipfs::{
+use rust_ipfs::{
     unixfs::UnixfsStatus, Ipfs, IpfsOptions, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs,
 };
 

@@ -1,4 +1,4 @@
-use ipfs::{Ipfs, IpfsTypes};
+use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::error::Error as StdError;

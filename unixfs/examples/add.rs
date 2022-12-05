@@ -1,5 +1,5 @@
 use libipld::Cid;
-use ipfs_unixfs::file::adder::FileAdder;
+use rust_unixfs::file::adder::FileAdder;
 use std::fmt;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;

@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, path::Path};
 
 use futures::{stream::BoxStream, StreamExt};
-use ipfs_unixfs::walk::{ContinuedWalk, Walker};
+use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
 
 use crate::{Ipfs, IpfsPath, IpfsTypes};

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use futures::StreamExt;
 
-use ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsOptions, TestTypes, UninitializedIpfs};
+use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsOptions, TestTypes, UninitializedIpfs};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-add")]

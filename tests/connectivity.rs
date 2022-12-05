@@ -1,5 +1,5 @@
-use ipfs::Node;
 use libp2p::{multiaddr::Protocol, Multiaddr};
+use rust_ipfs::Node;
 use std::time::Duration;
 use tokio::time::timeout;
 

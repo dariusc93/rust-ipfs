@@ -1,4 +1,4 @@
-use ipfs::{Ipfs, IpfsOptions, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsOptions, TestTypes, UninitializedIpfs};
 use libp2p::swarm::SwarmEvent;
 use tokio::task;
 

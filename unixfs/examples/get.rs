@@ -52,7 +52,7 @@ fn main() {
 }
 
 fn walk(blocks: ShardedBlockStore, start: &Cid) -> Result<(), Error> {
-    use ipfs_unixfs::walk::{ContinuedWalk, Walker};
+    use rust_unixfs::walk::{ContinuedWalk, Walker};
 
     let mut buf = Vec::new();
     let mut cache = None;
@@ -105,7 +105,7 @@ fn walk(blocks: ShardedBlockStore, start: &Cid) -> Result<(), Error> {
 enum Error {
     OpeningFailed(IoError),
     Other(IoError),
-    Walk(ipfs_unixfs::walk::Error),
+    Walk(rust_unixfs::walk::Error),
 }
 
 impl From<IoError> for Error {
@@ -114,8 +114,8 @@ impl From<IoError> for Error {
     }
 }
 
-impl From<ipfs_unixfs::walk::Error> for Error {
-    fn from(e: ipfs_unixfs::walk::Error) -> Error {
+impl From<rust_unixfs::walk::Error> for Error {
+    fn from(e: rust_unixfs::walk::Error) -> Error {
         Error::Walk(e)
     }
 }

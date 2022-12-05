@@ -2,7 +2,7 @@ use std::{borrow::Borrow, path::Path};
 
 use futures::{stream::BoxStream, StreamExt};
 use ipfs_bitswap::Block;
-use ipfs_unixfs::file::adder::{Chunker, FileAdderBuilder};
+use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use tokio_util::io::ReaderStream;
 
 use crate::{Ipfs, IpfsPath, IpfsTypes};

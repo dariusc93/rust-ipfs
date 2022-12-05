@@ -1,7 +1,8 @@
 use futures::pin_mut;
-use futures::stream::StreamExt; use ipfs::p2p::PeerInfo;
+use futures::stream::StreamExt; 
+use rust_ipfs::p2p::PeerInfo;
 // needed for StreamExt::next
-use ipfs::{Error, Ipfs, IpfsOptions, IpfsPath, MultiaddrWithPeerId, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Error, Ipfs, IpfsOptions, IpfsPath, MultiaddrWithPeerId, TestTypes, UninitializedIpfs};
 use std::env;
 use std::process::exit;
 use tokio::io::AsyncWriteExt;

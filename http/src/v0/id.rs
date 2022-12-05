@@ -1,5 +1,5 @@
 use super::{with_ipfs, InvalidPeerId, NotImplemented, StringError};
-use ipfs::{Ipfs, IpfsTypes, PeerId};
+use rust_ipfs::{Ipfs, IpfsTypes, PeerId};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use warp::{query, Filter};

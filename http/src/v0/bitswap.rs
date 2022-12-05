@@ -1,5 +1,5 @@
 use crate::v0::support::{with_ipfs, InvalidPeerId, StringError};
-use ipfs::{BitswapStats, Ipfs, IpfsTypes};
+use rust_ipfs::{BitswapStats, Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use warp::{query, reply, Filter, Rejection, Reply};
