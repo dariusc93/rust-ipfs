@@ -1429,6 +1429,36 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         }
     }
 
+    // TBD
+    pub async fn add_relay(&self, _: Multiaddr) -> Result<(), Error> {
+        Err(anyhow::anyhow!("Unimplemented"))
+    }
+
+    // TBD
+    pub async fn remove_relay(&self, _: Vec<Multiaddr>) -> Result<(), Error> {
+        Err(anyhow::anyhow!("Unimplemented"))
+    }
+
+    // TBD
+    pub async fn default_relay(&self) -> Result<(), Error> {
+        Err(anyhow::anyhow!("Unimplemented"))
+    }
+
+    // TBD
+    pub async fn relay_status(&self, _: Option<PeerId>) -> Result<(), Error> {
+        Err(anyhow::anyhow!("Unimplemented"))
+    }
+
+    // TBD
+    pub async fn set_relay(&self, _: Multiaddr) -> Result<(), Error> {
+        Err(anyhow::anyhow!("Unimplemented"))
+    }
+
+    // TBD
+    pub async fn auto_relay(&self) -> Result<(), Error> {
+        Err(anyhow::anyhow!("Unimplemented"))
+    }
+
     /// Walk the given Iplds' links up to `max_depth` (or indefinitely for `None`). Will return
     /// any duplicate trees unless `unique` is `true`.
     ///
