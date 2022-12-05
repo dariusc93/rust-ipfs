@@ -9,8 +9,6 @@ use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsOptions, TestTypes, Uninitialize
 #[clap(name = "unixfs-add")]
 struct Opt {
     file: PathBuf,
-    #[clap(long)]
-    dest: Option<PathBuf>,
 }
 
 #[tokio::main]

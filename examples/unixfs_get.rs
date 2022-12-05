@@ -8,7 +8,7 @@ use rust_ipfs::{
 };
 
 #[derive(Debug, Parser)]
-#[clap(name = "unixfs-add")]
+#[clap(name = "unixfs-get")]
 struct Opt {
     path: IpfsPath,
     dest: PathBuf,
