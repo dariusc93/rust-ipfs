@@ -33,6 +33,9 @@ pub mod repo;
 mod subscription;
 pub mod unixfs;
 
+#[cfg(feature = "port_mapping")]
+mod igd;
+
 #[macro_use]
 extern crate tracing;
 
