@@ -1,10 +1,11 @@
 use std::time::Duration;
 
-use futures::pin_mut;
-use rust_ipfs::{Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
+use futures::{pin_mut, FutureExt};
 use libipld::ipld;
 use libp2p::futures::StreamExt;
-use tokio::io::AsyncBufReadExt;
+use rust_ipfs::{Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
+use rustyline_async::{Readline, ReadlineError};
+use std::io::Write;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -50,19 +51,34 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::task::yield_now().await;
 
-    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    let identity = ipfs.identity(None).await?;
+
+    let peer_id = identity.peer_id;
+
+    let (mut rl, mut stdout) = Readline::new(format!("{} >", peer_id))?;
 
     loop {
         tokio::select! {
-            line = stdin.next_line() => {
-                let line = line?.expect("stdin closed");
-                if line == "/break" { break; }
-                if let Err(_e) = ipfs.pubsub_publish(topic.into(), line.as_bytes().to_vec()).await {}
-            },
             data = stream.next() => {
                 if let Some(msg) = data {
-                    println!("{}", String::from_utf8_lossy(&msg.data));
+                    writeln!(stdout, "{}: {}", msg.source.expect("Message should contain a source peer_id"), String::from_utf8_lossy(&msg.data))?;
                 }
+            }
+            line = rl.readline().fuse() => match line {
+                Ok(line) => {
+                    if let Err(e) = ipfs.pubsub_publish(topic.into(), line.as_bytes().to_vec()).await {
+                        writeln!(stdout, "Error publishing message: {e}")?;
+                        continue;
+                    }
+                    writeln!(stdout, "{}: {}", peer_id, line)?;
+                }
+                Err(ReadlineError::Eof) => break,
+                Err(ReadlineError::Interrupted) => break,
+                Err(e) => {
+                    writeln!(stdout, "Error: {}", e)?;
+                    writeln!(stdout, "Exiting...")?;
+                    break
+                },
             }
         }
     }
@@ -71,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+//Note: This is temporary as a similar implementation will be used internally in the future
 async fn topic_discovery(ipfs: Ipfs<TestTypes>, topic: &str) -> anyhow::Result<()> {
     let cid = ipfs.put_dag(ipld!(topic)).await?;
     ipfs.provide(cid).await?;
