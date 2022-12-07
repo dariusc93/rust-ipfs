@@ -1,12 +1,12 @@
-use std::{collections::HashSet, ops::{Deref, DerefMut}};
+use std::ops::{Deref, DerefMut};
 
 use futures::stream::BoxStream;
 use libp2p::PeerId;
 
-pub struct ProviderStream(pub BoxStream<'static, HashSet<PeerId>>);
+pub struct ProviderStream(pub BoxStream<'static, PeerId>);
 
 impl Deref for ProviderStream {
-    type Target = BoxStream<'static, HashSet<PeerId>>;
+    type Target = BoxStream<'static, PeerId>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }

@@ -175,9 +175,7 @@ async fn dht_providing() {
         .collect::<Vec<_>>()
         .await
         .iter()
-        .flatten()
-        .cloned()
-        .any(|x| x == nodes[last_index].id));
+        .any(|x| *x == nodes[last_index].id));
 }
 
 /// Check if Ipfs::{get, put} does its job.
