@@ -352,7 +352,7 @@ enum IpfsEvent {
     /// Connected ppers
     Connected(Channel<Vec<PeerId>>),
     /// Disconnect
-    Disconnect(MultiaddrWithPeerId, Channel<()>),
+    Disconnect(PeerId, Channel<()>),
     /// Ban Peer
     Ban(PeerId, Channel<()>),
     /// Unban peer
@@ -987,7 +987,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Disconnects a given peer.
-    pub async fn disconnect(&self, target: MultiaddrWithPeerId) -> Result<(), Error> {
+    pub async fn disconnect(&self, target: PeerId) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
             self.to_task
@@ -2319,10 +2319,10 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let connections = self.swarm.connected_peers().cloned();
                         ret.send(Ok(connections.collect())).ok();
                     }
-                    IpfsEvent::Disconnect(addr, ret) => {
+                    IpfsEvent::Disconnect(peer, ret) => {
                         let _ = ret.send(
                             self.swarm
-                                .disconnect_peer_id(addr.peer_id)
+                                .disconnect_peer_id(peer)
                                 .map_err(|_| anyhow::anyhow!("Peer was not connected")),
                         );
                     }

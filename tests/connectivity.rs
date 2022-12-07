@@ -110,7 +110,7 @@ async fn connect_two_nodes_with_two_connections_doesnt_panic() {
     // peer..
 
     node_a
-        .disconnect(peers.remove(0).addr)
+        .disconnect(peers.remove(0).addr.peer_id)
         .await
         .expect("failed to disconnect peer_b at peer_a");
 
