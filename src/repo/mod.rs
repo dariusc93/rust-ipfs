@@ -571,6 +571,20 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
         self.data_store.remove_recursive_pin(cid, refs).await
     }
 
+    /// Function to perform a basic cleanup of unpinned blocks
+    pub async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+        let mut removed_blocks = vec![];
+        let blocks = self.list_blocks().await?;
+        for cid in blocks {
+            if !self.is_pinned(&cid).await? {
+                if let Ok(cid) = self.remove_block(&cid).await {
+                    removed_blocks.push(cid);
+                }
+            }
+        }
+        Ok(removed_blocks)
+    }
+
     /// Checks if a `Cid` is pinned.
     pub async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
         self.data_store.is_pinned(cid).await
