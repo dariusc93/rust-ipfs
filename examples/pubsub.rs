@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use clap::Parser;
 use futures::{pin_mut, FutureExt};
 use libipld::ipld;
@@ -116,7 +114,7 @@ async fn topic_discovery(ipfs: Ipfs<TestTypes>, topic: String) -> anyhow::Result
     let cid = ipfs.put_dag(ipld!(topic)).await?;
     ipfs.provide(cid).await?;
     loop {
-        ipfs.get_providers(cid).await?;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut stream = ipfs.get_providers(cid).await?.boxed();
+        while let Some(_providers) = stream.next().await {}
     }
 }

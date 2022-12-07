@@ -43,7 +43,7 @@ use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Receiver, Sender, UnboundedSender},
         oneshot::{channel as oneshot_channel, Sender as OneshotSender},
     },
     sink::SinkExt,
@@ -51,7 +51,7 @@ use futures::{
 };
 
 use ipfs_bitswap::BitswapEvent;
-use p2p::{IdentifyConfiguration, KadStoreConfig, PeerInfo, RelayConfig};
+use p2p::{IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RelayConfig};
 use subscription::SubscriptionRegistry;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -117,7 +117,8 @@ use libp2p::{
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
         GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-        KademliaConfig, KademliaEvent::*, PutRecordError, PutRecordOk, QueryResult::*, Record,
+        KademliaConfig, KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*,
+        Record,
     },
     mdns::Event as MdnsEvent,
     ping::Config as PingConfig,
@@ -392,7 +393,7 @@ enum IpfsEvent {
         bool,
         OneshotSender<Either<Vec<Multiaddr>, SubscriptionFuture<KadResult, String>>>,
     ),
-    GetProviders(Cid, OneshotSender<SubscriptionFuture<KadResult, String>>),
+    GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
     Provide(Cid, Channel<SubscriptionFuture<KadResult, String>>),
     DhtGet(
         Key,
@@ -416,10 +417,9 @@ enum IpfsEvent {
 type TSwarmEvent = <TSwarm as Stream>::Item;
 type TSwarmEventFn = Arc<dyn Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send>;
 
-
 pub enum FDLimit {
     Max,
-    Custom(u64)
+    Custom(u64),
 }
 
 /// Configured Ipfs which can only be started.
@@ -459,7 +459,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         self.fdlimit = Some(limit);
         self
     }
-
 
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
@@ -515,14 +514,14 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
 
         if let Some(limit) = fdlimit {
-            #[cfg(unix)] 
+            #[cfg(unix)]
             {
                 let (_, hard) = rlimit::Resource::NOFILE.get()?;
                 let limit = match limit {
                     FDLimit::Max => hard,
-                    FDLimit::Custom(limit) => limit
+                    FDLimit::Custom(limit) => limit,
                 };
-                
+
                 let target = std::cmp::min(hard, limit);
                 rlimit::Resource::NOFILE.set(target, hard)?;
                 let (soft, _) = rlimit::Resource::NOFILE.get()?;
@@ -535,7 +534,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
                 warn!("Can only set a fd limit on unix systems. Ignoring...")
             }
         }
-        
+
         repo.init().instrument(init_span.clone()).await?;
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
@@ -572,6 +571,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             from_facade: receiver.fuse(),
             swarm,
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
+            provider_stream: HashMap::new(),
             kad_subscriptions,
             repo,
             autonat_limit,
@@ -865,7 +865,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             .await
     }
 
-    /// Retreive a file and saving it to a path. 
+    /// Retreive a file and saving it to a path.
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
         path: IpfsPath,
@@ -1325,8 +1325,8 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Performs a DHT lookup for providers of a value to the given key.
     ///
     /// Returns a list of peers found providing the Cid.
-    pub async fn get_providers(&self, cid: Cid) -> Result<Vec<PeerId>, Error> {
-        let kad_result = async move {
+    pub async fn get_providers(&self, cid: Cid) -> Result<ProviderStream, Error> {
+        async move {
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1334,17 +1334,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                 .send(IpfsEvent::GetProviders(cid, tx))
                 .await?;
 
-            Ok(rx.await?).map_err(|e: String| anyhow!(e))
+            rx.await?.ok_or_else(|| anyhow!("Provider already exist"))
         }
         .instrument(self.span.clone())
-        .await?
-        .await;
-
-        match kad_result {
-            Ok(KadResult::Peers(providers)) => Ok(providers),
-            Ok(_) => unreachable!(),
-            Err(e) => Err(anyhow!(e)),
-        }
+        .await
     }
 
     /// Establishes the node as a provider of a block with the given Cid: it publishes a provider
@@ -1680,6 +1673,7 @@ struct IpfsFuture<Types: IpfsTypes> {
     repo_events: Fuse<Receiver<RepoEvent>>,
     from_facade: Fuse<Receiver<IpfsEvent>>,
     listening_addresses: HashMap<Multiaddr, (ListenerId, Option<Channel<Multiaddr>>)>,
+    provider_stream: HashMap<QueryId, UnboundedSender<HashSet<PeerId>>>,
     repo: Arc<Repo<Types>>,
     kad_subscriptions: SubscriptionRegistry<KadResult, String>,
     autonat_limit: Arc<AtomicU64>,
@@ -1864,7 +1858,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             InboundRequest { request } => {
                                 trace!("kad: inbound {:?} request handled", request);
                             }
-                            OutboundQueryProgressed { result, id, .. } => {
+                            OutboundQueryProgressed {
+                                result, id, step, ..
+                            } => {
                                 // make sure the query is exhausted
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
                                     match result {
@@ -1934,19 +1930,28 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                         key: _,
                                         providers,
                                     })) => {
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            let providers =
-                                                providers.into_iter().collect::<Vec<_>>();
-
-                                            self.kad_subscriptions.finish_subscription(
-                                                id.into(),
-                                                Ok(KadResult::Peers(providers)),
-                                            );
+                                        if let Entry::Occupied(entry) =
+                                            self.provider_stream.entry(id)
+                                        {
+                                            if !providers.is_empty() {
+                                                tokio::spawn({
+                                                    let mut tx = entry.get().clone();
+                                                    async move {
+                                                        let _ = tx.send(providers).await;
+                                                    }
+                                                });
+                                            }
                                         }
                                     }
                                     GetProviders(Ok(
                                         GetProvidersOk::FinishedWithNoAdditionalRecord { .. },
-                                    )) => {}
+                                    )) => {
+                                        if step.last {
+                                            if let Some(tx) = self.provider_stream.remove(&id) {
+                                                tx.close_channel();
+                                            }
+                                        }
+                                    }
                                     GetProviders(Err(GetProvidersError::Timeout {
                                         key, ..
                                     })) => {
@@ -2501,10 +2506,11 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     IpfsEvent::GetProviders(cid, ret) => {
                         let key = Key::from(cid.hash().to_bytes());
                         let id = self.swarm.behaviour_mut().kademlia.get_providers(key);
+                        let (tx, rx) = futures::channel::mpsc::unbounded();
+                        let stream = ProviderStream::new(rx);
+                        self.provider_stream.insert(id, tx);
 
-                        let future = self.kad_subscriptions.create_subscription(id.into(), None);
-
-                        let _ = ret.send(future);
+                        let _ = ret.send(Some(stream));
                     }
                     IpfsEvent::Provide(cid, ret) => {
                         let key = Key::from(cid.hash().to_bytes());

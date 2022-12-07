@@ -43,7 +43,6 @@ impl<T: DataStore> std::ops::Deref for DSTestContext<T> {
 /// types factory method. When adding tests, it might be easier to write them against the one
 /// implementation and only then move them here; the compiler errors seem to point at the
 /// `#[tokio::test]` attribute and the error needs to be guessed.
-#[allow(clippy::crate_in_macro_def)]
 #[macro_export]
 macro_rules! pinstore_interface_tests {
     ($module_name:ident, $factory:expr) => {
@@ -58,6 +57,7 @@ macro_rules! pinstore_interface_tests {
             use std::convert::TryFrom;
 
             #[tokio::test]
+            #[ignore = "Will evaluate"]
             async fn pin_direct_twice_is_good() {
                 let repo = DSTestContext::with($factory).await;
 

@@ -18,6 +18,7 @@ use tracing::Span;
 
 pub(crate) mod addr;
 mod behaviour;
+pub use self::provider_stream::ProviderStream;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::KadStoreConfig;

@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use libipld::{
     multihash::{Code, MultihashDigest},
     Cid, IpldCodec,
@@ -150,7 +151,6 @@ async fn dht_popular_content_discovery() {
 
 /// Check if Ipfs::{get_providers, provide} does its job.
 #[tokio::test]
-#[ignore = "Will reevaluate"]
 async fn dht_providing() {
     const CHAIN_LEN: usize = 10;
     let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
@@ -168,16 +168,21 @@ async fn dht_providing() {
     nodes[last_index].provide(cid).await.unwrap();
 
     // and the first node should be able to learn that the last one provides it
-    assert!(nodes[0]
-        .get_providers(cid)
+    let providers = nodes[0].get_providers(cid).await.unwrap().boxed();
+
+    assert!(providers
+        .take(1)
+        .collect::<Vec<_>>()
         .await
-        .unwrap()
-        .contains(&nodes[last_index].id));
+        .iter()
+        .flatten()
+        .cloned()
+        .any(|x| x == nodes[last_index].id));
 }
 
 /// Check if Ipfs::{get, put} does its job.
 #[tokio::test]
-#[ignore = "Will reevaluate"]
+#[ignore = "Will reevaluate; test stalls which, which will likely be due to the changes to 0.50 kad"]
 async fn dht_get_put() {
     const CHAIN_LEN: usize = 10;
     let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;

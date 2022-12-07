@@ -1,29 +1,29 @@
 use std::{
+    collections::HashSet,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use futures::{channel::mpsc::UnboundedReceiver, Stream, StreamExt, stream::FusedStream};
+use futures::{channel::mpsc::UnboundedReceiver, stream::FusedStream, Stream, StreamExt};
 use libp2p::PeerId;
 
 #[derive(Debug)]
 pub struct ProviderStream {
     finished: bool,
-    rx: UnboundedReceiver<PeerId>,
+    rx: UnboundedReceiver<HashSet<PeerId>>,
 }
 
 impl ProviderStream {
-    #[allow(dead_code)]
-    pub fn new(rx: UnboundedReceiver<PeerId>) -> Self {
+    pub fn new(rx: UnboundedReceiver<HashSet<PeerId>>) -> Self {
         Self {
             finished: false,
-            rx
+            rx,
         }
     }
 }
 
 impl Stream for ProviderStream {
-    type Item = PeerId;
+    type Item = HashSet<PeerId>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.rx).poll_next_unpin(cx) {
