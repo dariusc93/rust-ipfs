@@ -416,11 +416,18 @@ enum IpfsEvent {
 type TSwarmEvent = <TSwarm as Stream>::Item;
 type TSwarmEventFn = Arc<dyn Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send>;
 
+
+pub enum FDLimit {
+    Max,
+    Custom(u64)
+}
+
 /// Configured Ipfs which can only be started.
 pub struct UninitializedIpfs<Types: IpfsTypes> {
     repo: Arc<Repo<Types>>,
     keys: Keypair,
     options: IpfsOptions,
+    fdlimit: Option<FDLimit>,
     repo_events: Receiver<RepoEvent>,
     swarm_event: Option<TSwarmEventFn>,
 }
@@ -436,15 +443,23 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let repo_options = RepoOptions::from(&options);
         let (repo, repo_events) = create_repo(repo_options);
         let keys = options.keypair.clone();
-
+        let fdlimit = None;
         UninitializedIpfs {
             repo: Arc::new(repo),
             keys,
             options,
+            fdlimit,
             repo_events,
             swarm_event: None,
         }
     }
+
+    /// Set file desc limit
+    pub fn fd_limit(mut self, limit: FDLimit) -> Self {
+        self.fdlimit = Some(limit);
+        self
+    }
+
 
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
@@ -475,6 +490,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             repo,
             keys,
             repo_events,
+            fdlimit,
             mut options,
             swarm_event,
         } = self;
@@ -498,6 +514,28 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         // instruments the IpfsFuture, the background task.
         let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
 
+        if let Some(limit) = fdlimit {
+            #[cfg(unix)] 
+            {
+                let (_, hard) = rlimit::Resource::NOFILE.get()?;
+                let limit = match limit {
+                    FDLimit::Max => hard,
+                    FDLimit::Custom(limit) => limit
+                };
+                
+                let target = std::cmp::min(hard, limit);
+                rlimit::Resource::NOFILE.set(target, hard)?;
+                let (soft, _) = rlimit::Resource::NOFILE.get()?;
+                if soft < 2048 {
+                    error!("Limit is too low: {soft}");
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                warn!("Can only set a fd limit on unix systems. Ignoring...")
+            }
+        }
+        
         repo.init().instrument(init_span.clone()).await?;
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
