@@ -641,6 +641,13 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             .await
     }
 
+    /// Cleans up of all unpinned blocks
+    /// Note: This is extremely basic and should not be relied on completely
+    ///       until there is additional or extended implementation for a gc
+    pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
+        self.repo.cleanup().instrument(self.span.clone()).await
+    }
+
     /// Pins a given Cid recursively or directly (non-recursively).
     ///
     /// Pins on a block are additive in sense that a previously directly (non-recursively) pinned
@@ -1999,8 +2006,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                     }
                                     GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            // let records =
-                                            //     records.into_iter().map(|rec| rec.record).collect();
                                             self.kad_subscriptions.finish_subscription(
                                                 id.into(),
                                                 Ok(KadResult::Record(record.record)),
