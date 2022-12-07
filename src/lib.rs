@@ -47,7 +47,7 @@ use futures::{
         oneshot::{channel as oneshot_channel, Sender as OneshotSender},
     },
     sink::SinkExt,
-    stream::{BoxStream, Fuse, Stream},
+    stream::{BoxStream, Fuse, Stream}, StreamExt,
 };
 
 use ipfs_bitswap::BitswapEvent;
@@ -483,7 +483,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// (instrumenting)[`tracing_futures::Instrument::instrument`] as the [`IpfsOptions::span`]
     /// will be used as parent span for all of the awaited and created futures.
     pub async fn start(self) -> Result<(Ipfs<Types>, impl Future<Output = ()>), Error> {
-        use futures::stream::StreamExt;
 
         let UninitializedIpfs {
             repo,
@@ -661,7 +660,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
     pub async fn insert_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        use futures::stream::{StreamExt, TryStreamExt};
+        use futures::stream::{TryStreamExt};
         let span = debug_span!(parent: &self.span, "insert_pin", cid = %cid, recursive);
         let refs_span = debug_span!(parent: &span, "insert_pin refs");
 
@@ -696,7 +695,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
     pub async fn remove_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        use futures::stream::{StreamExt, TryStreamExt};
+        use futures::stream::{TryStreamExt};
         let span = debug_span!(parent: &self.span, "remove_pin", cid = %cid, recursive);
         async move {
             if !recursive {
@@ -1325,7 +1324,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Performs a DHT lookup for providers of a value to the given key.
     ///
     /// Returns a list of peers found providing the Cid.
-    pub async fn get_providers(&self, cid: Cid) -> Result<ProviderStream, Error> {
+    pub async fn get_providers(&self, cid: Cid) -> Result<BoxStream<'static, HashSet<PeerId>>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1334,7 +1333,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                 .send(IpfsEvent::GetProviders(cid, tx))
                 .await?;
 
-            rx.await?.ok_or_else(|| anyhow!("Provider already exist"))
+            rx.await?.ok_or_else(|| anyhow!("Provider already exist")).map(|s| s.0)
         }
         .instrument(self.span.clone())
         .await
@@ -1815,7 +1814,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
         loop {
             loop {
                 let inner = {
-                    use futures::StreamExt;
                     let next = self.swarm.select_next_some();
                     futures::pin_mut!(next);
                     match next.poll(ctx) {
@@ -2506,11 +2504,26 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     IpfsEvent::GetProviders(cid, ret) => {
                         let key = Key::from(cid.hash().to_bytes());
                         let id = self.swarm.behaviour_mut().kademlia.get_providers(key);
-                        let (tx, rx) = futures::channel::mpsc::unbounded();
-                        let stream = ProviderStream::new(rx);
+                        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+                        let stream = async_stream::stream! {
+                            let mut current_providers: HashSet<PeerId> = Default::default();
+                            while let Some(providers) = rx.next().await {
+                                let providers: HashSet<PeerId> = providers;
+                                let providers = providers
+                                    .difference(&current_providers)
+                                    .copied()
+                                    .collect::<HashSet<_>>();
+
+                                current_providers.extend(providers.clone());
+
+                                if !providers.is_empty() {
+                                    yield providers
+                                }
+                            }
+                        };
                         self.provider_stream.insert(id, tx);
 
-                        let _ = ret.send(Some(stream));
+                        let _ = ret.send(Some(ProviderStream(stream.boxed())));
                     }
                     IpfsEvent::Provide(cid, ret) => {
                         let key = Key::from(cid.hash().to_bytes());

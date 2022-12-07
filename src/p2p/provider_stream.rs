@@ -1,54 +1,25 @@
-use std::{
-    collections::HashSet,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::{collections::HashSet, ops::{Deref, DerefMut}};
 
-use futures::{channel::mpsc::UnboundedReceiver, stream::FusedStream, Stream, StreamExt};
+use futures::stream::BoxStream;
 use libp2p::PeerId;
 
-#[derive(Debug)]
-pub struct ProviderStream {
-    finished: bool,
-    rx: UnboundedReceiver<HashSet<PeerId>>,
-    providers: HashSet<PeerId>,
-}
+pub struct ProviderStream(pub BoxStream<'static, HashSet<PeerId>>);
 
-impl ProviderStream {
-    pub fn new(rx: UnboundedReceiver<HashSet<PeerId>>) -> Self {
-        Self {
-            providers: Default::default(),
-            finished: false,
-            rx,
-        }
+impl Deref for ProviderStream {
+    type Target = BoxStream<'static, HashSet<PeerId>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl Stream for ProviderStream {
-    type Item = HashSet<PeerId>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.rx).poll_next_unpin(cx) {
-            Poll::Ready(Some(providers)) => {
-                let providers = providers
-                    .difference(&self.providers)
-                    .copied()
-                    .collect::<HashSet<_>>();
-
-                self.providers.extend(providers.clone());
-                Poll::Ready(Some(providers))
-            }
-            Poll::Ready(None) => {
-                self.finished = true;
-                Poll::Ready(None)
-            }
-            Poll::Pending => Poll::Pending,
-        }
+impl DerefMut for ProviderStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
-impl FusedStream for ProviderStream {
-    fn is_terminated(&self) -> bool {
-        self.finished
+impl core::fmt::Debug for ProviderStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ProviderStream")
     }
 }
