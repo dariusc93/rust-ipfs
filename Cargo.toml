@@ -23,7 +23,7 @@ anyhow = "1.0"
 async-stream = { default-features = false, version = "0.3" }
 async-trait = { default-features = false, version = "0.1" }
 base64 = { default-features = false, features = ["alloc"], version = "0.13" }
-ipfs-bitswap = { version = "0.3.0-alpha", path = "bitswap" }
+ipfs-bitswap = { version = "0.3.0-alpha", path = "bitswap", package = "rust-ipfs-bitswap" }
 byteorder = { default-features = false, version = "1.3" }
 bytes = { default-features = false, version = "1" }
 libipld = "0.15"
