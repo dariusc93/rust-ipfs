@@ -139,9 +139,6 @@ async fn publish_between_two_nodes_single_topic() {
         let received = timeout(
             Duration::from_secs(2),
             st.take(2)
-                // Arc::try_unwrap will fail sometimes here as the sender side in src/p2p/pubsub.rs:305
-                // can still be looping
-                .map(|msg| (*msg).clone())
                 .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
                 .collect::<Vec<_>>(),
         )
@@ -265,7 +262,6 @@ async fn publish_between_two_nodes_different_topics() {
         let received = timeout(
             Duration::from_secs(2),
             st.take(1)
-                .map(|msg| (*msg).clone())
                 .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
                 .next(),
         )

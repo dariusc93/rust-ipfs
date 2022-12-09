@@ -5,7 +5,6 @@ use libp2p::identity::Keypair;
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
@@ -25,11 +24,10 @@ use libp2p::swarm::{
 
 /// Currently a thin wrapper around Gossipsub.
 /// Allows single subscription to a topic with only unbounded senders. Tracks the peers subscribed
-/// to different topics. The messages in the streams are wrapped in `Arc` as they technically could
-/// be sent to multiple topics, but this api is not provided.
+/// to different topics.
 pub struct GossipsubStream {
     // Tracks the topic subscriptions.
-    streams: HashMap<TopicHash, channel::UnboundedSender<Arc<GossipsubMessage>>>,
+    streams: HashMap<TopicHash, channel::UnboundedSender<GossipsubMessage>>,
 
     // Gossipsub protocol
     gossipsub: Gossipsub,
@@ -59,7 +57,7 @@ impl core::ops::DerefMut for GossipsubStream {
 pub struct SubscriptionStream {
     on_drop: Option<channel::UnboundedSender<TopicHash>>,
     topic: Option<TopicHash>,
-    inner: channel::UnboundedReceiver<Arc<GossipsubMessage>>,
+    inner: channel::UnboundedReceiver<GossipsubMessage>,
 }
 
 impl Drop for SubscriptionStream {
@@ -94,7 +92,7 @@ impl fmt::Debug for SubscriptionStream {
 }
 
 impl Stream for SubscriptionStream {
-    type Item = Arc<GossipsubMessage>;
+    type Item = GossipsubMessage;
 
     fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Self::Item>> {
         use futures::stream::StreamExt;
@@ -378,7 +376,7 @@ impl NetworkBehaviour for GossipsubStream {
                 }) => {
                     let topic = message.topic.clone();
                     if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(se) = oe.get().unbounded_send(Arc::new(message)) {
+                        if let Err(se) = oe.get().unbounded_send(message) {
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
