@@ -49,7 +49,6 @@ async fn unsubscribe_via_drop() {
 // }
 
 #[tokio::test]
-#[ignore = "Will revisit/reevaluate"]
 async fn publish_between_two_nodes_single_topic() {
     use futures::stream::StreamExt;
 
@@ -96,16 +95,7 @@ async fn publish_between_two_nodes_single_topic() {
         .await
         .unwrap();
 
-    // the order is not defined, but both should see the other's message and the message they sent
     let expected = [
-        // first node should witness it's the message it sent
-        (
-            libp2p::gossipsub::IdentTopic::new(topic.clone()),
-            Some(nodes[0].id),
-            b"foobar",
-            nodes[0].id,
-        ),
-        // second node should witness first nodes message, and so on.
         (
             libp2p::gossipsub::IdentTopic::new(topic.clone()),
             Some(nodes[0].id),
@@ -117,12 +107,6 @@ async fn publish_between_two_nodes_single_topic() {
             Some(nodes[1].id),
             b"barfoo",
             nodes[0].id,
-        ),
-        (
-            libp2p::gossipsub::IdentTopic::new(topic.clone()),
-            Some(nodes[1].id),
-            b"barfoo",
-            nodes[1].id,
         ),
     ]
     .iter()
@@ -138,7 +122,7 @@ async fn publish_between_two_nodes_single_topic() {
     ] {
         let received = timeout(
             Duration::from_secs(2),
-            st.take(2)
+            st.take(1)
                 .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
                 .collect::<Vec<_>>(),
         )
