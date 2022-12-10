@@ -52,7 +52,9 @@ use futures::{
 };
 
 use ipfs_bitswap::BitswapEvent;
-use p2p::{IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RelayConfig};
+use p2p::{
+    IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
+};
 use subscription::SubscriptionRegistry;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -396,11 +398,7 @@ enum IpfsEvent {
     ),
     GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
     Provide(Cid, Channel<SubscriptionFuture<KadResult, String>>),
-    DhtGet(
-        Key,
-        Quorum,
-        OneshotSender<SubscriptionFuture<KadResult, String>>,
-    ),
+    DhtGet(Key, OneshotSender<RecordStream>),
     DhtPut(
         Key,
         Vec<u8>,
@@ -571,6 +569,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             swarm,
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
             provider_stream: HashMap::new(),
+            record_stream: HashMap::new(),
             kad_subscriptions,
             repo,
             autonat_limit,
@@ -1412,30 +1411,19 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     pub async fn dht_get<T: Into<Key>>(
         &self,
         key: T,
-        quorum: Quorum,
-    ) -> Result<Vec<Vec<u8>>, Error> {
-        let kad_result = async move {
+    ) -> Result<RecordStream, Error> {
+        async move {
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::DhtGet(key.into(), quorum, tx))
+                .send(IpfsEvent::DhtGet(key.into(), tx))
                 .await?;
 
             Ok(rx.await?).map_err(|e: String| anyhow!(e))
         }
         .instrument(self.span.clone())
-        .await?
-        .await;
-
-        match kad_result {
-            Ok(KadResult::Records(recs)) => {
-                let values = recs.into_iter().map(|rec| rec.value).collect();
-                Ok(values)
-            }
-            Ok(_) => unreachable!(),
-            Err(e) => Err(anyhow!(e)),
-        }
+        .await
     }
 
     /// Stores the given key + value record locally and replicates it in the DHT. It doesn't
@@ -1682,6 +1670,7 @@ struct IpfsFuture<Types: IpfsTypes> {
     from_facade: Fuse<Receiver<IpfsEvent>>,
     listening_addresses: HashMap<Multiaddr, (ListenerId, Option<Channel<Multiaddr>>)>,
     provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
+    record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     repo: Arc<Repo<Types>>,
     kad_subscriptions: SubscriptionRegistry<KadResult, String>,
     autonat_limit: Arc<AtomicU64>,
@@ -2005,16 +1994,25 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                         );
                                     }
                                     GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                                id.into(),
-                                                Ok(KadResult::Record(record.record)),
-                                            );
+                                        if let Entry::Occupied(entry) = self.record_stream.entry(id)
+                                        {
+                                            tokio::spawn({
+                                                let mut tx = entry.get().clone();
+                                                async move {
+                                                    let _ = tx.send(record.record).await;
+                                                }
+                                            });
                                         }
                                     }
                                     GetRecord(Ok(
                                         GetRecordOk::FinishedWithNoAdditionalRecord { .. },
-                                    )) => {}
+                                    )) => {
+                                        if step.last {
+                                            if let Some(tx) = self.record_stream.remove(&id) {
+                                                tx.close_channel();
+                                            }
+                                        }
+                                    }
                                     GetRecord(Err(GetRecordError::NotFound {
                                         key,
                                         closest_peers: _,
@@ -2023,11 +2021,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                         warn!("kad: couldn't find record {}", key);
 
                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                                id.into(),
-                                                Err("couldn't find a record for the given key"
-                                                    .into()),
-                                            );
+                                            if let Some(tx) = self.record_stream.remove(&id) {
+                                                tx.close_channel();
+                                            }
                                         }
                                     }
                                     GetRecord(Err(GetRecordError::QuorumFailed {
@@ -2042,11 +2038,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                         );
 
                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("quorum failed when trying to obtain a record for the given key"
-                                    .into()),
-                            );
+                                            if let Some(tx) = self.record_stream.remove(&id) {
+                                                tx.close_channel();
+                                            }
                                         }
                                     }
                                     GetRecord(Err(GetRecordError::Timeout { key })) => {
@@ -2054,11 +2048,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                         warn!("kad: timed out while trying to get key {}", key);
 
                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("timed out while trying to get a record for the given key"
-                                    .into()),
-                            );
+                                            if let Some(tx) = self.record_stream.remove(&id) {
+                                                tx.close_channel();
+                                            }
                                         }
                                     }
                                     PutRecord(Ok(PutRecordOk { key }))
@@ -2540,11 +2532,17 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         };
                         let _ = ret.send(future);
                     }
-                    IpfsEvent::DhtGet(key, _, ret) => {
+                    IpfsEvent::DhtGet(key, ret) => {
                         let id = self.swarm.behaviour_mut().kademlia.get_record(key);
+                        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+                        let stream = async_stream::stream! {
+                            while let Some(record) = rx.next().await {
+                                    yield record;
+                            }
+                        };
+                        self.record_stream.insert(id, tx);
 
-                        let future = self.kad_subscriptions.create_subscription(id.into(), None);
-                        let _ = ret.send(future);
+                        let _ = ret.send(RecordStream(stream.boxed()));
                     }
                     IpfsEvent::DhtPut(key, value, quorum, ret) => {
                         let record = Record {

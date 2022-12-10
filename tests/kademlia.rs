@@ -1,4 +1,4 @@
-use futures::StreamExt;
+use futures::{pin_mut, StreamExt};
 use libipld::{
     multihash::{Code, MultihashDigest},
     Cid, IpldCodec,
@@ -180,7 +180,6 @@ async fn dht_providing() {
 
 /// Check if Ipfs::{get, put} does its job.
 #[tokio::test]
-#[ignore = "Will reevaluate; test stalls which, which will likely be due to the changes to 0.50 kad"]
 async fn dht_get_put() {
     const CHAIN_LEN: usize = 10;
     let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
@@ -196,5 +195,15 @@ async fn dht_get_put() {
         .unwrap();
 
     // and the first node should be able to get it
-    assert_eq!(nodes[0].dht_get(key, quorum).await.unwrap(), vec![value]);
+    let records = nodes[0].dht_get(key).await.unwrap();
+    pin_mut!(records);
+
+    // assert_eq!(nodes[0].dht_get(key, quorum).await.unwrap(), vec![value]);
+    assert!(records
+        .by_ref()
+        .take(1)
+        .collect::<Vec<_>>()
+        .await
+        .iter()
+        .any(|x| x.value == value));
 }

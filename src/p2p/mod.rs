@@ -1,5 +1,5 @@
 //! P2P handling for IPFS nodes.
-mod provider_stream;
+mod stream;
 
 use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
@@ -18,7 +18,8 @@ use tracing::Span;
 
 pub(crate) mod addr;
 mod behaviour;
-pub use self::provider_stream::ProviderStream;
+pub use self::stream::ProviderStream;
+pub use self::stream::RecordStream;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::KadStoreConfig;
