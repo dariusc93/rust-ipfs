@@ -18,12 +18,12 @@ use tracing::Span;
 
 pub(crate) mod addr;
 mod behaviour;
-pub use self::stream::ProviderStream;
-pub use self::stream::RecordStream;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::KadStoreConfig;
 pub use self::behaviour::{RateLimit, RelayConfig};
+pub use self::stream::ProviderStream;
+pub use self::stream::RecordStream;
 pub use self::transport::TransportConfig;
 pub(crate) mod gossipsub;
 mod swarm;
@@ -207,12 +207,18 @@ pub async fn create_swarm(
     let transport = transport::build_transport(keypair, relay_transport, transport_config)?;
 
     // Create a Swarm
-    let swarm = libp2p::swarm::SwarmBuilder::with_executor(transport, behaviour, peer_id, SpannedExecutor(span)).connection_limits(swarm_config.connection)
-        .notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
-        .connection_event_buffer_size(swarm_config.connection_event_buffer_size)
-        .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
-        .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
-        .build();
+    let swarm = libp2p::swarm::SwarmBuilder::with_executor(
+        transport,
+        behaviour,
+        peer_id,
+        SpannedExecutor(span),
+    )
+    .connection_limits(swarm_config.connection)
+    .notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
+    .connection_event_buffer_size(swarm_config.connection_event_buffer_size)
+    .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
+    .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
+    .build();
 
     Ok(swarm)
 }

@@ -32,8 +32,6 @@ type NetworkBehaviourAction = swarm::NetworkBehaviourAction<
 pub struct SwarmApi {
     events: VecDeque<NetworkBehaviourAction>,
 
-    // FIXME: anything related to this is probably wrong, and doesn't behave as one would expect
-    // from the method names
     peers: HashMap<PeerId, Option<IdentifyInfo>>,
 
     connect_registry: SubscriptionRegistry<(), String>,
@@ -197,21 +195,12 @@ impl NetworkBehaviour for SwarmApi {
             }
         };
 
-        if let Entry::Vacant(entry) = self.peers.entry(*peer_id) {
-            entry.insert(None);
-        };
+        self.peers.entry(*peer_id).or_default();
 
         let connections = self.connected_peers.entry(*peer_id).or_default();
         connections.push(addr.clone());
 
-        let prev = self.connections.insert(addr.clone(), *peer_id);
-
-        if let Some(prev) = prev {
-            warn!(
-                "tracked connection was replaced from {} => {}: {}",
-                prev, peer_id, addr
-            );
-        }
+        self.connections.insert(addr, *peer_id);
 
         if let ConnectedPoint::Dialer {
             address,
@@ -621,8 +610,9 @@ mod tests {
         let peer_id = key.public().to_peer_id();
         let transport = build_transport(key, None, Default::default()).unwrap();
 
-        let swarm = SwarmBuilder::with_executor(transport, SwarmApi::default(), peer_id, ThreadLocalTokio)
-            .build();
+        let swarm =
+            SwarmBuilder::with_executor(transport, SwarmApi::default(), peer_id, ThreadLocalTokio)
+                .build();
         (peer_id, swarm)
     }
 

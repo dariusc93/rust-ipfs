@@ -19,7 +19,7 @@ use libp2p::kad::record::{
     Record,
 };
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
-use libp2p::mdns::{Config as MdnsConfig, Event as MdnsEvent, tokio::Behaviour as Mdns};
+use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
@@ -275,7 +275,9 @@ pub struct KadStoreConfig {
 impl Behaviour {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
     pub async fn new(options: SwarmOptions) -> Result<(Self, Option<ClientTransport>), Error> {
-        info!("net: starting with peer id {}", options.peer_id);
+        let peer_id = options.peer_id;
+
+        info!("net: starting with peer id {}", peer_id);
 
         let mdns = if options.mdns {
             let config = MdnsConfig {
@@ -297,7 +299,7 @@ impl Behaviour {
                 .memory
                 .unwrap_or_default();
 
-            MemoryStore::with_config(options.peer_id.to_owned(), config)
+            MemoryStore::with_config(peer_id, config)
         };
 
         let kad_config = match options.kad_config.clone() {
@@ -310,7 +312,7 @@ impl Behaviour {
             }
         };
 
-        let mut kademlia = Kademlia::with_config(options.peer_id.to_owned(), store, kad_config);
+        let mut kademlia = Kademlia::with_config(peer_id, store, kad_config);
 
         for addr in &options.bootstrap {
             let addr = MultiaddrWithPeerId::try_from(addr.clone())?;
@@ -322,7 +324,6 @@ impl Behaviour {
         let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
 
         let ping = Ping::new(options.ping_config.unwrap_or_default());
-        let peer_id = options.keypair.public().into();
 
         let identify = Identify::new(
             options

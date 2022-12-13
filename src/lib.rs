@@ -1408,10 +1408,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.
-    pub async fn dht_get<T: Into<Key>>(
-        &self,
-        key: T,
-    ) -> Result<RecordStream, Error> {
+    pub async fn dht_get<T: Into<Key>>(&self, key: T) -> Result<RecordStream, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
