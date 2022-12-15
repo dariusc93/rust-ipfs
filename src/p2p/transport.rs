@@ -3,7 +3,7 @@ use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, OrTransport};
 use libp2p::core::upgrade::SelectUpgrade;
-use libp2p::dns::TokioDnsConfig;
+use libp2p::dns::{ResolverConfig, TokioDnsConfig};
 use libp2p::identity;
 use libp2p::mplex::MplexConfig;
 use libp2p::noise::{self, NoiseConfig};
@@ -78,11 +78,13 @@ pub fn build_transport(
     let transport = tcp_transport.or_transport(ws_transport);
 
     let transport_timeout = TransportTimeout::new(transport, Duration::from_secs(30));
-    #[cfg(not(target_os = "android"))]
-    let transport = TokioDnsConfig::system(transport_timeout)?;
-    #[cfg(target_os = "android")]
-    let transport =
-        TokioDnsConfig::custom(transport_timeout, Default::default(), Default::default())?;
+
+    //TODO: Make this configurable to use, google, cloudflare or a custom resolver
+    let transport = TokioDnsConfig::custom(
+        transport_timeout,
+        ResolverConfig::cloudflare(),
+        Default::default(),
+    )?;
 
     let transport = match relay {
         Some(relay) => {
