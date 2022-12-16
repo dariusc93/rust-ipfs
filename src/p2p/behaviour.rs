@@ -1,4 +1,5 @@
 use super::gossipsub::GossipsubStream;
+use super::relay::RelayManager;
 use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
@@ -45,6 +46,7 @@ pub struct Behaviour {
     pub autonat: autonat::Behaviour,
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
+    pub relay_manager: Toggle<RelayManager>,
     pub dcutr: Toggle<Dcutr>,
     pub swarm: SwarmApi,
 }
@@ -60,6 +62,7 @@ pub enum BehaviourEvent {
     Autonat(autonat::Event),
     Relay(RelayEvent),
     RelayClient(RelayClientEvent),
+    RelayManager(super::relay::Event),
     Dcutr(DcutrEvent),
     Void(void::Void),
 }
@@ -103,6 +106,12 @@ impl From<GossipsubEvent> for BehaviourEvent {
 impl From<autonat::Event> for BehaviourEvent {
     fn from(event: autonat::Event) -> Self {
         BehaviourEvent::Autonat(event)
+    }
+}
+
+impl From<super::relay::Event> for BehaviourEvent {
+    fn from(event: super::relay::Event) -> Self {
+        BehaviourEvent::RelayManager(event)
     }
 }
 
@@ -368,6 +377,8 @@ impl Behaviour {
             false => (None, None.into()),
         };
 
+        let relay_manager = Toggle::from(Some(RelayManager::default()));
+
         Ok((
             Behaviour {
                 mdns,
@@ -382,6 +393,7 @@ impl Behaviour {
                 dcutr,
                 relay,
                 relay_client,
+                relay_manager,
             },
             transport,
         ))

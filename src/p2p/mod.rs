@@ -1,4 +1,5 @@
 //! P2P handling for IPFS nodes.
+mod relay;
 mod stream;
 
 use std::convert::TryInto;

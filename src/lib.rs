@@ -116,6 +116,7 @@ pub use libp2p::{
 };
 
 use libp2p::{
+    autonat::Event,
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
@@ -362,6 +363,7 @@ enum IpfsEvent {
     /// Unban peer
     Unban(PeerId, Channel<()>),
     /// Request background task to return the listened and external addresses
+    AddStaticRelay(PeerId, Multiaddr, OneshotSender<Result<(), Error>>),
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
@@ -1454,8 +1456,19 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     // TBD
-    pub async fn add_relay(&self, _: Multiaddr) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
+    pub async fn add_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::AddStaticRelay(peer_id, addr, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
     }
 
     // TBD
@@ -2270,9 +2283,35 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                     self.autonat_counter.store(counter, Ordering::Relaxed);
                                 }
                             }
+
+                            if protocols
+                                .iter()
+                                .any(|p| p.as_bytes() == libp2p::relay::v2::STOP_PROTOCOL_NAME)
+                            {
+                                if let Some(relay) =
+                                    self.swarm.behaviour_mut().relay_manager.as_mut()
+                                {
+                                    relay.inject_candidate(peer_id, info.listen_addrs)
+                                }
+                            }
                         }
                         event => trace!("identify: {:?}", event),
                     },
+                    SwarmEvent::Behaviour(BehaviourEvent::Autonat(Event::StatusChanged {
+                        new,
+                        ..
+                    })) => {
+                        if let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                            relay.change_nat(new)
+                        }
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::RelayClient(event)) => {
+                        if let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                            relay.inject_relay_client_event(event)
+                        }
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::RelayManager(event)) => {
+                    }
                     _ => trace!("Swarm event: {:?}", inner),
                 }
             }
@@ -2448,6 +2487,13 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             .cloned()
                             .collect();
                         let _ = ret.send(peers);
+                    }
+                    IpfsEvent::AddStaticRelay(peer_id, addr, ret) => {
+                        if let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                            let _ = ret.send(relay.add_static_relay(peer_id, addr));
+                        } else {
+                            let _ = ret.send(Err(anyhow::anyhow!("Behaviour disabled")));
+                        }
                     }
                     IpfsEvent::FindPeerIdentity(peer_id, local_only, ret) => {
                         let locally_known = self
