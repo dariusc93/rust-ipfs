@@ -70,6 +70,7 @@ pub struct RelayManager {
     pending_relay: HashMap<PeerId, Vec<Multiaddr>>,
 
     candidates: HashMap<PeerId, Vec<Multiaddr>>,
+    candidates_rtt: HashMap<PeerId, Duration>,
 
     candidates_connection: HashMap<ConnectionId, Multiaddr>,
 
@@ -95,6 +96,7 @@ impl Default for RelayManager {
             relay_registry: Default::default(),
             pending_relay: Default::default(),
             candidates: Default::default(),
+            candidates_rtt: Default::default(),
             candidates_connection: Default::default(),
             reservation: Default::default(),
             blacklist: Default::default(),
@@ -173,6 +175,39 @@ impl RelayManager {
         }
     }
 
+    // This will select a candidate with the lowest ping
+    pub fn select_candidate_low_rtt(&self) {
+        let mut best_candidate = None;
+        let mut last_rtt: Option<Duration> = None;
+
+        // println!("List: {:?}", self.candidates_rtt);
+        // println!("List: {:?}", self.candidates);
+        let peer_id_list = self.candidates_rtt.keys().copied().collect::<Vec<_>>();
+        let rtt_list = self.candidates_rtt.values().copied().collect::<Vec<_>>();
+        for (index, rtt) in rtt_list.iter().enumerate() {
+            if let Some(current) = last_rtt.as_mut() {
+                if rtt.as_millis() < (current).as_millis() {
+                    *current = *rtt;
+                    best_candidate = peer_id_list.get(index).copied();
+                }
+            } else {
+                last_rtt = Some(*rtt);
+                best_candidate = peer_id_list.get(index).copied();
+            }
+        }
+
+        // println!("{:?} with {:?}", best_candidate, last_rtt);
+    }
+
+    pub fn set_candidate_rtt(&mut self, peer_id: PeerId, rtt: Duration) {
+        if self.candidates.contains_key(&peer_id) {
+            self.candidates_rtt
+                .entry(peer_id)
+                .and_modify(|r| *r = rtt)
+                .or_insert(rtt);
+        }
+    }
+
     pub fn inject_candidate(&mut self, peer_id: PeerId, addrs: Vec<Multiaddr>) {
         let candidates_size = self.candidates.len();
 
@@ -180,20 +215,14 @@ impl RelayManager {
             return;
         }
 
-        if !matches!(self.nat_status, NatStatus::Public(_))
-            && (candidates_size == 0
-                || (self.limits.max_candidates > candidates_size
-                    && candidates_size < self.limits.min_candidates))
-        {
-            *self.candidates.entry(peer_id).or_default() = addrs.clone();
+        *self.candidates.entry(peer_id).or_default() = addrs.clone();
 
-            for addr in addrs {
-                self.events
-                    .push_back(NetworkBehaviourAction::GenerateEvent(Event::Added {
-                        peer_id,
-                        addr,
-                    }));
-            }
+        for addr in addrs {
+            self.events
+                .push_back(NetworkBehaviourAction::GenerateEvent(Event::Added {
+                    peer_id,
+                    addr,
+                }));
         }
     }
 

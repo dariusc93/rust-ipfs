@@ -364,6 +364,7 @@ enum IpfsEvent {
     Unban(PeerId, Channel<()>),
     /// Request background task to return the listened and external addresses
     AddStaticRelay(PeerId, Multiaddr, OneshotSender<Result<(), Error>>),
+    FindBestRelay(OneshotSender<Result<(), Error>>),
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
@@ -1493,7 +1494,18 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
     // TBD
     pub async fn auto_relay(&self) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::FindBestRelay(tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
     }
 
     /// Walk the given Iplds' links up to `max_depth` (or indefinitely for `None`). Will return
@@ -2211,6 +2223,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                 rtt.as_millis()
                             );
                             self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
+                            if let Some(relay_manager) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                                relay_manager.set_candidate_rtt(peer, rtt);
+                            }
                         }
                         libp2p::ping::Event {
                             peer,
@@ -2310,8 +2325,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             relay.inject_relay_client_event(event)
                         }
                     }
-                    SwarmEvent::Behaviour(BehaviourEvent::RelayManager(event)) => {
-                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::RelayManager(_event)) => {}
                     _ => trace!("Swarm event: {:?}", inner),
                 }
             }
@@ -2491,6 +2505,13 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     IpfsEvent::AddStaticRelay(peer_id, addr, ret) => {
                         if let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() {
                             let _ = ret.send(relay.add_static_relay(peer_id, addr));
+                        } else {
+                            let _ = ret.send(Err(anyhow::anyhow!("Behaviour disabled")));
+                        }
+                    }
+                    IpfsEvent::FindBestRelay(ret) => {
+                        if let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                            let _ = ret.send(Ok(relay.select_candidate_low_rtt()));
                         } else {
                             let _ = ret.send(Err(anyhow::anyhow!("Behaviour disabled")));
                         }
