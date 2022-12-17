@@ -183,7 +183,7 @@ impl Default for IdentifyConfiguration {
             agent_version: "rust-ipfs".into(),
             initial_delay: Duration::from_millis(500),
             interval: Duration::from_secs(5 * 60),
-            push_update: false,
+            push_update: true,
             cache: 0,
         }
     }
@@ -377,7 +377,8 @@ impl Behaviour {
             false => (None, None.into()),
         };
 
-        let relay_manager = Toggle::from(Some(RelayManager::default()));
+        //TODO: Make configurable 
+        let relay_manager = Toggle::from(options.relay.then(RelayManager::default));
 
         Ok((
             Behaviour {

@@ -93,6 +93,7 @@ pub use self::p2p::gossipsub::SubscriptionStream;
 pub use self::{
     error::Error,
     p2p::BehaviourEvent,
+    p2p::RelayManagerEvent,
     p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
     repo::{PinKind, PinMode, RepoTypes},
@@ -2223,7 +2224,9 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                 rtt.as_millis()
                             );
                             self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
-                            if let Some(relay_manager) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                            if let Some(relay_manager) =
+                                self.swarm.behaviour_mut().relay_manager.as_mut()
+                            {
                                 relay_manager.set_candidate_rtt(peer, rtt);
                             }
                         }
@@ -2325,7 +2328,23 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             relay.inject_relay_client_event(event)
                         }
                     }
-                    SwarmEvent::Behaviour(BehaviourEvent::RelayManager(_event)) => {}
+                    SwarmEvent::Behaviour(BehaviourEvent::RelayManager(
+                        RelayManagerEvent::ReservationSelected { peer_id, addrs },
+                    )) => {
+                        if let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_ref() {
+                            if relay.reservation_amount() <= 1 {
+                                for addr in addrs {
+                                    let addr = addr
+                                        .with(Protocol::P2p(peer_id.into()))
+                                        .with(Protocol::P2pCircuit);
+                                    match self.swarm.listen_on(addr.clone()) {
+                                        Ok(_) => {}
+                                        Err(_) => continue,
+                                    };
+                                }
+                            }
+                        }
+                    }
                     _ => trace!("Swarm event: {:?}", inner),
                 }
             }

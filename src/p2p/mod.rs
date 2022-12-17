@@ -23,6 +23,7 @@ pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::KadStoreConfig;
 pub use self::behaviour::{RateLimit, RelayConfig};
+pub use self::relay::Event as RelayManagerEvent;
 pub use self::stream::ProviderStream;
 pub use self::stream::RecordStream;
 pub use self::transport::TransportConfig;
