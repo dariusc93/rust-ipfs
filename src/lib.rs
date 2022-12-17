@@ -2304,7 +2304,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
 
                             if protocols
                                 .iter()
-                                .any(|p| p.as_bytes() == libp2p::relay::v2::STOP_PROTOCOL_NAME)
+                                .any(|p| p.as_bytes() == libp2p::relay::v2::HOP_PROTOCOL_NAME)
                             {
                                 if let Some(relay) =
                                     self.swarm.behaviour_mut().relay_manager.as_mut()
