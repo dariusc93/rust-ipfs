@@ -32,6 +32,7 @@ pub mod refs;
 pub mod repo;
 mod subscription;
 pub mod unixfs;
+pub mod utils;
 
 #[cfg(feature = "port_mapping")]
 mod igd;
@@ -545,7 +546,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             repo: repo.clone(),
             identify_conf: id_conf,
             keys: DebuggableKeypair(keys),
-            to_task,
+            to_task: to_task.clone(),
         };
 
         // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
@@ -570,6 +571,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let mut fut = IpfsFuture {
             repo_events: repo_events.fuse(),
             from_facade: receiver.fuse(),
+            inner_sender: to_task,
             swarm,
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
             provider_stream: HashMap::new(),
@@ -1691,6 +1693,7 @@ struct IpfsFuture<Types: IpfsTypes> {
     swarm: TSwarm,
     repo_events: Fuse<Receiver<RepoEvent>>,
     from_facade: Fuse<Receiver<IpfsEvent>>,
+    inner_sender: Sender<IpfsEvent>,
     listening_addresses: HashMap<Multiaddr, (ListenerId, Option<Channel<Multiaddr>>)>,
     provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     record_stream: HashMap<QueryId, UnboundedSender<Record>>,
