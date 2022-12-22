@@ -97,7 +97,9 @@ pub use self::{
     path::IpfsPath,
     repo::{PinKind, PinMode, RepoTypes},
 };
-pub use ipfs_bitswap::Block;
+
+pub type Block = libipld::Block<libipld::DefaultParams>;
+
 use libipld::{
     multibase::{self, Base},
     Cid, Ipld, IpldCodec,
