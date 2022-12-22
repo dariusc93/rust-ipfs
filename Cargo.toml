@@ -9,7 +9,7 @@ description = "IPFS node implementation"
 version = "0.3.0-alpha"
 
 [features]
-default = ["port_mapping"]
+default = []
 port_mapping = ["igd-next"]
 
 # feature will enable sled_data_store use in ipfs::Types (default used by ipfs-http for example)
