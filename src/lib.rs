@@ -76,7 +76,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::{config::BOOTSTRAP_NODES, repo::BlockPut};
+use crate::{config::BOOTSTRAP_NODES, repo::BlockPut, p2p::Nat};
 
 use self::{
     dag::IpldDag,
@@ -120,7 +120,7 @@ pub use libp2p::{
 };
 
 use libp2p::{
-    autonat::Event,
+    autonat::{Event, NatStatus},
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
@@ -2325,7 +2325,12 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         ..
                     })) => {
                         if let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() {
-                            relay.change_nat(new)
+                            let nat = match new {
+                                NatStatus::Public(_) => Nat::Public,
+                                NatStatus::Private => Nat::Private,
+                                _ => Nat::Unknown
+                            };
+                            relay.change_nat(nat)
                         }
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::RelayClient(event)) => {

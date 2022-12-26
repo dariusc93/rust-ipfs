@@ -1,6 +1,5 @@
 use core::task::{Context, Poll};
 use futures::StreamExt;
-use libp2p::autonat::NatStatus;
 use libp2p::core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
 use libp2p::multiaddr::Protocol;
 use libp2p::relay::v2::client::Event as RelayClientEvent;
@@ -32,6 +31,7 @@ pub enum Event {
         peer_id: PeerId,
         addr: Vec<Multiaddr>,
     },
+    FindCandidate,
     CandidateLimitReached {
         current: usize,
         limit: usize,
@@ -63,6 +63,14 @@ impl Default for RelayLimits {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Nat {
+    Public,
+    Private,
+    #[default]
+    Unknown
+}
+
 pub struct RelayManager {
     events: VecDeque<NetworkBehaviourAction>,
 
@@ -75,7 +83,7 @@ pub struct RelayManager {
 
     reservation: HashMap<ListenerId, Multiaddr>,
     reservation_peer: HashSet<PeerId>,
-    
+
     // Will have a delay start, but will be used to find candidates that might be used
     interval: Interval,
 
@@ -87,7 +95,7 @@ pub struct RelayManager {
     // Used to check for the nat status. If we are not behind a NAT, then a relay probably should not be used
     // since a direct connection could be established
     // TODO: Investigate if the status changes when port mapping is done
-    nat_status: NatStatus,
+    nat_status: Nat,
 
     limits: RelayLimits,
 }
@@ -107,7 +115,7 @@ impl Default for RelayManager {
                 Instant::now() + Duration::from_secs(10),
                 Duration::from_secs(5),
             ),
-            nat_status: NatStatus::Unknown,
+            nat_status: Nat::Unknown,
             limits: Default::default(),
         }
     }
@@ -207,7 +215,7 @@ impl RelayManager {
     }
 
     // Note: This might not be used internally, or alteast "NatStatus"
-    pub fn change_nat(&mut self, nat: NatStatus) {
+    pub fn change_nat(&mut self, nat: Nat) {
         self.nat_status = nat;
         //TODO: If nat change to public to probably disconnect relay
         //      but if it change to private to attempt to utilize a relay
@@ -234,8 +242,7 @@ impl RelayManager {
             return;
         }
 
-        if self.reservation.len() >= self.limits.max_reservation
-        {
+        if self.reservation.len() >= self.limits.max_reservation {
             warn!("Reservation is at its threshold. Will not continue with select");
             return;
         }
@@ -341,7 +348,7 @@ impl RelayManager {
                 self.blacklist.insert(relay_peer_id, None);
                 error!("Reservation request failed {relay_peer_id}: {error}");
             }
-            e => info!("Relay Client Event: {e:?}")
+            e => info!("Relay Client Event: {e:?}"),
         }
     }
 }
