@@ -77,7 +77,7 @@ impl SwarmApi {
 
     //Note: This may get pushed into its own behaviour in the near future
     pub fn identify_info(&self) -> impl Iterator<Item = &IdentifyInfo> {
-        self.peers.iter().map(|(_, v)| v).filter_map(|s| s.as_ref())
+        self.peers.values().filter_map(|s| s.as_ref())
     }
 
     pub fn remove_peer(&mut self, peer_id: &PeerId) {
