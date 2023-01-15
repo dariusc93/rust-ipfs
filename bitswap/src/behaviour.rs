@@ -334,12 +334,12 @@ impl NetworkBehaviour for Bitswap {
     ) -> Poll<NetworkBehaviourAction<Self::OutEvent, Self::ConnectionHandler>> {
         use futures::stream::StreamExt;
 
-        while let Poll::Ready(Some((peer_id, block))) = self.ready_blocks.poll_next_unpin(ctx) {
-            self.send_block(peer_id, block);
-        }
-
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
+        }
+
+        while let Poll::Ready(Some((peer_id, block))) = self.ready_blocks.poll_next_unpin(ctx) {
+            self.send_block(peer_id, block);
         }
 
         for (peer_id, ledger) in &mut self.connected_peers {
