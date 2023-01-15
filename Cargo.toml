@@ -111,7 +111,7 @@ rand = { default-features = false, version = "0.8", features = [
 ] }
 tempfile = "3.1.0"
 
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.1", features = ["derive"] }
 
 # [[bench]]
 # name = "hashed-map-cid"
