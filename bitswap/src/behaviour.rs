@@ -8,7 +8,7 @@
 use crate::block::Block;
 use crate::ledger::{Ledger, Message, Priority};
 use crate::protocol::{BitswapConfig, MessageWrapper};
-use fnv::FnvHashSet;
+use fnv::{FnvHashMap, FnvHashSet};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use hash_hasher::HashedMap;
 use libipld::Cid;
@@ -96,6 +96,9 @@ pub struct Bitswap {
     >,
     /// List of prospect peers to connect to.
     target_peers: FnvHashSet<PeerId>,
+
+    peer_connection_id: FnvHashMap<PeerId, ConnectionId>,
+
     /// Ledger
     pub connected_peers: HashMap<PeerId, Ledger>,
     /// Wanted blocks
@@ -114,6 +117,7 @@ impl Default for Bitswap {
         Bitswap {
             events: Default::default(),
             target_peers: Default::default(),
+            peer_connection_id: Default::default(),
             connected_peers: Default::default(),
             wanted_blocks: Default::default(),
             queued_blocks: tx,
@@ -233,15 +237,17 @@ impl NetworkBehaviour for Bitswap {
     fn inject_connection_established(
         &mut self,
         peer_id: &PeerId,
-        _connection_id: &ConnectionId,
+        connection_id: &ConnectionId,
         _endpoint: &ConnectedPoint,
         _failed_addresses: Option<&Vec<Multiaddr>>,
         _other_established: usize,
     ) {
         debug!("bitswap: inject_connected {}", peer_id);
+        self.target_peers.remove(peer_id);
         let ledger = Ledger::new();
         self.stats.entry(*peer_id).or_default();
         self.connected_peers.insert(*peer_id, ledger);
+        self.peer_connection_id.insert(*peer_id, *connection_id);
         self.send_want_list(*peer_id);
     }
 
@@ -255,6 +261,7 @@ impl NetworkBehaviour for Bitswap {
     ) {
         debug!("bitswap: inject_disconnected {:?}", peer_id);
         self.connected_peers.remove(peer_id);
+        self.peer_connection_id.remove(peer_id);
         // the related stats are not dropped, so that they
         // persist for peers regardless of disconnects
     }
@@ -268,7 +275,7 @@ impl NetworkBehaviour for Bitswap {
             // we've received a bitswap message, process it
             MessageWrapper::Rx(msg) => msg,
         };
-
+        
         debug!("bitswap: inject_event from {}: {:?}", source, message);
 
         let current_wantlist = self.local_wantlist();
@@ -341,11 +348,13 @@ impl NetworkBehaviour for Bitswap {
                     peer_stats.update_outgoing(message.blocks.len() as u64);
                 }
 
-                return Poll::Ready(NetworkBehaviourAction::NotifyHandler {
-                    peer_id: *peer_id,
-                    handler: NotifyHandler::Any,
-                    event: message,
-                });
+                if let Some(id) = self.peer_connection_id.get(peer_id) {
+                    return Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                        peer_id: *peer_id,
+                        handler: NotifyHandler::One(*id),
+                        event: message,
+                    });
+                }
             }
         }
         Poll::Pending
