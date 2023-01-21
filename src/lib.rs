@@ -80,10 +80,7 @@ use crate::{config::BOOTSTRAP_NODES, repo::BlockPut};
 use self::{
     dag::IpldDag,
     ipns::Ipns,
-    p2p::{
-        addr::{could_be_bound_from_ephemeral, starts_unspecified},
-        create_swarm, SwarmOptions, TSwarm,
-    },
+    p2p::{create_swarm, SwarmOptions, TSwarm},
     repo::{create_repo, Repo, RepoEvent, RepoOptions},
     subscription::SubscriptionFuture,
 };
@@ -381,8 +378,14 @@ enum IpfsEvent {
     BitswapStats(OneshotSender<BitswapStats>),
     SwarmListenOn(Multiaddr, OneshotSender<Result<ListenerId, Error>>),
     SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
-    AddListeningAddress(Multiaddr, Channel<Multiaddr>),
-    RemoveListeningAddress(Multiaddr, Channel<()>),
+    AddListeningAddress(
+        Multiaddr,
+        Channel<SubscriptionFuture<Option<Option<Multiaddr>>, String>>,
+    ),
+    RemoveListeningAddress(
+        Multiaddr,
+        Channel<SubscriptionFuture<Option<Option<Multiaddr>>, String>>,
+    ),
     Bootstrap(Channel<SubscriptionFuture<KadResult, String>>),
     DirectBootstrap(Channel<()>),
     AddPeer(PeerId, Option<Multiaddr>),
@@ -559,6 +562,8 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let autonat_limit = Arc::new(AtomicU64::new(64));
         let autonat_counter = Arc::new(Default::default());
         let kad_subscriptions = Default::default();
+        let listener_subscriptions = Default::default();
+        let listeners = Default::default();
         let bootstraps = Default::default();
 
         let IpfsOptions {
@@ -570,9 +575,11 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             from_facade: receiver.fuse(),
             swarm,
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
+            listeners,
             provider_stream: HashMap::new(),
             record_stream: HashMap::new(),
             kad_subscriptions,
+            listener_subscriptions,
             repo,
             autonat_limit,
             autonat_counter,
@@ -581,7 +588,11 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         };
 
         for addr in listening_addrs.into_iter() {
-            fut.start_add_listener_address(addr, None);
+            match fut.swarm.listen_on(addr) {
+                Ok(id) => fut.listeners.insert(id),
+                _ => continue,
+            };
+            // fut.start_add_listener_address(addr, None);
         }
 
         Ok((ipfs, fut.instrument(swarm_span)))
@@ -1270,7 +1281,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             rx.await?
         }
         .instrument(self.span.clone())
-        .await
+        .await?
+        .await?
+        .and_then(|addr| addr)
+        .ok_or(anyhow::anyhow!("No multiaddr provided"))
     }
 
     /// Stop listening on a previously added listening address. Fails if the address is not being
@@ -1289,7 +1303,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             rx.await?
         }
         .instrument(self.span.clone())
-        .await
+        .await?
+        .await?
+        .ok_or(anyhow::anyhow!("Error removing address"))
+        .map(|_| ())
     }
 
     /// Obtain the addresses associated with the given `PeerId`; they are first searched for locally
@@ -1667,134 +1684,17 @@ struct IpfsFuture<Types: IpfsTypes> {
     swarm: TSwarm,
     repo_events: Fuse<Receiver<RepoEvent>>,
     from_facade: Fuse<Receiver<IpfsEvent>>,
-    listening_addresses: HashMap<Multiaddr, (ListenerId, Option<Channel<Multiaddr>>)>,
+    listening_addresses: HashMap<Multiaddr, ListenerId>,
+    listeners: HashSet<ListenerId>,
     provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     repo: Arc<Repo<Types>>,
     kad_subscriptions: SubscriptionRegistry<KadResult, String>,
+    listener_subscriptions: SubscriptionRegistry<Option<Option<Multiaddr>>, String>,
     autonat_limit: Arc<AtomicU64>,
     autonat_counter: Arc<AtomicU64>,
     bootstraps: HashSet<MultiaddrWithPeerId>,
     swarm_event: Option<TSwarmEventFn>,
-}
-
-impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
-    /// Completes the adding of listening address by matching the new listening address `addr` to
-    /// the `self.listening_addresses` so that we can detect even the multiaddresses with ephemeral
-    /// ports.
-    fn complete_listening_address_adding(&mut self, addr: Multiaddr) {
-        let maybe_sender = match self.listening_addresses.get_mut(&addr) {
-            // matching a non-ephemeral is simpler
-            Some((_, maybe_sender)) => maybe_sender.take(),
-            None => {
-                // try finding an ephemeral binding on the same prefix
-                let mut matching_keys = self
-                    .listening_addresses
-                    .keys()
-                    .filter(|right| could_be_bound_from_ephemeral(0, &addr, right))
-                    .cloned();
-
-                let first = matching_keys.next();
-
-                if let Some(first) = first {
-                    let second = matching_keys.next();
-
-                    match (first, second) {
-                        (first, None) => {
-                            if let Some((id, maybe_sender)) =
-                                self.listening_addresses.remove(&first)
-                            {
-                                self.listening_addresses.insert(addr.clone(), (id, None));
-                                maybe_sender
-                            } else {
-                                unreachable!("We found a matching ephemeral key already, it must be in the listening_addresses")
-                            }
-                        }
-                        (first, Some(second)) => {
-                            // this is more complicated, but we are guarding
-                            // against this in the from_facade match below
-                            unreachable!(
-                                "More than one matching [{}, {}] and {:?} for {}",
-                                first,
-                                second,
-                                matching_keys.collect::<Vec<_>>(),
-                                addr
-                            );
-                        }
-                    }
-                } else {
-                    // this case is hit when user asks for /ip4/0.0.0.0/tcp/0 for example, the
-                    // libp2p will bound to multiple addresses but we will not get access in 0.19
-                    // to their ListenerIds.
-
-                    let first = self
-                        .listening_addresses
-                        .iter()
-                        .filter(|(addr, _)| starts_unspecified(addr))
-                        .filter(|(could_have_ephemeral, _)| {
-                            could_be_bound_from_ephemeral(1, &addr, could_have_ephemeral)
-                        })
-                        // finally we want to make sure we only match on addresses which are yet to
-                        // be reported back
-                        .filter(|(_, (_, maybe_sender))| maybe_sender.is_some())
-                        .map(|(addr, _)| addr.to_owned())
-                        .next();
-
-                    if let Some(first) = first {
-                        let (id, maybe_sender) = self
-                            .listening_addresses
-                            .remove(&first)
-                            .expect("just filtered this key out");
-                        self.listening_addresses.insert(addr.clone(), (id, None));
-                        trace!("guessing the first match for {} to be {}", first, addr);
-                        maybe_sender
-                    } else {
-                        None
-                    }
-                }
-            }
-        };
-
-        if let Some(sender) = maybe_sender {
-            let _ = sender.send(Ok(addr));
-        }
-    }
-
-    fn start_add_listener_address(&mut self, addr: Multiaddr, ret: Option<Channel<Multiaddr>>) {
-        use libp2p::Swarm;
-
-        if starts_unspecified(&addr)
-            && self
-                .listening_addresses
-                .values()
-                .filter(|(_, maybe_sender)| maybe_sender.is_some())
-                .count()
-                > 0
-        {
-            if let Some(sender) = ret {
-                let _ = sender.send(Err(format_err!("Cannot start listening to an unspecified address when there are pending specified addresses")));
-            }
-            return;
-        }
-
-        match self.listening_addresses.entry(addr) {
-            Entry::Occupied(oe) => {
-                if let Some(sender) = ret {
-                    let _ = sender.send(Err(format_err!("Already adding a possibly ephemeral Multiaddr; wait for the first one to resolve before adding others: {}", oe.key())));
-                }
-            }
-            Entry::Vacant(ve) => match Swarm::listen_on(&mut self.swarm, ve.key().to_owned()) {
-                Ok(id) => {
-                    ve.insert((id, ret));
-                }
-                Err(e) => {
-                    if let Some(sender) = ret {
-                        let _ = sender.send(Err(Error::from(e)));
-                    }
-                }
-            },
-        }
-    }
 }
 
 impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
@@ -1827,8 +1727,38 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     handler(&mut self.swarm, &inner)
                 }
                 match inner {
-                    SwarmEvent::NewListenAddr { address, .. } => {
-                        self.complete_listening_address_adding(address);
+                    SwarmEvent::NewListenAddr {
+                        listener_id,
+                        address,
+                    } => {
+                        self.listening_addresses
+                            .insert(address.clone(), listener_id);
+                        self.listener_subscriptions
+                            .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
+                    }
+                    SwarmEvent::ExpiredListenAddr {
+                        listener_id,
+                        address,
+                    } => {
+                        self.listening_addresses.remove(&address);
+                        self.listener_subscriptions
+                            .finish_subscription(listener_id.into(), Ok(Some(None)));
+                    }
+                    SwarmEvent::ListenerClosed {
+                        listener_id,
+                        reason,
+                        addresses,
+                    } => {
+                        for address in addresses {
+                            self.listening_addresses.remove(&address);
+                        }
+                        let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
+                        self.listener_subscriptions
+                            .finish_subscription(listener_id.into(), reason);
+                    }
+                    SwarmEvent::ListenerError { listener_id, error } => {
+                        self.listener_subscriptions
+                            .finish_subscription(listener_id.into(), Err(error.to_string()));
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
                         MdnsEvent::Discovered(list) => {
@@ -2384,19 +2314,31 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
                         let _ = ret.send((stats, peers, wantlist).into());
                     }
-                    IpfsEvent::AddListeningAddress(addr, ret) => {
-                        self.start_add_listener_address(addr, Some(ret));
-                    }
+                    IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
+                        Ok(id) => {
+                            self.listeners.insert(id);
+                            let fut = self
+                                .listener_subscriptions
+                                .create_subscription(id.into(), None);
+                            let _ = ret.send(Ok(fut));
+                        }
+                        Err(e) => {
+                            let _ = ret.send(Err(anyhow::anyhow!(e)));
+                        }
+                    },
                     IpfsEvent::RemoveListeningAddress(addr, ret) => {
-                        let removed = if let Some((id, _)) = self.listening_addresses.remove(&addr)
-                        {
+                        let removed = if let Some(id) = self.listening_addresses.remove(&addr) {
                             if !self.swarm.remove_listener(id) {
                                 Err(format_err!(
                                     "Failed to remove previously added listening address: {}",
                                     addr
                                 ))
                             } else {
-                                Ok(())
+                                self.listeners.remove(&id);
+                                let fut = self
+                                    .listener_subscriptions
+                                    .create_subscription(id.into(), None);
+                                Ok(fut)
                             }
                         } else {
                             Err(format_err!("Address was not listened to before: {}", addr))

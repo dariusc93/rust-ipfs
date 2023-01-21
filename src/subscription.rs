@@ -11,6 +11,7 @@ use futures::channel::mpsc::Sender;
 use futures::future::Future;
 use libipld::Cid;
 use libp2p::kad::QueryId;
+use libp2p::swarm::derive_prelude::ListenerId;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -31,6 +32,8 @@ static GLOBAL_REQ_COUNT: AtomicU64 = AtomicU64::new(0);
 pub enum RequestKind {
     /// A request to connect to the given `Multiaddr`+`PeerId` pair.
     Connect(MultiaddrWithPeerId),
+    /// Listener
+    ListenerId(ListenerId),
     /// A request to obtain a `Block` with a specific `Cid`.
     GetBlock(Cid),
     /// A DHT request to Kademlia.
@@ -51,6 +54,12 @@ impl From<Cid> for RequestKind {
     }
 }
 
+impl From<ListenerId> for RequestKind {
+    fn from(id: ListenerId) -> Self {
+        Self::ListenerId(id)
+    }
+}
+
 impl From<QueryId> for RequestKind {
     fn from(id: QueryId) -> Self {
         Self::KadQuery(id)
@@ -61,6 +70,7 @@ impl fmt::Display for RequestKind {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Connect(tgt) => write!(fmt, "Connect to {:?}", tgt),
+            Self::ListenerId(lid) => write!(fmt, "Listener Id {:?}", lid),
             Self::GetBlock(cid) => write!(fmt, "Obtain block {}", cid),
             Self::KadQuery(id) => write!(fmt, "Kad request {:?}", id),
             #[cfg(test)]

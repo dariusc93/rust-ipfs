@@ -22,7 +22,7 @@ test_js_interop = []
 anyhow = "1.0"
 async-stream = { default-features = false, version = "0.3" }
 async-trait = { default-features = false, version = "0.1" }
-base64 = { default-features = false, features = ["alloc"], version = "0.13" }
+base64 = { default-features = false, features = ["alloc"], version = "0.21" }
 ipfs-bitswap = { version = "0.3.0-alpha", path = "bitswap", package = "rust-ipfs-bitswap" }
 byteorder = { default-features = false, version = "1.3" }
 bytes = { default-features = false, version = "1" }
@@ -76,14 +76,14 @@ tracing-futures = { default-features = false, features = [
 ], version = "0.2" }
 
 void = { default-features = false, version = "1.0" }
-fs2 = "0.4.3"
+fs2 = "0.4"
 sled = "0.34"
 once_cell = "1.16"
 igd-next = { version = "0.12", optional = true, features = ["aio"] }
 
 prost = { default-features = false, version = "0.11" }
 
-rlimit = "0.8.3"
+rlimit = "0.9"
 
 [build-dependencies]
 prost-build = { default-features = false, version = "0.11" }

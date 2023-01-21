@@ -174,47 +174,6 @@ impl fmt::Display for MultiaddrWithPeerId {
     }
 }
 
-// Checks if the multiaddr starts with ip4 or ip6 unspecified address, like 0.0.0.0
-pub(crate) fn starts_unspecified(addr: &Multiaddr) -> bool {
-    match addr.iter().next() {
-        Some(Protocol::Ip4(ip4)) if ip4.is_unspecified() => true,
-        Some(Protocol::Ip6(ip6)) if ip6.is_unspecified() => true,
-        _ => false,
-    }
-}
-
-pub(crate) fn could_be_bound_from_ephemeral(
-    skip: usize,
-    bound: &Multiaddr,
-    may_have_ephemeral: &Multiaddr,
-) -> bool {
-    if bound.len() != may_have_ephemeral.len() {
-        // no zip_longest in std
-        false
-    } else {
-        // this is could be wrong at least in the future; /p2p/peerid is not a
-        // valid suffix but I could imagine some kind of ws or webrtc could
-        // give us issues in the long future?
-        bound
-            .iter()
-            .skip(skip)
-            .zip(may_have_ephemeral.iter().skip(skip))
-            .all(|(left, right)| match (right, left) {
-                (Protocol::Tcp(0), Protocol::Tcp(x))
-                | (Protocol::Udp(0), Protocol::Udp(x))
-                | (Protocol::Sctp(0), Protocol::Sctp(x)) => {
-                    assert_ne!(x, 0, "cannot have bound to port 0");
-                    true
-                }
-                (Protocol::Memory(0), Protocol::Memory(x)) => {
-                    assert_ne!(x, 0, "cannot have bound to port 0");
-                    true
-                }
-                (right, left) => right == left,
-            })
-    }
-}
-
 #[allow(dead_code)]
 /// Returns the last peer id in a Multiaddr
 pub(crate) fn peer_id_from_multiaddr(addr: Multiaddr) -> Option<PeerId> {
@@ -236,7 +195,6 @@ pub(crate) fn extract_peer_id_from_multiaddr(mut addr: Multiaddr) -> (Option<Pee
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libp2p::build_multiaddr;
 
     #[test]
     fn connection_targets() {
@@ -253,70 +211,5 @@ mod tests {
             multiaddr_with_peer.parse::<Multiaddr>().unwrap()
         );
         assert!(p2p_peer.parse::<Multiaddr>().is_ok());
-    }
-
-    #[test]
-    fn unspecified_multiaddrs() {
-        assert!(starts_unspecified(&build_multiaddr!(
-            Ip4([0, 0, 0, 0]),
-            Tcp(1u16)
-        )));
-        assert!(starts_unspecified(&build_multiaddr!(
-            Ip6([0, 0, 0, 0, 0, 0, 0, 0]),
-            Tcp(1u16)
-        )));
-    }
-
-    #[test]
-    fn localhost_multiaddrs_are_not_unspecified() {
-        assert!(!starts_unspecified(&build_multiaddr!(
-            Ip4([127, 0, 0, 1]),
-            Tcp(1u16)
-        )));
-        assert!(!starts_unspecified(&build_multiaddr!(
-            Ip6([0, 0, 0, 0, 0, 0, 0, 1]),
-            Tcp(1u16)
-        )));
-    }
-
-    #[test]
-    fn bound_ephemerals() {
-        assert!(could_be_bound_from_ephemeral(
-            0,
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(55555u16)),
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16))
-        ));
-        assert!(could_be_bound_from_ephemeral(
-            1,
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(55555u16)),
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16))
-        ));
-        assert!(could_be_bound_from_ephemeral(
-            1,
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(55555u16)),
-            &build_multiaddr!(Ip4([0, 0, 0, 0]), Tcp(0u16))
-        ));
-        assert!(could_be_bound_from_ephemeral(
-            1,
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(55555u16)),
-            &build_multiaddr!(Ip4([0, 0, 0, 0]), Tcp(0u16))
-        ));
-
-        assert!(!could_be_bound_from_ephemeral(
-            0,
-            &build_multiaddr!(Ip4([192, 168, 0, 1]), Tcp(55555u16)),
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16))
-        ));
-        assert!(could_be_bound_from_ephemeral(
-            1,
-            &build_multiaddr!(Ip4([192, 168, 0, 1]), Tcp(55555u16)),
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16))
-        ));
-
-        assert!(!could_be_bound_from_ephemeral(
-            1,
-            &build_multiaddr!(Ip4([192, 168, 0, 1]), Tcp(55555u16)),
-            &build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(44444u16))
-        ));
     }
 }
