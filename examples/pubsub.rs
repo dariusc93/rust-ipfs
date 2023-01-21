@@ -44,20 +44,25 @@ async fn main() -> anyhow::Result<()> {
     let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
     tokio::spawn(fut);
 
+    let identity = ipfs.identity(None).await?;
+    let peer_id = identity.peer_id;
+    let (mut rl, mut stdout) = Readline::new(format!("{} >", peer_id))?;
+
     if !opt.disable_bootstrap {
         ipfs.default_bootstrap().await?;
         //Until autorelay is implemented and/or functions to use relay more directly, we will manually listen to the relays (using libp2p bootstrap, though you can add your own)
 
         tokio::spawn({
             let ipfs = ipfs.clone();
+            let mut stdout = stdout.clone();
             async move {
                 let list = ipfs.get_bootstraps().await?;
                 for addr in list {
                     let circuit = addr.with(Protocol::P2pCircuit);
-                    ipfs.swarm_listen_on(circuit).await?;
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    if let Err(e) = ipfs.add_listening_address(circuit.clone()).await {
+                        writeln!(stdout, "Error listening to {circuit}: {e}")?;
+                    }
                 }
-
                 if ipfs.bootstrap().await.is_err() {
                     //Due to no peers added to kad, we will not be able to bootstrap
                 }
@@ -72,12 +77,6 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(topic_discovery(ipfs.clone(), topic.clone()));
 
     tokio::task::yield_now().await;
-
-    let identity = ipfs.identity(None).await?;
-
-    let peer_id = identity.peer_id;
-
-    let (mut rl, mut stdout) = Readline::new(format!("{} >", peer_id))?;
 
     loop {
         tokio::select! {
