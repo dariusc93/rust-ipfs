@@ -376,7 +376,6 @@ enum IpfsEvent {
         OneshotSender<Vec<(Cid, ipfs_bitswap::Priority)>>,
     ),
     BitswapStats(OneshotSender<BitswapStats>),
-    SwarmListenOn(Multiaddr, OneshotSender<Result<ListenerId, Error>>),
     SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(
         Multiaddr,
@@ -607,22 +606,6 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
     fn ipns(&self) -> Ipns<Types> {
         Ipns::new(self.clone())
-    }
-
-    /// Calls Swarm::liste_on directly
-    pub async fn swarm_listen_on(&self, addr: Multiaddr) -> Result<ListenerId, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::SwarmListenOn(addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
     }
 
     /// Puts a block into the ipfs repo.
@@ -2228,9 +2211,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let info = self.swarm.behaviour().supported_protocols();
 
                         let _ = ret.send(info);
-                    }
-                    IpfsEvent::SwarmListenOn(addr, ret) => {
-                        let _ = ret.send(self.swarm.listen_on(addr).map_err(anyhow::Error::from));
                     }
                     IpfsEvent::SwarmDial(opt, ret) => {
                         let result = self.swarm.dial(opt);
