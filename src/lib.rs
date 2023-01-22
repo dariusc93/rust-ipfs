@@ -783,7 +783,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// Returns Cid version 1 for the document
     pub async fn put_dag(&self, ipld: Ipld) -> Result<Cid, Error> {
         self.dag()
-            .put(ipld, IpldCodec::DagCbor)
+            .put(IpldCodec::DagCbor, ipld, None)
             .instrument(self.span.clone())
             .await
     }

@@ -9,14 +9,19 @@ use crate::{Ipfs, IpfsPath, IpfsTypes};
 
 use super::UnixfsStatus;
 
+#[derive(Clone, Debug)]
 pub struct AddOption {
     pub chunk: Option<Chunker>,
+    pub pin: bool,
+    pub provide: bool,
 }
 
 impl Default for AddOption {
     fn default() -> Self {
         Self {
             chunk: Some(Chunker::Size(1024 * 1024)),
+            pin: false,
+            provide: false
         }
     }
 }
@@ -55,9 +60,9 @@ where
 {
     let stream = async_stream::stream! {
             let ipfs = ipfs.borrow();
-
+            
             let mut adder = FileAdderBuilder::default()
-                .with_chunker(opt.map(|o| o.chunk.unwrap_or_default()).unwrap_or_default())
+                .with_chunker(opt.clone().map(|o| o.chunk.unwrap_or_default()).unwrap_or_default())
                 .build();
 
             let mut written = 0;
@@ -111,10 +116,23 @@ where
                 last_cid = Some(cid);
             }
 
-            match last_cid {
-                Some(cid) => yield UnixfsStatus::CompletedStatus { path: IpfsPath::from(cid), written, total_size },
-                None => yield UnixfsStatus::FailedStatus { written, total_size, error: None }
+            let cid = match last_cid {
+                Some(cid) => cid,
+                None => {
+                    yield UnixfsStatus::FailedStatus { written, total_size, error: None };
+                    return;
+                }
             };
+
+            if let Some(opt) = opt.clone() {
+                if opt.pin {
+                    if let Ok(false) = ipfs.is_pinned(&cid).await {
+                        if let Err(_e) = ipfs.insert_pin(&cid, true).await {}
+                    }
+                }
+            }
+
+            yield UnixfsStatus::CompletedStatus { path: IpfsPath::from(cid), written, total_size }
         };
 
     Ok(stream.boxed())

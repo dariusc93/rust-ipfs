@@ -4,11 +4,6 @@ use crate::error::Error;
 use crate::path::{IpfsPath, SlashedPath};
 use crate::repo::RepoTypes;
 use crate::{Block, Ipfs};
-use rust_unixfs::{
-    dagpb::{wrap_node_data, NodeData},
-    dir::{Cache, ShardedLookup},
-    resolve, MaybeResolved,
-};
 use libipld::{
     cid::{
         multihash::{Code, MultihashDigest},
@@ -16,6 +11,11 @@ use libipld::{
     },
     codec::Codec,
     Ipld, IpldCodec,
+};
+use rust_unixfs::{
+    dagpb::{wrap_node_data, NodeData},
+    dir::{Cache, ShardedLookup},
+    resolve, MaybeResolved,
 };
 use std::convert::TryFrom;
 use std::error::Error as StdError;
@@ -170,6 +170,17 @@ pub struct IpldDag<Types: RepoTypes> {
     ipfs: Ipfs<Types>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct DagOpt {
+    pub pin: Option<DagPinOpt>,
+    pub provided: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DagPinOpt {
+    pub recursive: bool,
+}
+
 impl<Types: RepoTypes> IpldDag<Types> {
     /// Creates a new `IpldDag` for DAG operations.
     // FIXME: duplicates Ipfs::dag(), having both is redundant.
@@ -180,7 +191,12 @@ impl<Types: RepoTypes> IpldDag<Types> {
     /// Returns the `Cid` of a newly inserted block.
     ///
     /// The block is created from the `data`, encoded with the `codec` and inserted into the repo.
-    pub async fn put(&self, data: Ipld, codec: IpldCodec) -> Result<Cid, Error> {
+    pub async fn put(
+        &self,
+        codec: IpldCodec,
+        data: Ipld,
+        opt: Option<DagOpt>,
+    ) -> Result<Cid, Error> {
         let bytes = codec.encode(&data)?;
         let hash = Code::Sha2_256.digest(&bytes);
         let version = if codec == IpldCodec::DagPb {
@@ -191,6 +207,13 @@ impl<Types: RepoTypes> IpldDag<Types> {
         let cid = Cid::new(version, codec.into(), hash)?;
         let block = Block::new(cid, bytes)?;
         let (cid, _) = self.ipfs.repo.put_block(block).await?;
+        if let Some(opt) = opt {
+            if let Some(opt) = opt.pin {
+                if !self.ipfs.is_pinned(&cid).await? {
+                    self.ipfs.insert_pin(&cid, opt.recursive).await?;
+                }
+            }
+        }
         Ok(cid)
     }
 
@@ -616,7 +639,10 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, 2, 3]);
-        let cid = dag.put(data.clone(), IpldCodec::DagCbor).await.unwrap();
+        let cid = dag
+            .put(IpldCodec::DagCbor, data.clone(), None)
+            .await
+            .unwrap();
         let res = dag.get(IpfsPath::from(cid)).await.unwrap();
         assert_eq!(res, data);
     }
@@ -626,7 +652,10 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, 2, 3]);
-        let cid = dag.put(data.clone(), IpldCodec::DagCbor).await.unwrap();
+        let cid = dag
+            .put(IpldCodec::DagCbor, data.clone(), None)
+            .await
+            .unwrap();
         let res = dag
             .get(IpfsPath::from(cid).sub_path("1").unwrap())
             .await
@@ -639,7 +668,7 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, [2], 3,]);
-        let cid = dag.put(data, IpldCodec::DagCbor).await.unwrap();
+        let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
         let res = dag
             .get(IpfsPath::from(cid).sub_path("1/0").unwrap())
             .await
@@ -654,7 +683,7 @@ mod tests {
         let data = ipld!({
             "key": false,
         });
-        let cid = dag.put(data, IpldCodec::DagCbor).await.unwrap();
+        let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
         let res = dag
             .get(IpfsPath::from(cid).sub_path("key").unwrap())
             .await
@@ -667,9 +696,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data1 = ipld!([1]);
-        let cid1 = dag.put(data1, IpldCodec::DagCbor).await.unwrap();
+        let cid1 = dag.put(IpldCodec::DagCbor, data1, None).await.unwrap();
         let data2 = ipld!([cid1]);
-        let cid2 = dag.put(data2, IpldCodec::DagCbor).await.unwrap();
+        let cid2 = dag.put(IpldCodec::DagCbor, data2, None).await.unwrap();
         let res = dag
             .get(IpfsPath::from(cid2).sub_path("0/0").unwrap())
             .await
@@ -726,12 +755,9 @@ mod tests {
         for (path, expected) in &good_examples {
             let p = IpfsPath::try_from(*path).unwrap();
 
-            let (resolved, matched_segments) = super::resolve_local_ipld(
-                root,
-                example_doc.clone(),
-                &mut p.iter().peekable(),
-            )
-            .unwrap();
+            let (resolved, matched_segments) =
+                super::resolve_local_ipld(root, example_doc.clone(), &mut p.iter().peekable())
+                    .unwrap();
 
             assert_eq!(matched_segments, 4);
 
@@ -861,9 +887,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
+        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
         let ipld = ipld!([cid1]);
-        let cid2 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
+        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
 
         let prefix = IpfsPath::from(cid2);
 
@@ -890,9 +916,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
+        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
         let ipld = ipld!({ "0": cid1 });
-        let cid2 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
+        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
 
         let path = IpfsPath::from(cid2).sub_path("1/a").unwrap();
 
@@ -906,9 +932,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
+        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
         let ipld = ipld!([cid1]);
-        let cid2 = dag.put(ipld, IpldCodec::DagCbor).await.unwrap();
+        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
 
         let path = IpfsPath::from(cid2).sub_path("0/a").unwrap();
 
@@ -934,9 +960,7 @@ mod tests {
             .await
             .unwrap();
 
-        let path = IpfsPath::from(cid)
-            .sub_path("anything-here")
-            .unwrap();
+        let path = IpfsPath::from(cid).sub_path("anything-here").unwrap();
 
         let e = ipfs.dag().resolve(path, true).await.unwrap_err();
 
