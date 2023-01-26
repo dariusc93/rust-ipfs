@@ -1267,7 +1267,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await?
         .await?
         .and_then(|addr| addr)
-        .ok_or(anyhow::anyhow!("No multiaddr provided"))
+        .ok_or_else(|| anyhow::anyhow!("No multiaddr provided"))
     }
 
     /// Stop listening on a previously added listening address. Fails if the address is not being
@@ -1288,7 +1288,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .instrument(self.span.clone())
         .await?
         .await?
-        .ok_or(anyhow::anyhow!("Error removing address"))
+        .ok_or_else(|| anyhow::anyhow!("Error removing address"))
         .map(|_| ())
     }
 
