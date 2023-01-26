@@ -386,7 +386,6 @@ enum IpfsEvent {
         Channel<SubscriptionFuture<Option<Option<Multiaddr>>, String>>,
     ),
     Bootstrap(Channel<SubscriptionFuture<KadResult, String>>),
-    DirectBootstrap(Channel<()>),
     AddPeer(PeerId, Option<Multiaddr>),
     GetClosestPeers(PeerId, OneshotSender<SubscriptionFuture<KadResult, String>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
@@ -1601,24 +1600,6 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         //      error?
 
         let _bootstrap_task = tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)) });
-
-        Ok(())
-    }
-
-    /// Bootstraps the local node to join the DHT: it looks up the node's own ID in the
-    /// DHT and introduces it to the other nodes in it; at least one other node must be
-    /// known in order for the process to succeed. Subsequently, additional queries are
-    /// ran with random keys so that the buckets farther from the closest neighbor also
-    /// get refreshed.
-    pub async fn direct_bootstrap(&self) -> Result<(), Error> {
-        let (tx, rx) = oneshot_channel();
-
-        self.to_task
-            .clone()
-            .send(IpfsEvent::DirectBootstrap(tx))
-            .await?;
-
-        rx.await?
     }
 
     /// Add a known listen address of a peer participating in the DHT to the routing table.
@@ -2342,16 +2323,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                 Err(anyhow!("kad: can't bootstrap the node: {:?}", e))
                             }
                         };
-                        let _ = ret.send(future);
-                    }
-                    IpfsEvent::DirectBootstrap(ret) => {
-                        let future = self
-                            .swarm
-                            .behaviour_mut()
-                            .kademlia()
-                            .bootstrap()
-                            .map(|_| ())
-                            .map_err(Error::from);
                         let _ = ret.send(future);
                     }
                     IpfsEvent::AddPeer(peer_id, addr) => {
