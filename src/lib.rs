@@ -1721,7 +1721,7 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                 std::time::Duration::from_secs(2 * 60),
                                 rx,
                             ) {
-                                error!("Unable to use port mapping: {e}");
+                                warn!("Unable to use port mapping: {e}");
                             } else {
                                 self.mapping_task.insert(address.clone(), tx);
                             }
