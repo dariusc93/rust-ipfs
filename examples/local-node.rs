@@ -26,13 +26,7 @@ async fn main() -> anyhow::Result<()> {
 
     if opt.bootstrap {
         ipfs.default_bootstrap().await?;
-        tokio::spawn({
-            let ipfs = ipfs.clone();
-            async move {
-                let _ = ipfs.bootstrap().await?;
-                Ok::<_, anyhow::Error>(())
-            }
-        });
+        let _ = ipfs.bootstrap().await?;
     }
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
