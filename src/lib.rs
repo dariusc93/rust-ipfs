@@ -1591,12 +1591,18 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// known in order for the process to succeed. Subsequently, additional queries are
     /// ran with random keys so that the buckets farther from the closest neighbor also
     /// get refreshed.
-    pub async fn bootstrap(&self) -> Result<KadResult, Error> {
+    pub async fn bootstrap(&self) -> Result<(), Error> {
         let (tx, rx) = oneshot_channel();
 
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
+        let fut = rx.await??;
 
-        rx.await??.await.map_err(|e| anyhow!(e))
+        //TODO: Maybe return JoinHandle to allow indiciation if bootstrapping is complete or if it returned an
+        //      error?
+
+        let _bootstrap_task = tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)) });
+
+        Ok(())
     }
 
     /// Bootstraps the local node to join the DHT: it looks up the node's own ID in the
@@ -2778,7 +2784,7 @@ mod node {
         /// known in order for the process to succeed. Subsequently, additional queries are
         /// ran with random keys so that the buckets farther from the closest neighbor also
         /// get refreshed.
-        pub async fn bootstrap(&self) -> Result<KadResult, Error> {
+        pub async fn bootstrap(&self) -> Result<(), Error> {
             self.ipfs.bootstrap().await
         }
 
