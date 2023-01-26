@@ -2175,6 +2175,13 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         }
                         event => trace!("identify: {:?}", event),
                     },
+                    SwarmEvent::Behaviour(BehaviourEvent::Autonat(
+                        autonat::Event::StatusChanged { old, new },
+                    )) => {
+                        //TODO: Use status to indicate if we should port forward or not
+                        debug!("Old Nat Status: {:?}", old);
+                        debug!("New Nat Status: {:?}", new);
+                    }
                     _ => trace!("Swarm event: {:?}", inner),
                 }
             }
