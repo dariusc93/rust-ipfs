@@ -33,7 +33,6 @@ pub mod repo;
 mod subscription;
 pub mod unixfs;
 
-#[cfg(feature = "port_mapping")]
 mod igd;
 
 #[macro_use]
@@ -56,7 +55,7 @@ use p2p::{
     IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
 };
 use subscription::SubscriptionRegistry;
-use tokio::task::JoinHandle;
+use tokio::{runtime::Handle, sync::broadcast, task::JoinHandle};
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::UnixfsStatus;
@@ -116,6 +115,7 @@ pub use libp2p::{
 };
 
 use libp2p::{
+    autonat,
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
@@ -218,6 +218,8 @@ pub struct IpfsOptions {
     /// Ping Configuration
     pub ping_configuration: Option<PingConfig>,
 
+    pub port_mapping: bool,
+
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
@@ -249,6 +251,7 @@ impl Default for IpfsOptions {
                 "/ip6/::/tcp/0".parse().unwrap(),
                 "/ip6/::/udp/0/quic-v1".parse().unwrap(),
             ],
+            port_mapping: false,
             transport_configuration: None,
             swarm_configuration: None,
             span: None,
@@ -564,6 +567,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let listener_subscriptions = Default::default();
         let listeners = Default::default();
         let bootstraps = Default::default();
+        let mapping_task = HashMap::new();
 
         let IpfsOptions {
             listening_addrs, ..
@@ -584,6 +588,8 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             autonat_counter,
             bootstraps,
             swarm_event,
+            mapping_task,
+            port_mapping: options.port_mapping,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -591,7 +597,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
                 Ok(id) => fut.listeners.insert(id),
                 _ => continue,
             };
-            // fut.start_add_listener_address(addr, None);
         }
 
         Ok((ipfs, fut.instrument(swarm_span)))
@@ -1665,6 +1670,8 @@ struct IpfsFuture<Types: IpfsTypes> {
     autonat_counter: Arc<AtomicU64>,
     bootstraps: HashSet<MultiaddrWithPeerId>,
     swarm_event: Option<TSwarmEventFn>,
+    mapping_task: HashMap<Multiaddr, broadcast::Sender<()>>,
+    port_mapping: bool,
 }
 
 impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
@@ -1703,6 +1710,22 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     } => {
                         self.listening_addresses
                             .insert(address.clone(), listener_id);
+
+                        if self.port_mapping
+                            && address.iter().any(|p| matches!(p, Protocol::Ip4(_)))
+                        {
+                            let (tx, rx) = broadcast::channel(1);
+                            if let Err(e) = igd::forward_port(
+                                Handle::current(),
+                                address.clone(),
+                                std::time::Duration::from_secs(2 * 60),
+                                rx,
+                            ) {
+                                error!("Unable to use port mapping: {e}");
+                            } else {
+                                self.mapping_task.insert(address.clone(), tx);
+                            }
+                        }
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
                     }
@@ -1710,7 +1733,11 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         listener_id,
                         address,
                     } => {
+                        self.listeners.remove(&listener_id);
                         self.listening_addresses.remove(&address);
+                        if let Some(tx) = self.mapping_task.remove(&address) {
+                            let _ = tx.send(());
+                        }
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), Ok(Some(None)));
                     }
@@ -1719,14 +1746,19 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         reason,
                         addresses,
                     } => {
+                        self.listeners.remove(&listener_id);
                         for address in addresses {
                             self.listening_addresses.remove(&address);
+                            if let Some(tx) = self.mapping_task.remove(&address) {
+                                let _ = tx.send(());
+                            }
                         }
                         let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), reason);
                     }
                     SwarmEvent::ListenerError { listener_id, error } => {
+                        self.listeners.remove(&listener_id);
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), Err(error.to_string()));
                     }
