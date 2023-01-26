@@ -56,6 +56,7 @@ use p2p::{
     IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
 };
 use subscription::SubscriptionRegistry;
+use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::UnixfsStatus;
@@ -1590,16 +1591,15 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// known in order for the process to succeed. Subsequently, additional queries are
     /// ran with random keys so that the buckets farther from the closest neighbor also
     /// get refreshed.
-    pub async fn bootstrap(&self) -> Result<(), Error> {
+    pub async fn bootstrap(&self) -> Result<JoinHandle<Result<KadResult, Error>>, Error> {
         let (tx, rx) = oneshot_channel();
 
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
         let fut = rx.await??;
 
-        //TODO: Maybe return JoinHandle to allow indiciation if bootstrapping is complete or if it returned an
-        //      error?
+        let bootstrap_task = tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)) });
 
-        let _bootstrap_task = tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)) });
+        Ok(bootstrap_task)
     }
 
     /// Add a known listen address of a peer participating in the DHT to the routing table.
@@ -2678,6 +2678,8 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
+    use futures::TryFutureExt;
+
     use super::*;
     use std::convert::TryFrom;
 
@@ -2755,8 +2757,11 @@ mod node {
         /// known in order for the process to succeed. Subsequently, additional queries are
         /// ran with random keys so that the buckets farther from the closest neighbor also
         /// get refreshed.
-        pub async fn bootstrap(&self) -> Result<(), Error> {
-            self.ipfs.bootstrap().await
+        pub async fn bootstrap(&self) -> Result<KadResult, Error> {
+            self.ipfs
+                .bootstrap()
+                .and_then(|fut| async { fut.await.map_err(anyhow::Error::from) })
+                .await?
         }
 
         /// Shuts down the `Node`.

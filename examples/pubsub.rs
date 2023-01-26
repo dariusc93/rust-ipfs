@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "Error listening to {circuit}: {e}")?;
                     }
                 }
-                if ipfs.bootstrap().await.is_err() {
+                if ipfs.bootstrap().await?.await.is_err() {
                     //Due to no peers added to kad, we will not be able to bootstrap
                 }
                 Ok::<_, anyhow::Error>(())
