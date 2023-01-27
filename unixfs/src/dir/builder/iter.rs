@@ -247,8 +247,7 @@ impl PostOrderIterator {
 
                         match (parent_id, parent_leaves, index) {
                             (pid, None, index) => panic!(
-                                "leaves not found for parent_id = {} and index = {}",
-                                pid, index
+                                "leaves not found for parent_id = {pid} and index = {index}"
                             ),
                             (_, Some(vec), index) => {
                                 let cell = &mut vec[index];

@@ -69,12 +69,12 @@ impl From<QueryId> for RequestKind {
 impl fmt::Display for RequestKind {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Connect(tgt) => write!(fmt, "Connect to {:?}", tgt),
-            Self::ListenerId(lid) => write!(fmt, "Listener Id {:?}", lid),
-            Self::GetBlock(cid) => write!(fmt, "Obtain block {}", cid),
-            Self::KadQuery(id) => write!(fmt, "Kad request {:?}", id),
+            Self::Connect(tgt) => write!(fmt, "Connect to {tgt:?}"),
+            Self::ListenerId(lid) => write!(fmt, "Listener Id {lid:?}"),
+            Self::GetBlock(cid) => write!(fmt, "Obtain block {cid}"),
+            Self::KadQuery(id) => write!(fmt, "Kad request {id:?}"),
             #[cfg(test)]
-            Self::Num(n) => write!(fmt, "A test request for {}", n),
+            Self::Num(n) => write!(fmt, "A test request for {n}"),
         }
     }
 }
@@ -159,8 +159,7 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> SubscriptionRegistry<T, E> 
                 // the subscriptions and it still isn't perfect. if you hit these assertion please
                 // do report a bug.
                 let msg = format!(
-                    "no subscriptions to be awoken! subs: {:?}; req_kind: {:?}",
-                    related_subs, req_kind
+                    "no subscriptions to be awoken! subs: {related_subs:?}; req_kind: {req_kind:?}"
                 );
 
                 // important: drop the held mutexes before panicking so that we can continue using
@@ -224,7 +223,7 @@ pub enum SubscriptionErr<E: Debug + PartialEq> {
 
 impl<E: Debug + PartialEq> fmt::Display for SubscriptionErr<E> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "{:?}", self)
+        write!(fmt, "{self:?}")
     }
 }
 

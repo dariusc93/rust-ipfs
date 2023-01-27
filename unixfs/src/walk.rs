@@ -712,15 +712,15 @@ impl fmt::Display for Error {
         use Error::*;
 
         match self {
-            UnsupportedType(ut) => write!(fmt, "unsupported UnixFs type: {:?}", ut),
-            UnexpectedType(ut) => write!(fmt, "link to unexpected UnixFs type from File: {:?}", ut),
-            DagPbParsingFailed(e) => write!(fmt, "failed to parse the outer dag-pb: {}", e),
-            UnixFsParsingFailed(e) => write!(fmt, "failed to parse the inner UnixFs: {}", e),
+            UnsupportedType(ut) => write!(fmt, "unsupported UnixFs type: {ut:?}"),
+            UnexpectedType(ut) => write!(fmt, "link to unexpected UnixFs type from File: {ut:?}"),
+            DagPbParsingFailed(e) => write!(fmt, "failed to parse the outer dag-pb: {e}"),
+            UnixFsParsingFailed(e) => write!(fmt, "failed to parse the inner UnixFs: {e}"),
             EmptyDagPbNode => write!(fmt, "failed to parse the inner UnixFs: no data"),
-            InvalidCid(e) => write!(fmt, "link contained an invalid Cid: {}", e),
-            File(e) => write!(fmt, "invalid file: {}", e),
-            UnsupportedDirectory(udp) => write!(fmt, "unsupported directory: {}", udp),
-            UnsupportedHAMTShard(se) => write!(fmt, "unsupported hamtshard: {}", se),
+            InvalidCid(e) => write!(fmt, "link contained an invalid Cid: {e}"),
+            File(e) => write!(fmt, "invalid file: {e}"),
+            UnsupportedDirectory(udp) => write!(fmt, "unsupported directory: {udp}"),
+            UnsupportedHAMTShard(se) => write!(fmt, "unsupported hamtshard: {se}"),
         }
     }
 }
@@ -763,7 +763,7 @@ mod tests {
         pb.push("foobar.trickle");
         counts.checked_removal(&pb, 5);
 
-        assert!(counts.is_empty(), "{:#?}", counts);
+        assert!(counts.is_empty(), "{counts:#?}");
     }
 
     #[test]
@@ -794,7 +794,7 @@ mod tests {
 
         for (index, i) in indices.iter().enumerate() {
             fmtbuf.clear();
-            write!(fmtbuf, "long-named-file-{:03}", i).unwrap();
+            write!(fmtbuf, "long-named-file-{i:03}").unwrap();
 
             if index > 0 {
                 buf.pop();
@@ -804,7 +804,7 @@ mod tests {
             counts.checked_removal(&buf, 1);
         }
 
-        assert!(counts.is_empty(), "{:#?}", counts);
+        assert!(counts.is_empty(), "{counts:#?}");
     }
 
     #[test]
@@ -916,8 +916,7 @@ mod tests {
                 }
                 Vacant(_) => {
                     panic!(
-                        "no such key {:?} (expected {}) in {:#?}",
-                        key, expected, self
+                        "no such key {key:?} (expected {expected}) in {self:#?}"
                     );
                 }
             }

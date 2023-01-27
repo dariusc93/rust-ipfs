@@ -49,8 +49,8 @@ macro_rules! pinstore_interface_tests {
         #[cfg(test)]
         mod $module_name {
 
-            use crate::repo::common_tests::DSTestContext;
-            use crate::repo::{DataStore, PinKind, PinMode, PinStore};
+            use $crate::repo::common_tests::DSTestContext;
+            use $crate::repo::{DataStore, PinKind, PinMode, PinStore};
             use futures::{StreamExt, TryStreamExt};
             use hash_hasher::HashedMap;
             use libipld::Cid;

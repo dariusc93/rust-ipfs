@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Please connect an ipfs node having {} to:\n", opt.path);
 
         for address in addresses {
-            eprintln!(" - {}", address);
+            eprintln!(" - {address}");
         }
 
         eprintln!();
@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
     // and the initial block loading will require at least one async call before any actual file
     // content can be *streamed*.
     let stream = ipfs.cat_unixfs(opt.path, None).await.unwrap_or_else(|e| {
-        eprintln!("Error: {}", e);
+        eprintln!("Error: {e}");
         exit(1);
     });
 
@@ -96,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
                 stdout.write_all(&bytes).await?;
             }
             Some(Err(e)) => {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 exit(1);
             }
             None => break,

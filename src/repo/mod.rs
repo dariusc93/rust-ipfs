@@ -154,7 +154,7 @@ impl fmt::Display for LockError {
             LockError::LockFileOpenFailed(_) => "Failed to open repository lock file.",
         };
 
-        write!(f, "{}", msg)
+        write!(f, "{msg}")
     }
 }
 

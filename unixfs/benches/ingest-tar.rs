@@ -15,10 +15,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             });
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("could not find {:?}:", file);
+            eprintln!("could not find {file:?}:");
             eprintln!("please download a linux kernel and unpack it to enable benchmark. specific version doesn't matter.");
         }
-        Err(e) => panic!("failed to read the {:?}: {}", file, e),
+        Err(e) => panic!("failed to read the {file:?}: {e}"),
     }
 }
 

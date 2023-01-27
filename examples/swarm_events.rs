@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts)
         .swarm_events(|_, event| {
             if let SwarmEvent::NewListenAddr { address, .. } = event {
-                println!("Listening on {}", address);
+                println!("Listening on {address}");
             }
         })
         .start()

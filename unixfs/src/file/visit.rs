@@ -320,8 +320,7 @@ mod tests {
             let sliced = target_slice(block_data, &block_range, target_range);
             assert_eq!(
                 sliced, *expected,
-                "slice {:?} of block {:?}",
-                target_range, block_range
+                "slice {target_range:?} of block {block_range:?}"
             );
         }
     }

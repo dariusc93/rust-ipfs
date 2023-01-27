@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
                 stdout.write_all(&bytes).await?;
             }
             Err(e) => {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 break;
             }
         }

@@ -639,7 +639,7 @@ mod tests {
             match res {
                 Ok(Ok((_, BlockPut::NewBlock))) => writes += 1,
                 Ok(Ok((_, BlockPut::Existed))) => existing += 1,
-                Ok(Err(e)) => println!("joinhandle err: {}", e),
+                Ok(Err(e)) => println!("joinhandle err: {e}"),
                 _ => unreachable!("join error"),
             }
         }

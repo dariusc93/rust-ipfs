@@ -121,10 +121,10 @@ impl fmt::Display for ResolveError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ResolveError::*;
         match self {
-            UnexpectedType(ut) => write!(fmt, "unexpected type for UnixFs: {:?}", ut),
-            UnexpectedDirProperties(udp) => write!(fmt, "unexpected directory properties: {}", udp),
-            Read(e) => write!(fmt, "parsing failed: {}", e),
-            Lookup(e) => write!(fmt, "{}", e),
+            UnexpectedType(ut) => write!(fmt, "unexpected type for UnixFs: {ut:?}"),
+            UnexpectedDirProperties(udp) => write!(fmt, "unexpected directory properties: {udp}"),
+            Read(e) => write!(fmt, "parsing failed: {e}"),
+            Lookup(e) => write!(fmt, "{e}"),
         }
     }
 }
@@ -256,9 +256,9 @@ mod tests {
             match res {
                 Ok(MaybeResolved::Found(cid)) => assert_eq!(Some(cid), target),
                 Ok(MaybeResolved::NotFound) => {
-                    assert!(target.is_none(), "should not have found {:?}", segment)
+                    assert!(target.is_none(), "should not have found {segment:?}")
                 }
-                x => panic!("{:?}", x),
+                x => panic!("{x:?}"),
             }
         }
     }

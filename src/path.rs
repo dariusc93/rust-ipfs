@@ -224,7 +224,7 @@ impl fmt::Display for SlashedPath {
                 write!(fmt, "/")?;
             }
 
-            write!(fmt, "{}", s)
+            write!(fmt, "{s}")
         })
     }
 }
@@ -253,9 +253,9 @@ impl fmt::Debug for PathRoot {
         use PathRoot::*;
 
         match self {
-            Ipld(cid) => write!(fmt, "{}", cid),
-            Ipns(pid) => write!(fmt, "{}", pid),
-            Dns(name) => write!(fmt, "{:?}", name),
+            Ipld(cid) => write!(fmt, "{cid}"),
+            Ipns(pid) => write!(fmt, "{pid}"),
+            Dns(name) => write!(fmt, "{name:?}"),
         }
     }
 }
@@ -277,7 +277,7 @@ impl fmt::Display for PathRoot {
             PathRoot::Ipns(peer_id) => ("/ipns/", peer_id.to_base58()),
             PathRoot::Dns(domain) => ("/ipns/", domain.to_owned()),
         };
-        write!(fmt, "{}{}", prefix, key)
+        write!(fmt, "{prefix}{key}")
     }
 }
 
@@ -427,7 +427,7 @@ mod tests {
         ];
         for &path in &paths {
             let p = IpfsPath::try_from(path).unwrap();
-            assert_eq!(p.iter().count(), 0, "{:?} from {:?}", p, path);
+            assert_eq!(p.iter().count(), 0, "{p:?} from {path:?}");
         }
     }
 

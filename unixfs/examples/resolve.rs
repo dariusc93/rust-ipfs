@@ -12,7 +12,7 @@ fn main() {
     {
         Some(Ok(path)) => path,
         Some(Err(e)) => {
-            eprintln!("Invalid path given as argument: {}", e);
+            eprintln!("Invalid path given as argument: {e}");
             std::process::exit(1);
         }
         None => {
@@ -30,7 +30,7 @@ fn main() {
     let ipfs_path = match std::env::var("IPFS_PATH") {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("IPFS_PATH is not set or could not be read: {}", e);
+            eprintln!("IPFS_PATH is not set or could not be read: {e}");
             std::process::exit(1);
         }
     };
@@ -42,13 +42,13 @@ fn main() {
 
     match walk(blockstore, path) {
         Ok(Some(cid)) => {
-            println!("{}", cid);
+            println!("{cid}");
         }
         Ok(None) => {
             eprintln!("not found");
         }
         Err(Error::OpeningFailed(e)) => {
-            eprintln!("{}\n", e);
+            eprintln!("{e}\n");
             eprintln!("This is likely caused by either:");
             eprintln!(" - ipfs does not have the block");
             eprintln!(" - ipfs is configured to use non-flatfs storage");
@@ -56,7 +56,7 @@ fn main() {
             std::process::exit(1);
         }
         Err(e) => {
-            eprintln!("Failed to walk the merkle tree: {}", e);
+            eprintln!("Failed to walk the merkle tree: {e}");
             std::process::exit(1);
         }
     }
@@ -71,7 +71,7 @@ pub enum PathError {
 impl fmt::Display for PathError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PathError::InvalidCid(e) => write!(fmt, "{}", e),
+            PathError::InvalidCid(e) => write!(fmt, "{e}"),
             PathError::InvalidPath => write!(fmt, "invalid path"),
         }
     }
@@ -161,9 +161,9 @@ fn walk(blocks: ShardedBlockStore, mut path: IpfsPath) -> Result<Option<Cid>, Er
     let mut cache = None;
 
     for segment in path.path {
-        println!("cache {:?}", cache);
+        println!("cache {cache:?}");
         buf.clear();
-        eprintln!("reading {} to resolve {:?}", root, segment);
+        eprintln!("reading {root} to resolve {segment:?}");
         blocks.as_file(&root.to_bytes())?.read_to_end(&mut buf)?;
 
         let mut walker = match resolve(&buf, segment.as_str(), &mut cache)? {
@@ -172,8 +172,8 @@ fn walk(blocks: ShardedBlockStore, mut path: IpfsPath) -> Result<Option<Cid>, Er
                 // With HAMTDirectories the top level can contain a direct link to the target, but
                 // it's more likely it will be found under some bucket, which would be the third
                 // case in this match.
-                println!("got lucky: found {} for {:?}", cid, segment);
-                println!("cache {:?}", cache);
+                println!("got lucky: found {cid} for {segment:?}");
+                println!("cache {cache:?}");
                 root = cid;
                 continue;
             }
@@ -190,25 +190,24 @@ fn walk(blocks: ShardedBlockStore, mut path: IpfsPath) -> Result<Option<Cid>, Er
             NeedToLoadMore(walker) => walker,
         };
 
-        eprintln!("walking {} on {:?}", root, segment);
+        eprintln!("walking {root} on {segment:?}");
 
         let mut other_blocks = 1;
 
         loop {
             let (first, _) = walker.pending_links();
             buf.clear();
-            eprintln!("  -> reading {} while searching for {:?}", first, segment);
+            eprintln!("  -> reading {first} while searching for {segment:?}");
             blocks.as_file(&first.to_bytes())?.read_to_end(&mut buf)?;
 
             match walker.continue_walk(&buf, &mut cache)? {
                 NotFound => {
-                    println!("cache {:?}", cache);
+                    println!("cache {cache:?}");
                     return Ok(None);
                 }
                 Found(cid) => {
                     eprintln!(
-                        "     resolved {} from {} after {} blocks to {}",
-                        segment, root, other_blocks, cid
+                        "     resolved {segment} from {root} after {other_blocks} blocks to {cid}"
                     );
                     root = cid;
                     break;
@@ -219,7 +218,7 @@ fn walk(blocks: ShardedBlockStore, mut path: IpfsPath) -> Result<Option<Cid>, Er
         }
     }
 
-    println!("cache {:?}", cache);
+    println!("cache {cache:?}");
     Ok(Some(root))
 }
 
@@ -251,9 +250,9 @@ impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Error::*;
         match self {
-            OpeningFailed(e) => write!(fmt, "File opening failed: {}", e),
-            Other(e) => write!(fmt, "Other file related io error: {}", e),
-            Traversal(e) => write!(fmt, "Walking failed, please report this as a bug: {:?}", e),
+            OpeningFailed(e) => write!(fmt, "File opening failed: {e}"),
+            Other(e) => write!(fmt, "Other file related io error: {e}"),
+            Traversal(e) => write!(fmt, "Walking failed, please report this as a bug: {e:?}"),
         }
     }
 }

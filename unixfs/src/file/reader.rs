@@ -248,7 +248,7 @@ where
     pub fn unwrap_content(self) -> &'a [u8] {
         match self {
             FileContent::Bytes(x) => x,
-            y => panic!("Expected FileContent::Bytes, found: {:?}", y),
+            y => panic!("Expected FileContent::Bytes, found: {y:?}"),
         }
     }
 }
@@ -302,15 +302,13 @@ mod tests {
         let res = Ending::TreeCoverage(100).check_is_suitable_next(10, &(0..102));
         assert!(
             matches!(res, Err(FileError::TreeExpandsOnLinks)),
-            "{:?}",
-            res
+            "{res:?}"
         );
 
         let res = Ending::TreeCoverage(100).check_is_suitable_next(0, &(0..102));
         assert!(
             matches!(res, Err(FileError::TreeExpandsOnLinks)),
-            "{:?}",
-            res
+            "{res:?}"
         );
     }
 
@@ -319,8 +317,7 @@ mod tests {
         let res = Ending::TreeCoverage(100).check_is_suitable_next(10, &(88..102));
         assert!(
             matches!(res, Err(FileError::TreeOverlapsBetweenLinks)),
-            "{:?}",
-            res
+            "{res:?}"
         );
     }
 
@@ -329,20 +326,19 @@ mod tests {
         let res = Ending::Chunk(100).check_is_suitable_next(0, &(101..105));
         assert!(
             matches!(res, Err(FileError::TreeJumpsBetweenLinks)),
-            "{:?}",
-            res
+            "{res:?}"
         );
     }
 
     #[test]
     fn wrong_next() {
         let res = Ending::TreeCoverage(200).check_is_suitable_next(100, &(0..100));
-        assert!(matches!(res, Err(FileError::EarlierLink)), "{:?}", res);
+        assert!(matches!(res, Err(FileError::EarlierLink)), "{res:?}");
 
         let res = Ending::TreeCoverage(101).check_is_suitable_next(100, &(0..100));
-        assert!(matches!(res, Err(FileError::EarlierLink)), "{:?}", res);
+        assert!(matches!(res, Err(FileError::EarlierLink)), "{res:?}");
 
         let res = Ending::TreeCoverage(100).check_is_suitable_next(100, &(0..100));
-        assert!(matches!(res, Err(FileError::EarlierLink)), "{:?}", res);
+        assert!(matches!(res, Err(FileError::EarlierLink)), "{res:?}");
     }
 }

@@ -287,7 +287,7 @@ fn dagpb_links(ipld: Ipld) -> Vec<(Option<String>, Cid)> {
 
     let links = match links {
         Some(Ipld::List(v)) => v,
-        x => panic!("Expected dag-pb2ipld \"Links\" to be a list, got: {:?}", x),
+        x => panic!("Expected dag-pb2ipld \"Links\" to be a list, got: {x:?}"),
     };
 
     links
@@ -299,8 +299,7 @@ fn dagpb_links(ipld: Ipld) -> Vec<(Option<String>, Cid)> {
                     let link = match m.remove("Hash") {
                         Some(Ipld::Link(cid)) => cid,
                         Some(x) => panic!(
-                            "Expected dag-pb2ipld \"Links[{}]/Hash\" to be a link, got: {:?}",
-                            i, x
+                            "Expected dag-pb2ipld \"Links[{i}]/Hash\" to be a link, got: {x:?}"
                         ),
                         None => return None,
                     };
@@ -312,8 +311,7 @@ fn dagpb_links(ipld: Ipld) -> Vec<(Option<String>, Cid)> {
                         }
                         Some(Ipld::String(s)) => Some(s),
                         Some(x) => panic!(
-                            "Expected dag-pb2ipld \"Links[{}]/Name\" to be a string, got: {:?}",
-                            i, x
+                            "Expected dag-pb2ipld \"Links[{i}]/Name\" to be a string, got: {x:?}"
                         ),
                         // not too sure of this, this could be the index as string as well?
                         None => unimplemented!(
@@ -324,8 +322,7 @@ fn dagpb_links(ipld: Ipld) -> Vec<(Option<String>, Cid)> {
                     Some((name, link))
                 }
                 x => panic!(
-                    "Expected dag-pb2ipld \"Links[{}]\" to be a map, got: {:?}",
-                    i, x
+                    "Expected dag-pb2ipld \"Links[{i}]\" to be a map, got: {x:?}"
                 ),
             }
         })
@@ -410,7 +407,7 @@ mod tests {
             (root, unixfs1),
         ];
 
-        println!("found edges:\n{:#?}", all_edges);
+        println!("found edges:\n{all_edges:#?}");
 
         assert_edges(&expected, all_edges.as_slice());
     }
@@ -456,7 +453,7 @@ mod tests {
             .map(|s| s.as_str())
             .collect::<Vec<&str>>();
 
-        assert!(diff.is_empty(), "{:?}", diff);
+        assert!(diff.is_empty(), "{diff:?}");
     }
 
     fn assert_edges(expected: &[(&str, &str)], actual: &[(String, String)]) {
@@ -469,7 +466,7 @@ mod tests {
 
         let diff: Vec<_> = expected.symmetric_difference(&actual).collect();
 
-        assert!(diff.is_empty(), "{:#?}", diff);
+        assert!(diff.is_empty(), "{diff:#?}");
     }
 
     async fn preloaded_testing_ipfs() -> Node {

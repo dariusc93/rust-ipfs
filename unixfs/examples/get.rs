@@ -8,7 +8,7 @@ fn main() {
     let cid = match std::env::args().nth(1).map(Cid::try_from) {
         Some(Ok(cid)) => cid,
         Some(Err(e)) => {
-            eprintln!("Invalid cid given as argument: {}", e);
+            eprintln!("Invalid cid given as argument: {e}");
             std::process::exit(1);
         }
         None => {
@@ -24,7 +24,7 @@ fn main() {
     let ipfs_path = match std::env::var("IPFS_PATH") {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("IPFS_PATH is not set or could not be read: {}", e);
+            eprintln!("IPFS_PATH is not set or could not be read: {e}");
             std::process::exit(1);
         }
     };
@@ -37,7 +37,7 @@ fn main() {
     match walk(blockstore, &cid) {
         Ok(()) => {}
         Err(Error::OpeningFailed(e)) => {
-            eprintln!("{}\n", e);
+            eprintln!("{e}\n");
             eprintln!("This is likely caused by either:");
             eprintln!(" - ipfs does not have the block");
             eprintln!(" - ipfs is configured to use non-flatfs storage");
@@ -45,7 +45,7 @@ fn main() {
             std::process::exit(1);
         }
         Err(e) => {
-            eprintln!("Failed to walk the merkle tree: {}", e);
+            eprintln!("Failed to walk the merkle tree: {e}");
             std::process::exit(1);
         }
     }
@@ -78,7 +78,7 @@ fn walk(blocks: ShardedBlockStore, start: &Cid) -> Result<(), Error> {
                 if segment.is_last() {
                     let mode = metadata.mode().unwrap_or(0o0644) & 0o7777;
                     let (seconds, _) = metadata.mtime().unwrap_or((0, 0));
-                    println!("f {:o} {:>12} {:>16} {:?}", mode, seconds, size, path);
+                    println!("f {mode:o} {seconds:>12} {size:>16} {path:?}");
                 }
             }
             ContinuedWalk::Directory(_, path, metadata)
@@ -124,9 +124,9 @@ impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Error::*;
         match self {
-            OpeningFailed(e) => write!(fmt, "Failed to open file: {}", e),
-            Other(e) => write!(fmt, "A file-related IO error: {}", e),
-            Walk(e) => write!(fmt, "Walk failed, please report this as a bug: {}", e),
+            OpeningFailed(e) => write!(fmt, "Failed to open file: {e}"),
+            Other(e) => write!(fmt, "A file-related IO error: {e}"),
+            Walk(e) => write!(fmt, "Walk failed, please report this as a bug: {e}"),
         }
     }
 }
