@@ -767,7 +767,7 @@ mod tests {
             }
 
             let remaining_path = p.iter().skip(matched_segments).collect::<Vec<&str>>();
-            assert!(remaining_path.is_empty(), "{:?}", remaining_path);
+            assert!(remaining_path.is_empty(), "{remaining_path:?}");
         }
     }
 
@@ -830,8 +830,7 @@ mod tests {
                     ..
                 }
             ),
-            "{:?}",
-            e
+            "{e:?}"
         );
     }
 
@@ -854,8 +853,7 @@ mod tests {
                     ..
                 }
             ),
-            "{:?}",
-            e
+            "{e:?}"
         );
     }
 
@@ -877,8 +875,7 @@ mod tests {
                     ..
                 }
             ),
-            "{:?}",
-            e
+            "{e:?}"
         );
     }
 
@@ -904,7 +901,7 @@ mod tests {
             let cloned = p.clone();
             match dag.resolve(p, true).await.unwrap() {
                 (ResolvedNode::Projection(_, Ipld::Integer(1)), remaining_path) => {
-                    assert_eq!(remaining_path, ["0"][..], "{}", cloned);
+                    assert_eq!(remaining_path, ["0"][..], "{cloned}");
                 }
                 x => unreachable!("{:?}", x),
             }
@@ -924,7 +921,7 @@ mod tests {
 
         //let cloned = path.clone();
         let e = dag.resolve(path, true).await.unwrap_err();
-        assert_eq!(e.to_string(), format!("no link named \"1\" under {}", cid2));
+        assert_eq!(e.to_string(), format!("no link named \"1\" under {cid2}"));
     }
 
     #[tokio::test]
@@ -940,7 +937,7 @@ mod tests {
 
         //let cloned = path.clone();
         let e = dag.resolve(path, true).await.unwrap_err();
-        assert_eq!(e.to_string(), format!("no link named \"a\" under {}", cid1));
+        assert_eq!(e.to_string(), format!("no link named \"a\" under {cid1}"));
     }
 
     #[tokio::test]
@@ -966,7 +963,7 @@ mod tests {
 
         assert_eq!(
             e.to_string(),
-            format!("no link named \"anything-here\" under {}", cid)
+            format!("no link named \"anything-here\" under {cid}")
         );
     }
 

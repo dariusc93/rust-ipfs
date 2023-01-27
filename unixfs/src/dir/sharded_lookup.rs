@@ -249,8 +249,7 @@ impl fmt::Display for ShardError {
         match self {
             UnsupportedProperties { hash_type, fanout } => write!(
                 fmt,
-                "unsupported HAMTShard properties: hash_type={:?}, fanout={:?}",
-                hash_type, fanout
+                "unsupported HAMTShard properties: hash_type={hash_type:?}, fanout={fanout:?}"
             ),
             UnexpectedProperties {
                 filesize,
@@ -312,14 +311,13 @@ impl fmt::Display for LookupError {
         use LookupError::*;
 
         match self {
-            InvalidCid(e) => write!(fmt, "Invalid link: {:?}", e),
-            Multiple(e) => write!(fmt, "Multiple matching links found: {:?}", e),
-            UnexpectedBucketType(ut) => write!(fmt, "unexpected type for HAMT bucket: {:?}", ut),
-            Shard(e) => write!(fmt, "{}", e),
+            InvalidCid(e) => write!(fmt, "Invalid link: {e:?}"),
+            Multiple(e) => write!(fmt, "Multiple matching links found: {e:?}"),
+            UnexpectedBucketType(ut) => write!(fmt, "unexpected type for HAMT bucket: {ut:?}"),
+            Shard(e) => write!(fmt, "{e}"),
             Read(Some(e)) => write!(
                 fmt,
-                "failed to parse the block as unixfs or dag-pb node: {}",
-                e
+                "failed to parse the block as unixfs or dag-pb node: {e}"
             ),
             Read(None) => write!(fmt, "HAMTDirectory not found in empty dag-pb node"),
         }
@@ -424,8 +422,7 @@ mod tests {
                 err,
                 LookupError::Shard(ShardError::UnsupportedProperties { .. })
             ),
-            "{:?}",
-            err
+            "{err:?}"
         );
     }
 
@@ -456,8 +453,7 @@ mod tests {
                 err,
                 LookupError::Shard(ShardError::UnexpectedProperties { .. })
             ),
-            "{:?}",
-            err
+            "{err:?}"
         );
     }
 }

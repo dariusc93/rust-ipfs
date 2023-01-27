@@ -117,8 +117,7 @@ async fn connect_two_nodes_with_two_connections_doesnt_panic() {
     let peers = node_a.peers().await.unwrap();
     assert!(
         peers.is_empty(),
-        "node_b was still connected after disconnect: {:?}",
-        peers
+        "node_b was still connected after disconnect: {peers:?}"
     );
 }
 
@@ -140,9 +139,7 @@ async fn connect_to_wrong_peer() {
         let peers = node.peers().await.unwrap();
         assert!(
             peers.is_empty(),
-            "{} should have no connections, but had: {:?}",
-            name,
-            peers
+            "{name} should have no connections, but had: {peers:?}"
         );
     }
 

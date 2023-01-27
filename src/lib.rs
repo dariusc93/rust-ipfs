@@ -299,7 +299,7 @@ impl<I: Borrow<Keypair>> fmt::Debug for DebuggableKeypair<I> {
             _ => "Unknown",
         };
 
-        write!(fmt, "Keypair::{}", kind)
+        write!(fmt, "Keypair::{kind}")
     }
 }
 

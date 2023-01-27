@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 
     let identity = ipfs.identity(None).await?;
     let peer_id = identity.peer_id;
-    let (mut rl, mut stdout) = Readline::new(format!("{} >", peer_id))?;
+    let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
 
     if !opt.disable_bootstrap {
         ipfs.default_bootstrap().await?;
@@ -91,12 +91,12 @@ async fn main() -> anyhow::Result<()> {
                         writeln!(stdout, "Error publishing message: {e}")?;
                         continue;
                     }
-                    writeln!(stdout, "{}: {}", peer_id, line)?;
+                    writeln!(stdout, "{peer_id}: {line}")?;
                 }
                 Err(ReadlineError::Eof) => break,
                 Err(ReadlineError::Interrupted) => break,
                 Err(e) => {
-                    writeln!(stdout, "Error: {}", e)?;
+                    writeln!(stdout, "Error: {e}")?;
                     writeln!(stdout, "Exiting...")?;
                     break
                 },

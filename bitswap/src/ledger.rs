@@ -212,7 +212,7 @@ impl std::fmt::Debug for Message {
             } else {
                 write!(fmt, ", ")?;
             }
-            write!(fmt, "want: {} {}", cid, priority)?;
+            write!(fmt, "want: {cid} {priority}")?;
         }
         for cid in self.cancel() {
             if first {
@@ -220,7 +220,7 @@ impl std::fmt::Debug for Message {
             } else {
                 write!(fmt, ", ")?;
             }
-            write!(fmt, "cancel: {}", cid)?;
+            write!(fmt, "cancel: {cid}")?;
         }
         for block in self.blocks() {
             if first {

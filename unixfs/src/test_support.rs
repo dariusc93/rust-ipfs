@@ -13,7 +13,7 @@ impl FakeBlockstore {
     pub fn get_by_cid<'a>(&'a self, cid: &Cid) -> &'a [u8] {
         self.blocks
             .get(cid)
-            .unwrap_or_else(|| panic!("cid not found: {}", cid))
+            .unwrap_or_else(|| panic!("cid not found: {cid}"))
     }
 
     pub fn get_by_raw<'a>(&'a self, key: &[u8]) -> &'a [u8] {
@@ -35,8 +35,7 @@ impl FakeBlockstore {
 
         assert!(
             self.blocks.insert(cid, block.to_vec()).is_none(),
-            "duplicate cid {}",
-            cid
+            "duplicate cid {cid}"
         );
 
         cid

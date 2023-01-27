@@ -23,7 +23,7 @@ impl fmt::Debug for Entry {
         use Entry::*;
 
         match self {
-            Leaf(leaf) => write!(fmt, "Leaf {{ {:?} }}", leaf),
+            Leaf(leaf) => write!(fmt, "Leaf {{ {leaf:?} }}"),
             Directory(_) => write!(fmt, "DirBuilder {{ .. }}"),
         }
     }
@@ -104,19 +104,18 @@ impl fmt::Display for TreeBuildingFailed {
         use TreeBuildingFailed::*;
 
         match self {
-            RootedPath(s) => write!(fmt, "path is rooted: {:?}", s),
-            RepeatSlashesInPath(s) => write!(fmt, "path contains repeat slashes: {:?}", s),
-            PathEndsInSlash(s) => write!(fmt, "path ends in a slash: {:?}", s),
+            RootedPath(s) => write!(fmt, "path is rooted: {s:?}"),
+            RepeatSlashesInPath(s) => write!(fmt, "path contains repeat slashes: {s:?}"),
+            PathEndsInSlash(s) => write!(fmt, "path ends in a slash: {s:?}"),
             TooManyRootLevelEntries => write!(
                 fmt,
                 "multiple root level entries while configured wrap_with_directory = false"
             ),
             // TODO: perhaps we should allow adding two leafs with the same Cid?
-            DuplicatePath(s) => write!(fmt, "path exists already: {:?}", s),
+            DuplicatePath(s) => write!(fmt, "path exists already: {s:?}"),
             LeafAsDirectory(s) => write!(
                 fmt,
-                "attempted to use already added leaf as a subdirectory: {:?}",
-                s
+                "attempted to use already added leaf as a subdirectory: {s:?}"
             ),
         }
     }
@@ -139,8 +138,8 @@ impl fmt::Display for TreeConstructionFailed {
         use TreeConstructionFailed::*;
 
         match self {
-            Protobuf(e) => write!(fmt, "serialization failed: {}", e),
-            TooLargeBlock(size) => write!(fmt, "attempted to create block of {} bytes", size),
+            Protobuf(e) => write!(fmt, "serialization failed: {e}"),
+            TooLargeBlock(size) => write!(fmt, "attempted to create block of {size} bytes"),
         }
     }
 }

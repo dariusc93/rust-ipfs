@@ -35,9 +35,7 @@ async fn multiple_concurrent_ephemeral_listening_addresses_on_same_ip() {
 
     assert!(
         first.is_ok() || second.is_ok(),
-        "first: {:?}, second: {:?}",
-        first,
-        second
+        "first: {first:?}, second: {second:?}"
     );
 }
 
@@ -87,9 +85,7 @@ async fn listening_for_multiple_unspecified_addresses() {
     // on unspecified address
     assert!(
         first.is_ok() || second.is_ok(),
-        "first: {:?}, second: {:?}",
-        first,
-        second
+        "first: {first:?}, second: {second:?}"
     );
 }
 
@@ -137,7 +133,6 @@ async fn pre_configured_listening_addrs() {
 
     assert!(
         addrs.contains(&addr),
-        "pre-configured listening addr not found; is port 4001 available to listen on?; listening addrs: {:?}",
-        addrs
+        "pre-configured listening addr not found; is port 4001 available to listen on?; listening addrs: {addrs:?}"
     );
 }

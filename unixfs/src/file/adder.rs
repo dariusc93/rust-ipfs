@@ -64,7 +64,7 @@ impl fmt::Display for LinkFormatter<'_> {
             if current == next_depth {
                 count += 1;
             } else {
-                write!(fmt, "{}: {}/", current, count)?;
+                write!(fmt, "{current}: {count}/")?;
 
                 let steps_between = if current > next_depth {
                     current - next_depth
@@ -80,7 +80,7 @@ impl fmt::Display for LinkFormatter<'_> {
             }
         }
 
-        write!(fmt, "{}: {}]", current, count)
+        write!(fmt, "{current}: {count}]")
     }
 }
 
@@ -763,8 +763,7 @@ mod tests {
             assert_eq!(
                 blocks_received.last().unwrap().0.to_string(),
                 "QmYSLcVQqxKygiq7x9w1XGYxU29EShB8ZemiaQ8GAAw17h",
-                "amt: {}",
-                amt
+                "amt: {amt}"
             );
         }
     }

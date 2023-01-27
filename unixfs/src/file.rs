@@ -37,11 +37,11 @@ impl fmt::Display for FileReadFailed {
         use FileReadFailed::*;
 
         match self {
-            File(e) => write!(fmt, "{}", e),
-            UnexpectedType(ut) => write!(fmt, "unexpected type for UnixFs: {:?}", ut),
-            Read(Some(e)) => write!(fmt, "reading failed: {}", e),
+            File(e) => write!(fmt, "{e}"),
+            UnexpectedType(ut) => write!(fmt, "unexpected type for UnixFs: {ut:?}"),
+            Read(Some(e)) => write!(fmt, "reading failed: {e}"),
             Read(None) => write!(fmt, "reading failed: missing UnixFS message"),
-            InvalidCid(e) => write!(fmt, "{}", e),
+            InvalidCid(e) => write!(fmt, "{e}"),
         }
     }
 }
@@ -116,7 +116,7 @@ impl fmt::Display for FileError {
                 "filesize is non-zero while there are no links or content"
             ),
             NonRootDefinesMetadata(metadata) => {
-                write!(fmt, "unsupported: non-root defines {:?}", metadata)
+                write!(fmt, "unsupported: non-root defines {metadata:?}")
             }
             IntermediateNodeWithoutFileSize => {
                 write!(fmt, "intermediatery node with links but no filesize")
@@ -130,8 +130,7 @@ impl fmt::Display for FileError {
             TreeJumpsBetweenLinks => write!(fmt, "unsupported: tree contains holes"),
             UnexpectedRawOrFileProperties { hash_type, fanout } => write!(
                 fmt,
-                "unsupported: File or Raw with hash_type {:?} or fanount {:?}",
-                hash_type, fanout
+                "unsupported: File or Raw with hash_type {hash_type:?} or fanount {fanout:?}"
             ),
         }
     }
@@ -193,15 +192,14 @@ pub(crate) mod tests {
         let (content, _) = fr.content();
         assert!(
             matches!(content, FileContent::Bytes(b"content")),
-            "{:?}",
-            content
+            "{content:?}"
         );
     }
 
     #[test]
     fn visiting_just_content() {
         let res = IdleFileVisit::default().start(CONTENT_FILE);
-        assert!(matches!(res, Ok((b"content", _, _, None))), "{:?}", res);
+        assert!(matches!(res, Ok((b"content", _, _, None))), "{res:?}");
     }
 
     #[test]
@@ -210,7 +208,7 @@ pub(crate) mod tests {
             .with_target_range(500_000..600_000)
             .start(CONTENT_FILE);
 
-        assert!(matches!(res, Ok((b"", _, _, None))), "{:?}", res);
+        assert!(matches!(res, Ok((b"", _, _, None))), "{res:?}");
     }
 
     #[test]
@@ -218,7 +216,7 @@ pub(crate) mod tests {
         let block = &hex!("0a0408021800");
         let fr = FileReader::from_block(block).unwrap();
         let (content, _) = fr.content();
-        assert!(matches!(content, FileContent::Bytes(b"")), "{:?}", content);
+        assert!(matches!(content, FileContent::Bytes(b"")), "{content:?}");
     }
 
     #[test]

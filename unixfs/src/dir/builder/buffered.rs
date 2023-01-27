@@ -373,8 +373,7 @@ mod tests {
 
         assert!(
             matches!(err, TreeBuildingFailed::LeafAsDirectory(_)),
-            "{:?}",
-            err
+            "{err:?}"
         );
     }
 
@@ -412,7 +411,7 @@ mod tests {
         impl<'a> fmt::Debug for Hex<'a> {
             fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
                 for b in self.0 {
-                    write!(fmt, "{:02x}", b)?;
+                    write!(fmt, "{b:02x}")?;
                 }
                 Ok(())
             }
@@ -435,7 +434,7 @@ mod tests {
             );
         }
 
-        assert_eq!(expected.len(), 0, "size mismatch: {:?}", actual);
+        assert_eq!(expected.len(), 0, "size mismatch: {actual:?}");
     }
 
     /// Returns a quick and dirty sha2-256 of the given number as a Cidv0

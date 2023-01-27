@@ -24,7 +24,7 @@ fn main() {
         match stdin.fill_buf().unwrap() {
             x if x.is_empty() => {
                 eprintln!("finishing");
-                eprintln!("{:?}", adder);
+                eprintln!("{adder:?}");
                 let blocks = adder.finish();
                 stats.process(blocks);
                 break;
@@ -48,15 +48,15 @@ fn main() {
 
     let process_stats = get_process_stats();
 
-    eprintln!("{}", stats);
+    eprintln!("{stats}");
 
     let total = start.elapsed();
 
     if let Some(process_stats) = process_stats {
-        eprint!("{}, ", process_stats);
+        eprint!("{process_stats}, ");
     }
 
-    eprintln!("total: {:?}", total);
+    eprintln!("total: {total:?}");
 
     let megabytes = 1024.0 * 1024.0;
 

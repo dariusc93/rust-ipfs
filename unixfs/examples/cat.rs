@@ -9,7 +9,7 @@ fn main() {
     let cid = match std::env::args().nth(1).map(Cid::try_from) {
         Some(Ok(cid)) => cid,
         Some(Err(e)) => {
-            eprintln!("Invalid cid given as argument: {}", e);
+            eprintln!("Invalid cid given as argument: {e}");
             std::process::exit(1);
         }
         None => {
@@ -25,7 +25,7 @@ fn main() {
     let ipfs_path = match std::env::var("IPFS_PATH") {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("IPFS_PATH is not set or could not be read: {}", e);
+            eprintln!("IPFS_PATH is not set or could not be read: {e}");
             std::process::exit(1);
         }
     };
@@ -37,11 +37,11 @@ fn main() {
 
     match walk(blockstore, &cid) {
         Ok((read, content)) => {
-            eprintln!("Content bytes: {}", content);
-            eprintln!("Total bytes:   {}", read);
+            eprintln!("Content bytes: {content}");
+            eprintln!("Total bytes:   {read}");
         }
         Err(Error::OpeningFailed(e)) => {
-            eprintln!("{}\n", e);
+            eprintln!("{e}\n");
             eprintln!("This is likely caused by either:");
             eprintln!(" - ipfs does not have the block");
             eprintln!(" - ipfs is configured to use non-flatfs storage");
@@ -49,7 +49,7 @@ fn main() {
             std::process::exit(1);
         }
         Err(e) => {
-            eprintln!("Failed to walk the merkle tree: {}", e);
+            eprintln!("Failed to walk the merkle tree: {e}");
             std::process::exit(1);
         }
     }
@@ -125,9 +125,9 @@ impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Error::*;
         match self {
-            OpeningFailed(e) => write!(fmt, "File opening failed: {}", e),
-            Other(e) => write!(fmt, "Other file related io error: {}", e),
-            Traversal(e) => write!(fmt, "Traversal failed, please report this as a bug: {}", e),
+            OpeningFailed(e) => write!(fmt, "File opening failed: {e}"),
+            Other(e) => write!(fmt, "Other file related io error: {e}"),
+            Traversal(e) => write!(fmt, "Traversal failed, please report this as a bug: {e}"),
         }
     }
 }

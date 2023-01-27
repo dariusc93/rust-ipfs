@@ -540,7 +540,7 @@ mod tests {
                 _ = swarm2.next() => {},
                 res = &mut fut => {
                     let err = res.unwrap_err().unwrap();
-                    let expected_start = format!("Dial error: Unexpected peer ID {}", swarm1_peerid);
+                    let expected_start = format!("Dial error: Unexpected peer ID {swarm1_peerid}");
                     assert_eq!(&err[0..expected_start.len()], expected_start);
                     return;
                 }

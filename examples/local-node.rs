@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
 
     if opt.bootstrap {
         ipfs.default_bootstrap().await?;
-        let _ = ipfs.bootstrap().await?;
+        ipfs.bootstrap().await?;
     }
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     println!("PeerID: {}", key.to_peer_id());
 
     for address in addresses {
-        println!("Listening on: {}", address);
+        println!("Listening on: {address}");
     }
 
     // Used to wait until the process is terminated instead of creating a loop

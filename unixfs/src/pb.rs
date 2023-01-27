@@ -24,11 +24,10 @@ impl fmt::Display for ParsingFailed<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParsingFailed::*;
         match self {
-            InvalidDagPb(e) => write!(fmt, "failed to read the block as dag-pb: {}", e),
+            InvalidDagPb(e) => write!(fmt, "failed to read the block as dag-pb: {e}"),
             InvalidUnixFs(e, _) => write!(
                 fmt,
-                "failed to read the dag-pb PBNode::Data as UnixFS message: {}",
-                e
+                "failed to read the dag-pb PBNode::Data as UnixFS message: {e}"
             ),
             NoData(_) => write!(fmt, "dag-pb PBNode::Data was missing or empty"),
         }
@@ -217,7 +216,7 @@ mod test {
         assert_eq!(unixfs_data.Type, UnixFsType::File);
         assert_eq!(unixfs_data.Data, Some(Cow::Borrowed(&b"content"[..])));
         assert_eq!(unixfs_data.filesize, Some(7));
-        println!("{:?}", unixfs_data);
+        println!("{unixfs_data:?}");
     }
 
     #[test]

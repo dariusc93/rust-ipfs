@@ -52,7 +52,7 @@ impl fmt::Display for UnexpectedDirectoryProperties {
         )?;
 
         for b in self.data.as_deref().unwrap_or_default() {
-            write!(fmt, "{:02x}", b)?;
+            write!(fmt, "{b:02x}")?;
         }
 
         write!(fmt, "]")
