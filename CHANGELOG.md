@@ -1,2 +1,2 @@
-# 0.3.0 [unrelease]
-- TODO
+# 0.3.0-alpha.1
+- See commit history
