@@ -1656,6 +1656,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
+#[allow(clippy::type_complexity)]
 struct IpfsFuture<Types: IpfsTypes> {
     swarm: TSwarm,
     repo_events: Fuse<Receiver<RepoEvent>>,
