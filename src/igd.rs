@@ -5,12 +5,11 @@ use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
-use tokio::runtime::Handle;
 use tokio::sync::broadcast::Receiver;
 use tokio::time::{self, Instant};
 use tracing::debug;
 
-fn multiaddr_to_socket_port(
+pub(crate) fn multiaddr_to_socket_port(
     addr: Multiaddr,
 ) -> Result<(SocketAddr, u16, PortMappingProtocol), Error> {
     let mut iter = addr.iter();
@@ -46,11 +45,15 @@ fn multiaddr_to_socket_port(
 }
 
 pub(crate) fn forward_port(
-    handle: Handle,
     addr: Multiaddr,
     lease_interval: Duration,
     mut termination_rx: Receiver<()>,
-) -> Result<(), Error> {
+) -> Option<oneshot::Receiver<Result<(), Error>>> {
+
+    if multiaddr_to_socket_port(addr.clone()).is_err() {
+        return None;
+    }
+
     let lease_interval = lease_interval.min(Duration::from_secs(u32::MAX.into()));
     let lease_interval_u32 = lease_interval.as_secs() as u32;
     let (tx, rx) = oneshot::channel();
@@ -85,7 +88,7 @@ pub(crate) fn forward_port(
             };
         }
     });
-    tokio::task::block_in_place(|| handle.block_on(rx))?
+    Some(rx)
 }
 
 pub(crate) async fn add_or_renewal_port(addr: Multiaddr, lease_duration: u32) -> Result<(), Error> {
