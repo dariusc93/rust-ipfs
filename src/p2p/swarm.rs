@@ -101,6 +101,10 @@ impl SwarmApi {
             })
     }
 
+    pub fn peer_rtt(&self, peer_id: &PeerId) -> Option<Duration> {
+        self.roundtrip_times.get(peer_id).copied()
+    }
+
     pub fn set_rtt(&mut self, peer_id: &PeerId, rtt: Duration) {
         // NOTE: this is for any connection
         self.roundtrip_times.insert(*peer_id, rtt);

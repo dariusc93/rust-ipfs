@@ -1,13 +1,16 @@
 use super::gossipsub::GossipsubStream;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
+use crate::repo::Repo;
 use crate::subscription::SubscriptionFuture;
+use crate::IpfsTypes;
 
 // use cid::Cid;
-use ipfs_bitswap::{Bitswap, BitswapEvent};
+use iroh_bitswap::{Bitswap, BitswapEvent};
 use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
@@ -34,10 +37,10 @@ use std::time::Duration;
 /// Behaviour type.
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
-pub struct Behaviour {
+pub struct Behaviour<TRepoTypes: IpfsTypes> {
     pub mdns: Toggle<Mdns>,
     pub kademlia: Kademlia<MemoryStore>,
-    pub bitswap: Bitswap,
+    pub bitswap: Bitswap<Repo<TRepoTypes>>,
     pub ping: Ping,
     pub identify: Identify,
     pub keepalive: Toggle<KeepAliveBehaviour>,
@@ -272,9 +275,12 @@ pub struct KadStoreConfig {
     pub memory: Option<MemoryStoreConfig>,
 }
 
-impl Behaviour {
+impl<TRepoTypes: IpfsTypes> Behaviour<TRepoTypes> {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
-    pub async fn new(options: SwarmOptions) -> Result<(Self, Option<ClientTransport>), Error> {
+    pub async fn new(
+        options: SwarmOptions,
+        repo: Repo<TRepoTypes>,
+    ) -> Result<(Self, Option<ClientTransport>), Error> {
         let peer_id = options.peer_id;
 
         info!("net: starting with peer id {}", peer_id);
@@ -320,7 +326,7 @@ impl Behaviour {
         }
 
         let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
-        let bitswap = Bitswap::default();
+        let bitswap = Bitswap::new(peer_id, repo, Default::default()).await;
         let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
 
         let ping = Ping::new(options.ping_config.unwrap_or_default());
@@ -393,7 +399,7 @@ impl Behaviour {
         }
         self.swarm.add_peer(peer);
         self.pubsub.add_explicit_peer(&peer);
-        self.bitswap.connect(peer);
+        // self.bitswap.connect(peer);
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId) {
@@ -429,15 +435,6 @@ impl Behaviour {
         self.swarm.connect(addr)
     }
 
-    // FIXME: it would be best if get_providers is called only in case the already connected
-    // peers don't have it
-    pub fn want_block(&mut self, cid: Cid) {
-        // TODO: Restructure this to utilize provider propertly
-        let key = cid.hash().to_bytes();
-        self.kademlia.get_providers(key.into());
-        self.bitswap.want_block(cid, 1);
-    }
-
     pub fn stop_providing_block(&mut self, cid: &Cid) {
         info!("Finished providing block {}", cid.to_string());
         let key = cid.hash().to_bytes();
@@ -448,11 +445,27 @@ impl Behaviour {
         self.swarm.protocols().collect::<Vec<_>>()
     }
 
+    pub fn notify_new_blocks(&self, blocks: Vec<crate::Block>) {
+        let client = self.bitswap.client().clone();
+        tokio::task::spawn(async move {
+            let blocks = blocks
+                .iter()
+                .map(|block| iroh_bitswap::Block {
+                    cid: *block.cid(),
+                    data: Bytes::copy_from_slice(block.data()),
+                })
+                .collect::<Vec<_>>();
+            if let Err(err) = client.notify_new_blocks(&blocks).await {
+                warn!("failed to notify bitswap about blocks: {:?}", err);
+            }
+        });
+    }
+
     pub fn pubsub(&mut self) -> &mut GossipsubStream {
         &mut self.pubsub
     }
 
-    pub fn bitswap(&mut self) -> &mut Bitswap {
+    pub fn bitswap(&mut self) -> &mut Bitswap<Repo<TRepoTypes>> {
         &mut self.bitswap
     }
 
@@ -462,8 +475,9 @@ impl Behaviour {
 }
 
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
-pub async fn build_behaviour(
+pub async fn build_behaviour<TRepoType: IpfsTypes>(
     options: SwarmOptions,
-) -> Result<(Behaviour, Option<ClientTransport>), Error> {
-    Behaviour::new(options).await
+    repo: Repo<TRepoType>,
+) -> Result<(Behaviour<TRepoType>, Option<ClientTransport>), Error> {
+    Behaviour::new(options, repo).await
 }

@@ -208,7 +208,9 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> Default for SubscriptionReg
 
 impl<T: Debug + Clone + PartialEq, E: Debug + Clone> Drop for SubscriptionRegistry<T, E> {
     fn drop(&mut self) {
-        self.shutdown();
+        if Arc::strong_count(&self.subscriptions) == 1 {
+            self.shutdown();
+        }
     }
 }
 
@@ -404,6 +406,7 @@ impl<T: Debug + PartialEq, E: Debug + PartialEq> Future for SubscriptionFuture<T
 
 impl<T: Debug + PartialEq, E: Debug> Drop for SubscriptionFuture<T, E> {
     fn drop(&mut self) {
+        // if Arc::strong_count(&self.subscriptions) == 1 {
         trace!("Dropping subscription future {} to {}", self.id, self.kind);
 
         if self.cleanup_complete {
@@ -431,6 +434,7 @@ impl<T: Debug + PartialEq, E: Debug> Drop for SubscriptionFuture<T, E> {
         if let Some(mut sub @ Subscription::Pending { .. }) = sub {
             sub.cancel(self.id, self.kind.clone(), is_last);
         }
+        // }
     }
 }
 

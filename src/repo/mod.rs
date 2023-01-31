@@ -29,7 +29,7 @@ pub mod kv;
 pub mod mem;
 
 /// Consolidates `BlockStore` and `DataStore` into a representation of storage.
-pub trait RepoTypes: Send + Sync + 'static {
+pub trait RepoTypes: Debug + Send + Sync + 'static {
     /// Describes a blockstore.
     type TBlockStore: BlockStore;
     /// Describes a datastore.
@@ -326,11 +326,46 @@ impl<C: Borrow<Cid>> PinKind<C> {
 /// Consolidates a blockstore, a datastore and a subscription registry.
 #[derive(Debug)]
 pub struct Repo<TRepoTypes: RepoTypes> {
-    block_store: TRepoTypes::TBlockStore,
-    data_store: TRepoTypes::TDataStore,
+    block_store: Arc<TRepoTypes::TBlockStore>,
+    data_store: Arc<TRepoTypes::TDataStore>,
     events: Sender<RepoEvent>,
     pub(crate) subscriptions: SubscriptionRegistry<Block, String>,
     lockfile: Arc<Mutex<TRepoTypes::TLock>>,
+}
+
+impl<TRepoTypes: RepoTypes> Clone for Repo<TRepoTypes> {
+    fn clone(&self) -> Self {
+        Self {
+            block_store: self.block_store.clone(),
+            data_store: self.data_store.clone(),
+            events: self.events.clone(),
+            subscriptions: self.subscriptions.clone(),
+            lockfile: self.lockfile.clone(),
+        }
+    }
+}
+
+#[async_trait]
+impl<TRepoTypes: RepoTypes> iroh_bitswap::Store for Repo<TRepoTypes> {
+    async fn get_size(&self, cid: &Cid) -> anyhow::Result<usize> {
+        self.get_block_now(cid)
+            .await?
+            .ok_or(anyhow::anyhow!("Block doesnt exist"))
+            .map(|block| block.data().len())
+    }
+    async fn get(&self, cid: &Cid) -> anyhow::Result<iroh_bitswap::Block> {
+        let block = self
+            .get_block_now(cid)
+            .await?
+            .ok_or(anyhow::anyhow!("Block doesnt exist"))?;
+        Ok(iroh_bitswap::Block {
+            cid: *block.cid(),
+            data: bytes::Bytes::copy_from_slice(block.data()),
+        })
+    }
+    async fn has(&self, cid: &Cid) -> anyhow::Result<bool> {
+        self.get_block_now(cid).await.map(|b| b.is_some())
+    }
 }
 
 /// Events used to communicate to the swarm on repo changes.
@@ -370,8 +405,8 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = TRepoTypes::TBlockStore::new(blockstore_path);
-        let data_store = TRepoTypes::TDataStore::new(datastore_path);
+        let block_store = Arc::new(TRepoTypes::TBlockStore::new(blockstore_path));
+        let data_store = Arc::new(TRepoTypes::TDataStore::new(datastore_path));
         let lockfile = TRepoTypes::TLock::new(lockfile_path);
         let (sender, receiver) = channel(1);
 
@@ -545,9 +580,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
     pub async fn remove_ipns(&self, ipns: &PeerId) -> Result<(), Error> {
         // FIXME: us needing to clone the peerid is wasteful to pass it as a reference only to be
         // cloned again
-        self.data_store
-            .remove(Column::Ipns, &ipns.to_bytes())
-            .await
+        self.data_store.remove(Column::Ipns, &ipns.to_bytes()).await
     }
 
     /// Inserts a direct pin for a `Cid`.

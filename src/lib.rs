@@ -50,7 +50,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 
-use ipfs_bitswap::BitswapEvent;
+use iroh_bitswap::BitswapEvent;
 use p2p::{
     IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
 };
@@ -75,7 +75,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::{config::BOOTSTRAP_NODES, repo::BlockPut};
+use crate::config::BOOTSTRAP_NODES;
 
 use self::{
     dag::IpldDag,
@@ -134,7 +134,7 @@ pub trait IpfsTypes: RepoTypes {}
 impl<T: RepoTypes> IpfsTypes for T {}
 
 /// Default node configuration, currently with persistent block store and data store for pins.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Types;
 impl RepoTypes for Types {
     type TBlockStore = repo::fs::FsBlockStore;
@@ -146,7 +146,7 @@ impl RepoTypes for Types {
 }
 
 /// In-memory testing configuration used in tests.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestTypes;
 impl RepoTypes for TestTypes {
     type TBlockStore = repo::mem::MemBlockStore;
@@ -319,7 +319,7 @@ impl<I: Borrow<Keypair>> DebuggableKeypair<I> {
 #[derive(Debug)]
 pub struct Ipfs<Types: IpfsTypes> {
     span: Span,
-    repo: Arc<Repo<Types>>,
+    repo: Repo<Types>,
     keys: DebuggableKeypair<Keypair>,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
@@ -329,7 +329,7 @@ impl<Types: IpfsTypes> Clone for Ipfs<Types> {
     fn clone(&self) -> Self {
         Ipfs {
             span: self.span.clone(),
-            repo: Arc::clone(&self.repo),
+            repo: self.repo.clone(),
             identify_conf: self.identify_conf.clone(),
             keys: self.keys.clone(),
             to_task: self.to_task.clone(),
@@ -375,11 +375,6 @@ enum IpfsEvent {
     ),
     PubsubPeers(Option<String>, OneshotSender<Vec<PeerId>>),
     PubsubSubscribed(OneshotSender<Vec<String>>),
-    WantList(
-        Option<PeerId>,
-        OneshotSender<Vec<(Cid, ipfs_bitswap::Priority)>>,
-    ),
-    BitswapStats(OneshotSender<BitswapStats>),
     SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(
         Multiaddr,
@@ -392,7 +387,6 @@ enum IpfsEvent {
     Bootstrap(Channel<SubscriptionFuture<KadResult, String>>),
     AddPeer(PeerId, Option<Multiaddr>),
     GetClosestPeers(PeerId, OneshotSender<SubscriptionFuture<KadResult, String>>),
-    GetBitswapPeers(OneshotSender<Vec<PeerId>>),
     FindPeerIdentity(
         PeerId,
         bool,
@@ -420,8 +414,9 @@ enum IpfsEvent {
     Exit,
 }
 
-type TSwarmEvent = <TSwarm as Stream>::Item;
-type TSwarmEventFn = Arc<dyn Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send>;
+type TSwarmEvent<TRepoTypes> = <TSwarm<TRepoTypes> as Stream>::Item;
+type TSwarmEventFn<TRepoTypes> =
+    Arc<dyn Fn(&mut TSwarm<TRepoTypes>, &TSwarmEvent<TRepoTypes>) + Sync + Send>;
 
 pub enum FDLimit {
     Max,
@@ -430,12 +425,12 @@ pub enum FDLimit {
 
 /// Configured Ipfs which can only be started.
 pub struct UninitializedIpfs<Types: IpfsTypes> {
-    repo: Arc<Repo<Types>>,
+    repo: Repo<Types>,
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     repo_events: Receiver<RepoEvent>,
-    swarm_event: Option<TSwarmEventFn>,
+    swarm_event: Option<TSwarmEventFn<Types>>,
 }
 
 impl<Types: IpfsTypes> UninitializedIpfs<Types> {
@@ -451,7 +446,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let keys = options.keypair.clone();
         let fdlimit = None;
         UninitializedIpfs {
-            repo: Arc::new(repo),
+            repo,
             keys,
             options,
             fdlimit,
@@ -469,7 +464,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
     where
-        F: Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send + 'static,
+        F: Fn(&mut TSwarm<Types>, &TSwarmEvent<Types>) + Sync + Send + 'static,
     {
         self.swarm_event = Some(Arc::new(func));
         self
@@ -557,9 +552,15 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
 
         let swarm_config = options.swarm_configuration.unwrap_or_default();
         let transport_config = options.transport_configuration.unwrap_or_default();
-        let swarm = create_swarm(swarm_options, swarm_config, transport_config, exec_span)
-            .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
-            .await?;
+        let swarm = create_swarm(
+            swarm_options,
+            swarm_config,
+            transport_config,
+            repo.clone(),
+            exec_span,
+        )
+        .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
+        .await?;
 
         let autonat_limit = Arc::new(AtomicU64::new(64));
         let autonat_counter = Arc::new(Default::default());
@@ -580,6 +581,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
             listeners,
             provider_stream: HashMap::new(),
+            bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
             kad_subscriptions,
             listener_subscriptions,
@@ -1203,23 +1205,23 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Returns the known wantlist for the local node when the `peer` is `None` or the wantlist of the given `peer`
-    pub async fn bitswap_wantlist(
-        &self,
-        peer: Option<PeerId>,
-    ) -> Result<Vec<(Cid, ipfs_bitswap::Priority)>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
+    // pub async fn bitswap_wantlist(
+    //     &self,
+    //     peer: Option<PeerId>,
+    // ) -> Result<Vec<(Cid, ipfs_bitswap::Priority)>, Error> {
+    //     async move {
+    //         let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::WantList(peer, tx))
-                .await?;
+    //         self.to_task
+    //             .clone()
+    //             .send(IpfsEvent::WantList(peer, tx))
+    //             .await?;
 
-            Ok(rx.await?)
-        }
-        .instrument(self.span.clone())
-        .await
-    }
+    //         Ok(rx.await?)
+    //     }
+    //     .instrument(self.span.clone())
+    //     .await
+    // }
 
     /// Returns a list of local blocks
     ///
@@ -1230,20 +1232,20 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Returns the accumulated bitswap stats
-    pub async fn bitswap_stats(&self) -> Result<BitswapStats, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
+    // pub async fn bitswap_stats(&self) -> Result<BitswapStats, Error> {
+    //     async move {
+    //         let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::BitswapStats(tx))
-                .await?;
+    //         self.to_task
+    //             .clone()
+    //             .send(IpfsEvent::BitswapStats(tx))
+    //             .await?;
 
-            Ok(rx.await?)
-        }
-        .instrument(self.span.clone())
-        .await
-    }
+    //         Ok(rx.await?)
+    //     }
+    //     .instrument(self.span.clone())
+    //     .await
+    // }
 
     /// Add a given multiaddr as a listening address. Will fail if the address is unsupported, or
     /// if it is already being listened on. Currently will invoke `Swarm::listen_on` internally,
@@ -1632,16 +1634,16 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Returns the Bitswap peers for the a `Node`.
-    pub async fn get_bitswap_peers(&self) -> Result<Vec<PeerId>, Error> {
-        let (tx, rx) = oneshot_channel();
+    // pub async fn get_bitswap_peers(&self) -> Result<Vec<PeerId>, Error> {
+    //     let (tx, rx) = oneshot_channel();
 
-        self.to_task
-            .clone()
-            .send(IpfsEvent::GetBitswapPeers(tx))
-            .await?;
+    //     self.to_task
+    //         .clone()
+    //         .send(IpfsEvent::GetBitswapPeers(tx))
+    //         .await?;
 
-        rx.await.map_err(|e| anyhow!(e))
-    }
+    //     rx.await.map_err(|e| anyhow!(e))
+    // }
 
     /// Exit daemon.
     pub async fn exit_daemon(mut self) {
@@ -1658,20 +1660,22 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
 struct IpfsFuture<Types: IpfsTypes> {
-    swarm: TSwarm,
+    swarm: TSwarm<Types>,
     repo_events: Fuse<Receiver<RepoEvent>>,
     from_facade: Fuse<Receiver<IpfsEvent>>,
     listening_addresses: HashMap<Multiaddr, ListenerId>,
     listeners: HashSet<ListenerId>,
     provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
+    bitswap_provider_stream:
+        HashMap<QueryId, tokio::sync::mpsc::Sender<Result<HashSet<PeerId>, String>>>,
     record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    repo: Arc<Repo<Types>>,
+    repo: Repo<Types>,
     kad_subscriptions: SubscriptionRegistry<KadResult, String>,
     listener_subscriptions: SubscriptionRegistry<Option<Option<Multiaddr>>, String>,
     autonat_limit: Arc<AtomicU64>,
     autonat_counter: Arc<AtomicU64>,
     bootstraps: HashSet<MultiaddrWithPeerId>,
-    swarm_event: Option<TSwarmEventFn>,
+    swarm_event: Option<TSwarmEventFn<Types>>,
     mapping_task: HashMap<Multiaddr, broadcast::Sender<()>>,
     mapping_pending: HashMap<
         Multiaddr,
@@ -1870,10 +1874,23 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                             if !providers.is_empty() {
                                                 tokio::spawn({
                                                     let mut tx = entry.get().clone();
+                                                    let providers = providers.clone();
                                                     async move {
                                                         for provider in providers {
                                                             let _ = tx.send(provider).await;
                                                         }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                        if let Entry::Occupied(entry) =
+                                            self.bitswap_provider_stream.entry(id)
+                                        {
+                                            if !providers.is_empty() {
+                                                tokio::spawn({
+                                                    let tx = entry.get().clone();
+                                                    async move {
+                                                        let _ = tx.send(Ok(providers)).await;
                                                     }
                                                 });
                                             }
@@ -1885,6 +1902,11 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                         if step.last {
                                             if let Some(tx) = self.provider_stream.remove(&id) {
                                                 tx.close_channel();
+                                            }
+                                            if let Some(tx) =
+                                                self.bitswap_provider_stream.remove(&id)
+                                            {
+                                                drop(tx)
                                             }
                                         }
                                     }
@@ -2070,64 +2092,90 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                             }
                         }
                     }
-                    SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
-                        BitswapEvent::ReceivedBlock(peer_id, block) => {
-                            let repo = self.repo.clone();
-                            let peer_stats = Arc::clone(
-                                self.swarm.behaviour().bitswap.stats.get(&peer_id).unwrap(),
-                            );
-                            tokio::task::spawn(async move {
-                                let bytes = block.data().len() as u64;
-                                let res = repo.put_block(block.clone()).await;
-                                match res {
-                                    Ok((_, uniqueness)) => match uniqueness {
-                                        BlockPut::NewBlock => {
-                                            peer_stats.update_incoming_unique(bytes)
-                                        }
-                                        BlockPut::Existed => {
-                                            peer_stats.update_incoming_duplicate(bytes)
-                                        }
-                                    },
-                                    Err(e) => {
-                                        debug!(
-                                            "Got block {} from peer {} but failed to store it: {}",
-                                            block.cid(),
-                                            peer_id.to_base58(),
-                                            e
-                                        );
-                                    }
-                                };
-                            });
+                    SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => {
+                        match event {
+                            BitswapEvent::Provide { key } => {
+                                let key = key.hash().to_bytes();
+                                let _id = self
+                                    .swarm
+                                    .behaviour_mut()
+                                    .kademlia
+                                    .start_providing(key.into())
+                                    .ok();
+                            }
+                            BitswapEvent::FindProviders { key, response, .. } => {
+                                let key = key.hash().to_bytes();
+                                let id = self
+                                    .swarm
+                                    .behaviour_mut()
+                                    .kademlia
+                                    .get_providers(key.into());
+                                self.bitswap_provider_stream.insert(id, response);
+                            }
+                            BitswapEvent::Ping { peer, response } => {
+                                let duration = self.swarm.behaviour().swarm.peer_rtt(&peer);
+                                let _ = response.send(duration).ok();
+                            }
                         }
-                        BitswapEvent::ReceivedWant(peer_id, cid, priority) => {
-                            info!(
-                                "Peer {} wants block {} with priority {}",
-                                peer_id, cid, priority
-                            );
+                        //     match event {
+                        //     BitswapEvent::ReceivedBlock(peer_id, block) => {
+                        //         let repo = self.repo.clone();
+                        //         let peer_stats = Arc::clone(
+                        //             self.swarm.behaviour().bitswap.stats.get(&peer_id).unwrap(),
+                        //         );
+                        //         tokio::task::spawn(async move {
+                        //             let bytes = block.data().len() as u64;
+                        //             let res = repo.put_block(block.clone()).await;
+                        //             match res {
+                        //                 Ok((_, uniqueness)) => match uniqueness {
+                        //                     BlockPut::NewBlock => {
+                        //                         peer_stats.update_incoming_unique(bytes)
+                        //                     }
+                        //                     BlockPut::Existed => {
+                        //                         peer_stats.update_incoming_duplicate(bytes)
+                        //                     }
+                        //                 },
+                        //                 Err(e) => {
+                        //                     debug!(
+                        //                         "Got block {} from peer {} but failed to store it: {}",
+                        //                         block.cid(),
+                        //                         peer_id.to_base58(),
+                        //                         e
+                        //                     );
+                        //                 }
+                        //             };
+                        //         });
+                        //     }
+                        //     BitswapEvent::ReceivedWant(peer_id, cid, priority) => {
+                        //         info!(
+                        //             "Peer {} wants block {} with priority {}",
+                        //             peer_id, cid, priority
+                        //         );
 
-                            let queued_blocks =
-                                self.swarm.behaviour_mut().bitswap().queued_blocks.clone();
-                            let repo = self.repo.clone();
+                        //         let queued_blocks =
+                        //             self.swarm.behaviour_mut().bitswap().queued_blocks.clone();
+                        //         let repo = self.repo.clone();
 
-                            tokio::task::spawn(async move {
-                                match repo.get_block_now(&cid).await {
-                                    Ok(Some(block)) => {
-                                        let _ = queued_blocks.unbounded_send((peer_id, block));
-                                    }
-                                    Ok(None) => {}
-                                    Err(err) => {
-                                        warn!(
-                                            "Peer {} wanted block {} but we failed: {}",
-                                            peer_id.to_base58(),
-                                            cid,
-                                            err,
-                                        );
-                                    }
-                                }
-                            });
-                        }
-                        BitswapEvent::ReceivedCancel(..) => {}
-                    },
+                        //         tokio::task::spawn(async move {
+                        //             match repo.get_block_now(&cid).await {
+                        //                 Ok(Some(block)) => {
+                        //                     let _ = queued_blocks.unbounded_send((peer_id, block));
+                        //                 }
+                        //                 Ok(None) => {}
+                        //                 Err(err) => {
+                        //                     warn!(
+                        //                         "Peer {} wanted block {} but we failed: {}",
+                        //                         peer_id.to_base58(),
+                        //                         cid,
+                        //                         err,
+                        //                     );
+                        //                 }
+                        //             }
+                        //         });
+                        //     }
+                        //     BitswapEvent::ReceivedCancel(..) => {}
+                        // }
+                    }
                     SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
                         libp2p::ping::Event {
                             peer,
@@ -2179,6 +2227,10 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                                 ..
                             } = info.clone();
 
+                            self.swarm
+                                .behaviour_mut()
+                                .bitswap
+                                .on_identify(&peer_id, &protocols);
                             if protocols
                                 .iter()
                                 .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
@@ -2309,24 +2361,24 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     IpfsEvent::PubsubSubscribed(ret) => {
                         let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_topics());
                     }
-                    IpfsEvent::WantList(peer, ret) => {
-                        let list = if let Some(peer) = peer {
-                            self.swarm
-                                .behaviour_mut()
-                                .bitswap()
-                                .peer_wantlist(&peer)
-                                .unwrap_or_default()
-                        } else {
-                            self.swarm.behaviour_mut().bitswap().local_wantlist()
-                        };
-                        let _ = ret.send(list);
-                    }
-                    IpfsEvent::BitswapStats(ret) => {
-                        let stats = self.swarm.behaviour_mut().bitswap().stats();
-                        let peers = self.swarm.behaviour_mut().bitswap().peers();
-                        let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
-                        let _ = ret.send((stats, peers, wantlist).into());
-                    }
+                    // IpfsEvent::WantList(peer, ret) => {
+                    //     let list = if let Some(peer) = peer {
+                    //         self.swarm
+                    //             .behaviour_mut()
+                    //             .bitswap()
+                    //             .peer_wantlist(&peer)
+                    //             .unwrap_or_default()
+                    //     } else {
+                    //         self.swarm.behaviour_mut().bitswap().local_wantlist()
+                    //     };
+                    //     let _ = ret.send(list);
+                    // }
+                    // IpfsEvent::BitswapStats(ret) => {
+                    //     let stats = self.swarm.behaviour_mut().bitswap().stats();
+                    //     let peers = self.swarm.behaviour_mut().bitswap().peers();
+                    //     let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
+                    //     let _ = ret.send((stats, peers, wantlist).into());
+                    // }
                     IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
                         Ok(id) => {
                             self.listeners.insert(id);
@@ -2384,17 +2436,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let future = self.kad_subscriptions.create_subscription(id.into(), None);
 
                         let _ = ret.send(future);
-                    }
-                    IpfsEvent::GetBitswapPeers(ret) => {
-                        let peers = self
-                            .swarm
-                            .behaviour_mut()
-                            .bitswap()
-                            .connected_peers
-                            .keys()
-                            .cloned()
-                            .collect();
-                        let _ = ret.send(peers);
                     }
                     IpfsEvent::FindPeerIdentity(peer_id, local_only, ret) => {
                         let locally_known = self
@@ -2621,14 +2662,45 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
             // wants this to be written with a `while let`.
             while let Poll::Ready(Some(evt)) = Pin::new(&mut self.repo_events).poll_next(ctx) {
                 match evt {
-                    RepoEvent::WantBlock(cid) => self.swarm.behaviour_mut().want_block(cid),
+                    RepoEvent::WantBlock(cid) => {
+                        let client = self.swarm.behaviour_mut().bitswap().client().clone();
+                        let repo = self.repo.clone();
+                        tokio::spawn(async move {
+                            let block = match client.get_block(&cid).await {
+                                Ok(block) => match Block::new(block.cid, block.data.to_vec()) {
+                                    Ok(b) => b,
+                                    Err(_e) => return,
+                                },
+                                Err(_e) => return,
+                            };
+                            let res = repo.put_block(block.clone()).await;
+                            if let Err(e) = res {
+                                debug!("Got block {} but failed to store it: {}", block.cid(), e);
+                            }
+                        });
+                    }
                     RepoEvent::UnwantBlock(cid) => {
-                        self.swarm.behaviour_mut().bitswap().cancel_block(&cid)
+                        let client = self.swarm.behaviour_mut().bitswap().client().clone();
+                        let repo = self.repo.clone();
+                        tokio::task::spawn(async move {
+                            if let Ok(block) = repo.get_block(&cid).await {
+                                let blocks = [block]
+                                    .iter()
+                                    .map(|block| iroh_bitswap::Block {
+                                        cid: *block.cid(),
+                                        data: bytes::Bytes::copy_from_slice(block.data()),
+                                    })
+                                    .collect::<Vec<_>>();
+                                if let Err(err) = client.notify_new_blocks(&blocks).await {
+                                    warn!("failed to notify bitswap about blocks: {:?}", err);
+                                }
+                            }
+                        });
                     }
                     RepoEvent::NewBlock(cid, ret) => {
                         // TODO: consider if cancel is applicable in cases where we provide the
                         // associated Block ourselves
-                        self.swarm.behaviour_mut().bitswap().cancel_block(&cid);
+                        // self.swarm.behaviour_mut().bitswap().cancel_block(&cid);
                         // currently disabled; see https://github.com/rs-ipfs/rust-ipfs/pull/281#discussion_r465583345
                         // for details regarding the concerns about enabling this functionality as-is
                         if false {
@@ -2694,53 +2766,53 @@ pub fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> {
     Ok(peer_id)
 }
 
-/// Bitswap statistics
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BitswapStats {
-    /// The number of IPFS blocks sent to other peers
-    pub blocks_sent: u64,
-    /// The number of bytes sent in IPFS blocks to other peers
-    pub data_sent: u64,
-    /// The number of IPFS blocks received from other peers
-    pub blocks_received: u64,
-    /// The number of bytes received in IPFS blocks from other peers
-    pub data_received: u64,
-    /// Duplicate blocks received (the block had already been received previously)
-    pub dup_blks_received: u64,
-    /// The number of bytes in duplicate blocks received
-    pub dup_data_received: u64,
-    /// The current peers
-    pub peers: Vec<PeerId>,
-    /// The wantlist of the local node
-    pub wantlist: Vec<(Cid, ipfs_bitswap::Priority)>,
-}
+// /// Bitswap statistics
+// #[derive(Clone, Debug, Eq, PartialEq)]
+// pub struct BitswapStats {
+//     /// The number of IPFS blocks sent to other peers
+//     pub blocks_sent: u64,
+//     /// The number of bytes sent in IPFS blocks to other peers
+//     pub data_sent: u64,
+//     /// The number of IPFS blocks received from other peers
+//     pub blocks_received: u64,
+//     /// The number of bytes received in IPFS blocks from other peers
+//     pub data_received: u64,
+//     /// Duplicate blocks received (the block had already been received previously)
+//     pub dup_blks_received: u64,
+//     /// The number of bytes in duplicate blocks received
+//     pub dup_data_received: u64,
+//     /// The current peers
+//     pub peers: Vec<PeerId>,
+//     /// The wantlist of the local node
+//     pub wantlist: Vec<(Cid, iroh_bitswap::Priority)>,
+// }
 
-impl
-    From<(
-        ipfs_bitswap::Stats,
-        Vec<PeerId>,
-        Vec<(Cid, ipfs_bitswap::Priority)>,
-    )> for BitswapStats
-{
-    fn from(
-        (stats, peers, wantlist): (
-            ipfs_bitswap::Stats,
-            Vec<PeerId>,
-            Vec<(Cid, ipfs_bitswap::Priority)>,
-        ),
-    ) -> Self {
-        BitswapStats {
-            blocks_sent: stats.sent_blocks.load(Ordering::Relaxed),
-            data_sent: stats.sent_data.load(Ordering::Relaxed),
-            blocks_received: stats.received_blocks.load(Ordering::Relaxed),
-            data_received: stats.received_data.load(Ordering::Relaxed),
-            dup_blks_received: stats.duplicate_blocks.load(Ordering::Relaxed),
-            dup_data_received: stats.duplicate_data.load(Ordering::Relaxed),
-            peers,
-            wantlist,
-        }
-    }
-}
+// impl
+//     From<(
+//         ipfs_bitswap::Stats,
+//         Vec<PeerId>,
+//         Vec<(Cid, ipfs_bitswap::Priority)>,
+//     )> for BitswapStats
+// {
+//     fn from(
+//         (stats, peers, wantlist): (
+//             ipfs_bitswap::Stats,
+//             Vec<PeerId>,
+//             Vec<(Cid, ipfs_bitswap::Priority)>,
+//         ),
+//     ) -> Self {
+//         BitswapStats {
+//             blocks_sent: stats.sent_blocks.load(Ordering::Relaxed),
+//             data_sent: stats.sent_data.load(Ordering::Relaxed),
+//             blocks_received: stats.received_blocks.load(Ordering::Relaxed),
+//             data_received: stats.received_data.load(Ordering::Relaxed),
+//             dup_blks_received: stats.duplicate_blocks.load(Ordering::Relaxed),
+//             dup_data_received: stats.duplicate_data.load(Ordering::Relaxed),
+//             peers,
+//             wantlist,
+//         }
+//     }
+// }
 
 #[doc(hidden)]
 pub use node::Node;
