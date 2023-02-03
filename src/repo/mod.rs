@@ -377,7 +377,7 @@ pub enum RepoEvent {
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
     NewBlock(
-        Cid,
+        Block,
         oneshot::Sender<Result<SubscriptionFuture<KadResult, String>, anyhow::Error>>,
     ),
     /// Signals the removal of a block.
@@ -459,15 +459,14 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
 
     /// Puts a block into the block store.
     pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
-        let cid = *block.cid();
-        let (_cid, res) = self.block_store.put(block.clone()).await?;
+        let (cid, res) = self.block_store.put(block.clone()).await?;
 
         // FIXME: this doesn't cause actual DHT providing yet, only some
         // bitswap housekeeping; we might want to not ignore the channel
         // errors when we actually start providing on the DHT
         if let BlockPut::NewBlock = res {
             self.subscriptions
-                .finish_subscription(cid.into(), Ok(block));
+                .finish_subscription(cid.into(), Ok(block.clone()));
 
             // sending only fails if no one is listening anymore
             // and that is okay with us.
@@ -475,7 +474,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
 
             self.events
                 .clone()
-                .send(RepoEvent::NewBlock(cid, tx))
+                .send(RepoEvent::NewBlock(block, tx))
                 .await
                 .ok();
 
