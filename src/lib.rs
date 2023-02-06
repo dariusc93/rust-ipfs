@@ -33,8 +33,6 @@ pub mod repo;
 mod subscription;
 pub mod unixfs;
 
-mod igd;
-
 #[macro_use]
 extern crate tracing;
 
@@ -47,7 +45,7 @@ use futures::{
     },
     sink::SinkExt,
     stream::{BoxStream, Fuse, Stream},
-    FutureExt, StreamExt,
+    StreamExt,
 };
 
 use ipfs_bitswap::BitswapEvent;
@@ -55,7 +53,7 @@ use p2p::{
     IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
 };
 use subscription::SubscriptionRegistry;
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::UnixfsStatus;
@@ -567,7 +565,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let listener_subscriptions = Default::default();
         let listeners = Default::default();
         let bootstraps = Default::default();
-        let mapping_task = HashMap::new();
 
         let IpfsOptions {
             listening_addrs, ..
@@ -588,9 +585,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             autonat_counter,
             bootstraps,
             swarm_event,
-            mapping_task,
-            mapping_pending: Default::default(),
-            port_mapping: options.port_mapping,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -1672,15 +1666,6 @@ struct IpfsFuture<Types: IpfsTypes> {
     autonat_counter: Arc<AtomicU64>,
     bootstraps: HashSet<MultiaddrWithPeerId>,
     swarm_event: Option<TSwarmEventFn>,
-    mapping_task: HashMap<Multiaddr, broadcast::Sender<()>>,
-    mapping_pending: HashMap<
-        Multiaddr,
-        (
-            futures::channel::oneshot::Receiver<Result<(), Error>>,
-            broadcast::Sender<()>,
-        ),
-    >,
-    port_mapping: bool,
 }
 
 impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
@@ -1720,19 +1705,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         self.listening_addresses
                             .insert(address.clone(), listener_id);
 
-                        if self.port_mapping
-                            && address.iter().any(|p| matches!(p, Protocol::Ip4(_)))
-                        {
-                            let (tx, rx) = broadcast::channel(1);
-                            if let Some(forward_rx) = igd::forward_port(
-                                address.clone(),
-                                std::time::Duration::from_secs(2 * 60),
-                                rx,
-                            ) {
-                                self.mapping_pending
-                                    .insert(address.clone(), (forward_rx, tx));
-                            }
-                        }
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
                     }
@@ -1742,9 +1714,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     } => {
                         self.listeners.remove(&listener_id);
                         self.listening_addresses.remove(&address);
-                        if let Some(tx) = self.mapping_task.remove(&address) {
-                            let _ = tx.send(());
-                        }
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), Ok(Some(None)));
                     }
@@ -1756,9 +1725,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         self.listeners.remove(&listener_id);
                         for address in addresses {
                             self.listening_addresses.remove(&address);
-                            if let Some(tx) = self.mapping_task.remove(&address) {
-                                let _ = tx.send(());
-                            }
                         }
                         let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
                         self.listener_subscriptions
@@ -2654,29 +2620,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     }
                 }
             }
-
-            let pending_addr_list = self.mapping_pending.keys().cloned().collect::<Vec<_>>();
-
-            for address in pending_addr_list {
-                if let Entry::Occupied(mut entry) = self.mapping_pending.entry(address.clone()) {
-                    let result = {
-                        let (nat_rx, _) = entry.get_mut();
-                        match Pin::new(nat_rx).poll_unpin(ctx) {
-                            Poll::Ready(r) => Some(r),
-                            Poll::Pending => continue,
-                        }
-                    };
-
-                    if let Some(result) = result {
-                        let (_, tx) = entry.remove();
-                        if let Ok(Ok(_)) = result {
-                            self.mapping_task.insert(address.clone(), tx);
-                        }
-                    }
-                }
-            }
-
-            self.mapping_pending.shrink_to_fit();
 
             done = true;
         }
