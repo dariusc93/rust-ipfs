@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).spawn_start().await?;
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).start().await?;
 
     if opt.default_bootstrap {
         ipfs.default_bootstrap().await?;

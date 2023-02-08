@@ -47,7 +47,7 @@ use futures::{
     },
     sink::SinkExt,
     stream::{BoxStream, Fuse, Stream},
-    FutureExt, StreamExt,
+    StreamExt,
 };
 
 use ipfs_bitswap::BitswapEvent;
@@ -64,15 +64,12 @@ use std::{
     borrow::Borrow,
     collections::{hash_map::Entry, HashMap, HashSet},
     env, fmt,
-    future::Future,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
-    pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    task::{Context, Poll},
 };
 
 use crate::{config::BOOTSTRAP_NODES, repo::BlockPut};
@@ -126,7 +123,7 @@ use libp2p::{
     mdns::Event as MdnsEvent,
     ping::Config as PingConfig,
     ping::Success as PingSuccess,
-    swarm::{dial_opts::DialOpts, DialError},
+    swarm::{dial_opts::DialOpts, DialError, SwarmEvent},
 };
 
 /// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
@@ -475,20 +472,8 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         self
     }
 
-    /// Same as [`crate::UninitializedIpfs::start`] except we use [`tokio::spawn`] internally
-    pub async fn spawn_start(self) -> Result<Ipfs<Types>, Error> {
-        let (ipfs, fut) = self.start().await?;
-        tokio::spawn(fut);
-        Ok(ipfs)
-    }
-
-    /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync, and the
-    /// future should be spawned on a executor as soon as possible.
-    ///
-    /// The future returned from this method should not need
-    /// (instrumenting)[`tracing_futures::Instrument::instrument`] as the [`IpfsOptions::span`]
-    /// will be used as parent span for all of the awaited and created futures.
-    pub async fn start(self) -> Result<(Ipfs<Types>, impl Future<Output = ()>), Error> {
+    /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync.
+    pub async fn start(self) -> Result<Ipfs<Types>, Error> {
         let UninitializedIpfs {
             repo,
             keys,
@@ -599,8 +584,10 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
                 _ => continue,
             };
         }
-
-        Ok((ipfs, fut.instrument(swarm_span)))
+        tokio::spawn(async move {
+            fut.run().instrument(swarm_span).await;
+        });
+        Ok(ipfs)
     }
 }
 
@@ -1683,1005 +1670,1481 @@ struct IpfsFuture<Types: IpfsTypes> {
     port_mapping: bool,
 }
 
-impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-        use libp2p::swarm::SwarmEvent;
-
-        // begin by polling the swarm so that initially it'll first have chance to bind listeners
-        // and such.
-
-        let mut done = false;
-
+impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
+    pub(crate) async fn run(&mut self) {
         loop {
-            loop {
-                let inner = {
-                    let next = self.swarm.select_next_some();
-                    futures::pin_mut!(next);
-                    match next.poll(ctx) {
-                        Poll::Ready(inner) => inner,
-                        Poll::Pending if done => return Poll::Pending,
-                        Poll::Pending => break,
-                    }
-                };
-                // as a swarm event was returned, we need to do at least one more round to fully
-                // exhaust the swarm before possibly causing the swarm to do more work by popping
-                // off the events from Ipfs and ... this looping goes on for a while.
-                done = false;
-                if let Some(handler) = self.swarm_event.clone() {
-                    handler(&mut self.swarm, &inner)
-                }
-                match inner {
-                    SwarmEvent::NewListenAddr {
-                        listener_id,
-                        address,
-                    } => {
-                        self.listening_addresses
-                            .insert(address.clone(), listener_id);
-
-                        if self.port_mapping
-                            && address.iter().any(|p| matches!(p, Protocol::Ip4(_)))
-                        {
-                            let (tx, rx) = broadcast::channel(1);
-                            if let Some(forward_rx) = igd::forward_port(
-                                address.clone(),
-                                std::time::Duration::from_secs(2 * 60),
-                                rx,
-                            ) {
-                                self.mapping_pending
-                                    .insert(address.clone(), (forward_rx, tx));
-                            }
-                        }
-                        self.listener_subscriptions
-                            .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
-                    }
-                    SwarmEvent::ExpiredListenAddr {
-                        listener_id,
-                        address,
-                    } => {
-                        self.listeners.remove(&listener_id);
-                        self.listening_addresses.remove(&address);
-                        if let Some(tx) = self.mapping_task.remove(&address) {
-                            let _ = tx.send(());
-                        }
-                        self.listener_subscriptions
-                            .finish_subscription(listener_id.into(), Ok(Some(None)));
-                    }
-                    SwarmEvent::ListenerClosed {
-                        listener_id,
-                        reason,
-                        addresses,
-                    } => {
-                        self.listeners.remove(&listener_id);
-                        for address in addresses {
-                            self.listening_addresses.remove(&address);
-                            if let Some(tx) = self.mapping_task.remove(&address) {
-                                let _ = tx.send(());
-                            }
-                        }
-                        let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
-                        self.listener_subscriptions
-                            .finish_subscription(listener_id.into(), reason);
-                    }
-                    SwarmEvent::ListenerError { listener_id, error } => {
-                        self.listeners.remove(&listener_id);
-                        self.listener_subscriptions
-                            .finish_subscription(listener_id.into(), Err(error.to_string()));
-                    }
-                    SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
-                        MdnsEvent::Discovered(list) => {
-                            for (peer, addr) in list {
-                                trace!("mdns: Discovered peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().add_peer(peer, Some(addr));
-                            }
-                        }
-                        MdnsEvent::Expired(list) => {
-                            for (peer, _) in list {
-                                if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
-                                    if !mdns.has_node(&peer) {
-                                        trace!("mdns: Expired peer {}", peer.to_base58());
-                                        self.swarm.behaviour_mut().remove_peer(&peer);
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    SwarmEvent::Behaviour(BehaviourEvent::Kad(event)) => {
-                        match event {
-                            InboundRequest { request } => {
-                                trace!("kad: inbound {:?} request handled", request);
-                            }
-                            OutboundQueryProgressed {
-                                result, id, step, ..
-                            } => {
-                                // make sure the query is exhausted
-                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    match result {
-                                        // these subscriptions return actual values
-                                        GetClosestPeers(_) | GetProviders(_) | GetRecord(_) => {}
-                                        // we want to return specific errors for the following
-                                        Bootstrap(Err(_))
-                                        | StartProviding(Err(_))
-                                        | PutRecord(Err(_)) => {}
-                                        // and the rest can just return a general KadResult::Complete
-                                        _ => {
-                                            self.kad_subscriptions.finish_subscription(
-                                                id.into(),
-                                                Ok(KadResult::Complete),
-                                            );
-                                        }
-                                    }
-                                }
-
-                                match result {
-                                    Bootstrap(Ok(BootstrapOk {
-                                        peer,
-                                        num_remaining,
-                                    })) => {
-                                        debug!(
-                                            "kad: bootstrapped with {}, {} peers remain",
-                                            peer, num_remaining
-                                        );
-                                    }
-                                    Bootstrap(Err(BootstrapError::Timeout { .. })) => {
-                                        warn!("kad: timed out while trying to bootstrap");
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                                id.into(),
-                                                Err("kad: timed out while trying to bootstrap"
-                                                    .into()),
-                                            );
-                                        }
-                                    }
-                                    GetClosestPeers(Ok(GetClosestPeersOk { key: _, peers })) => {
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                                id.into(),
-                                                Ok(KadResult::Peers(peers)),
-                                            );
-                                        }
-                                    }
-                                    GetClosestPeers(Err(GetClosestPeersError::Timeout {
-                                        key: _,
-                                        peers: _,
-                                    })) => {
-                                        // don't mention the key here, as this is just the id of our node
-                                        warn!(
-                                            "kad: timed out while trying to find all closest peers"
-                                        );
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("timed out while trying to get providers for the given key"
-                                    .into()),
-                            );
-                                        }
-                                    }
-                                    GetProviders(Ok(GetProvidersOk::FoundProviders {
-                                        key: _,
-                                        providers,
-                                    })) => {
-                                        if let Entry::Occupied(entry) =
-                                            self.provider_stream.entry(id)
-                                        {
-                                            if !providers.is_empty() {
-                                                tokio::spawn({
-                                                    let mut tx = entry.get().clone();
-                                                    async move {
-                                                        for provider in providers {
-                                                            let _ = tx.send(provider).await;
-                                                        }
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    }
-                                    GetProviders(Ok(
-                                        GetProvidersOk::FinishedWithNoAdditionalRecord { .. },
-                                    )) => {
-                                        if step.last {
-                                            if let Some(tx) = self.provider_stream.remove(&id) {
-                                                tx.close_channel();
-                                            }
-                                        }
-                                    }
-                                    GetProviders(Err(GetProvidersError::Timeout {
-                                        key, ..
-                                    })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!(
-                                            "kad: timed out while trying to get providers for {}",
-                                            key
-                                        );
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("timed out while trying to get providers for the given key"
-                                    .into()),
-                            );
-                                        }
-                                    }
-                                    StartProviding(Ok(AddProviderOk { key })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        debug!("kad: providing {}", key);
-                                    }
-                                    StartProviding(Err(AddProviderError::Timeout { key })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!("kad: timed out while trying to provide {}", key);
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("kad: timed out while trying to provide the record".into()),
-                            );
-                                        }
-                                    }
-                                    RepublishProvider(Ok(AddProviderOk { key })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        debug!("kad: republished provider {}", key);
-                                    }
-                                    RepublishProvider(Err(AddProviderError::Timeout { key })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!(
-                                            "kad: timed out while trying to republish provider {}",
-                                            key
-                                        );
-                                    }
-                                    GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
-                                        if let Entry::Occupied(entry) = self.record_stream.entry(id)
-                                        {
-                                            tokio::spawn({
-                                                let mut tx = entry.get().clone();
-                                                async move {
-                                                    let _ = tx.send(record.record).await;
-                                                }
-                                            });
-                                        }
-                                    }
-                                    GetRecord(Ok(
-                                        GetRecordOk::FinishedWithNoAdditionalRecord { .. },
-                                    )) => {
-                                        if step.last {
-                                            if let Some(tx) = self.record_stream.remove(&id) {
-                                                tx.close_channel();
-                                            }
-                                        }
-                                    }
-                                    GetRecord(Err(GetRecordError::NotFound {
-                                        key,
-                                        closest_peers: _,
-                                    })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!("kad: couldn't find record {}", key);
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            if let Some(tx) = self.record_stream.remove(&id) {
-                                                tx.close_channel();
-                                            }
-                                        }
-                                    }
-                                    GetRecord(Err(GetRecordError::QuorumFailed {
-                                        key,
-                                        records: _,
-                                        quorum,
-                                    })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!(
-                                            "kad: quorum failed {} when trying to get key {}",
-                                            quorum, key
-                                        );
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            if let Some(tx) = self.record_stream.remove(&id) {
-                                                tx.close_channel();
-                                            }
-                                        }
-                                    }
-                                    GetRecord(Err(GetRecordError::Timeout { key })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!("kad: timed out while trying to get key {}", key);
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            if let Some(tx) = self.record_stream.remove(&id) {
-                                                tx.close_channel();
-                                            }
-                                        }
-                                    }
-                                    PutRecord(Ok(PutRecordOk { key }))
-                                    | RepublishRecord(Ok(PutRecordOk { key })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        debug!("kad: successfully put record {}", key);
-                                    }
-                                    PutRecord(Err(PutRecordError::QuorumFailed {
-                                        key,
-                                        success: _,
-                                        quorum,
-                                    }))
-                                    | RepublishRecord(Err(PutRecordError::QuorumFailed {
-                                        key,
-                                        success: _,
-                                        quorum,
-                                    })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!(
-                                            "kad: quorum failed ({}) when trying to put record {}",
-                                            quorum, key
-                                        );
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                id.into(),
-                                Err("kad: quorum failed when trying to put the record".into()),
-                            );
-                                        }
-                                    }
-                                    PutRecord(Err(PutRecordError::Timeout {
-                                        key,
-                                        success: _,
-                                        quorum: _,
-                                    })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!("kad: timed out while trying to put record {}", key);
-
-                                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                            self.kad_subscriptions.finish_subscription(
-                                                id.into(),
-                                                Err(
-                                                    "kad: timed out while trying to put the record"
-                                                        .into(),
-                                                ),
-                                            );
-                                        }
-                                    }
-                                    RepublishRecord(Err(PutRecordError::Timeout {
-                                        key,
-                                        success: _,
-                                        quorum: _,
-                                    })) => {
-                                        let key = multibase::encode(Base::Base32Lower, key);
-                                        warn!(
-                                            "kad: timed out while trying to republish record {}",
-                                            key
-                                        );
-                                    }
-                                }
-                            }
-                            RoutingUpdated {
-                                peer,
-                                is_new_peer: _,
-                                addresses,
-                                bucket_range: _,
-                                old_peer: _,
-                            } => {
-                                trace!("kad: routing updated; {}: {:?}", peer, addresses);
-                            }
-                            UnroutablePeer { peer } => {
-                                trace!("kad: peer {} is unroutable", peer);
-                            }
-                            RoutablePeer { peer, address } => {
-                                trace!("kad: peer {} ({}) is routable", peer, address);
-                            }
-                            PendingRoutablePeer { peer, address } => {
-                                trace!("kad: pending routable peer {} ({})", peer, address);
-                            }
-                        }
-                    }
-                    SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
-                        BitswapEvent::ReceivedBlock(peer_id, block) => {
-                            let repo = self.repo.clone();
-                            let peer_stats = Arc::clone(
-                                self.swarm.behaviour().bitswap.stats.get(&peer_id).unwrap(),
-                            );
-                            tokio::task::spawn(async move {
-                                let bytes = block.data().len() as u64;
-                                let res = repo.put_block(block.clone()).await;
-                                match res {
-                                    Ok((_, uniqueness)) => match uniqueness {
-                                        BlockPut::NewBlock => {
-                                            peer_stats.update_incoming_unique(bytes)
-                                        }
-                                        BlockPut::Existed => {
-                                            peer_stats.update_incoming_duplicate(bytes)
-                                        }
-                                    },
-                                    Err(e) => {
-                                        debug!(
-                                            "Got block {} from peer {} but failed to store it: {}",
-                                            block.cid(),
-                                            peer_id.to_base58(),
-                                            e
-                                        );
-                                    }
-                                };
-                            });
-                        }
-                        BitswapEvent::ReceivedWant(peer_id, cid, priority) => {
-                            info!(
-                                "Peer {} wants block {} with priority {}",
-                                peer_id, cid, priority
-                            );
-
-                            let queued_blocks =
-                                self.swarm.behaviour_mut().bitswap().queued_blocks.clone();
-                            let repo = self.repo.clone();
-
-                            tokio::task::spawn(async move {
-                                match repo.get_block_now(&cid).await {
-                                    Ok(Some(block)) => {
-                                        let _ = queued_blocks.unbounded_send((peer_id, block));
-                                    }
-                                    Ok(None) => {}
-                                    Err(err) => {
-                                        warn!(
-                                            "Peer {} wanted block {} but we failed: {}",
-                                            peer_id.to_base58(),
-                                            cid,
-                                            err,
-                                        );
-                                    }
-                                }
-                            });
-                        }
-                        BitswapEvent::ReceivedCancel(..) => {}
-                    },
-                    SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
-                        libp2p::ping::Event {
-                            peer,
-                            result: Result::Ok(PingSuccess::Ping { rtt }),
-                        } => {
-                            trace!(
-                                "ping: rtt to {} is {} ms",
-                                peer.to_base58(),
-                                rtt.as_millis()
-                            );
-                            self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
-                        }
-                        libp2p::ping::Event {
-                            peer,
-                            result: Result::Ok(PingSuccess::Pong),
-                        } => {
-                            trace!("ping: pong from {}", peer);
-                        }
-                        libp2p::ping::Event {
-                            peer,
-                            result: Result::Err(libp2p::ping::Failure::Timeout),
-                        } => {
-                            trace!("ping: timeout to {}", peer);
-                            self.swarm.behaviour_mut().remove_peer(&peer);
-                        }
-                        libp2p::ping::Event {
-                            peer,
-                            result: Result::Err(libp2p::ping::Failure::Other { error }),
-                        } => {
-                            error!("ping: failure with {}: {}", peer.to_base58(), error);
-                        }
-                        libp2p::ping::Event {
-                            peer,
-                            result: Result::Err(libp2p::ping::Failure::Unsupported),
-                        } => {
-                            error!("ping: failure with {}: unsupported", peer.to_base58());
-                        }
-                    },
-                    SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
-                        IdentifyEvent::Received { peer_id, info } => {
-                            self.swarm
-                                .behaviour_mut()
-                                .swarm
-                                .inject_identify_info(peer_id, info.clone());
-
-                            let IdentifyInfo {
-                                listen_addrs,
-                                protocols,
-                                ..
-                            } = info.clone();
-
-                            if protocols
-                                .iter()
-                                .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
-                            {
-                                for addr in &listen_addrs {
-                                    self.swarm
-                                        .behaviour_mut()
-                                        .kademlia()
-                                        .add_address(&peer_id, addr.clone());
-                                }
-                            }
-
-                            #[allow(clippy::collapsible_if)]
-                            if protocols
-                                .iter()
-                                .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
-                            {
-                                if self.autonat_counter.load(Ordering::Relaxed)
-                                    <= self.autonat_limit.load(Ordering::Relaxed)
-                                {
-                                    for addr in listen_addrs {
-                                        self.swarm
-                                            .behaviour_mut()
-                                            .autonat
-                                            .add_server(peer_id, Some(addr));
-                                    }
-
-                                    let mut counter = self.autonat_counter.load(Ordering::Relaxed);
-                                    counter += 1;
-                                    self.autonat_counter.store(counter, Ordering::Relaxed);
-                                }
-                            }
-                        }
-                        event => trace!("identify: {:?}", event),
-                    },
-                    SwarmEvent::Behaviour(BehaviourEvent::Autonat(
-                        autonat::Event::StatusChanged { old, new },
-                    )) => {
-                        //TODO: Use status to indicate if we should port forward or not
-                        debug!("Old Nat Status: {:?}", old);
-                        debug!("New Nat Status: {:?}", new);
-                    }
-                    _ => trace!("Swarm event: {:?}", inner),
+            tokio::select! {
+                swarm = self.swarm.select_next_some() => {
+                    self.handle_swarm_event(swarm).await;
+                },
+                event = self.from_facade.select_next_some() => {
+                    self.handle_event(event).await;
+                },
+                repo = self.repo_events.select_next_some() => {
+                    self.handle_repo_event(repo).await;
                 }
             }
+        }
+    }
 
-            // temporary pinning of the receivers should be safe as we are pinning through the
-            // already pinned self. with the receivers we can also safely ignore exhaustion
-            // as those are fused.
-            loop {
-                let inner = match Pin::new(&mut self.from_facade).poll_next(ctx) {
-                    Poll::Ready(Some(evt)) => evt,
-                    // doing teardown also after the `Ipfs` has been dropped
-                    Poll::Ready(None) => IpfsEvent::Exit,
-                    Poll::Pending => break,
-                };
+    async fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
+        if let Some(handler) = self.swarm_event.clone() {
+            handler(&mut self.swarm, &swarm_event)
+        }
+        match swarm_event {
+            SwarmEvent::NewListenAddr {
+                listener_id,
+                address,
+            } => {
+                self.listening_addresses
+                    .insert(address.clone(), listener_id);
 
-                match inner {
-                    IpfsEvent::Connect(target, ret) => {
-                        ret.send(self.swarm.behaviour_mut().connect(target)).ok();
+                if self.port_mapping && address.iter().any(|p| matches!(p, Protocol::Ip4(_))) {
+                    let (tx, rx) = broadcast::channel(1);
+                    if let Some(forward_rx) = igd::forward_port(
+                        address.clone(),
+                        std::time::Duration::from_secs(2 * 60),
+                        rx,
+                    ) {
+                        self.mapping_pending
+                            .insert(address.clone(), (forward_rx, tx));
                     }
-                    IpfsEvent::Protocol(ret) => {
-                        let info = self.swarm.behaviour().supported_protocols();
+                }
+                self.listener_subscriptions
+                    .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
+            }
+            SwarmEvent::ExpiredListenAddr {
+                listener_id,
+                address,
+            } => {
+                self.listeners.remove(&listener_id);
+                self.listening_addresses.remove(&address);
+                if let Some(tx) = self.mapping_task.remove(&address) {
+                    let _ = tx.send(());
+                }
+                self.listener_subscriptions
+                    .finish_subscription(listener_id.into(), Ok(Some(None)));
+            }
+            SwarmEvent::ListenerClosed {
+                listener_id,
+                reason,
+                addresses,
+            } => {
+                self.listeners.remove(&listener_id);
+                for address in addresses {
+                    self.listening_addresses.remove(&address);
+                    if let Some(tx) = self.mapping_task.remove(&address) {
+                        let _ = tx.send(());
+                    }
+                }
+                let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
+                self.listener_subscriptions
+                    .finish_subscription(listener_id.into(), reason);
+            }
+            SwarmEvent::ListenerError { listener_id, error } => {
+                self.listeners.remove(&listener_id);
+                self.listener_subscriptions
+                    .finish_subscription(listener_id.into(), Err(error.to_string()));
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
+                MdnsEvent::Discovered(list) => {
+                    for (peer, addr) in list {
+                        trace!("mdns: Discovered peer {}", peer.to_base58());
+                        self.swarm.behaviour_mut().add_peer(peer, Some(addr));
+                    }
+                }
+                MdnsEvent::Expired(list) => {
+                    for (peer, _) in list {
+                        if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
+                            if !mdns.has_node(&peer) {
+                                trace!("mdns: Expired peer {}", peer.to_base58());
+                                self.swarm.behaviour_mut().remove_peer(&peer);
+                            }
+                        }
+                    }
+                }
+            },
+            SwarmEvent::Behaviour(BehaviourEvent::Kad(event)) => {
+                match event {
+                    InboundRequest { request } => {
+                        trace!("kad: inbound {:?} request handled", request);
+                    }
+                    OutboundQueryProgressed {
+                        result, id, step, ..
+                    } => {
+                        // make sure the query is exhausted
+                        if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                            match result {
+                                // these subscriptions return actual values
+                                GetClosestPeers(_) | GetProviders(_) | GetRecord(_) => {}
+                                // we want to return specific errors for the following
+                                Bootstrap(Err(_)) | StartProviding(Err(_)) | PutRecord(Err(_)) => {}
+                                // and the rest can just return a general KadResult::Complete
+                                _ => {
+                                    self.kad_subscriptions
+                                        .finish_subscription(id.into(), Ok(KadResult::Complete));
+                                }
+                            }
+                        }
 
-                        let _ = ret.send(info);
+                        match result {
+                            Bootstrap(Ok(BootstrapOk {
+                                peer,
+                                num_remaining,
+                            })) => {
+                                debug!(
+                                    "kad: bootstrapped with {}, {} peers remain",
+                                    peer, num_remaining
+                                );
+                            }
+                            Bootstrap(Err(BootstrapError::Timeout { .. })) => {
+                                warn!("kad: timed out while trying to bootstrap");
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    self.kad_subscriptions.finish_subscription(
+                                        id.into(),
+                                        Err("kad: timed out while trying to bootstrap".into()),
+                                    );
+                                }
+                            }
+                            GetClosestPeers(Ok(GetClosestPeersOk { key: _, peers })) => {
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    self.kad_subscriptions.finish_subscription(
+                                        id.into(),
+                                        Ok(KadResult::Peers(peers)),
+                                    );
+                                }
+                            }
+                            GetClosestPeers(Err(GetClosestPeersError::Timeout {
+                                key: _,
+                                peers: _,
+                            })) => {
+                                // don't mention the key here, as this is just the id of our node
+                                warn!("kad: timed out while trying to find all closest peers");
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    self.kad_subscriptions.finish_subscription(
+                        id.into(),
+                        Err("timed out while trying to get providers for the given key"
+                            .into()),
+                    );
+                                }
+                            }
+                            GetProviders(Ok(GetProvidersOk::FoundProviders {
+                                key: _,
+                                providers,
+                            })) => {
+                                if let Entry::Occupied(entry) = self.provider_stream.entry(id) {
+                                    if !providers.is_empty() {
+                                        tokio::spawn({
+                                            let mut tx = entry.get().clone();
+                                            async move {
+                                                for provider in providers {
+                                                    let _ = tx.send(provider).await;
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                            GetProviders(Ok(GetProvidersOk::FinishedWithNoAdditionalRecord {
+                                ..
+                            })) => {
+                                if step.last {
+                                    if let Some(tx) = self.provider_stream.remove(&id) {
+                                        tx.close_channel();
+                                    }
+                                }
+                            }
+                            GetProviders(Err(GetProvidersError::Timeout { key, .. })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!("kad: timed out while trying to get providers for {}", key);
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    self.kad_subscriptions.finish_subscription(
+                        id.into(),
+                        Err("timed out while trying to get providers for the given key"
+                            .into()),
+                    );
+                                }
+                            }
+                            StartProviding(Ok(AddProviderOk { key })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                debug!("kad: providing {}", key);
+                            }
+                            StartProviding(Err(AddProviderError::Timeout { key })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!("kad: timed out while trying to provide {}", key);
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    self.kad_subscriptions.finish_subscription(
+                                        id.into(),
+                                        Err("kad: timed out while trying to provide the record"
+                                            .into()),
+                                    );
+                                }
+                            }
+                            RepublishProvider(Ok(AddProviderOk { key })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                debug!("kad: republished provider {}", key);
+                            }
+                            RepublishProvider(Err(AddProviderError::Timeout { key })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!("kad: timed out while trying to republish provider {}", key);
+                            }
+                            GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
+                                if let Entry::Occupied(entry) = self.record_stream.entry(id) {
+                                    tokio::spawn({
+                                        let mut tx = entry.get().clone();
+                                        async move {
+                                            let _ = tx.send(record.record).await;
+                                        }
+                                    });
+                                }
+                            }
+                            GetRecord(Ok(GetRecordOk::FinishedWithNoAdditionalRecord {
+                                ..
+                            })) => {
+                                if step.last {
+                                    if let Some(tx) = self.record_stream.remove(&id) {
+                                        tx.close_channel();
+                                    }
+                                }
+                            }
+                            GetRecord(Err(GetRecordError::NotFound {
+                                key,
+                                closest_peers: _,
+                            })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!("kad: couldn't find record {}", key);
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    if let Some(tx) = self.record_stream.remove(&id) {
+                                        tx.close_channel();
+                                    }
+                                }
+                            }
+                            GetRecord(Err(GetRecordError::QuorumFailed {
+                                key,
+                                records: _,
+                                quorum,
+                            })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!(
+                                    "kad: quorum failed {} when trying to get key {}",
+                                    quorum, key
+                                );
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    if let Some(tx) = self.record_stream.remove(&id) {
+                                        tx.close_channel();
+                                    }
+                                }
+                            }
+                            GetRecord(Err(GetRecordError::Timeout { key })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!("kad: timed out while trying to get key {}", key);
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    if let Some(tx) = self.record_stream.remove(&id) {
+                                        tx.close_channel();
+                                    }
+                                }
+                            }
+                            PutRecord(Ok(PutRecordOk { key }))
+                            | RepublishRecord(Ok(PutRecordOk { key })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                debug!("kad: successfully put record {}", key);
+                            }
+                            PutRecord(Err(PutRecordError::QuorumFailed {
+                                key,
+                                success: _,
+                                quorum,
+                            }))
+                            | RepublishRecord(Err(PutRecordError::QuorumFailed {
+                                key,
+                                success: _,
+                                quorum,
+                            })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!(
+                                    "kad: quorum failed ({}) when trying to put record {}",
+                                    quorum, key
+                                );
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    self.kad_subscriptions.finish_subscription(
+                                        id.into(),
+                                        Err("kad: quorum failed when trying to put the record"
+                                            .into()),
+                                    );
+                                }
+                            }
+                            PutRecord(Err(PutRecordError::Timeout {
+                                key,
+                                success: _,
+                                quorum: _,
+                            })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!("kad: timed out while trying to put record {}", key);
+
+                                if self.swarm.behaviour().kademlia.query(&id).is_none() {
+                                    self.kad_subscriptions.finish_subscription(
+                                        id.into(),
+                                        Err("kad: timed out while trying to put the record".into()),
+                                    );
+                                }
+                            }
+                            RepublishRecord(Err(PutRecordError::Timeout {
+                                key,
+                                success: _,
+                                quorum: _,
+                            })) => {
+                                let key = multibase::encode(Base::Base32Lower, key);
+                                warn!("kad: timed out while trying to republish record {}", key);
+                            }
+                        }
                     }
-                    IpfsEvent::SwarmDial(opt, ret) => {
-                        let result = self.swarm.dial(opt);
-                        let _ = ret.send(result);
+                    RoutingUpdated {
+                        peer,
+                        is_new_peer: _,
+                        addresses,
+                        bucket_range: _,
+                        old_peer: _,
+                    } => {
+                        trace!("kad: routing updated; {}: {:?}", peer, addresses);
                     }
-                    IpfsEvent::Addresses(ret) => {
-                        let addrs = self.swarm.behaviour_mut().addrs();
-                        ret.send(Ok(addrs)).ok();
+                    UnroutablePeer { peer } => {
+                        trace!("kad: peer {} is unroutable", peer);
                     }
-                    IpfsEvent::Listeners(ret) => {
-                        let listeners = self.swarm.listeners().cloned().collect::<Vec<Multiaddr>>();
-                        ret.send(Ok(listeners)).ok();
+                    RoutablePeer { peer, address } => {
+                        trace!("kad: peer {} ({}) is routable", peer, address);
                     }
-                    IpfsEvent::Connections(ret) => {
-                        let connections = self.swarm.behaviour_mut().connections();
-                        ret.send(Ok(connections.collect())).ok();
+                    PendingRoutablePeer { peer, address } => {
+                        trace!("kad: pending routable peer {} ({})", peer, address);
                     }
-                    IpfsEvent::Connected(ret) => {
-                        let connections = self.swarm.connected_peers().cloned();
-                        ret.send(Ok(connections.collect())).ok();
-                    }
-                    IpfsEvent::Disconnect(peer, ret) => {
-                        let _ = ret.send(
-                            self.swarm
-                                .disconnect_peer_id(peer)
-                                .map_err(|_| anyhow::anyhow!("Peer was not connected")),
-                        );
-                    }
-                    IpfsEvent::Ban(peer, ret) => {
-                        self.swarm.ban_peer_id(peer);
-                        let _ = ret.send(Ok(()));
-                    }
-                    IpfsEvent::Unban(peer, ret) => {
-                        self.swarm.unban_peer_id(peer);
-                        let _ = ret.send(Ok(()));
-                    }
-                    IpfsEvent::GetAddresses(ret) => {
-                        // perhaps this could be moved under `IpfsEvent` or free functions?
-                        let mut addresses = Vec::new();
-                        addresses.extend(self.swarm.listeners().map(|a| a.to_owned()));
-                        addresses
-                            .extend(self.swarm.external_addresses().map(|ar| ar.addr.to_owned()));
-                        // ignore error, perhaps caller went away already
-                        let _ = ret.send(addresses);
-                    }
-                    IpfsEvent::PubsubSubscribe(topic, ret) => {
-                        let pubsub = self.swarm.behaviour_mut().pubsub().subscribe(topic).ok();
-                        let _ = ret.send(pubsub);
-                    }
-                    IpfsEvent::PubsubUnsubscribe(topic, ret) => {
-                        let _ = ret.send(self.swarm.behaviour_mut().pubsub().unsubscribe(topic));
-                    }
-                    IpfsEvent::PubsubPublish(topic, data, ret) => {
-                        let _ = ret.send(self.swarm.behaviour_mut().pubsub().publish(topic, data));
-                    }
-                    IpfsEvent::PubsubPeers(Some(topic), ret) => {
-                        let _ =
-                            ret.send(self.swarm.behaviour_mut().pubsub().subscribed_peers(&topic));
-                    }
-                    IpfsEvent::PubsubPeers(None, ret) => {
-                        let _ = ret.send(self.swarm.behaviour_mut().pubsub().known_peers());
-                    }
-                    IpfsEvent::PubsubSubscribed(ret) => {
-                        let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_topics());
-                    }
-                    IpfsEvent::WantList(peer, ret) => {
-                        let list = if let Some(peer) = peer {
+                }
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
+                BitswapEvent::ReceivedBlock(peer_id, block) => {
+                    let repo = self.repo.clone();
+                    let peer_stats =
+                        Arc::clone(self.swarm.behaviour().bitswap.stats.get(&peer_id).unwrap());
+                    tokio::task::spawn(async move {
+                        let bytes = block.data().len() as u64;
+                        let res = repo.put_block(block.clone()).await;
+                        match res {
+                            Ok((_, uniqueness)) => match uniqueness {
+                                BlockPut::NewBlock => peer_stats.update_incoming_unique(bytes),
+                                BlockPut::Existed => peer_stats.update_incoming_duplicate(bytes),
+                            },
+                            Err(e) => {
+                                debug!(
+                                    "Got block {} from peer {} but failed to store it: {}",
+                                    block.cid(),
+                                    peer_id.to_base58(),
+                                    e
+                                );
+                            }
+                        };
+                    });
+                }
+                BitswapEvent::ReceivedWant(peer_id, cid, priority) => {
+                    info!(
+                        "Peer {} wants block {} with priority {}",
+                        peer_id, cid, priority
+                    );
+
+                    let queued_blocks = self.swarm.behaviour_mut().bitswap().queued_blocks.clone();
+                    let repo = self.repo.clone();
+
+                    tokio::task::spawn(async move {
+                        match repo.get_block_now(&cid).await {
+                            Ok(Some(block)) => {
+                                let _ = queued_blocks.unbounded_send((peer_id, block));
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                warn!(
+                                    "Peer {} wanted block {} but we failed: {}",
+                                    peer_id.to_base58(),
+                                    cid,
+                                    err,
+                                );
+                            }
+                        }
+                    });
+                }
+                BitswapEvent::ReceivedCancel(..) => {}
+            },
+            SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
+                libp2p::ping::Event {
+                    peer,
+                    result: Result::Ok(PingSuccess::Ping { rtt }),
+                } => {
+                    trace!(
+                        "ping: rtt to {} is {} ms",
+                        peer.to_base58(),
+                        rtt.as_millis()
+                    );
+                    self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
+                }
+                libp2p::ping::Event {
+                    peer,
+                    result: Result::Ok(PingSuccess::Pong),
+                } => {
+                    trace!("ping: pong from {}", peer);
+                }
+                libp2p::ping::Event {
+                    peer,
+                    result: Result::Err(libp2p::ping::Failure::Timeout),
+                } => {
+                    trace!("ping: timeout to {}", peer);
+                    self.swarm.behaviour_mut().remove_peer(&peer);
+                }
+                libp2p::ping::Event {
+                    peer,
+                    result: Result::Err(libp2p::ping::Failure::Other { error }),
+                } => {
+                    error!("ping: failure with {}: {}", peer.to_base58(), error);
+                }
+                libp2p::ping::Event {
+                    peer,
+                    result: Result::Err(libp2p::ping::Failure::Unsupported),
+                } => {
+                    error!("ping: failure with {}: unsupported", peer.to_base58());
+                }
+            },
+            SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
+                IdentifyEvent::Received { peer_id, info } => {
+                    self.swarm
+                        .behaviour_mut()
+                        .swarm
+                        .inject_identify_info(peer_id, info.clone());
+
+                    let IdentifyInfo {
+                        listen_addrs,
+                        protocols,
+                        ..
+                    } = info;
+
+                    if protocols
+                        .iter()
+                        .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
+                    {
+                        for addr in &listen_addrs {
                             self.swarm
                                 .behaviour_mut()
-                                .bitswap()
-                                .peer_wantlist(&peer)
-                                .unwrap_or_default()
-                        } else {
-                            self.swarm.behaviour_mut().bitswap().local_wantlist()
-                        };
-                        let _ = ret.send(list);
-                    }
-                    IpfsEvent::BitswapStats(ret) => {
-                        let stats = self.swarm.behaviour_mut().bitswap().stats();
-                        let peers = self.swarm.behaviour_mut().bitswap().peers();
-                        let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
-                        let _ = ret.send((stats, peers, wantlist).into());
-                    }
-                    IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
-                        Ok(id) => {
-                            self.listeners.insert(id);
-                            let fut = self
-                                .listener_subscriptions
-                                .create_subscription(id.into(), None);
-                            let _ = ret.send(Ok(fut));
+                                .kademlia()
+                                .add_address(&peer_id, addr.clone());
                         }
-                        Err(e) => {
-                            let _ = ret.send(Err(anyhow::anyhow!(e)));
-                        }
-                    },
-                    IpfsEvent::RemoveListeningAddress(addr, ret) => {
-                        let removed = if let Some(id) = self.listening_addresses.remove(&addr) {
-                            if !self.swarm.remove_listener(id) {
-                                Err(format_err!(
-                                    "Failed to remove previously added listening address: {}",
-                                    addr
-                                ))
-                            } else {
-                                self.listeners.remove(&id);
-                                let fut = self
-                                    .listener_subscriptions
-                                    .create_subscription(id.into(), None);
-                                Ok(fut)
-                            }
-                        } else {
-                            Err(format_err!("Address was not listened to before: {}", addr))
-                        };
+                    }
 
-                        let _ = ret.send(removed);
-                    }
-                    IpfsEvent::Bootstrap(ret) => {
-                        let future = match self.swarm.behaviour_mut().kademlia.bootstrap() {
-                            Ok(id) => {
-                                Ok(self.kad_subscriptions.create_subscription(id.into(), None))
+                    #[allow(clippy::collapsible_if)]
+                    if protocols
+                        .iter()
+                        .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
+                    {
+                        if self.autonat_counter.load(Ordering::Relaxed)
+                            <= self.autonat_limit.load(Ordering::Relaxed)
+                        {
+                            for addr in listen_addrs {
+                                self.swarm
+                                    .behaviour_mut()
+                                    .autonat
+                                    .add_server(peer_id, Some(addr));
                             }
-                            Err(e) => {
-                                error!("kad: can't bootstrap the node: {:?}", e);
-                                Err(anyhow!("kad: can't bootstrap the node: {:?}", e))
-                            }
-                        };
-                        let _ = ret.send(future);
+
+                            let mut counter = self.autonat_counter.load(Ordering::Relaxed);
+                            counter += 1;
+                            self.autonat_counter.store(counter, Ordering::Relaxed);
+                        }
                     }
-                    IpfsEvent::AddPeer(peer_id, addr) => {
-                        self.swarm.behaviour_mut().add_peer(peer_id, addr);
+                }
+                event => trace!("identify: {:?}", event),
+            },
+            SwarmEvent::Behaviour(BehaviourEvent::Autonat(autonat::Event::StatusChanged {
+                old,
+                new,
+            })) => {
+                //TODO: Use status to indicate if we should port forward or not
+                debug!("Old Nat Status: {:?}", old);
+                debug!("New Nat Status: {:?}", new);
+            }
+            _ => trace!("Swarm event: {:?}", swarm_event),
+        }
+    }
+    //IpfsEvent::Exit,
+    async fn handle_event(&mut self, event: IpfsEvent) {
+        match event {
+            IpfsEvent::Connect(target, ret) => {
+                ret.send(self.swarm.behaviour_mut().connect(target)).ok();
+            }
+            IpfsEvent::Protocol(ret) => {
+                let info = self.swarm.behaviour().supported_protocols();
+
+                let _ = ret.send(info);
+            }
+            IpfsEvent::SwarmDial(opt, ret) => {
+                let result = self.swarm.dial(opt);
+                let _ = ret.send(result);
+            }
+            IpfsEvent::Addresses(ret) => {
+                let addrs = self.swarm.behaviour_mut().addrs();
+                ret.send(Ok(addrs)).ok();
+            }
+            IpfsEvent::Listeners(ret) => {
+                let listeners = self.swarm.listeners().cloned().collect::<Vec<Multiaddr>>();
+                ret.send(Ok(listeners)).ok();
+            }
+            IpfsEvent::Connections(ret) => {
+                let connections = self.swarm.behaviour_mut().connections();
+                ret.send(Ok(connections.collect())).ok();
+            }
+            IpfsEvent::Connected(ret) => {
+                let connections = self.swarm.connected_peers().cloned();
+                ret.send(Ok(connections.collect())).ok();
+            }
+            IpfsEvent::Disconnect(peer, ret) => {
+                let _ = ret.send(
+                    self.swarm
+                        .disconnect_peer_id(peer)
+                        .map_err(|_| anyhow::anyhow!("Peer was not connected")),
+                );
+            }
+            IpfsEvent::Ban(peer, ret) => {
+                self.swarm.ban_peer_id(peer);
+                let _ = ret.send(Ok(()));
+            }
+            IpfsEvent::Unban(peer, ret) => {
+                self.swarm.unban_peer_id(peer);
+                let _ = ret.send(Ok(()));
+            }
+            IpfsEvent::GetAddresses(ret) => {
+                // perhaps this could be moved under `IpfsEvent` or free functions?
+                let mut addresses = Vec::new();
+                addresses.extend(self.swarm.listeners().map(|a| a.to_owned()));
+                addresses.extend(self.swarm.external_addresses().map(|ar| ar.addr.to_owned()));
+                // ignore error, perhaps caller went away already
+                let _ = ret.send(addresses);
+            }
+            IpfsEvent::PubsubSubscribe(topic, ret) => {
+                let pubsub = self.swarm.behaviour_mut().pubsub().subscribe(topic).ok();
+                let _ = ret.send(pubsub);
+            }
+            IpfsEvent::PubsubUnsubscribe(topic, ret) => {
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().unsubscribe(topic));
+            }
+            IpfsEvent::PubsubPublish(topic, data, ret) => {
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().publish(topic, data));
+            }
+            IpfsEvent::PubsubPeers(Some(topic), ret) => {
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_peers(&topic));
+            }
+            IpfsEvent::PubsubPeers(None, ret) => {
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().known_peers());
+            }
+            IpfsEvent::PubsubSubscribed(ret) => {
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_topics());
+            }
+            IpfsEvent::WantList(peer, ret) => {
+                let list = if let Some(peer) = peer {
+                    self.swarm
+                        .behaviour_mut()
+                        .bitswap()
+                        .peer_wantlist(&peer)
+                        .unwrap_or_default()
+                } else {
+                    self.swarm.behaviour_mut().bitswap().local_wantlist()
+                };
+                let _ = ret.send(list);
+            }
+            IpfsEvent::BitswapStats(ret) => {
+                let stats = self.swarm.behaviour_mut().bitswap().stats();
+                let peers = self.swarm.behaviour_mut().bitswap().peers();
+                let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
+                let _ = ret.send((stats, peers, wantlist).into());
+            }
+            IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
+                Ok(id) => {
+                    self.listeners.insert(id);
+                    let fut = self
+                        .listener_subscriptions
+                        .create_subscription(id.into(), None);
+                    let _ = ret.send(Ok(fut));
+                }
+                Err(e) => {
+                    let _ = ret.send(Err(anyhow::anyhow!(e)));
+                }
+            },
+            IpfsEvent::RemoveListeningAddress(addr, ret) => {
+                let removed = if let Some(id) = self.listening_addresses.remove(&addr) {
+                    if !self.swarm.remove_listener(id) {
+                        Err(format_err!(
+                            "Failed to remove previously added listening address: {}",
+                            addr
+                        ))
+                    } else {
+                        self.listeners.remove(&id);
+                        let fut = self
+                            .listener_subscriptions
+                            .create_subscription(id.into(), None);
+                        Ok(fut)
                     }
-                    IpfsEvent::GetClosestPeers(peer_id, ret) => {
+                } else {
+                    Err(format_err!("Address was not listened to before: {}", addr))
+                };
+
+                let _ = ret.send(removed);
+            }
+            IpfsEvent::Bootstrap(ret) => {
+                let future = match self.swarm.behaviour_mut().kademlia.bootstrap() {
+                    Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                    Err(e) => {
+                        error!("kad: can't bootstrap the node: {:?}", e);
+                        Err(anyhow!("kad: can't bootstrap the node: {:?}", e))
+                    }
+                };
+                let _ = ret.send(future);
+            }
+            IpfsEvent::AddPeer(peer_id, addr) => {
+                self.swarm.behaviour_mut().add_peer(peer_id, addr);
+            }
+            IpfsEvent::GetClosestPeers(peer_id, ret) => {
+                let id = self
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .get_closest_peers(peer_id);
+
+                let future = self.kad_subscriptions.create_subscription(id.into(), None);
+
+                let _ = ret.send(future);
+            }
+            IpfsEvent::GetBitswapPeers(ret) => {
+                let peers = self
+                    .swarm
+                    .behaviour_mut()
+                    .bitswap()
+                    .connected_peers
+                    .keys()
+                    .cloned()
+                    .collect();
+                let _ = ret.send(peers);
+            }
+            IpfsEvent::FindPeerIdentity(peer_id, local_only, ret) => {
+                let locally_known = self
+                    .swarm
+                    .behaviour()
+                    .swarm
+                    .peers()
+                    .find(|(k, _)| peer_id.eq(k))
+                    .and_then(|(_, v)| v.clone())
+                    .map(|v| v.into());
+
+                let addrs = if locally_known.is_some() || local_only {
+                    Either::Left(locally_known)
+                } else {
+                    Either::Right({
                         let id = self
                             .swarm
                             .behaviour_mut()
                             .kademlia
                             .get_closest_peers(peer_id);
 
-                        let future = self.kad_subscriptions.create_subscription(id.into(), None);
-
-                        let _ = ret.send(future);
-                    }
-                    IpfsEvent::GetBitswapPeers(ret) => {
-                        let peers = self
-                            .swarm
-                            .behaviour_mut()
-                            .bitswap()
-                            .connected_peers
-                            .keys()
-                            .cloned()
-                            .collect();
-                        let _ = ret.send(peers);
-                    }
-                    IpfsEvent::FindPeerIdentity(peer_id, local_only, ret) => {
-                        let locally_known = self
-                            .swarm
-                            .behaviour()
-                            .swarm
-                            .peers()
-                            .find(|(k, _)| peer_id.eq(k))
-                            .and_then(|(_, v)| v.clone())
-                            .map(|v| v.into());
-
-                        let addrs = if locally_known.is_some() || local_only {
-                            Either::Left(locally_known)
-                        } else {
-                            Either::Right({
-                                let id = self
-                                    .swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .get_closest_peers(peer_id);
-
-                                self.kad_subscriptions.create_subscription(id.into(), None)
-                            })
-                        };
-                        let _ = ret.send(addrs);
-                    }
-                    IpfsEvent::FindPeer(peer_id, local_only, ret) => {
-                        let swarm_addrs = self.swarm.behaviour_mut().swarm.connections_to(&peer_id);
-                        let locally_known_addrs = if !swarm_addrs.is_empty() {
-                            swarm_addrs
-                        } else {
-                            self.swarm
-                                .behaviour_mut()
-                                .kademlia()
-                                .addresses_of_peer(&peer_id)
-                        };
-                        let addrs = if !locally_known_addrs.is_empty() || local_only {
-                            Either::Left(locally_known_addrs)
-                        } else {
-                            Either::Right({
-                                let id = self
-                                    .swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .get_closest_peers(peer_id);
-
-                                self.kad_subscriptions.create_subscription(id.into(), None)
-                            })
-                        };
-                        let _ = ret.send(addrs);
-                    }
-                    IpfsEvent::GetProviders(cid, ret) => {
-                        let key = Key::from(cid.hash().to_bytes());
-                        let id = self.swarm.behaviour_mut().kademlia.get_providers(key);
-                        let (tx, mut rx) = futures::channel::mpsc::unbounded();
-                        let stream = async_stream::stream! {
-                            let mut current_providers: HashSet<PeerId> = Default::default();
-                            while let Some(provider) = rx.next().await {
-                                if current_providers.insert(provider) {
-                                    yield provider;
-                                }
-                            }
-                        };
-                        self.provider_stream.insert(id, tx);
-
-                        let _ = ret.send(Some(ProviderStream(stream.boxed())));
-                    }
-                    IpfsEvent::Provide(cid, ret) => {
-                        let key = Key::from(cid.hash().to_bytes());
-                        let future = match self.swarm.behaviour_mut().kademlia.start_providing(key)
-                        {
-                            Ok(id) => {
-                                Ok(self.kad_subscriptions.create_subscription(id.into(), None))
-                            }
-                            Err(e) => {
-                                error!("kad: can't provide a key: {:?}", e);
-                                Err(anyhow!("kad: can't provide the key: {:?}", e))
-                            }
-                        };
-                        let _ = ret.send(future);
-                    }
-                    IpfsEvent::DhtGet(key, ret) => {
-                        let id = self.swarm.behaviour_mut().kademlia.get_record(key);
-                        let (tx, mut rx) = futures::channel::mpsc::unbounded();
-                        let stream = async_stream::stream! {
-                            while let Some(record) = rx.next().await {
-                                    yield record;
-                            }
-                        };
-                        self.record_stream.insert(id, tx);
-
-                        let _ = ret.send(RecordStream(stream.boxed()));
-                    }
-                    IpfsEvent::DhtPut(key, value, quorum, ret) => {
-                        let record = Record {
-                            key,
-                            value,
-                            publisher: None,
-                            expires: None,
-                        };
-                        let future = match self
+                        self.kad_subscriptions.create_subscription(id.into(), None)
+                    })
+                };
+                let _ = ret.send(addrs);
+            }
+            IpfsEvent::FindPeer(peer_id, local_only, ret) => {
+                let swarm_addrs = self.swarm.behaviour_mut().swarm.connections_to(&peer_id);
+                let locally_known_addrs = if !swarm_addrs.is_empty() {
+                    swarm_addrs
+                } else {
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia()
+                        .addresses_of_peer(&peer_id)
+                };
+                let addrs = if !locally_known_addrs.is_empty() || local_only {
+                    Either::Left(locally_known_addrs)
+                } else {
+                    Either::Right({
+                        let id = self
                             .swarm
                             .behaviour_mut()
                             .kademlia
-                            .put_record(record, quorum)
-                        {
-                            Ok(id) => {
-                                Ok(self.kad_subscriptions.create_subscription(id.into(), None))
-                            }
-                            Err(e) => {
-                                error!("kad: can't put a record: {:?}", e);
-                                Err(anyhow!("kad: can't provide the record: {:?}", e))
-                            }
-                        };
-                        let _ = ret.send(future);
-                    }
-                    IpfsEvent::GetBootstrappers(ret) => {
-                        let list = self
-                            .bootstraps
-                            .iter()
-                            .map(MultiaddrWithPeerId::clone)
-                            .map(Multiaddr::from)
-                            .collect::<Vec<_>>();
-                        let _ = ret.send(list);
-                    }
-                    IpfsEvent::AddBootstrapper(addr, ret) => {
-                        let ret_addr = addr.clone().into();
-                        if self.bootstraps.insert(addr.clone()) {
-                            let MultiaddrWithPeerId {
-                                multiaddr: ma,
-                                peer_id,
-                            } = addr;
+                            .get_closest_peers(peer_id);
 
-                            self.swarm
-                                .behaviour_mut()
-                                .kademlia
-                                .add_address(&peer_id, ma.into());
-                            // the return value of add_address doesn't implement Debug
-                            trace!(peer_id=%peer_id, "tried to add a bootstrapper");
+                        self.kad_subscriptions.create_subscription(id.into(), None)
+                    })
+                };
+                let _ = ret.send(addrs);
+            }
+            IpfsEvent::GetProviders(cid, ret) => {
+                let key = Key::from(cid.hash().to_bytes());
+                let id = self.swarm.behaviour_mut().kademlia.get_providers(key);
+                let (tx, mut rx) = futures::channel::mpsc::unbounded();
+                let stream = async_stream::stream! {
+                    let mut current_providers: HashSet<PeerId> = Default::default();
+                    while let Some(provider) = rx.next().await {
+                        if current_providers.insert(provider) {
+                            yield provider;
                         }
-                        let _ = ret.send(Ok(ret_addr));
                     }
-                    IpfsEvent::RemoveBootstrapper(addr, ret) => {
-                        let result = addr.clone().into();
-                        if self.bootstraps.remove(&addr) {
-                            let peer_id = addr.peer_id;
-                            let prefix: Multiaddr = addr.multiaddr.into();
+                };
+                self.provider_stream.insert(id, tx);
 
-                            if let Some(e) = self
-                                .swarm
-                                .behaviour_mut()
-                                .kademlia
-                                .remove_address(&peer_id, &prefix)
-                            {
-                                info!(peer_id=%peer_id, status=?e.status, "removed bootstrapper");
-                            } else {
-                                warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
-                            }
-                        }
-                        let _ = ret.send(Ok(result));
+                let _ = ret.send(Some(ProviderStream(stream.boxed())));
+            }
+            IpfsEvent::Provide(cid, ret) => {
+                let key = Key::from(cid.hash().to_bytes());
+                let future = match self.swarm.behaviour_mut().kademlia.start_providing(key) {
+                    Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                    Err(e) => {
+                        error!("kad: can't provide a key: {:?}", e);
+                        Err(anyhow!("kad: can't provide the key: {:?}", e))
                     }
-                    IpfsEvent::ClearBootstrappers(ret) => {
-                        let removed = self.bootstraps.drain().collect::<Vec<_>>();
-                        let mut list = Vec::with_capacity(removed.len());
-                        for addr_with_peer_id in removed {
-                            let peer_id = &addr_with_peer_id.peer_id;
-                            let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
-
-                            if let Some(e) = self
-                                .swarm
-                                .behaviour_mut()
-                                .kademlia
-                                .remove_address(peer_id, &prefix)
-                            {
-                                info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
-                                list.push(addr_with_peer_id.into());
-                            } else {
-                                error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
-                            }
-                        }
-                        let _ = ret.send(list);
+                };
+                let _ = ret.send(future);
+            }
+            IpfsEvent::DhtGet(key, ret) => {
+                let id = self.swarm.behaviour_mut().kademlia.get_record(key);
+                let (tx, mut rx) = futures::channel::mpsc::unbounded();
+                let stream = async_stream::stream! {
+                    while let Some(record) = rx.next().await {
+                            yield record;
                     }
-                    IpfsEvent::DefaultBootstrap(ret) => {
-                        let mut rets = Vec::new();
+                };
+                self.record_stream.insert(id, tx);
 
-                        for addr in BOOTSTRAP_NODES {
-                            let addr = addr
-                                .parse::<MultiaddrWithPeerId>()
-                                .expect("see test bootstrap_nodes_are_multiaddr_with_peerid");
-                            if self.bootstraps.insert(addr.clone()) {
-                                let MultiaddrWithPeerId {
-                                    multiaddr: ma,
-                                    peer_id,
-                                } = addr.clone();
-
-                                // this is intentionally the multiaddr without peerid turned into plain multiaddr:
-                                // libp2p cannot dial addresses which include peerids.
-                                let ma: Multiaddr = ma.into();
-
-                                // same as with add_bootstrapper: the return value from kademlia.add_address
-                                // doesn't implement Debug
-                                self.swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .add_address(&peer_id, ma.clone());
-                                trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
-
-                                // report with the peerid
-                                let reported: Multiaddr = addr.into();
-                                rets.push(reported);
-                            }
-                        }
-
-                        let _ = ret.send(Ok(rets));
+                let _ = ret.send(RecordStream(stream.boxed()));
+            }
+            IpfsEvent::DhtPut(key, value, quorum, ret) => {
+                let record = Record {
+                    key,
+                    value,
+                    publisher: None,
+                    expires: None,
+                };
+                let future = match self
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .put_record(record, quorum)
+                {
+                    Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                    Err(e) => {
+                        error!("kad: can't put a record: {:?}", e);
+                        Err(anyhow!("kad: can't provide the record: {:?}", e))
                     }
-                    IpfsEvent::Exit => {
-                        // FIXME: we could do a proper teardown
-                        return Poll::Ready(());
+                };
+                let _ = ret.send(future);
+            }
+            IpfsEvent::GetBootstrappers(ret) => {
+                let list = self
+                    .bootstraps
+                    .iter()
+                    .map(MultiaddrWithPeerId::clone)
+                    .map(Multiaddr::from)
+                    .collect::<Vec<_>>();
+                let _ = ret.send(list);
+            }
+            IpfsEvent::AddBootstrapper(addr, ret) => {
+                let ret_addr = addr.clone().into();
+                if self.bootstraps.insert(addr.clone()) {
+                    let MultiaddrWithPeerId {
+                        multiaddr: ma,
+                        peer_id,
+                    } = addr;
+
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer_id, ma.into());
+                    // the return value of add_address doesn't implement Debug
+                    trace!(peer_id=%peer_id, "tried to add a bootstrapper");
+                }
+                let _ = ret.send(Ok(ret_addr));
+            }
+            IpfsEvent::RemoveBootstrapper(addr, ret) => {
+                let result = addr.clone().into();
+                if self.bootstraps.remove(&addr) {
+                    let peer_id = addr.peer_id;
+                    let prefix: Multiaddr = addr.multiaddr.into();
+
+                    if let Some(e) = self
+                        .swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .remove_address(&peer_id, &prefix)
+                    {
+                        info!(peer_id=%peer_id, status=?e.status, "removed bootstrapper");
+                    } else {
+                        warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
                     }
                 }
+                let _ = ret.send(Ok(result));
             }
+            IpfsEvent::ClearBootstrappers(ret) => {
+                let removed = self.bootstraps.drain().collect::<Vec<_>>();
+                let mut list = Vec::with_capacity(removed.len());
+                for addr_with_peer_id in removed {
+                    let peer_id = &addr_with_peer_id.peer_id;
+                    let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
 
-            // Poll::Ready(None) and Poll::Pending can be used to break out of the loop, clippy
-            // wants this to be written with a `while let`.
-            while let Poll::Ready(Some(evt)) = Pin::new(&mut self.repo_events).poll_next(ctx) {
-                match evt {
-                    RepoEvent::WantBlock(cid) => self.swarm.behaviour_mut().want_block(cid),
-                    RepoEvent::UnwantBlock(cid) => {
-                        self.swarm.behaviour_mut().bitswap().cancel_block(&cid)
-                    }
-                    RepoEvent::NewBlock(cid, ret) => {
-                        // TODO: consider if cancel is applicable in cases where we provide the
-                        // associated Block ourselves
-                        self.swarm.behaviour_mut().bitswap().cancel_block(&cid);
-                        // currently disabled; see https://github.com/rs-ipfs/rust-ipfs/pull/281#discussion_r465583345
-                        // for details regarding the concerns about enabling this functionality as-is
-                        if false {
-                            let key = Key::from(cid.hash().to_bytes());
-                            let future =
-                                match self.swarm.behaviour_mut().kademlia.start_providing(key) {
-                                    Ok(id) => Ok(self
-                                        .kad_subscriptions
-                                        .create_subscription(id.into(), None)),
-                                    Err(e) => {
-                                        error!("kad: can't provide a key: {:?}", e);
-                                        Err(anyhow!("kad: can't provide the key: {:?}", e))
-                                    }
-                                };
-
-                            let _ = ret.send(future);
-                        } else {
-                            let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
-                        }
-                    }
-                    RepoEvent::RemovedBlock(cid) => {
-                        self.swarm.behaviour_mut().stop_providing_block(&cid)
+                    if let Some(e) = self
+                        .swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .remove_address(peer_id, &prefix)
+                    {
+                        info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
+                        list.push(addr_with_peer_id.into());
+                    } else {
+                        error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
                     }
                 }
+                let _ = ret.send(list);
             }
+            IpfsEvent::DefaultBootstrap(ret) => {
+                let mut rets = Vec::new();
 
-            let pending_addr_list = self.mapping_pending.keys().cloned().collect::<Vec<_>>();
+                for addr in BOOTSTRAP_NODES {
+                    let addr = addr
+                        .parse::<MultiaddrWithPeerId>()
+                        .expect("see test bootstrap_nodes_are_multiaddr_with_peerid");
+                    if self.bootstraps.insert(addr.clone()) {
+                        let MultiaddrWithPeerId {
+                            multiaddr: ma,
+                            peer_id,
+                        } = addr.clone();
 
-            for address in pending_addr_list {
-                if let Entry::Occupied(mut entry) = self.mapping_pending.entry(address.clone()) {
-                    let result = {
-                        let (nat_rx, _) = entry.get_mut();
-                        match Pin::new(nat_rx).poll_unpin(ctx) {
-                            Poll::Ready(r) => Some(r),
-                            Poll::Pending => continue,
+                        // this is intentionally the multiaddr without peerid turned into plain multiaddr:
+                        // libp2p cannot dial addresses which include peerids.
+                        let ma: Multiaddr = ma.into();
+
+                        // same as with add_bootstrapper: the return value from kademlia.add_address
+                        // doesn't implement Debug
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .add_address(&peer_id, ma.clone());
+                        trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
+
+                        // report with the peerid
+                        let reported: Multiaddr = addr.into();
+                        rets.push(reported);
+                    }
+                }
+
+                let _ = ret.send(Ok(rets));
+            }
+            IpfsEvent::Exit => {
+                // FIXME: we could do a proper teardown
+            }
+        }
+    }
+    async fn handle_repo_event(&mut self, event: RepoEvent) {
+        match event {
+            RepoEvent::WantBlock(cid) => self.swarm.behaviour_mut().want_block(cid),
+            RepoEvent::UnwantBlock(cid) => self.swarm.behaviour_mut().bitswap().cancel_block(&cid),
+            RepoEvent::NewBlock(cid, ret) => {
+                // TODO: consider if cancel is applicable in cases where we provide the
+                // associated Block ourselves
+                self.swarm.behaviour_mut().bitswap().cancel_block(&cid);
+                // currently disabled; see https://github.com/rs-ipfs/rust-ipfs/pull/281#discussion_r465583345
+                // for details regarding the concerns about enabling this functionality as-is
+                if false {
+                    let key = Key::from(cid.hash().to_bytes());
+                    let future = match self.swarm.behaviour_mut().kademlia.start_providing(key) {
+                        Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                        Err(e) => {
+                            error!("kad: can't provide a key: {:?}", e);
+                            Err(anyhow!("kad: can't provide the key: {:?}", e))
                         }
                     };
 
-                    if let Some(result) = result {
-                        let (_, tx) = entry.remove();
-                        if let Ok(Ok(_)) = result {
-                            self.mapping_task.insert(address.clone(), tx);
-                        }
-                    }
+                    let _ = ret.send(future);
+                } else {
+                    let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
                 }
             }
-
-            self.mapping_pending.shrink_to_fit();
-
-            done = true;
+            RepoEvent::RemovedBlock(cid) => self.swarm.behaviour_mut().stop_providing_block(&cid),
         }
     }
 }
+
+// impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
+//     type Output = ();
+
+//     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+//         use libp2p::swarm::SwarmEvent;
+
+//         // begin by polling the swarm so that initially it'll first have chance to bind listeners
+//         // and such.
+
+//         let mut done = false;
+
+//         loop {
+//             loop {
+//                 let inner = {
+//                     let next = self.swarm.select_next_some();
+//                     futures::pin_mut!(next);
+//                     match next.poll(ctx) {
+//                         Poll::Ready(inner) => inner,
+//                         Poll::Pending if done => return Poll::Pending,
+//                         Poll::Pending => break,
+//                     }
+//                 };
+//                 // as a swarm event was returned, we need to do at least one more round to fully
+//                 // exhaust the swarm before possibly causing the swarm to do more work by popping
+//                 // off the events from Ipfs and ... this looping goes on for a while.
+//                 done = false;
+//                 if let Some(handler) = self.swarm_event.clone() {
+//                     handler(&mut self.swarm, &inner)
+//                 }
+//                 match inner {
+//                     SwarmEvent::NewListenAddr {
+//                         listener_id,
+//                         address,
+//                     } => {
+//                         self.listening_addresses
+//                             .insert(address.clone(), listener_id);
+
+//                         if self.port_mapping
+//                             && address.iter().any(|p| matches!(p, Protocol::Ip4(_)))
+//                         {
+//                             let (tx, rx) = broadcast::channel(1);
+//                             if let Some(forward_rx) = igd::forward_port(
+//                                 address.clone(),
+//                                 std::time::Duration::from_secs(2 * 60),
+//                                 rx,
+//                             ) {
+//                                 self.mapping_pending
+//                                     .insert(address.clone(), (forward_rx, tx));
+//                             }
+//                         }
+//                         self.listener_subscriptions
+//                             .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
+//                     }
+//                     SwarmEvent::ExpiredListenAddr {
+//                         listener_id,
+//                         address,
+//                     } => {
+//                         self.listeners.remove(&listener_id);
+//                         self.listening_addresses.remove(&address);
+//                         if let Some(tx) = self.mapping_task.remove(&address) {
+//                             let _ = tx.send(());
+//                         }
+//                         self.listener_subscriptions
+//                             .finish_subscription(listener_id.into(), Ok(Some(None)));
+//                     }
+//                     SwarmEvent::ListenerClosed {
+//                         listener_id,
+//                         reason,
+//                         addresses,
+//                     } => {
+//                         self.listeners.remove(&listener_id);
+//                         for address in addresses {
+//                             self.listening_addresses.remove(&address);
+//                             if let Some(tx) = self.mapping_task.remove(&address) {
+//                                 let _ = tx.send(());
+//                             }
+//                         }
+//                         let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
+//                         self.listener_subscriptions
+//                             .finish_subscription(listener_id.into(), reason);
+//                     }
+//                     SwarmEvent::ListenerError { listener_id, error } => {
+//                         self.listeners.remove(&listener_id);
+//                         self.listener_subscriptions
+//                             .finish_subscription(listener_id.into(), Err(error.to_string()));
+//                     }
+//                     SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
+//                         MdnsEvent::Discovered(list) => {
+//                             for (peer, addr) in list {
+//                                 trace!("mdns: Discovered peer {}", peer.to_base58());
+//                                 self.swarm.behaviour_mut().add_peer(peer, Some(addr));
+//                             }
+//                         }
+//                         MdnsEvent::Expired(list) => {
+//                             for (peer, _) in list {
+//                                 if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
+//                                     if !mdns.has_node(&peer) {
+//                                         trace!("mdns: Expired peer {}", peer.to_base58());
+//                                         self.swarm.behaviour_mut().remove_peer(&peer);
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     },
+//                     SwarmEvent::Behaviour(BehaviourEvent::Kad(event)) => {
+//                         match event {
+//                             InboundRequest { request } => {
+//                                 trace!("kad: inbound {:?} request handled", request);
+//                             }
+//                             OutboundQueryProgressed {
+//                                 result, id, step, ..
+//                             } => {
+//                                 // make sure the query is exhausted
+//                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                     match result {
+//                                         // these subscriptions return actual values
+//                                         GetClosestPeers(_) | GetProviders(_) | GetRecord(_) => {}
+//                                         // we want to return specific errors for the following
+//                                         Bootstrap(Err(_))
+//                                         | StartProviding(Err(_))
+//                                         | PutRecord(Err(_)) => {}
+//                                         // and the rest can just return a general KadResult::Complete
+//                                         _ => {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                                 id.into(),
+//                                                 Ok(KadResult::Complete),
+//                                             );
+//                                         }
+//                                     }
+//                                 }
+
+//                                 match result {
+//                                     Bootstrap(Ok(BootstrapOk {
+//                                         peer,
+//                                         num_remaining,
+//                                     })) => {
+//                                         debug!(
+//                                             "kad: bootstrapped with {}, {} peers remain",
+//                                             peer, num_remaining
+//                                         );
+//                                     }
+//                                     Bootstrap(Err(BootstrapError::Timeout { .. })) => {
+//                                         warn!("kad: timed out while trying to bootstrap");
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                                 id.into(),
+//                                                 Err("kad: timed out while trying to bootstrap"
+//                                                     .into()),
+//                                             );
+//                                         }
+//                                     }
+//                                     GetClosestPeers(Ok(GetClosestPeersOk { key: _, peers })) => {
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                                 id.into(),
+//                                                 Ok(KadResult::Peers(peers)),
+//                                             );
+//                                         }
+//                                     }
+//                                     GetClosestPeers(Err(GetClosestPeersError::Timeout {
+//                                         key: _,
+//                                         peers: _,
+//                                     })) => {
+//                                         // don't mention the key here, as this is just the id of our node
+//                                         warn!(
+//                                             "kad: timed out while trying to find all closest peers"
+//                                         );
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                 id.into(),
+//                                 Err("timed out while trying to get providers for the given key"
+//                                     .into()),
+//                             );
+//                                         }
+//                                     }
+//                                     GetProviders(Ok(GetProvidersOk::FoundProviders {
+//                                         key: _,
+//                                         providers,
+//                                     })) => {
+//                                         if let Entry::Occupied(entry) =
+//                                             self.provider_stream.entry(id)
+//                                         {
+//                                             if !providers.is_empty() {
+//                                                 tokio::spawn({
+//                                                     let mut tx = entry.get().clone();
+//                                                     async move {
+//                                                         for provider in providers {
+//                                                             let _ = tx.send(provider).await;
+//                                                         }
+//                                                     }
+//                                                 });
+//                                             }
+//                                         }
+//                                     }
+//                                     GetProviders(Ok(
+//                                         GetProvidersOk::FinishedWithNoAdditionalRecord { .. },
+//                                     )) => {
+//                                         if step.last {
+//                                             if let Some(tx) = self.provider_stream.remove(&id) {
+//                                                 tx.close_channel();
+//                                             }
+//                                         }
+//                                     }
+//                                     GetProviders(Err(GetProvidersError::Timeout {
+//                                         key, ..
+//                                     })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!(
+//                                             "kad: timed out while trying to get providers for {}",
+//                                             key
+//                                         );
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                 id.into(),
+//                                 Err("timed out while trying to get providers for the given key"
+//                                     .into()),
+//                             );
+//                                         }
+//                                     }
+//                                     StartProviding(Ok(AddProviderOk { key })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         debug!("kad: providing {}", key);
+//                                     }
+//                                     StartProviding(Err(AddProviderError::Timeout { key })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!("kad: timed out while trying to provide {}", key);
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                 id.into(),
+//                                 Err("kad: timed out while trying to provide the record".into()),
+//                             );
+//                                         }
+//                                     }
+//                                     RepublishProvider(Ok(AddProviderOk { key })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         debug!("kad: republished provider {}", key);
+//                                     }
+//                                     RepublishProvider(Err(AddProviderError::Timeout { key })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!(
+//                                             "kad: timed out while trying to republish provider {}",
+//                                             key
+//                                         );
+//                                     }
+//                                     GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
+//                                         if let Entry::Occupied(entry) = self.record_stream.entry(id)
+//                                         {
+//                                             tokio::spawn({
+//                                                 let mut tx = entry.get().clone();
+//                                                 async move {
+//                                                     let _ = tx.send(record.record).await;
+//                                                 }
+//                                             });
+//                                         }
+//                                     }
+//                                     GetRecord(Ok(
+//                                         GetRecordOk::FinishedWithNoAdditionalRecord { .. },
+//                                     )) => {
+//                                         if step.last {
+//                                             if let Some(tx) = self.record_stream.remove(&id) {
+//                                                 tx.close_channel();
+//                                             }
+//                                         }
+//                                     }
+//                                     GetRecord(Err(GetRecordError::NotFound {
+//                                         key,
+//                                         closest_peers: _,
+//                                     })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!("kad: couldn't find record {}", key);
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             if let Some(tx) = self.record_stream.remove(&id) {
+//                                                 tx.close_channel();
+//                                             }
+//                                         }
+//                                     }
+//                                     GetRecord(Err(GetRecordError::QuorumFailed {
+//                                         key,
+//                                         records: _,
+//                                         quorum,
+//                                     })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!(
+//                                             "kad: quorum failed {} when trying to get key {}",
+//                                             quorum, key
+//                                         );
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             if let Some(tx) = self.record_stream.remove(&id) {
+//                                                 tx.close_channel();
+//                                             }
+//                                         }
+//                                     }
+//                                     GetRecord(Err(GetRecordError::Timeout { key })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!("kad: timed out while trying to get key {}", key);
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             if let Some(tx) = self.record_stream.remove(&id) {
+//                                                 tx.close_channel();
+//                                             }
+//                                         }
+//                                     }
+//                                     PutRecord(Ok(PutRecordOk { key }))
+//                                     | RepublishRecord(Ok(PutRecordOk { key })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         debug!("kad: successfully put record {}", key);
+//                                     }
+//                                     PutRecord(Err(PutRecordError::QuorumFailed {
+//                                         key,
+//                                         success: _,
+//                                         quorum,
+//                                     }))
+//                                     | RepublishRecord(Err(PutRecordError::QuorumFailed {
+//                                         key,
+//                                         success: _,
+//                                         quorum,
+//                                     })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!(
+//                                             "kad: quorum failed ({}) when trying to put record {}",
+//                                             quorum, key
+//                                         );
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                 id.into(),
+//                                 Err("kad: quorum failed when trying to put the record".into()),
+//                             );
+//                                         }
+//                                     }
+//                                     PutRecord(Err(PutRecordError::Timeout {
+//                                         key,
+//                                         success: _,
+//                                         quorum: _,
+//                                     })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!("kad: timed out while trying to put record {}", key);
+
+//                                         if self.swarm.behaviour().kademlia.query(&id).is_none() {
+//                                             self.kad_subscriptions.finish_subscription(
+//                                                 id.into(),
+//                                                 Err(
+//                                                     "kad: timed out while trying to put the record"
+//                                                         .into(),
+//                                                 ),
+//                                             );
+//                                         }
+//                                     }
+//                                     RepublishRecord(Err(PutRecordError::Timeout {
+//                                         key,
+//                                         success: _,
+//                                         quorum: _,
+//                                     })) => {
+//                                         let key = multibase::encode(Base::Base32Lower, key);
+//                                         warn!(
+//                                             "kad: timed out while trying to republish record {}",
+//                                             key
+//                                         );
+//                                     }
+//                                 }
+//                             }
+//                             RoutingUpdated {
+//                                 peer,
+//                                 is_new_peer: _,
+//                                 addresses,
+//                                 bucket_range: _,
+//                                 old_peer: _,
+//                             } => {
+//                                 trace!("kad: routing updated; {}: {:?}", peer, addresses);
+//                             }
+//                             UnroutablePeer { peer } => {
+//                                 trace!("kad: peer {} is unroutable", peer);
+//                             }
+//                             RoutablePeer { peer, address } => {
+//                                 trace!("kad: peer {} ({}) is routable", peer, address);
+//                             }
+//                             PendingRoutablePeer { peer, address } => {
+//                                 trace!("kad: pending routable peer {} ({})", peer, address);
+//                             }
+//                         }
+//                     }
+//                     SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
+//                         BitswapEvent::ReceivedBlock(peer_id, block) => {
+//                             let repo = self.repo.clone();
+//                             let peer_stats = Arc::clone(
+//                                 self.swarm.behaviour().bitswap.stats.get(&peer_id).unwrap(),
+//                             );
+//                             tokio::task::spawn(async move {
+//                                 let bytes = block.data().len() as u64;
+//                                 let res = repo.put_block(block.clone()).await;
+//                                 match res {
+//                                     Ok((_, uniqueness)) => match uniqueness {
+//                                         BlockPut::NewBlock => {
+//                                             peer_stats.update_incoming_unique(bytes)
+//                                         }
+//                                         BlockPut::Existed => {
+//                                             peer_stats.update_incoming_duplicate(bytes)
+//                                         }
+//                                     },
+//                                     Err(e) => {
+//                                         debug!(
+//                                             "Got block {} from peer {} but failed to store it: {}",
+//                                             block.cid(),
+//                                             peer_id.to_base58(),
+//                                             e
+//                                         );
+//                                     }
+//                                 };
+//                             });
+//                         }
+//                         BitswapEvent::ReceivedWant(peer_id, cid, priority) => {
+//                             info!(
+//                                 "Peer {} wants block {} with priority {}",
+//                                 peer_id, cid, priority
+//                             );
+
+//                             let queued_blocks =
+//                                 self.swarm.behaviour_mut().bitswap().queued_blocks.clone();
+//                             let repo = self.repo.clone();
+
+//                             tokio::task::spawn(async move {
+//                                 match repo.get_block_now(&cid).await {
+//                                     Ok(Some(block)) => {
+//                                         let _ = queued_blocks.unbounded_send((peer_id, block));
+//                                     }
+//                                     Ok(None) => {}
+//                                     Err(err) => {
+//                                         warn!(
+//                                             "Peer {} wanted block {} but we failed: {}",
+//                                             peer_id.to_base58(),
+//                                             cid,
+//                                             err,
+//                                         );
+//                                     }
+//                                 }
+//                             });
+//                         }
+//                         BitswapEvent::ReceivedCancel(..) => {}
+//                     },
+//                     SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
+//                         libp2p::ping::Event {
+//                             peer,
+//                             result: Result::Ok(PingSuccess::Ping { rtt }),
+//                         } => {
+//                             trace!(
+//                                 "ping: rtt to {} is {} ms",
+//                                 peer.to_base58(),
+//                                 rtt.as_millis()
+//                             );
+//                             self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
+//                         }
+//                         libp2p::ping::Event {
+//                             peer,
+//                             result: Result::Ok(PingSuccess::Pong),
+//                         } => {
+//                             trace!("ping: pong from {}", peer);
+//                         }
+//                         libp2p::ping::Event {
+//                             peer,
+//                             result: Result::Err(libp2p::ping::Failure::Timeout),
+//                         } => {
+//                             trace!("ping: timeout to {}", peer);
+//                             self.swarm.behaviour_mut().remove_peer(&peer);
+//                         }
+//                         libp2p::ping::Event {
+//                             peer,
+//                             result: Result::Err(libp2p::ping::Failure::Other { error }),
+//                         } => {
+//                             error!("ping: failure with {}: {}", peer.to_base58(), error);
+//                         }
+//                         libp2p::ping::Event {
+//                             peer,
+//                             result: Result::Err(libp2p::ping::Failure::Unsupported),
+//                         } => {
+//                             error!("ping: failure with {}: unsupported", peer.to_base58());
+//                         }
+//                     },
+//                     SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
+//                         IdentifyEvent::Received { peer_id, info } => {
+//                             self.swarm
+//                                 .behaviour_mut()
+//                                 .swarm
+//                                 .inject_identify_info(peer_id, info.clone());
+
+//                             let IdentifyInfo {
+//                                 listen_addrs,
+//                                 protocols,
+//                                 ..
+//                             } = info.clone();
+
+//                             if protocols
+//                                 .iter()
+//                                 .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
+//                             {
+//                                 for addr in &listen_addrs {
+//                                     self.swarm
+//                                         .behaviour_mut()
+//                                         .kademlia()
+//                                         .add_address(&peer_id, addr.clone());
+//                                 }
+//                             }
+
+//                             #[allow(clippy::collapsible_if)]
+//                             if protocols
+//                                 .iter()
+//                                 .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
+//                             {
+//                                 if self.autonat_counter.load(Ordering::Relaxed)
+//                                     <= self.autonat_limit.load(Ordering::Relaxed)
+//                                 {
+//                                     for addr in listen_addrs {
+//                                         self.swarm
+//                                             .behaviour_mut()
+//                                             .autonat
+//                                             .add_server(peer_id, Some(addr));
+//                                     }
+
+//                                     let mut counter = self.autonat_counter.load(Ordering::Relaxed);
+//                                     counter += 1;
+//                                     self.autonat_counter.store(counter, Ordering::Relaxed);
+//                                 }
+//                             }
+//                         }
+//                         event => trace!("identify: {:?}", event),
+//                     },
+//                     SwarmEvent::Behaviour(BehaviourEvent::Autonat(
+//                         autonat::Event::StatusChanged { old, new },
+//                     )) => {
+//                         //TODO: Use status to indicate if we should port forward or not
+//                         debug!("Old Nat Status: {:?}", old);
+//                         debug!("New Nat Status: {:?}", new);
+//                     }
+//                     _ => trace!("Swarm event: {:?}", inner),
+//                 }
+//             }
+
+//             let pending_addr_list = self.mapping_pending.keys().cloned().collect::<Vec<_>>();
+
+//             for address in pending_addr_list {
+//                 if let Entry::Occupied(mut entry) = self.mapping_pending.entry(address.clone()) {
+//                     let result = {
+//                         let (nat_rx, _) = entry.get_mut();
+//                         match Pin::new(nat_rx).poll_unpin(ctx) {
+//                             Poll::Ready(r) => Some(r),
+//                             Poll::Pending => continue,
+//                         }
+//                     };
+
+//                     if let Some(result) = result {
+//                         let (_, tx) = entry.remove();
+//                         if let Ok(Ok(_)) = result {
+//                             self.mapping_task.insert(address.clone(), tx);
+//                         }
+//                     }
+//                 }
+//             }
+
+//             self.mapping_pending.shrink_to_fit();
+
+//             done = true;
+//         }
+//     }
+// }
 
 pub fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> {
     let mut addr = addr.clone();
@@ -2762,8 +3225,6 @@ mod node {
         /// The listened to and externally visible addresses. The addresses are suffixed with the
         /// P2p protocol containing the node's PeerID.
         pub addrs: Vec<Multiaddr>,
-        /// Stores the single background task spawned for the node.
-        pub bg_task: tokio::task::JoinHandle<()>,
     }
 
     impl Node {
@@ -2801,17 +3262,11 @@ mod node {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
 
-            let (ipfs, fut): (Ipfs<TestTypes>, _) =
-                UninitializedIpfs::new(opts).start().await.unwrap();
-            let bg_task = tokio::task::spawn(fut);
+            let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).start().await.unwrap();
+
             let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 
-            Node {
-                ipfs,
-                id,
-                addrs,
-                bg_task,
-            }
+            Node { ipfs, id, addrs }
         }
 
         /// Returns the subscriptions for a `Node`.
@@ -2836,7 +3291,6 @@ mod node {
         /// Shuts down the `Node`.
         pub async fn shutdown(self) {
             self.ipfs.exit_daemon().await;
-            let _ = self.bg_task.await;
         }
     }
 

@@ -41,8 +41,7 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
-    tokio::spawn(fut);
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).start().await?;
 
     let identity = ipfs.identity(None).await?;
     let peer_id = identity.peer_id;

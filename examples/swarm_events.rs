@@ -1,6 +1,5 @@
 use rust_ipfs::{Ipfs, IpfsOptions, TestTypes, UninitializedIpfs};
 use libp2p::swarm::SwarmEvent;
-use tokio::task;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -8,7 +7,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon
     let opts = IpfsOptions::inmemory_with_generated_keys();
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts)
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts)
         .swarm_events(|_, event| {
             if let SwarmEvent::NewListenAddr { address, .. } = event {
                 println!("Listening on {address}");
@@ -16,8 +15,6 @@ async fn main() -> anyhow::Result<()> {
         })
         .start()
         .await?;
-
-    task::spawn(fut);
 
     // Exit
     ipfs.exit_daemon().await;
