@@ -581,6 +581,9 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         tokio::spawn(async move {
             fut.run().instrument(swarm_span).await;
         });
+        // Used to give the task time to run before returning Ipfs
+        // TODO: Use a channel to notify when the task is ready
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         Ok(ipfs)
     }
 }
