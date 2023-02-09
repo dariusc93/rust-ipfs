@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::with_opt(opts).start().await?;
+    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
     tokio::spawn(fut);
 
     let identity = ipfs.identity(None).await?;
