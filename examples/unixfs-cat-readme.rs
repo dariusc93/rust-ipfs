@@ -1,13 +1,13 @@
 use std::str::FromStr;
 
 use futures::StreamExt;
-use rust_ipfs::{Ipfs, IpfsPath, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsOptions, IpfsPath, TestTypes, UninitializedIpfs};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().start().await?;
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(IpfsOptions::inmemory_with_generated_keys()).start().await?;
 
     ipfs.default_bootstrap().await?;
 
