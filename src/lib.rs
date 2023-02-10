@@ -53,7 +53,7 @@ use p2p::{
     IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
 };
 use subscription::SubscriptionRegistry;
-use tokio::task::JoinHandle;
+use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::UnixfsStatus;
@@ -578,12 +578,15 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
                 _ => continue,
             };
         }
-        tokio::spawn(async move {
-            fut.run().instrument(swarm_span).await;
+
+        let notify = Arc::new(Notify::new());
+        tokio::spawn({
+            let notify = notify.clone();
+            async move {
+                fut.run(notify).instrument(swarm_span).await;
+            }
         });
-        // Used to give the task time to run before returning Ipfs
-        // TODO: Use a channel to notify when the task is ready
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        notify.notified().await;
         Ok(ipfs)
     }
 }
@@ -1659,7 +1662,8 @@ struct IpfsFuture<Types: IpfsTypes> {
 }
 
 impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
-    pub(crate) async fn run(&mut self) {
+    pub(crate) async fn run(&mut self, notify: Arc<Notify>) {
+        let mut first_run = false;
         loop {
             tokio::select! {
                 swarm = self.swarm.select_next_some() => {
@@ -1671,6 +1675,10 @@ impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
                 repo = self.repo_events.select_next_some() => {
                     self.handle_repo_event(repo).await;
                 }
+            }
+            if !first_run {
+                first_run = true;
+                notify.notify_one();
             }
         }
     }

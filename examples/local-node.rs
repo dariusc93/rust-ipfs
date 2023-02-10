@@ -27,10 +27,9 @@ async fn main() -> anyhow::Result<()> {
     if opt.bootstrap {
         ipfs.default_bootstrap().await?;
         ipfs.bootstrap().await?;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
-
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
+    
     let PeerInfo {
         public_key: key,
         listen_addrs: addresses,
