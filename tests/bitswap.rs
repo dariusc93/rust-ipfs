@@ -7,7 +7,6 @@ use common::{spawn_nodes, Topology};
 
 // Ensure that the Bitswap object doesn't leak.
 #[tokio::test]
-#[ignore]
 async fn check_bitswap_cleanups() {
     // create a few nodes and connect the first one to others
     let mut nodes = spawn_nodes(3, Topology::Star).await;
