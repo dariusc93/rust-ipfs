@@ -90,14 +90,23 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         let mut first_run = false;
         loop {
             tokio::select! {
-                swarm = self.swarm.select_next_some() => {
-                    self.handle_swarm_event(swarm).await;
+                swarm = self.swarm.next() => {
+                    if let Some(swarm) = swarm {
+                        self.handle_swarm_event(swarm).await;
+                    }
                 },
-                event = self.from_facade.select_next_some() => {
-                    self.handle_event(event).await;
+                event = self.from_facade.next() => {
+                    if let Some(event) = event {
+                        if matches!(event, IpfsEvent::Exit) {
+                            break;
+                        }
+                        self.handle_event(event).await;
+                    }
                 },
-                repo = self.repo_events.select_next_some() => {
-                    self.handle_repo_event(repo).await;
+                repo = self.repo_events.next() => {
+                    if let Some(repo) = repo {
+                        self.handle_repo_event(repo).await;
+                    }
                 }
             }
             if !first_run {
