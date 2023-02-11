@@ -2,14 +2,12 @@ use clap::Parser;
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use rust_ipfs::p2p::PeerInfo;
-// needed for StreamExt::next
-use rust_ipfs::{Ipfs, IpfsOptions, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs};
 use std::process::exit;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Parser)]
 #[clap(name = "fetch_and_cat")]
-#[command()]
 struct Opt {
     path: IpfsPath,
     target: Option<Multiaddr>,
@@ -37,18 +35,9 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
 
     // Initialize the repo and start a daemon.
-    //
-    // Here we are using the IpfsOptions::inmemory_with_generated_keys, which creates a new random
-    // key and in-memory storage for blocks and pins.
-    let mut opts = IpfsOptions::inmemory_with_generated_keys();
-
-    // Disable MDNS to explicitly connect or be connected just in case there are multiple IPFS
-    // nodes running.
-    opts.mdns = false;
-
-    // Initialize the repo and start a daemon.
     // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).start().await?;
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().start().await?;
+
 
     if opt.default_bootstrappers {
         // applications wishing to find content on the global IPFS swarm should restore the latest

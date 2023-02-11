@@ -7,7 +7,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon
     let opts = IpfsOptions::inmemory_with_generated_keys();
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts)
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts)
         .swarm_events(|_, event| {
             if let SwarmEvent::NewListenAddr { address, .. } = event {
                 println!("Listening on {address}");

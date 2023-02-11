@@ -213,6 +213,7 @@ pub struct IpfsOptions {
     /// Ping Configuration
     pub ping_configuration: Option<PingConfig>,
 
+    /// Enables port mapping (aka UPnP)
     pub port_mapping: bool,
 
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
@@ -433,14 +434,24 @@ pub struct UninitializedIpfs<Types: IpfsTypes> {
     swarm_event: Option<TSwarmEventFn>,
 }
 
+impl<Types: IpfsTypes> Default for UninitializedIpfs<Types> {
+    fn default() -> Self {
+        Self::with_opt(Default::default())
+    }
+}
+
 impl<Types: IpfsTypes> UninitializedIpfs<Types> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Configures a new UninitializedIpfs with from the given options and optionally a span.
     /// If the span is not given, it is defaulted to `tracing::trace_span!("ipfs")`.
     ///
     /// The span is attached to all operations called on the later created `Ipfs` along with all
     /// operations done in the background task as well as tasks spawned by the underlying
     /// `libp2p::Swarm`.
-    pub fn new(options: IpfsOptions) -> Self {
+    pub fn with_opt(options: IpfsOptions) -> Self {
         let repo_options = RepoOptions::from(&options);
         let (repo, repo_events) = create_repo(repo_options);
         let keys = options.keypair.clone();
@@ -453,6 +464,102 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             repo_events,
             swarm_event: None,
         }
+    }
+
+    /// Adds a listening address
+    pub fn add_listening_addr(mut self, addr: Multiaddr) -> Self {
+        if !self.options.listening_addrs.contains(&addr) {
+            self.options.listening_addrs.push(addr)
+        }
+        self
+    }
+
+    /// Adds a bootstrap node
+    pub fn add_bootstrap(mut self, addr: Multiaddr) -> Self {
+        if !self.options.bootstrap.contains(&addr) {
+            self.options.bootstrap.push(addr)
+        }
+        self
+    }
+
+    /// Sets a path 
+    pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
+        let path = path.as_ref().to_path_buf();
+        self.options.ipfs_path = path;
+        self
+    }
+
+    /// Set identify configuration
+    pub fn set_identify_configuration(mut self, config: crate::p2p::IdentifyConfiguration) -> Self {
+        self.options.identify_configuration = Some(config);
+        self
+    }
+
+    /// Set transport configuration
+    pub fn set_transport_configuration(mut self, config: crate::p2p::TransportConfig) -> Self {
+        self.options.transport_configuration = Some(config);
+        self
+    }
+
+    /// Set swarm configuration
+    pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
+        self.options.swarm_configuration = Some(config);
+        self
+    }
+
+    /// Set kad configuration
+    pub fn set_kad_configuration(
+        mut self,
+        config: KademliaConfig,
+        store: Option<KadStoreConfig>,
+    ) -> Self {
+        self.options.kad_configuration = Some(config);
+        self.options.kad_store_config = store;
+        self
+    }
+
+    /// Set ping configuration
+    pub fn set_ping_configuration(mut self, config: PingConfig) -> Self {
+        self.options.ping_configuration = Some(config);
+        self
+    }
+
+    /// Set keypair
+    pub fn set_keypair(mut self, keypair: Keypair) -> Self {
+        self.options.keypair = keypair;
+        self
+    }
+
+    /// Enable keep alive
+    pub fn enable_keepalive(mut self) -> Self {
+        self.options.keep_alive = true;
+        self
+    }
+
+    /// Enable mdns
+    pub fn enable_mdns(mut self) -> Self {
+        self.options.mdns = true;
+        self
+    }
+
+    /// Enable relay client 
+    pub fn enable_relay(mut self, with_dcutr: bool) -> Self {
+        self.options.relay = true;
+        self.options.dcutr = with_dcutr;
+        self
+    }
+
+    /// Enable relay server
+    pub fn enable_relay_server(mut self, config: Option<RelayConfig>) -> Self {
+        self.options.relay_server = true;
+        self.options.relay_server_config = config;
+        self
+    }
+
+    /// Enable port mapping (AKA UPnP)
+    pub fn enable_upnp(mut self) -> Self {
+        self.options.port_mapping = true;
+        self
     }
 
     /// Set file desc limit
@@ -3239,7 +3346,7 @@ mod node {
 
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).start().await.unwrap();
+            let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts).start().await.unwrap();
 
             let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 
