@@ -4,7 +4,7 @@ use clap::Parser;
 use futures::StreamExt;
 
 use rust_ipfs::{
-    unixfs::UnixfsStatus, Ipfs, IpfsOptions, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs,
+    unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs,
 };
 
 #[derive(Debug, Parser)]
@@ -24,12 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let opts = IpfsOptions {
-        mdns: true,
-        ..Default::default()
-    };
-
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new(opts).spawn_start().await?;
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().enable_mdns().spawn_start().await?;
 
     if opt.default_bootstrap {
         ipfs.default_bootstrap().await?;
@@ -77,4 +72,4 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-} 
+}
