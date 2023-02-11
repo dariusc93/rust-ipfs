@@ -46,6 +46,7 @@ pub struct Behaviour<TRepoTypes: IpfsTypes> {
     pub keepalive: Toggle<KeepAliveBehaviour>,
     pub pubsub: GossipsubStream,
     pub autonat: autonat::Behaviour,
+    pub upnp: Toggle<libp2p_nat::Behaviour>,
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
@@ -366,6 +367,8 @@ impl<TRepoTypes: IpfsTypes> Behaviour<TRepoTypes> {
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
+        let upnp = Toggle::from(options.portmapping.then_some(libp2p_nat::Behaviour::new().await?));
+
         let (transport, relay_client) = match options.relay {
             true => {
                 let (transport, client) = RelayClient::new_transport_and_behaviour(peer_id);
@@ -388,6 +391,7 @@ impl<TRepoTypes: IpfsTypes> Behaviour<TRepoTypes> {
                 dcutr,
                 relay,
                 relay_client,
+                upnp,
             },
             transport,
         ))

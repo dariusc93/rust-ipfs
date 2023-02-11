@@ -33,8 +33,6 @@ pub mod repo;
 mod subscription;
 pub mod unixfs;
 
-mod igd;
-
 #[macro_use]
 extern crate tracing;
 
@@ -47,7 +45,7 @@ use futures::{
     },
     sink::SinkExt,
     stream::{BoxStream, Fuse, Stream},
-    FutureExt, StreamExt,
+    StreamExt,
 };
 
 use iroh_bitswap::BitswapEvent;
@@ -55,7 +53,7 @@ use p2p::{
     IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
 };
 use subscription::SubscriptionRegistry;
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::UnixfsStatus;
@@ -218,6 +216,7 @@ pub struct IpfsOptions {
     /// Ping Configuration
     pub ping_configuration: Option<PingConfig>,
 
+    /// Enables port mapping (aka UPnP)
     pub port_mapping: bool,
 
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
@@ -433,14 +432,24 @@ pub struct UninitializedIpfs<Types: IpfsTypes> {
     swarm_event: Option<TSwarmEventFn<Types>>,
 }
 
+impl<Types: IpfsTypes> Default for UninitializedIpfs<Types> {
+    fn default() -> Self {
+        Self::with_opt(Default::default())
+    }
+}
+
 impl<Types: IpfsTypes> UninitializedIpfs<Types> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Configures a new UninitializedIpfs with from the given options and optionally a span.
     /// If the span is not given, it is defaulted to `tracing::trace_span!("ipfs")`.
     ///
     /// The span is attached to all operations called on the later created `Ipfs` along with all
     /// operations done in the background task as well as tasks spawned by the underlying
     /// `libp2p::Swarm`.
-    pub fn new(options: IpfsOptions) -> Self {
+    pub fn with_opt(options: IpfsOptions) -> Self {
         let repo_options = RepoOptions::from(&options);
         let (repo, repo_events) = create_repo(repo_options);
         let keys = options.keypair.clone();
@@ -453,6 +462,102 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             repo_events,
             swarm_event: None,
         }
+    }
+
+    /// Adds a listening address
+    pub fn add_listening_addr(mut self, addr: Multiaddr) -> Self {
+        if !self.options.listening_addrs.contains(&addr) {
+            self.options.listening_addrs.push(addr)
+        }
+        self
+    }
+
+    /// Adds a bootstrap node
+    pub fn add_bootstrap(mut self, addr: Multiaddr) -> Self {
+        if !self.options.bootstrap.contains(&addr) {
+            self.options.bootstrap.push(addr)
+        }
+        self
+    }
+
+    /// Sets a path
+    pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
+        let path = path.as_ref().to_path_buf();
+        self.options.ipfs_path = path;
+        self
+    }
+
+    /// Set identify configuration
+    pub fn set_identify_configuration(mut self, config: crate::p2p::IdentifyConfiguration) -> Self {
+        self.options.identify_configuration = Some(config);
+        self
+    }
+
+    /// Set transport configuration
+    pub fn set_transport_configuration(mut self, config: crate::p2p::TransportConfig) -> Self {
+        self.options.transport_configuration = Some(config);
+        self
+    }
+
+    /// Set swarm configuration
+    pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
+        self.options.swarm_configuration = Some(config);
+        self
+    }
+
+    /// Set kad configuration
+    pub fn set_kad_configuration(
+        mut self,
+        config: KademliaConfig,
+        store: Option<KadStoreConfig>,
+    ) -> Self {
+        self.options.kad_configuration = Some(config);
+        self.options.kad_store_config = store;
+        self
+    }
+
+    /// Set ping configuration
+    pub fn set_ping_configuration(mut self, config: PingConfig) -> Self {
+        self.options.ping_configuration = Some(config);
+        self
+    }
+
+    /// Set keypair
+    pub fn set_keypair(mut self, keypair: Keypair) -> Self {
+        self.options.keypair = keypair;
+        self
+    }
+
+    /// Enable keep alive
+    pub fn enable_keepalive(mut self) -> Self {
+        self.options.keep_alive = true;
+        self
+    }
+
+    /// Enable mdns
+    pub fn enable_mdns(mut self) -> Self {
+        self.options.mdns = true;
+        self
+    }
+
+    /// Enable relay client
+    pub fn enable_relay(mut self, with_dcutr: bool) -> Self {
+        self.options.relay = true;
+        self.options.dcutr = with_dcutr;
+        self
+    }
+
+    /// Enable relay server
+    pub fn enable_relay_server(mut self, config: Option<RelayConfig>) -> Self {
+        self.options.relay_server = true;
+        self.options.relay_server_config = config;
+        self
+    }
+
+    /// Enable port mapping (AKA UPnP)
+    pub fn enable_upnp(mut self) -> Self {
+        self.options.port_mapping = true;
+        self
     }
 
     /// Set file desc limit
@@ -568,7 +673,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let listener_subscriptions = Default::default();
         let listeners = Default::default();
         let bootstraps = Default::default();
-        let mapping_task = HashMap::new();
 
         let IpfsOptions {
             listening_addrs, ..
@@ -590,9 +694,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             autonat_counter,
             bootstraps,
             swarm_event,
-            mapping_task,
-            mapping_pending: Default::default(),
-            port_mapping: options.port_mapping,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -1676,15 +1777,6 @@ struct IpfsFuture<Types: IpfsTypes> {
     autonat_counter: Arc<AtomicU64>,
     bootstraps: HashSet<MultiaddrWithPeerId>,
     swarm_event: Option<TSwarmEventFn<Types>>,
-    mapping_task: HashMap<Multiaddr, broadcast::Sender<()>>,
-    mapping_pending: HashMap<
-        Multiaddr,
-        (
-            futures::channel::oneshot::Receiver<Result<(), Error>>,
-            broadcast::Sender<()>,
-        ),
-    >,
-    port_mapping: bool,
 }
 
 impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
@@ -1724,19 +1816,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         self.listening_addresses
                             .insert(address.clone(), listener_id);
 
-                        if self.port_mapping
-                            && address.iter().any(|p| matches!(p, Protocol::Ip4(_)))
-                        {
-                            let (tx, rx) = broadcast::channel(1);
-                            if let Some(forward_rx) = igd::forward_port(
-                                address.clone(),
-                                std::time::Duration::from_secs(2 * 60),
-                                rx,
-                            ) {
-                                self.mapping_pending
-                                    .insert(address.clone(), (forward_rx, tx));
-                            }
-                        }
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
                     }
@@ -1746,9 +1825,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     } => {
                         self.listeners.remove(&listener_id);
                         self.listening_addresses.remove(&address);
-                        if let Some(tx) = self.mapping_task.remove(&address) {
-                            let _ = tx.send(());
-                        }
                         self.listener_subscriptions
                             .finish_subscription(listener_id.into(), Ok(Some(None)));
                     }
@@ -1760,9 +1836,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         self.listeners.remove(&listener_id);
                         for address in addresses {
                             self.listening_addresses.remove(&address);
-                            if let Some(tx) = self.mapping_task.remove(&address) {
-                                let _ = tx.send(());
-                            }
                         }
                         let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
                         self.listener_subscriptions
@@ -2625,7 +2698,10 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                         let client = self.swarm.behaviour_mut().bitswap().client().clone();
                         let server = self.swarm.behaviour_mut().bitswap().server().cloned();
                         tokio::task::spawn(async move {
-                            let block = iroh_bitswap::Block::new(bytes::Bytes::copy_from_slice(block.data()), *block.cid());
+                            let block = iroh_bitswap::Block::new(
+                                bytes::Bytes::copy_from_slice(block.data()),
+                                *block.cid(),
+                            );
                             if let Err(err) = client.notify_new_blocks(&[block.clone()]).await {
                                 warn!("failed to notify bitswap about blocks: {:?}", err);
                             }
@@ -2642,29 +2718,6 @@ impl<TRepoTypes: RepoTypes> Future for IpfsFuture<TRepoTypes> {
                     }
                 }
             }
-
-            let pending_addr_list = self.mapping_pending.keys().cloned().collect::<Vec<_>>();
-
-            for address in pending_addr_list {
-                if let Entry::Occupied(mut entry) = self.mapping_pending.entry(address.clone()) {
-                    let result = {
-                        let (nat_rx, _) = entry.get_mut();
-                        match Pin::new(nat_rx).poll_unpin(ctx) {
-                            Poll::Ready(r) => Some(r),
-                            Poll::Pending => continue,
-                        }
-                    };
-
-                    if let Some(result) = result {
-                        let (_, tx) = entry.remove();
-                        if let Ok(Ok(_)) = result {
-                            self.mapping_task.insert(address.clone(), tx);
-                        }
-                    }
-                }
-            }
-
-            self.mapping_pending.shrink_to_fit();
 
             done = true;
         }
@@ -2742,7 +2795,7 @@ mod node {
             // given span
 
             let (ipfs, fut): (Ipfs<TestTypes>, _) =
-                UninitializedIpfs::new(opts).start().await.unwrap();
+                UninitializedIpfs::with_opt(opts).start().await.unwrap();
             let bg_task = tokio::task::spawn(fut);
             let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 

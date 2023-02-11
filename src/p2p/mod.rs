@@ -125,6 +125,8 @@ pub struct SwarmOptions {
     /// Kad store config
     /// Note: Only supports MemoryStoreConfig at this time
     pub kad_store_config: Option<KadStoreConfig>,
+    /// UPnP/PortMapping
+    pub portmapping: bool,
     /// Keep alive
     pub keep_alive: bool,
     /// Relay client
@@ -150,6 +152,8 @@ impl From<&IpfsOptions> for SwarmOptions {
 
         let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
+        let portmapping = options.port_mapping;
+
         SwarmOptions {
             keypair,
             peer_id,
@@ -165,6 +169,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             ping_config,
             keep_alive,
             identify_config,
+            portmapping,
         }
     }
 }

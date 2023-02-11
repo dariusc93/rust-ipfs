@@ -1,5 +1,5 @@
 use futures::join;
-use rust_ipfs::{Ipfs, IpfsOptions, IpfsPath, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsPath, TestTypes, UninitializedIpfs};
 use libipld::ipld;
 use tokio::task;
 
@@ -8,8 +8,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
-    let opts = IpfsOptions::inmemory_with_generated_keys();
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new(opts).start().await?;
+    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new().start().await?;
     task::spawn(fut);
 
     // Create a DAG
