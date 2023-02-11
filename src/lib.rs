@@ -2253,7 +2253,7 @@ impl<TRepoTypes: RepoTypes> IpfsFuture<TRepoTypes> {
                 old,
                 new,
             })) => {
-                //TODO: Use status to indicate if we should port forward or not
+                //TODO: Use status to indicate if we should use a relay or not
                 debug!("Old Nat Status: {:?}", old);
                 debug!("New Nat Status: {:?}", new);
             }
