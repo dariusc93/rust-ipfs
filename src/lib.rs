@@ -439,19 +439,7 @@ pub struct UninitializedIpfs<Types: IpfsTypes> {
 
 impl<Types: IpfsTypes> Default for UninitializedIpfs<Types> {
     fn default() -> Self {
-        let options = Default::default();
-        let repo_options = RepoOptions::from(&options);
-        let (repo, repo_events) = create_repo(repo_options);
-        let keys = options.keypair.clone();
-        let fdlimit = None;
-        UninitializedIpfs {
-            repo: Arc::new(repo),
-            keys,
-            options,
-            fdlimit,
-            repo_events,
-            swarm_event: None,
-        }
+        Self::with_opt(Default::default())
     }
 }
 
@@ -467,9 +455,18 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// operations done in the background task as well as tasks spawned by the underlying
     /// `libp2p::Swarm`.
     pub fn with_opt(options: IpfsOptions) -> Self {
-        let mut uninit = Self::new();
-        uninit.options = options;
-        uninit
+        let repo_options = RepoOptions::from(&options);
+        let (repo, repo_events) = create_repo(repo_options);
+        let keys = options.keypair.clone();
+        let fdlimit = None;
+        UninitializedIpfs {
+            repo: Arc::new(repo),
+            keys,
+            options,
+            fdlimit,
+            repo_events,
+            swarm_event: None,
+        }
     }
 
     /// Adds a listening address
