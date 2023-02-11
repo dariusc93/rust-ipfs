@@ -12,7 +12,7 @@ use libp2p::quic::Config as QuicConfig;
 use libp2p::relay::v2::client::transport::ClientTransport;
 use libp2p::swarm::derive_prelude::EitherOutput;
 use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
-use libp2p::yamux::YamuxConfig;
+use libp2p::yamux::{YamuxConfig, WindowUpdateMode};
 use libp2p::{PeerId, Transport};
 use std::io::{self, Error, ErrorKind};
 use std::time::Duration;
@@ -32,8 +32,18 @@ pub struct TransportConfig {
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
-            yamux_config: YamuxConfig::default(),
-            mplex_config: MplexConfig::new(),
+            yamux_config: {
+                let mut config = YamuxConfig::default();
+                config.set_max_buffer_size(16 * 1024 * 1024);
+                config.set_receive_window_size(16 * 1024 * 1024);
+                config.set_window_update_mode(WindowUpdateMode::on_receive());
+                config
+            },
+            mplex_config: {
+                let mut config = MplexConfig::default();
+                config.set_max_buffer_size(usize::MAX);
+                config
+            },
             no_delay: true,
             port_reuse: true,
             timeout: Duration::from_secs(30),
@@ -68,8 +78,7 @@ pub fn build_transport(
         .nodelay(no_delay)
         .port_reuse(port_reuse);
 
-    let mut quic_config = QuicConfig::new(&keypair);
-    quic_config.handshake_timeout = Duration::from_secs(1);
+    let quic_config = QuicConfig::new(&keypair);
     let quic_transport = TokioQuicTransport::new(quic_config);
 
     let tcp_transport = TokioTcpTransport::new(tcp_config.clone());
