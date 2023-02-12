@@ -273,11 +273,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 warn!("kad: timed out while trying to get providers for {}", key);
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(
-                        id.into(),
-                        Err("timed out while trying to get providers for the given key"
-                            .into()),
-                    );
+                                    self.kad_subscriptions.finish_subscription(id.into(),Err("timed out while trying to get providers for the given key".into()));
                                 }
                             }
                             StartProviding(Ok(AddProviderOk { key })) => {
@@ -594,7 +590,6 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             }
             IpfsEvent::Protocol(ret) => {
                 let info = self.swarm.behaviour().supported_protocols();
-
                 let _ = ret.send(info);
             }
             IpfsEvent::SwarmDial(opt, ret) => {
@@ -612,6 +607,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             IpfsEvent::Connections(ret) => {
                 let connections = self.swarm.behaviour_mut().connections();
                 ret.send(Ok(connections.collect())).ok();
+            }
+            IpfsEvent::IsConnected(peer_id, ret) => {
+                let connected = self.swarm.is_connected(&peer_id);
+                ret.send(Ok(connected)).ok();
             }
             IpfsEvent::Connected(ret) => {
                 let connections = self.swarm.connected_peers().cloned();

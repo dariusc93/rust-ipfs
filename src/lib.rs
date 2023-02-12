@@ -338,8 +338,10 @@ enum IpfsEvent {
     Listeners(Channel<Vec<Multiaddr>>),
     /// Connections
     Connections(Channel<Vec<Connection>>),
-    /// Connected ppers
+    /// Connected peers
     Connected(Channel<Vec<PeerId>>),
+    /// Is Connected
+    IsConnected(PeerId, Channel<bool>),
     /// Disconnect
     Disconnect(PeerId, Channel<()>),
     /// Ban Peer
@@ -1011,6 +1013,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Dials a peer using [`Swarm::dial`].
+    // TODO: Remove once improvements are done
     pub async fn dial(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
         async move {
             let opt = opt.into();
@@ -1055,6 +1058,20 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             self.to_task
                 .clone()
                 .send(IpfsEvent::Connections(tx))
+                .await?;
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Checks whether there is an established connection to a peer.
+    pub async fn is_connected(&self, peer_id: PeerId) -> Result<bool, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+            self.to_task
+                .clone()
+                .send(IpfsEvent::IsConnected(peer_id, tx))
                 .await?;
             rx.await?
         }
@@ -1169,9 +1186,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                         .clone()
                         .send(IpfsEvent::GetAddresses(tx))
                         .await?;
-                    let protocols = self.protocols().await?;
 
                     let mut addresses = rx.await?;
+                    let protocols = self.protocols().await?;
+
                     let public_key = self.keys.get_ref().public();
                     let peer_id = public_key.to_peer_id();
 
