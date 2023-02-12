@@ -582,7 +582,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             _ => trace!("Swarm event: {:?}", swarm_event),
         }
     }
-    //IpfsEvent::Exit,
+
     async fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {
