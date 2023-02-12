@@ -102,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
                     };
 
                     match flag {
-                        false => {
+                        true => {
                             if relay_used {
                                 writeln!(stdout, "Disabling Relay...")?;
                                 for addr in listening_addrs.drain(..) {
@@ -111,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
                                 relay_used = false;
                             }
                         }
-                        true => {
+                        false => {
                             if !relay_used {
                                 writeln!(stdout, "Enabling Relay...")?;
                                 for addr in ipfs.get_bootstraps().await? {
