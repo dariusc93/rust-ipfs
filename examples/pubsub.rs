@@ -1,10 +1,11 @@
 use clap::Parser;
-use futures::{pin_mut, FutureExt};
+use futures::{channel::mpsc, pin_mut, FutureExt};
 use libipld::ipld;
-use libp2p::futures::StreamExt;
-use rust_ipfs::{Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
+use libp2p::{futures::StreamExt, swarm::SwarmEvent};
+use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
 use rustyline_async::{Readline, ReadlineError};
-use std::io::Write;
+use std::{io::Write, sync::Arc};
+use tokio::sync::Notify;
 
 #[derive(Debug, Parser)]
 #[clap(name = "pubsub")]
@@ -15,6 +16,8 @@ struct Opt {
     disable_mdns: bool,
     #[clap(long)]
     disable_relay: bool,
+    #[clap(long)]
+    disable_upnp: bool,
     #[clap(long)]
     topic: Option<String>,
     #[clap(long)]
@@ -38,33 +41,93 @@ async fn main() -> anyhow::Result<()> {
         dcutr: !opt.disable_relay,
         // Used to connect to relays
         relay: !opt.disable_relay,
+        // used to attempt port forwarding
+        port_mapping: !opt.disable_upnp,
         ..Default::default()
     };
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts).start().await?;
+    let (tx, mut rx) = mpsc::unbounded();
+
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts)
+        .swarm_events({
+            move |_, event| {
+                if let SwarmEvent::Behaviour(BehaviourEvent::Autonat(
+                    libp2p::autonat::Event::StatusChanged { new, .. },
+                )) = event
+                {
+                    match new {
+                        libp2p::autonat::NatStatus::Public(_) => {
+                            let _ = tx.unbounded_send(true);
+                        }
+                        libp2p::autonat::NatStatus::Private
+                        | libp2p::autonat::NatStatus::Unknown => {
+                            let _ = tx.unbounded_send(false);
+                        }
+                    }
+                }
+            }
+        })
+        .start()
+        .await?;
+
+    ipfs.default_bootstrap().await?;
 
     let identity = ipfs.identity(None).await?;
     let peer_id = identity.peer_id;
     let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
 
     if !opt.disable_bootstrap {
-        ipfs.default_bootstrap().await?;
-        //Until autorelay is implemented and/or functions to use relay more directly, we will manually listen to the relays (using libp2p bootstrap, though you can add your own)
+        tokio::spawn({
+            let ipfs = ipfs.clone();
+            async move { if let Err(_e) = ipfs.bootstrap().await {} }
+        });
+    }
 
+    let cancel = Arc::new(Notify::new());
+    if !opt.disable_relay {
+        //Until autorelay is implemented and/or functions to use relay more directly, we will manually listen to the relays (using libp2p bootstrap, though you can add your own)
         tokio::spawn({
             let ipfs = ipfs.clone();
             let mut stdout = stdout.clone();
+            let cancel = cancel.clone();
             async move {
-                let list = ipfs.get_bootstraps().await?;
-                for addr in list {
-                    let circuit = addr.with(Protocol::P2pCircuit);
-                    if let Err(e) = ipfs.add_listening_address(circuit.clone()).await {
-                        writeln!(stdout, "Error listening to {circuit}: {e}")?;
+                let mut listening_addrs = vec![];
+                let mut relay_used = false;
+                loop {
+                    let flag = tokio::select! {
+                        flag = rx.next() => {
+                            flag.unwrap_or_default()
+                        },
+                        _ = cancel.notified() => break
+                    };
+
+                    match flag {
+                        false => {
+                            if relay_used {
+                                writeln!(stdout, "Disabling Relay...")?;
+                                for addr in listening_addrs.drain(..) {
+                                    if let Err(_e) = ipfs.remove_listening_address(addr).await {}
+                                }
+                                relay_used = false;
+                            }
+                        }
+                        true => {
+                            if !relay_used {
+                                writeln!(stdout, "Enabling Relay...")?;
+                                for addr in ipfs.get_bootstraps().await? {
+                                    let circuit = addr.with(Protocol::P2pCircuit);
+                                    if let Ok(addr) =
+                                        ipfs.add_listening_address(circuit.clone()).await
+                                    {
+                                        listening_addrs.push(addr)
+                                    }
+                                }
+                                relay_used = !listening_addrs.is_empty();
+                            }
+                        }
                     }
                 }
-                if ipfs.bootstrap().await?.await.is_err() {
-                    //Due to no peers added to kad, we will not be able to bootstrap
-                }
+
                 Ok::<_, anyhow::Error>(())
             }
         });
@@ -92,8 +155,14 @@ async fn main() -> anyhow::Result<()> {
                     }
                     writeln!(stdout, "{peer_id}: {line}")?;
                 }
-                Err(ReadlineError::Eof) => break,
-                Err(ReadlineError::Interrupted) => break,
+                Err(ReadlineError::Eof) => {
+                    cancel.notify_one();
+                    break
+                },
+                Err(ReadlineError::Interrupted) => {
+                    cancel.notify_one();
+                    break
+                },
                 Err(e) => {
                     writeln!(stdout, "Error: {e}")?;
                     writeln!(stdout, "Exiting...")?;
