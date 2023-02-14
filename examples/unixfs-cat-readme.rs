@@ -6,8 +6,7 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().spawn_start().await?;
-
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().start().await?;
     ipfs.default_bootstrap().await?;
 
     let mut stream = ipfs

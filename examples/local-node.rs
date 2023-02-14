@@ -22,15 +22,15 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts).spawn_start().await?;
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts).start().await?;
+
 
     if opt.bootstrap {
         ipfs.default_bootstrap().await?;
         ipfs.bootstrap().await?;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
-
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
+    
     let PeerInfo {
         public_key: key,
         listen_addrs: addresses,

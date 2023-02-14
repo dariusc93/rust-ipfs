@@ -171,7 +171,7 @@ pub struct IpldDag<Types: RepoTypes> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct DagOpt {
+pub struct DagPutOpt {
     pub pin: Option<DagPinOpt>,
     pub provided: bool,
 }
@@ -195,7 +195,7 @@ impl<Types: RepoTypes> IpldDag<Types> {
         &self,
         codec: IpldCodec,
         data: Ipld,
-        opt: Option<DagOpt>,
+        opt: Option<DagPutOpt>,
     ) -> Result<Cid, Error> {
         let bytes = codec.encode(&data)?;
         let hash = Code::Sha2_256.digest(&bytes);

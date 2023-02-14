@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().enable_mdns().spawn_start().await?;
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().enable_mdns().start().await?;
 
     if opt.default_bootstrap {
         ipfs.default_bootstrap().await?;
