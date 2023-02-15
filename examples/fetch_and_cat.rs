@@ -35,11 +35,9 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
 
     // Initialize the repo and start a daemon.
-    let (ipfs, fut): (Ipfs<TestTypes>, _) = UninitializedIpfs::new().start().await?;
+    // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().start().await?;
 
-    // The background task must be spawned to use anything other than the repository; most notably,
-    // the libp2p.
-    tokio::task::spawn(fut);
 
     if opt.default_bootstrappers {
         // applications wishing to find content on the global IPFS swarm should restore the latest

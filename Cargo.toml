@@ -6,7 +6,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.3.0-alpha.2"
+version = "0.3.0-alpha.3"
 
 [features]
 
@@ -32,7 +32,7 @@ futures = { default-features = false, version = "0.3", features = [
     "std",
 ] }
 hash_hasher = "2.0.3"
-rust-unixfs = { version = "0.3.0-alpha.2", path = "unixfs" }
+rust-unixfs = { version = "0.3.0-alpha.3", path = "unixfs" }
 libp2p = { default-features = false, features = [
     "gossipsub",
     "autonat",
