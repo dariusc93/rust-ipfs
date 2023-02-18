@@ -90,23 +90,17 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         let mut first_run = false;
         loop {
             tokio::select! {
-                swarm = self.swarm.next() => {
-                    if let Some(swarm) = swarm {
-                        self.handle_swarm_event(swarm).await;
-                    }
+                Some(swarm) = self.swarm.next() => {
+                    self.handle_swarm_event(swarm);
                 },
-                event = self.from_facade.next() => {
-                    if let Some(event) = event {
-                        if matches!(event, IpfsEvent::Exit) {
-                            break;
-                        }
-                        self.handle_event(event).await;
+                Some(event) = self.from_facade.next() => {
+                    if matches!(event, IpfsEvent::Exit) {
+                        break;
                     }
+                    self.handle_event(event);
                 },
-                repo = self.repo_events.next() => {
-                    if let Some(repo) = repo {
-                        self.handle_repo_event(repo).await;
-                    }
+                Some(repo) = self.repo_events.next() => {
+                    self.handle_repo_event(repo);
                 }
             }
             if !first_run {
@@ -116,7 +110,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         }
     }
 
-    async fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
+    fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
         if let Some(handler) = self.swarm_event.clone() {
             handler(&mut self.swarm, &swarm_event)
         }
@@ -583,7 +577,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         }
     }
 
-    async fn handle_event(&mut self, event: IpfsEvent) {
+    fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {
                 ret.send(self.swarm.behaviour_mut().connect(target)).ok();
@@ -956,7 +950,8 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             }
         }
     }
-    async fn handle_repo_event(&mut self, event: RepoEvent) {
+
+    fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
             RepoEvent::WantBlock(cid) => self.swarm.behaviour_mut().want_block(cid),
             RepoEvent::UnwantBlock(cid) => self.swarm.behaviour_mut().bitswap().cancel_block(&cid),
