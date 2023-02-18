@@ -1,13 +1,16 @@
 use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
-    channel::mpsc::{Receiver, UnboundedSender},
+    channel::{
+        mpsc::{Receiver, UnboundedSender},
+        oneshot,
+    },
     sink::SinkExt,
     stream::Fuse,
     StreamExt,
 };
 
-use crate::subscription::SubscriptionRegistry;
+use crate::{p2p::PeerInfo, Channel};
 use crate::{
     p2p::{ProviderStream, RecordStream},
     TSwarmEvent,
@@ -77,8 +80,9 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Arc<Repo<Types>>,
-    pub(crate) kad_subscriptions: SubscriptionRegistry<KadResult, String>,
-    pub(crate) listener_subscriptions: SubscriptionRegistry<Option<Option<Multiaddr>>, String>,
+    pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
+    pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
+    pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
     pub(crate) autonat_limit: Arc<AtomicU64>,
     pub(crate) autonat_counter: Arc<AtomicU64>,
     pub(crate) bootstraps: HashSet<MultiaddrWithPeerId>,
@@ -122,8 +126,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 self.listening_addresses
                     .insert(address.clone(), listener_id);
 
-                self.listener_subscriptions
-                    .finish_subscription(listener_id.into(), Ok(Some(Some(address))));
+                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
+                    let _ = ret.send(Ok(Some(Some(address))));
+                }
             }
             SwarmEvent::ExpiredListenAddr {
                 listener_id,
@@ -131,8 +136,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             } => {
                 self.listeners.remove(&listener_id);
                 self.listening_addresses.remove(&address);
-                self.listener_subscriptions
-                    .finish_subscription(listener_id.into(), Ok(Some(None)));
+                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
+                    let _ = ret.send(Ok(Some(None)));
+                }
             }
             SwarmEvent::ListenerClosed {
                 listener_id,
@@ -143,14 +149,16 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 for address in addresses {
                     self.listening_addresses.remove(&address);
                 }
-                let reason = reason.map(|_| Some(None)).map_err(|e| e.to_string());
-                self.listener_subscriptions
-                    .finish_subscription(listener_id.into(), reason);
+                let reason = reason.map(|_| Some(None)).map_err(anyhow::Error::from);
+                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
+                    let _ = ret.send(reason);
+                }
             }
             SwarmEvent::ListenerError { listener_id, error } => {
                 self.listeners.remove(&listener_id);
-                self.listener_subscriptions
-                    .finish_subscription(listener_id.into(), Err(error.to_string()));
+                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
+                    let _ = ret.send(Err(error.into()));
+                }
             }
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
                 MdnsEvent::Discovered(list) => {
@@ -187,8 +195,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 Bootstrap(Err(_)) | StartProviding(Err(_)) | PutRecord(Err(_)) => {}
                                 // and the rest can just return a general KadResult::Complete
                                 _ => {
-                                    self.kad_subscriptions
-                                        .finish_subscription(id.into(), Ok(KadResult::Complete));
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Ok(KadResult::Complete));
+                                    }
                                 }
                             }
                         }
@@ -207,33 +216,53 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 warn!("kad: timed out while trying to bootstrap");
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(
-                                        id.into(),
-                                        Err("kad: timed out while trying to bootstrap".into()),
-                                    );
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Err(anyhow::anyhow!(
+                                            "kad: timed out while trying to bootstrap"
+                                        )));
+                                    }
                                 }
                             }
-                            GetClosestPeers(Ok(GetClosestPeersOk { key: _, peers })) => {
+                            GetClosestPeers(Ok(GetClosestPeersOk { key, peers })) => {
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(
-                                        id.into(),
-                                        Ok(KadResult::Peers(peers)),
-                                    );
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Ok(KadResult::Peers(peers.clone())));
+                                    }
+                                    if let Ok(peer_id) = PeerId::from_bytes(&key) {
+                                        if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                                            if !peers.contains(&peer_id) {
+                                                for ret in rets {
+                                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                                        "Could not locate peer"
+                                                    )));
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             GetClosestPeers(Err(GetClosestPeersError::Timeout {
-                                key: _,
+                                key,
                                 peers: _,
                             })) => {
                                 // don't mention the key here, as this is just the id of our node
                                 warn!("kad: timed out while trying to find all closest peers");
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(
-                        id.into(),
-                        Err("timed out while trying to get providers for the given key"
-                            .into()),
-                    );
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Err(anyhow::anyhow!(
+                                            "timed out while trying to find all closest peers"
+                                        )));
+                                    }
+                                    if let Ok(peer_id) = PeerId::from_bytes(&key) {
+                                        if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                                            for ret in rets {
+                                                let _ = ret.send(Err(anyhow::anyhow!(
+                                                    "timed out while trying to find all closest peers"
+                                                )));
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             GetProviders(Ok(GetProvidersOk::FoundProviders {
@@ -267,7 +296,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 warn!("kad: timed out while trying to get providers for {}", key);
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(id.into(),Err("timed out while trying to get providers for the given key".into()));
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Err(anyhow::anyhow!("timed out while trying to get providers for the given key")));
+                                    }
                                 }
                             }
                             StartProviding(Ok(AddProviderOk { key })) => {
@@ -279,11 +310,11 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 warn!("kad: timed out while trying to provide {}", key);
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(
-                                        id.into(),
-                                        Err("kad: timed out while trying to provide the record"
-                                            .into()),
-                                    );
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Err(anyhow::anyhow!(
+                                            "kad: timed out while trying to provide the record"
+                                        )));
+                                    }
                                 }
                             }
                             RepublishProvider(Ok(AddProviderOk { key })) => {
@@ -375,11 +406,11 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 );
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(
-                                        id.into(),
-                                        Err("kad: quorum failed when trying to put the record"
-                                            .into()),
-                                    );
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Err(anyhow::anyhow!(
+                                            "kad: quorum failed when trying to put the record"
+                                        )));
+                                    }
                                 }
                             }
                             PutRecord(Err(PutRecordError::Timeout {
@@ -391,10 +422,12 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 warn!("kad: timed out while trying to put record {}", key);
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
-                                    self.kad_subscriptions.finish_subscription(
-                                        id.into(),
-                                        Err("kad: timed out while trying to put the record".into()),
-                                    );
+                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                        let _ = ret.send(Err(anyhow::anyhow!(
+                                            "kad: timed out while trying to put record {}",
+                                            key
+                                        )));
+                                    }
                                 }
                             }
                             RepublishRecord(Err(PutRecordError::Timeout {
@@ -523,6 +556,12 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         .behaviour_mut()
                         .swarm
                         .inject_identify_info(peer_id, info.clone());
+
+                    if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                        for ret in rets {
+                            let _ = ret.send(Ok(info.clone().into()));
+                        }
+                    }
 
                     let IdentifyInfo {
                         listen_addrs,
@@ -673,10 +712,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
                 Ok(id) => {
                     self.listeners.insert(id);
-                    let fut = self
-                        .listener_subscriptions
-                        .create_subscription(id.into(), None);
-                    let _ = ret.send(Ok(fut));
+                    let (tx, rx) = oneshot::channel();
+                    self.listener_subscriptions.insert(id, tx);
+                    let _ = ret.send(Ok(rx));
                 }
                 Err(e) => {
                     let _ = ret.send(Err(anyhow::anyhow!(e)));
@@ -691,10 +729,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         ))
                     } else {
                         self.listeners.remove(&id);
-                        let fut = self
-                            .listener_subscriptions
-                            .create_subscription(id.into(), None);
-                        Ok(fut)
+                        let (tx, rx) = oneshot::channel();
+                        self.listener_subscriptions.insert(id, tx);
+                        Ok(rx)
                     }
                 } else {
                     Err(format_err!("Address was not listened to before: {}", addr))
@@ -704,7 +741,11 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             }
             IpfsEvent::Bootstrap(ret) => {
                 let future = match self.swarm.behaviour_mut().kademlia.bootstrap() {
-                    Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                    Ok(id) => {
+                        let (tx, rx) = oneshot::channel();
+                        self.kad_subscriptions.insert(id, tx);
+                        Ok(rx)
+                    }
                     Err(e) => {
                         error!("kad: can't bootstrap the node: {:?}", e);
                         Err(anyhow!("kad: can't bootstrap the node: {:?}", e))
@@ -722,9 +763,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     .kademlia
                     .get_closest_peers(peer_id);
 
-                let future = self.kad_subscriptions.create_subscription(id.into(), None);
+                let (tx, rx) = oneshot::channel();
+                self.kad_subscriptions.insert(id, tx);
 
-                let _ = ret.send(future);
+                let _ = ret.send(rx);
             }
             IpfsEvent::GetBitswapPeers(ret) => {
                 let peers = self
@@ -737,30 +779,26 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     .collect();
                 let _ = ret.send(peers);
             }
-            IpfsEvent::FindPeerIdentity(peer_id, local_only, ret) => {
-                let locally_known = self
-                    .swarm
-                    .behaviour()
-                    .swarm
-                    .peers()
-                    .find(|(k, _)| peer_id.eq(k))
-                    .and_then(|(_, v)| v.clone())
-                    .map(|v| v.into());
+            IpfsEvent::FindPeerIdentity(peer_id, ret) => {
+                let locally_known = self.swarm.behaviour().swarm.get_identify_info(&peer_id);
 
-                let addrs = if locally_known.is_some() || local_only {
-                    Either::Left(locally_known)
-                } else {
-                    Either::Right({
-                        let id = self
-                            .swarm
+                let (tx, rx) = oneshot::channel();
+
+                match locally_known {
+                    Some(info) => {
+                        let _ = tx.send(Ok(PeerInfo::from(info)));
+                    }
+                    None => {
+                        self.swarm
                             .behaviour_mut()
                             .kademlia
                             .get_closest_peers(peer_id);
 
-                        self.kad_subscriptions.create_subscription(id.into(), None)
-                    })
-                };
-                let _ = ret.send(addrs);
+                        self.dht_peer_lookup.entry(peer_id).or_default().push(tx);
+                    }
+                }
+
+                let _ = ret.send(rx);
             }
             IpfsEvent::FindPeer(peer_id, local_only, ret) => {
                 let swarm_addrs = self.swarm.behaviour_mut().swarm.connections_to(&peer_id);
@@ -781,8 +819,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                             .behaviour_mut()
                             .kademlia
                             .get_closest_peers(peer_id);
-
-                        self.kad_subscriptions.create_subscription(id.into(), None)
+                        let (tx, rx) = oneshot::channel();
+                        self.kad_subscriptions.insert(id, tx);
+                        rx
                     })
                 };
                 let _ = ret.send(addrs);
@@ -806,7 +845,11 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             IpfsEvent::Provide(cid, ret) => {
                 let key = Key::from(cid.hash().to_bytes());
                 let future = match self.swarm.behaviour_mut().kademlia.start_providing(key) {
-                    Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                    Ok(id) => {
+                        let (tx, rx) = oneshot::channel();
+                        self.kad_subscriptions.insert(id, tx);
+                        Ok(rx)
+                    }
                     Err(e) => {
                         error!("kad: can't provide a key: {:?}", e);
                         Err(anyhow!("kad: can't provide the key: {:?}", e))
@@ -839,7 +882,11 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     .kademlia
                     .put_record(record, quorum)
                 {
-                    Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                    Ok(id) => {
+                        let (tx, rx) = oneshot::channel();
+                        self.kad_subscriptions.insert(id, tx);
+                        Ok(rx)
+                    }
                     Err(e) => {
                         error!("kad: can't put a record: {:?}", e);
                         Err(anyhow!("kad: can't provide the record: {:?}", e))
@@ -964,7 +1011,11 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 if false {
                     let key = Key::from(cid.hash().to_bytes());
                     let future = match self.swarm.behaviour_mut().kademlia.start_providing(key) {
-                        Ok(id) => Ok(self.kad_subscriptions.create_subscription(id.into(), None)),
+                        Ok(id) => {
+                            let (tx, rx) = oneshot::channel();
+                            self.kad_subscriptions.insert(id, tx);
+                            Ok(rx)
+                        }
                         Err(e) => {
                             error!("kad: can't provide a key: {:?}", e);
                             Err(anyhow!("kad: can't provide the key: {:?}", e))

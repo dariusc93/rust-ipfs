@@ -1,10 +1,10 @@
 use super::gossipsub::GossipsubStream;
+use futures::channel::oneshot;
 use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
-use crate::subscription::SubscriptionFuture;
 
 // use cid::Cid;
 use ipfs_bitswap::{Bitswap, BitswapEvent};
@@ -429,7 +429,7 @@ impl Behaviour {
     pub fn connect(
         &mut self,
         addr: MultiaddrWithPeerId,
-    ) -> Option<Option<SubscriptionFuture<(), String>>> {
+    ) -> Option<Option<oneshot::Receiver<Result<(), Error>>>> {
         self.swarm.connect(addr)
     }
 

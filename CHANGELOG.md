@@ -3,11 +3,13 @@
 - feat/upnp: Use libp2p-nat for handling port forwarding [PR 23]
 - refactor/task: Move swarm and events into a task [PR 25]
 - chore/: Remove async from event handling functions [PR 27]
+- refactor/subscription: Use channels instead of subscription [PR 28]
 
 [PR 23]: https://github.com/dariusc93/rust-ipfs/pull/23
 [PR 21]: https://github.com/dariusc93/rust-ipfs/pull/21
 [PR 25]: https://github.com/dariusc93/rust-ipfs/pull/25
 [PR 27]: https://github.com/dariusc93/rust-ipfs/pull/27
+[PR 28]: https://github.com/dariusc93/rust-ipfs/pull/28
 
 # 0.3.0-alpha.2
 - fix: Poll receiving oneshot channel directly [PR 20]

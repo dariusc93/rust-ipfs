@@ -42,7 +42,7 @@ use either::Either;
 use futures::{
     channel::{
         mpsc::{channel, Receiver, Sender},
-        oneshot::{channel as oneshot_channel, Sender as OneshotSender},
+        oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
     sink::SinkExt,
     stream::{BoxStream, Stream},
@@ -74,7 +74,6 @@ use self::{
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
     repo::{create_repo, Repo, RepoEvent, RepoOptions},
-    subscription::SubscriptionFuture,
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -320,7 +319,7 @@ impl<Types: IpfsTypes> Clone for Ipfs<Types> {
 }
 
 type Channel<T> = OneshotSender<Result<T, Error>>;
-
+type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 /// Events used internally to communicate with the swarm, which is executed in the the background
 /// task.
 #[derive(Debug)]
@@ -328,7 +327,7 @@ enum IpfsEvent {
     /// Connect
     Connect(
         MultiaddrWithPeerId,
-        OneshotSender<Option<Option<SubscriptionFuture<(), String>>>>,
+        OneshotSender<Option<Option<ReceiverChannel<()>>>>,
     ),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
@@ -367,35 +366,26 @@ enum IpfsEvent {
     SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(
         Multiaddr,
-        Channel<SubscriptionFuture<Option<Option<Multiaddr>>, String>>,
+        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
     ),
     RemoveListeningAddress(
         Multiaddr,
-        Channel<SubscriptionFuture<Option<Option<Multiaddr>>, String>>,
+        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
     ),
-    Bootstrap(Channel<SubscriptionFuture<KadResult, String>>),
+    Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Option<Multiaddr>),
-    GetClosestPeers(PeerId, OneshotSender<SubscriptionFuture<KadResult, String>>),
+    GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
-    FindPeerIdentity(
-        PeerId,
-        bool,
-        OneshotSender<Either<Option<PeerInfo>, SubscriptionFuture<KadResult, String>>>,
-    ),
+    FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
     FindPeer(
         PeerId,
         bool,
-        OneshotSender<Either<Vec<Multiaddr>, SubscriptionFuture<KadResult, String>>>,
+        OneshotSender<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
     ),
     GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
-    Provide(Cid, Channel<SubscriptionFuture<KadResult, String>>),
+    Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtGet(Key, OneshotSender<RecordStream>),
-    DhtPut(
-        Key,
-        Vec<u8>,
-        Quorum,
-        Channel<SubscriptionFuture<KadResult, String>>,
-    ),
+    DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
     AddBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
     RemoveBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
@@ -658,6 +648,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             listeners,
             provider_stream: HashMap::new(),
             record_stream: HashMap::new(),
+            dht_peer_lookup: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
@@ -1003,7 +994,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             let subscription = rx.await?;
 
             match subscription {
-                Some(Some(future)) => future.await.map_err(|e| anyhow!(e)),
+                Some(Some(future)) => future.await?,
                 Some(None) => futures::future::ready(Ok(())).await,
                 None => futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await,
             }
@@ -1151,34 +1142,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
                     self.to_task
                         .clone()
-                        .send(IpfsEvent::FindPeerIdentity(peer_id, false, tx))
+                        .send(IpfsEvent::FindPeerIdentity(peer_id, tx))
                         .await?;
 
-                    match rx.await? {
-                        Either::Left(info) => info.ok_or_else(|| {
-                            anyhow!("couldn't find peer {} identity information", peer_id)
-                        }),
-                        Either::Right(future) => {
-                            future.await?;
-
-                            let (tx, rx) = oneshot_channel();
-
-                            self.to_task
-                                .clone()
-                                .send(IpfsEvent::FindPeerIdentity(peer_id, true, tx))
-                                .await?;
-
-                            match rx.await? {
-                                Either::Left(info) => info.ok_or_else(|| {
-                                    anyhow!("couldn't find peer {} identity information", peer_id)
-                                }),
-                                _ => Err(anyhow!(
-                                    "couldn't find peer {} identity information",
-                                    peer_id
-                                )),
-                            }
-                        }
-                    }
+                    rx.await?.await?
                 }
                 None => {
                     let (tx, rx) = oneshot_channel();
@@ -1365,11 +1332,11 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                 .send(IpfsEvent::AddListeningAddress(addr, tx))
                 .await?;
 
-            rx.await?
+            rx.await.map_err(anyhow::Error::from)?
         }
         .instrument(self.span.clone())
         .await?
-        .await?
+        .await??
         .and_then(|addr| addr)
         .ok_or_else(|| anyhow::anyhow!("No multiaddr provided"))
     }
@@ -1391,7 +1358,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         }
         .instrument(self.span.clone())
         .await?
-        .await?
+        .await??
         .ok_or_else(|| anyhow::anyhow!("Error removing address"))
         .map(|_| ())
     }
@@ -1413,7 +1380,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                 Either::Left(addrs) if !addrs.is_empty() => Ok(addrs),
                 Either::Left(_) => unreachable!(),
                 Either::Right(future) => {
-                    future.await?;
+                    future.await??;
 
                     let (tx, rx) = oneshot_channel();
 
@@ -1480,7 +1447,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await?
         .await;
 
-        match kad_result {
+        match kad_result? {
             Ok(KadResult::Complete) => Ok(()),
             Ok(_) => unreachable!(),
             Err(e) => Err(anyhow!(e)),
@@ -1505,7 +1472,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await?
         .await;
 
-        match kad_result {
+        match kad_result? {
             Ok(KadResult::Peers(closest)) => Ok(closest),
             Ok(_) => unreachable!(),
             Err(e) => Err(anyhow!(e)),
@@ -1552,7 +1519,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await??
         .await;
 
-        match kad_result {
+        match kad_result? {
             Ok(KadResult::Complete) => Ok(()),
             Ok(_) => unreachable!(),
             Err(e) => Err(anyhow!(e)),
@@ -1701,7 +1668,8 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
         let fut = rx.await??;
 
-        let bootstrap_task = tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)) });
+        let bootstrap_task =
+            tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)).and_then(|res| res) });
 
         Ok(bootstrap_task)
     }
