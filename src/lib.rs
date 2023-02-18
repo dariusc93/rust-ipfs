@@ -74,7 +74,6 @@ use self::{
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
     repo::{create_repo, Repo, RepoEvent, RepoOptions},
-    subscription::SubscriptionFuture,
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -328,7 +327,7 @@ enum IpfsEvent {
     /// Connect
     Connect(
         MultiaddrWithPeerId,
-        OneshotSender<Option<Option<SubscriptionFuture<(), String>>>>,
+        OneshotSender<Option<Option<ReceiverChannel<()>>>>,
     ),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
@@ -995,7 +994,7 @@ impl<Types: IpfsTypes> Ipfs<Types> {
             let subscription = rx.await?;
 
             match subscription {
-                Some(Some(future)) => future.await.map_err(|e| anyhow!(e)),
+                Some(Some(future)) => future.await?,
                 Some(None) => futures::future::ready(Ok(())).await,
                 None => futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await,
             }

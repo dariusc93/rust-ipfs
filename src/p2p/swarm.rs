@@ -1,6 +1,8 @@
 use crate::p2p::{MultiaddrWithPeerId, MultiaddrWithoutPeerId};
-use crate::subscription::{SubscriptionFuture, SubscriptionRegistry};
+use crate::Channel;
+use anyhow::Error;
 use core::task::{Context, Poll};
+use futures::channel::oneshot;
 use libp2p::core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::swarm::{
@@ -34,7 +36,8 @@ pub struct SwarmApi {
 
     peers: HashMap<PeerId, Option<IdentifyInfo>>,
 
-    connect_registry: SubscriptionRegistry<(), String>,
+    // connect_registry: SubscriptionRegistry<(), String>,
+    connect_registry: HashMap<MultiaddrWithPeerId, Vec<Channel<()>>>,
     connections: HashMap<MultiaddrWithoutPeerId, PeerId>,
     roundtrip_times: HashMap<PeerId, Duration>,
     connected_peers: HashMap<PeerId, Vec<MultiaddrWithoutPeerId>>,
@@ -113,7 +116,7 @@ impl SwarmApi {
     pub fn connect(
         &mut self,
         addr: MultiaddrWithPeerId,
-    ) -> Option<Option<SubscriptionFuture<(), String>>> {
+    ) -> Option<Option<oneshot::Receiver<Result<(), Error>>>> {
         let connected_already = self
             .connected_peers
             .get(&addr.peer_id)
@@ -126,9 +129,12 @@ impl SwarmApi {
 
         trace!("Connecting to {:?}", addr);
 
-        let subscription = self
-            .connect_registry
-            .create_subscription(addr.clone().into(), None);
+        let (tx, rx) = oneshot::channel();
+
+        self.connect_registry
+            .entry(addr.clone())
+            .or_default()
+            .push(tx);
 
         let handler = self.new_handler();
         self.events.push_back(NetworkBehaviourAction::Dial {
@@ -146,7 +152,7 @@ impl SwarmApi {
             .or_insert_with(|| Vec::with_capacity(1))
             .push(addr);
 
-        Some(Some(subscription))
+        Some(Some(rx))
     }
 
     pub fn connections_to(&self, peer_id: &PeerId) -> Vec<Multiaddr> {
@@ -226,8 +232,11 @@ impl NetworkBehaviour for SwarmApi {
                             oe.remove();
                         }
 
-                        self.connect_registry
-                            .finish_subscription(address.into(), Ok(()));
+                        if let Some(rets) = self.connect_registry.remove(&address) {
+                            for ret in rets {
+                                let _ = ret.send(Ok(()));
+                            }
+                        }
                     }
                 }
                 Entry::Vacant(_) => {
@@ -259,10 +268,13 @@ impl NetworkBehaviour for SwarmApi {
             // inject_connection_established. while the whole swarmapi is quite unclear on the
             // actual use cases, assume that connecting one is good enough for all outstanding
             // connection requests.
-            self.connect_registry.finish_subscription(
-                addr.into(),
-                Err("finished connecting to another address".into()),
-            );
+            if let Some(rets) = self.connect_registry.remove(&addr) {
+                for ret in rets {
+                    let _ = ret.send(Err(anyhow::anyhow!(
+                        "finished connecting to another address"
+                    )));
+                }
+            }
         }
     }
 
@@ -327,10 +339,11 @@ impl NetworkBehaviour for SwarmApi {
                         // panic following inject_connection_established, inject_connection_closed
                         // if there's only the DummyConnectionHandler, which doesn't open a
                         // substream and closes up immediatedly.
-                        self.connect_registry.finish_subscription(
-                            addr.into(),
-                            Err("Connection reset by peer".to_owned()),
-                        );
+                        if let Some(rets) = self.connect_registry.remove(&addr) {
+                            for ret in rets {
+                                let _ = ret.send(Err(anyhow::anyhow!("Connection reset by peer")));
+                            }
+                        }
                     }
 
                     if connections.is_empty() {
@@ -366,10 +379,11 @@ impl NetworkBehaviour for SwarmApi {
                             for (addr, error) in multiaddrs {
                                 let addr = MultiaddrWithPeerId::try_from(addr.clone())
                                     .expect("to recieve an MultiAddrWithPeerId from DialError");
-                                self.connect_registry.finish_subscription(
-                                    addr.clone().into(),
-                                    Err(error.to_string()),
-                                );
+                                if let Some(rets) = self.connect_registry.remove(&addr) {
+                                    for ret in rets {
+                                        let _ = ret.send(Err(anyhow::anyhow!(error.to_string())));
+                                    }
+                                }
 
                                 if let Some(pos) = addresses.iter().position(|a| *a == addr) {
                                     addresses.swap_remove(pos);
@@ -378,10 +392,11 @@ impl NetworkBehaviour for SwarmApi {
                         }
                         DialError::WrongPeerId { .. } => {
                             for addr in addresses.iter() {
-                                self.connect_registry.finish_subscription(
-                                    addr.clone().into(),
-                                    Err(error.to_string()),
-                                );
+                                if let Some(rets) = self.connect_registry.remove(addr) {
+                                    for ret in rets {
+                                        let _ = ret.send(Err(anyhow::anyhow!(error.to_string())));
+                                    }
+                                }
                             }
 
                             addresses.clear();
@@ -439,10 +454,7 @@ fn connection_point_addr(cp: &ConnectedPoint) -> anyhow::Result<MultiaddrWithout
 mod tests {
     use super::*;
     use crate::p2p::transport::build_transport;
-    use futures::{
-        stream::{StreamExt, TryStreamExt},
-        TryFutureExt,
-    };
+    use futures::stream::StreamExt;
     use libp2p::identity::Keypair;
     use libp2p::swarm::SwarmEvent;
     use libp2p::{multiaddr::Protocol, multihash::Multihash, swarm::Swarm, swarm::SwarmBuilder};
@@ -496,7 +508,7 @@ mod tests {
                         // route would be good; it does however leave the special case of adding
                         // another connection, which does add even more complexity than it exists
                         // at the present.
-                        res.unwrap();
+                        res.unwrap().unwrap();
 
                         // just to confirm that there are no connections.
                         assert_eq!(Vec::<Multiaddr>::new(), swarm1.behaviour().connections_to(&peer2_id));
@@ -534,16 +546,14 @@ mod tests {
                     .with(peer3_id),
             )
             .unwrap()
-            .unwrap()
-            // remove the private type wrapper
-            .map_err(|e| e.into_inner());
+            .unwrap();
 
         loop {
             tokio::select! {
                 _ = swarm1.next() => {},
                 _ = swarm2.next() => {},
                 res = &mut fut => {
-                    let err = res.unwrap_err().unwrap();
+                    let err = res.unwrap().unwrap_err().to_string();
                     let expected_start = format!("Dial error: Unexpected peer ID {swarm1_peerid}");
                     assert_eq!(&err[0..expected_start.len()], expected_start);
                     return;
@@ -585,7 +595,8 @@ mod tests {
         connections.push_back(swarm2.behaviour_mut().connect(targets.1).unwrap().unwrap());
         let ready = connections
             // turn the private error type into Option
-            .map_err(|e| e.into_inner())
+            .filter_map(|ret| async move { ret.ok() })
+            .map(|ret| ret.map_err(|e| Some(e.to_string())))
             .collect::<Vec<_>>();
 
         tokio::pin!(ready);
