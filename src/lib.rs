@@ -377,11 +377,7 @@ enum IpfsEvent {
     AddPeer(PeerId, Option<Multiaddr>),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
-    FindPeerIdentity(
-        PeerId,
-        bool,
-        OneshotSender<Either<Option<PeerInfo>, ReceiverChannel<KadResult>>>,
-    ),
+    FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
     FindPeer(
         PeerId,
         bool,
@@ -1147,34 +1143,10 @@ impl<Types: IpfsTypes> Ipfs<Types> {
 
                     self.to_task
                         .clone()
-                        .send(IpfsEvent::FindPeerIdentity(peer_id, false, tx))
+                        .send(IpfsEvent::FindPeerIdentity(peer_id, tx))
                         .await?;
 
-                    match rx.await? {
-                        Either::Left(info) => info.ok_or_else(|| {
-                            anyhow!("couldn't find peer {} identity information", peer_id)
-                        }),
-                        Either::Right(future) => {
-                            future.await??;
-
-                            let (tx, rx) = oneshot_channel();
-
-                            self.to_task
-                                .clone()
-                                .send(IpfsEvent::FindPeerIdentity(peer_id, true, tx))
-                                .await?;
-
-                            match rx.await? {
-                                Either::Left(info) => info.ok_or_else(|| {
-                                    anyhow!("couldn't find peer {} identity information", peer_id)
-                                }),
-                                _ => Err(anyhow!(
-                                    "couldn't find peer {} identity information",
-                                    peer_id
-                                )),
-                            }
-                        }
-                    }
+                    rx.await?.await?
                 }
                 None => {
                     let (tx, rx) = oneshot_channel();

@@ -81,7 +81,7 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Arc<Repo<Types>>,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
-    pub(crate) dht_peer_lookup: HashMap<PeerId, Channel<PeerInfo>>,
+    pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
     pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
     pub(crate) autonat_limit: Arc<AtomicU64>,
     pub(crate) autonat_counter: Arc<AtomicU64>,
@@ -235,18 +235,20 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                         let _ = ret.send(Ok(KadResult::Peers(peers.clone())));
                                     }
                                     if let Ok(peer_id) = PeerId::from_bytes(&key) {
-                                        if let Some(ret) = self.dht_peer_lookup.remove(&peer_id) {
+                                        if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
                                             if !peers.contains(&peer_id) {
-                                                let _ = ret.send(Err(anyhow::anyhow!(
-                                                    "Could not locate peer"
-                                                )));
+                                                for ret in rets {
+                                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                                        "Could not locate peer"
+                                                    )));
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                             GetClosestPeers(Err(GetClosestPeersError::Timeout {
-                                key: _,
+                                key,
                                 peers: _,
                             })) => {
                                 // don't mention the key here, as this is just the id of our node
@@ -254,7 +256,18 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
 
                                 if self.swarm.behaviour().kademlia.query(&id).is_none() {
                                     if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Err(anyhow::anyhow!("timed out while trying to get providers for the given key")));
+                                        let _ = ret.send(Err(anyhow::anyhow!(
+                                            "timed out while trying to find all closest peers"
+                                        )));
+                                    }
+                                    if let Ok(peer_id) = PeerId::from_bytes(&key) {
+                                        if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                                            for ret in rets {
+                                                let _ = ret.send(Err(anyhow::anyhow!(
+                                                    "timed out while trying to find all closest peers"
+                                                )));
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -550,8 +563,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         .swarm
                         .inject_identify_info(peer_id, info.clone());
 
-                    if let Some(ret) = self.dht_peer_lookup.remove(&peer_id) {
-                        let _ = ret.send(Ok(info.clone().into()));
+                    if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                        for ret in rets {
+                            let _ = ret.send(Ok(info.clone().into()));
+                        }
                     }
 
                     let IdentifyInfo {
@@ -770,32 +785,26 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     .collect();
                 let _ = ret.send(peers);
             }
-            IpfsEvent::FindPeerIdentity(peer_id, local_only, ret) => {
-                let locally_known = self
-                    .swarm
-                    .behaviour()
-                    .swarm
-                    .peers()
-                    .find(|(k, _)| peer_id.eq(k))
-                    .and_then(|(_, v)| v.clone())
-                    .map(|v| v.into());
+            IpfsEvent::FindPeerIdentity(peer_id, ret) => {
+                let locally_known = self.swarm.behaviour().swarm.get_identify_info(&peer_id);
 
-                let addrs = if locally_known.is_some() || local_only {
-                    Either::Left(locally_known)
-                } else {
-                    Either::Right({
-                        let id = self
-                            .swarm
+                let (tx, rx) = oneshot::channel();
+
+                match locally_known {
+                    Some(info) => {
+                        let _ = tx.send(Ok(PeerInfo::from(info)));
+                    }
+                    None => {
+                        self.swarm
                             .behaviour_mut()
                             .kademlia
                             .get_closest_peers(peer_id);
 
-                        let (tx, rx) = oneshot::channel();
-                        self.kad_subscriptions.insert(id, tx);
-                        rx
-                    })
-                };
-                let _ = ret.send(addrs);
+                        self.dht_peer_lookup.entry(peer_id).or_default().push(tx);
+                    }
+                }
+
+                let _ = ret.send(rx);
             }
             IpfsEvent::FindPeer(peer_id, local_only, ret) => {
                 let swarm_addrs = self.swarm.behaviour_mut().swarm.connections_to(&peer_id);

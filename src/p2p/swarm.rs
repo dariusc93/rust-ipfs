@@ -80,6 +80,10 @@ impl SwarmApi {
         self.peers.values().filter_map(|s| s.as_ref())
     }
 
+    pub fn get_identify_info(&self, peer_id: &PeerId) -> Option<IdentifyInfo> {
+        self.peers.get(peer_id).cloned()?
+    }
+
     pub fn remove_peer(&mut self, peer_id: &PeerId) {
         self.peers.remove(peer_id);
     }
