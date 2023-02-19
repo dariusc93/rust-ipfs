@@ -23,7 +23,7 @@ use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
-    },
+    }, time::Duration,
 };
 
 use crate::{config::BOOTSTRAP_NODES, repo::BlockPut, IpfsEvent, IpfsTypes, TSwarmEventFn};
@@ -92,6 +92,7 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
 impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
     pub(crate) async fn run(&mut self, notify: Arc<Notify>) {
         let mut first_run = false;
+        let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
@@ -105,6 +106,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 },
                 Some(repo) = self.repo_events.next() => {
                     self.handle_repo_event(repo);
+                },
+                _ = connected_peer_timer.tick() => {
+                    info!("Connected Peers: {}", self.swarm.connected_peers().count());
                 }
             }
             if !first_run {
