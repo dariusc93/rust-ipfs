@@ -2,8 +2,8 @@
 use crate::error::Error;
 use crate::p2p::KadResult;
 use crate::path::IpfsPath;
-use crate::subscription::{RequestKind, SubscriptionFuture, SubscriptionRegistry};
-use crate::{Block, IpfsOptions};
+use crate::subscription::{RequestKind, SubscriptionRegistry};
+use crate::{Block, IpfsOptions, ReceiverChannel};
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -378,7 +378,7 @@ pub enum RepoEvent {
     /// Signals the posession of a new block.
     NewBlock(
         Block,
-        oneshot::Sender<Result<SubscriptionFuture<KadResult, String>, anyhow::Error>>,
+        oneshot::Sender<Result<ReceiverChannel<KadResult>, anyhow::Error>>,
     ),
     /// Signals the removal of a block.
     RemovedBlock(Cid),
@@ -479,7 +479,7 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
                 .ok();
 
             if let Ok(Ok(kad_subscription)) = rx.await {
-                kad_subscription.await?;
+                kad_subscription.await??;
             }
         }
 

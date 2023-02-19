@@ -1,12 +1,13 @@
 use super::gossipsub::GossipsubStream;
 use bytes::Bytes;
+
+use futures::channel::oneshot;
 use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
 use crate::repo::Repo;
-use crate::subscription::SubscriptionFuture;
 use crate::IpfsTypes;
 
 // use cid::Cid;
@@ -435,7 +436,7 @@ impl<TRepoTypes: IpfsTypes> Behaviour<TRepoTypes> {
     pub fn connect(
         &mut self,
         addr: MultiaddrWithPeerId,
-    ) -> Option<Option<SubscriptionFuture<(), String>>> {
+    ) -> Option<Option<oneshot::Receiver<Result<(), Error>>>> {
         self.swarm.connect(addr)
     }
 

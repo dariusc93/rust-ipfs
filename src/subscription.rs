@@ -231,6 +231,8 @@ impl<E: Debug + PartialEq> fmt::Display for SubscriptionErr<E> {
 
 impl<E: Debug + PartialEq> std::error::Error for SubscriptionErr<E> {}
 
+//TODO: Remove
+#[allow(dead_code)]
 impl<E: Debug + PartialEq> SubscriptionErr<E> {
     pub fn into_inner(self) -> Option<E> {
         use SubscriptionErr::*;
