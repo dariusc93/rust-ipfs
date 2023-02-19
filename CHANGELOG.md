@@ -1,4 +1,4 @@
-# 0.3.0-alpha.3 [unreleased]
+# 0.3.0-alpha.3
 - refactor/opt: Expanded UninitializedIpfs functionality [PR 21]
 - feat/upnp: Use libp2p-nat for handling port forwarding [PR 23]
 - refactor/task: Move swarm and events into a task [PR 25]
