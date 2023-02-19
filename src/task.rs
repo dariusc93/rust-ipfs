@@ -96,12 +96,14 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
+                    tokio::time::sleep(Duration::from_nanos(10)).await;
                     self.handle_swarm_event(swarm);
                 },
                 Some(event) = self.from_facade.next() => {
                     if matches!(event, IpfsEvent::Exit) {
                         break;
                     }
+                    tokio::time::sleep(Duration::from_nanos(10)).await;
                     self.handle_event(event);
                 },
                 Some(repo) = self.repo_events.next() => {
