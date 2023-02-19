@@ -1,36 +1,25 @@
-use clap::Parser;
-use rust_ipfs::{p2p::PeerInfo, Ipfs, IpfsOptions, PublicKey, TestTypes, UninitializedIpfs};
+use rust_ipfs::{p2p::PeerInfo, Ipfs, PublicKey, TestTypes, UninitializedIpfs};
 use tokio::sync::Notify;
-
-#[derive(Debug, Parser)]
-#[clap(name = "local-node")]
-struct Opt {
-    #[clap(long)]
-    portmapping: bool,
-    #[clap(long)]
-    bootstrap: bool,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let opt = Opt::parse();
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
-    let opts = IpfsOptions {
-        port_mapping: opt.portmapping,
-        ..Default::default()
-    };
+    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new()
+        .enable_mdns()
+        .enable_relay(true)
+        .enable_relay_server(None)
+        .enable_upnp()
+        .start()
+        .await?;
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts).start().await?;
+    ipfs.default_bootstrap().await?;
+    ipfs.bootstrap().await?;
 
+    // Used to give more time after bootstrapping
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    if opt.bootstrap {
-        ipfs.default_bootstrap().await?;
-        ipfs.bootstrap().await?;
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
-    
     let PeerInfo {
         public_key: key,
         listen_addrs: addresses,
