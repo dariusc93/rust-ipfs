@@ -408,6 +408,7 @@ pub struct UninitializedIpfs<Types: IpfsTypes> {
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
+    delay: bool,
     repo_events: Receiver<RepoEvent>,
     swarm_event: Option<TSwarmEventFn>,
 }
@@ -434,11 +435,13 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let (repo, repo_events) = create_repo(repo_options);
         let keys = options.keypair.clone();
         let fdlimit = None;
+        let delay = false;
         UninitializedIpfs {
             repo: Arc::new(repo),
             keys,
             options,
             fdlimit,
+            delay,
             repo_events,
             swarm_event: None,
         }
@@ -546,6 +549,13 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         self
     }
 
+    /// Used to delay the loop
+    /// Note: This may be removed in future 
+    pub fn enable_delay(mut self) -> Self {
+        self.delay = true;
+        self
+    }
+
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
     where
@@ -562,6 +572,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             keys,
             repo_events,
             fdlimit,
+            delay,
             mut options,
             swarm_event,
         } = self;
@@ -603,7 +614,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             }
             #[cfg(not(unix))]
             {
-                warn!("Can only set a fd limit on unix systems. Ignoring...")
+                warn!("Cannot set {limit:?}. Can only set a fd limit on unix systems. Ignoring...")
             }
         }
 
@@ -669,7 +680,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         tokio::spawn({
             let notify = notify.clone();
             async move {
-                fut.run(notify).instrument(swarm_span).await;
+                fut.run(delay, notify).instrument(swarm_span).await;
             }
         });
         notify.notified().await;

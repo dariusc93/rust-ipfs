@@ -3,7 +3,7 @@ authors = ["Rust-IPFS contributors"]
 description = "Bitswap protocol implementation used in ipfs"
 edition = "2021"
 name = "rust-ipfs-bitswap"
-version = "0.3.0-alpha.3"
+version = "0.3.0-alpha.4"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dariusc93/rust-ipfs"
 
