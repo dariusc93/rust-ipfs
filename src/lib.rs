@@ -435,7 +435,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         let (repo, repo_events) = create_repo(repo_options);
         let keys = options.keypair.clone();
         let fdlimit = None;
-        let delay = false;
+        let delay = true;
         UninitializedIpfs {
             repo: Arc::new(repo),
             keys,
@@ -551,8 +551,8 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
 
     /// Used to delay the loop
     /// Note: This may be removed in future 
-    pub fn enable_delay(mut self) -> Self {
-        self.delay = true;
+    pub fn disable_delay(mut self) -> Self {
+        self.delay = false;
         self
     }
 
