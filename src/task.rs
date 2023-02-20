@@ -90,20 +90,24 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
 }
 
 impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
-    pub(crate) async fn run(&mut self, notify: Arc<Notify>) {
+    pub(crate) async fn run(&mut self, delay: bool, notify: Arc<Notify>) {
         let mut first_run = false;
         let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
-                    tokio::time::sleep(Duration::from_nanos(10)).await;
+                    if delay {
+                        tokio::time::sleep(Duration::from_nanos(10)).await;
+                    }
                     self.handle_swarm_event(swarm);
                 },
                 Some(event) = self.from_facade.next() => {
                     if matches!(event, IpfsEvent::Exit) {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_nanos(10)).await;
+                    if delay {
+                        tokio::time::sleep(Duration::from_nanos(10)).await;
+                    }
                     self.handle_event(event);
                 },
                 Some(repo) = self.repo_events.next() => {
