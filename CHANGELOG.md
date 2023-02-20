@@ -1,3 +1,8 @@
+# 0.3.0-alpha.4 [unreleased]
+- chore/: Add small delay before processing events [PR 29]
+
+[PR 29]: https://github.com/dariusc93/rust-ipfs/pull/29
+
 # 0.3.0-alpha.3
 - refactor/opt: Expanded UninitializedIpfs functionality [PR 21]
 - feat/upnp: Use libp2p-nat for handling port forwarding [PR 23]
