@@ -1,4 +1,4 @@
-# 0.3.0-alpha.4 [unreleased]
+# 0.3.0-alpha.4
 - chore/: Add small delay before processing events [PR 29]
 
 [PR 29]: https://github.com/dariusc93/rust-ipfs/pull/29
