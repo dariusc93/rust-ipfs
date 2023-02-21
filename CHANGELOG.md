@@ -1,3 +1,6 @@
+# 0.3.0-alpha.5
+- fix/: Add debug derive to FDLimit
+
 # 0.3.0-alpha.4
 - chore/: Add small delay before processing events [PR 29]
 
