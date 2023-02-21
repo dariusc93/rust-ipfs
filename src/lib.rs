@@ -397,6 +397,7 @@ enum IpfsEvent {
 type TSwarmEvent = <TSwarm as Stream>::Item;
 type TSwarmEventFn = Arc<dyn Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send>;
 
+#[derive(Debug, Copy, Clone)]
 pub enum FDLimit {
     Max,
     Custom(u64),
