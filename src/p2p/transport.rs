@@ -1,3 +1,4 @@
+use futures::future::Either;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
@@ -9,10 +10,9 @@ use libp2p::mplex::MplexConfig;
 use libp2p::noise::{self, NoiseConfig};
 use libp2p::quic::tokio::Transport as TokioQuicTransport;
 use libp2p::quic::Config as QuicConfig;
-use libp2p::relay::v2::client::transport::ClientTransport;
-use libp2p::swarm::derive_prelude::EitherOutput;
+use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
-use libp2p::yamux::{YamuxConfig, WindowUpdateMode};
+use libp2p::yamux::{WindowUpdateMode, YamuxConfig};
 use libp2p::{PeerId, Transport};
 use std::io::{self, Error, ErrorKind};
 use std::time::Duration;
@@ -120,8 +120,8 @@ pub fn build_transport(
 
     let transport = OrTransport::new(quic_transport, transport)
         .map(|either_output, _| match either_output {
-            EitherOutput::First((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-            EitherOutput::Second((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+            Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+            Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
         })
         .boxed();
 

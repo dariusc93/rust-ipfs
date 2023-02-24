@@ -12,10 +12,14 @@ use fnv::{FnvHashMap, FnvHashSet};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use hash_hasher::HashedMap;
 use libipld::Cid;
-use libp2p_core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
+use libp2p_core::{Multiaddr, PeerId};
+use libp2p_swarm::derive_prelude::ConnectionEstablished;
 use libp2p_swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p_swarm::handler::OneShotHandler;
-use libp2p_swarm::{NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, PollParameters};
+use libp2p_swarm::{
+    ConnectionClosed, ConnectionId, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler,
+    PollParameters,
+};
 use std::task::{Context, Poll};
 use std::{
     collections::{HashMap, VecDeque},
@@ -87,13 +91,7 @@ impl Stats {
 /// Network behaviour that handles sending and receiving IPFS blocks.
 pub struct Bitswap {
     /// Queue of events to report to the user.
-    events: VecDeque<
-        NetworkBehaviourAction<
-            BitswapEvent,
-            <Bitswap as NetworkBehaviour>::ConnectionHandler,
-            Message,
-        >,
-    >,
+    events: VecDeque<NetworkBehaviourAction<BitswapEvent, Message>>,
     /// List of prospect peers to connect to.
     target_peers: FnvHashSet<PeerId>,
 
@@ -159,12 +157,10 @@ impl Bitswap {
     /// Called from Kademlia behaviour.
     pub fn connect(&mut self, peer_id: PeerId) {
         if self.target_peers.insert(peer_id) {
-            let handler = self.new_handler();
             self.events.push_back(NetworkBehaviourAction::Dial {
                 opts: DialOpts::peer_id(peer_id)
                     .condition(PeerCondition::Disconnected)
                     .build(),
-                handler,
             });
         }
     }
@@ -234,39 +230,62 @@ impl NetworkBehaviour for Bitswap {
         Vec::new()
     }
 
-    fn inject_connection_established(
-        &mut self,
-        peer_id: &PeerId,
-        connection_id: &ConnectionId,
-        _endpoint: &ConnectedPoint,
-        _failed_addresses: Option<&Vec<Multiaddr>>,
-        _other_established: usize,
-    ) {
-        debug!("bitswap: inject_connected {}", peer_id);
-        self.target_peers.remove(peer_id);
-        let ledger = Ledger::new();
-        self.stats.entry(*peer_id).or_default();
-        self.connected_peers.insert(*peer_id, ledger);
-        self.peer_connection_id.insert(*peer_id, *connection_id);
-        self.send_want_list(*peer_id);
+    fn on_swarm_event(&mut self, event: libp2p_swarm::FromSwarm<Self::ConnectionHandler>) {
+        match event {
+            libp2p_swarm::FromSwarm::ConnectionEstablished(ConnectionEstablished {
+                peer_id,
+                connection_id,
+                ..
+            }) => {
+                debug!("bitswap: inject_connected {}", peer_id);
+                self.target_peers.remove(&peer_id);
+                let ledger = Ledger::new();
+                self.stats.entry(peer_id).or_default();
+                self.connected_peers.insert(peer_id, ledger);
+                self.peer_connection_id.insert(peer_id, connection_id);
+                self.send_want_list(peer_id);
+            }
+            libp2p_swarm::FromSwarm::ConnectionClosed(ConnectionClosed { peer_id, .. }) => {
+                debug!("bitswap: inject_disconnected {:?}", peer_id);
+                self.connected_peers.remove(&peer_id);
+                self.peer_connection_id.remove(&peer_id);
+            }
+            _ => {}
+        }
     }
 
-    fn inject_connection_closed(
-        &mut self,
-        peer_id: &PeerId,
-        _connection_id: &ConnectionId,
-        _endpoint: &ConnectedPoint,
-        _handler: Self::ConnectionHandler,
-        _remaining_established: usize,
-    ) {
-        debug!("bitswap: inject_disconnected {:?}", peer_id);
-        self.connected_peers.remove(peer_id);
-        self.peer_connection_id.remove(peer_id);
-        // the related stats are not dropped, so that they
-        // persist for peers regardless of disconnects
-    }
+    // fn inject_connection_established(
+    //     &mut self,
+    //     peer_id: &PeerId,
+    //     connection_id: &ConnectionId,
+    //     _endpoint: &ConnectedPoint,
+    //     _failed_addresses: Option<&Vec<Multiaddr>>,
+    //     _other_established: usize,
+    // ) {
 
-    fn inject_event(&mut self, source: PeerId, _connection: ConnectionId, message: MessageWrapper) {
+    // }
+
+    // fn inject_connection_closed(
+    //     &mut self,
+    //     peer_id: &PeerId,
+    //     _connection_id: &ConnectionId,
+    //     _endpoint: &ConnectedPoint,
+    //     _handler: Self::ConnectionHandler,
+    //     _remaining_established: usize,
+    // ) {
+    //     debug!("bitswap: inject_disconnected {:?}", peer_id);
+    //     self.connected_peers.remove(peer_id);
+    //     self.peer_connection_id.remove(peer_id);
+    //     // the related stats are not dropped, so that they
+    //     // persist for peers regardless of disconnects
+    // }
+
+    fn on_connection_handler_event(
+        &mut self,
+        source: PeerId,
+        _connection: ConnectionId,
+        message: MessageWrapper,
+    ) {
         let mut message = match message {
             // we just sent an outgoing bitswap message, nothing to do here
             // FIXME: we could commit any pending stats accounting for this peer now
@@ -275,7 +294,7 @@ impl NetworkBehaviour for Bitswap {
             // we've received a bitswap message, process it
             MessageWrapper::Rx(msg) => msg,
         };
-        
+
         debug!("bitswap: inject_event from {}: {:?}", source, message);
 
         let current_wantlist = self.local_wantlist();
@@ -331,7 +350,7 @@ impl NetworkBehaviour for Bitswap {
         &mut self,
         ctx: &mut Context,
         _: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<Self::OutEvent, Self::ConnectionHandler>> {
+    ) -> Poll<NetworkBehaviourAction<Self::OutEvent, Message>> {
         use futures::stream::StreamExt;
 
         if let Some(event) = self.events.pop_front() {

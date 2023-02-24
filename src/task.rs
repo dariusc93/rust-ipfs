@@ -23,7 +23,8 @@ use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
-    }, time::Duration,
+    },
+    time::Duration,
 };
 
 use crate::{config::BOOTSTRAP_NODES, repo::BlockPut, IpfsEvent, IpfsTypes, TSwarmEventFn};
@@ -45,7 +46,7 @@ use libipld::multibase::{self, Base};
 pub use libp2p::{
     self,
     core::transport::ListenerId,
-    gossipsub::{error::PublishError, MessageId},
+    gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},
@@ -626,6 +627,8 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         }
     }
 
+    #[allow(deprecated)]
+    //TODO: Replace addresses_of_peer
     fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {

@@ -93,7 +93,7 @@ use libipld::{Cid, Ipld, IpldCodec};
 pub use libp2p::{
     self,
     core::transport::ListenerId,
-    gossipsub::{error::PublishError, MessageId},
+    gossipsub::{PublishError, MessageId},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},

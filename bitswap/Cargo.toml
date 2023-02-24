@@ -15,8 +15,8 @@ libipld = "0.15"
 fnv = { default-features = false, version = "1.0" }
 futures = { default-features = false, version = "0.3" }
 hash_hasher = "2.0.3"
-libp2p-core = { default-features = false, version = "0.38.0" }
-libp2p-swarm = { default-features = false, version = "0.41.0" }
+libp2p-core = { default-features = false, version = "0.39.0" }
+libp2p-swarm = { default-features = false, version = "0.42.0" }
 prost = { default-features = false, version = "0.11" }
 thiserror = { default-features = false, version = "1.0" }
 tokio = { default-features = false, version = "1", features = ["rt"] }
