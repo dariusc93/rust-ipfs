@@ -1,3 +1,6 @@
+# 0.3.0-alpha.6
+- chore: Disable quic-v1 until 0.51 update
+
 # 0.3.0-alpha.5
 - fix/: Add debug derive to FDLimit
 
