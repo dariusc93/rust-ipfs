@@ -43,7 +43,7 @@ libp2p = { default-features = false, features = [
     "websocket",
     "tcp",
     "macros",
-    "quic",
+    # "quic",
     "tokio",
     "mplex",
     "noise",
