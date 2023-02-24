@@ -228,9 +228,9 @@ impl Default for IpfsOptions {
             identify_configuration: Default::default(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
-                // "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+                "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
                 "/ip6/::/tcp/0".parse().unwrap(),
-                // "/ip6/::/udp/0/quic-v1".parse().unwrap(),
+                "/ip6/::/udp/0/quic-v1".parse().unwrap(),
             ],
             port_mapping: false,
             transport_configuration: None,
