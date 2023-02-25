@@ -272,9 +272,9 @@ impl PinStore for FsDataStore {
 
                 if mode == PinMode::Recursive {
                     if collect_recursive_for_indirect {
-                        recursive.insert(cid.clone());
+                        recursive.insert(cid);
                     }
-                    if matches && returned.insert(cid.clone()) {
+                    if matches && returned.insert(cid) {
                         // the recursive pins can always be returned right away since they have
                         // the highest priority in this listing or output
                         yield (cid, mode);
@@ -290,7 +290,7 @@ impl PinStore for FsDataStore {
             // of directly pinned and recursively pinned should be disjoint, but probably there
             // are times when 100% accurate results are not possible... Nor needed.
             for cid in direct {
-                if returned.insert(cid.clone()) {
+                if returned.insert(cid) {
                     yield (cid, PinMode::Direct)
                 }
             }
@@ -310,7 +310,7 @@ impl PinStore for FsDataStore {
 
             while let Some((_, next_batch)) = StreamExt::try_next(&mut recursive).await? {
                 for indirect in next_batch {
-                    if returned.insert(indirect.clone()) {
+                    if returned.insert(indirect) {
                         yield (indirect, PinMode::Indirect);
                     }
                 }

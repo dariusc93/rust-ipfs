@@ -220,7 +220,7 @@ pub async fn create_swarm(
     )
     .connection_limits(swarm_config.connection)
     .notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
-    .connection_event_buffer_size(swarm_config.connection_event_buffer_size)
+    .per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
     .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
     .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
     .build();

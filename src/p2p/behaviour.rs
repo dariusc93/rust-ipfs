@@ -11,8 +11,8 @@ use ipfs_bitswap::{Bitswap, BitswapEvent};
 use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::{Multiaddr, PeerId};
-use libp2p::dcutr::behaviour::{Behaviour as Dcutr, Event as DcutrEvent};
-use libp2p::gossipsub::GossipsubEvent;
+use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
+use libp2p::gossipsub::Event as GossipsubEvent;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
 use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
@@ -21,9 +21,9 @@ use libp2p::kad::record::{
 use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
 use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
-use libp2p::relay::v2::client::transport::ClientTransport;
-use libp2p::relay::v2::client::{Client as RelayClient, Event as RelayClientEvent};
-use libp2p::relay::v2::relay::{rate_limiter, Event as RelayEvent, Relay};
+use libp2p::relay::client::{self, Transport as ClientTransport};
+use libp2p::relay::client::{Behaviour as RelayClient, Event as RelayClientEvent};
+use libp2p::relay::{Behaviour as Relay, Event as RelayEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
@@ -192,69 +192,70 @@ impl IdentifyConfiguration {
     }
 }
 
-impl From<RelayConfig> for libp2p::relay::v2::relay::Config {
-    fn from(
-        RelayConfig {
-            max_reservations,
-            max_reservations_per_peer,
-            reservation_duration,
-            reservation_rate_limiters,
-            max_circuits,
-            max_circuits_per_peer,
-            max_circuit_duration,
-            max_circuit_bytes,
-            circuit_src_rate_limiters,
-        }: RelayConfig,
-    ) -> Self {
-        let reservation_rate_limiters = reservation_rate_limiters
-            .iter()
-            .map(|rate| match rate {
-                RateLimit::PerPeer { limit, interval } => {
-                    rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
-                        limit: *limit,
-                        interval: *interval,
-                    })
-                }
-                RateLimit::PerIp { limit, interval } => {
-                    rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
-                        limit: *limit,
-                        interval: *interval,
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
+// impl From<RelayConfig> for libp2p::relay::Config {
+//     fn from(
+//         RelayConfig {
+//             max_reservations,
+//             max_reservations_per_peer,
+//             reservation_duration,
+//             reservation_rate_limiters,
+//             max_circuits,
+//             max_circuits_per_peer,
+//             max_circuit_duration,
+//             max_circuit_bytes,
+//             circuit_src_rate_limiters,
+//         }: RelayConfig,
+//     ) -> Self {
+//         unimplemented!()
+//         // let reservation_rate_limiters = reservation_rate_limiters
+//         //     .iter()
+//         //     .map(|rate| match rate {
+//         //         RateLimit::PerPeer { limit, interval } => {
+//         //             rate_limiter::new_per_peer(rate_limiter::generic::GenericRateLimiterConfig {
+//         //                 limit: *limit,
+//         //                 interval: *interval,
+//         //             })
+//         //         }
+//         //         RateLimit::PerIp { limit, interval } => {
+//         //             rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
+//         //                 limit: *limit,
+//         //                 interval: *interval,
+//         //             })
+//         //         }
+//         //     })
+//         //     .collect::<Vec<_>>();
 
-        let circuit_src_rate_limiters = circuit_src_rate_limiters
-            .iter()
-            .map(|rate| match rate {
-                RateLimit::PerPeer { limit, interval } => {
-                    rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
-                        limit: *limit,
-                        interval: *interval,
-                    })
-                }
-                RateLimit::PerIp { limit, interval } => {
-                    rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
-                        limit: *limit,
-                        interval: *interval,
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
+//         // let circuit_src_rate_limiters = circuit_src_rate_limiters
+//         //     .iter()
+//         //     .map(|rate| match rate {
+//         //         RateLimit::PerPeer { limit, interval } => {
+//         //             rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
+//         //                 limit: *limit,
+//         //                 interval: *interval,
+//         //             })
+//         //         }
+//         //         RateLimit::PerIp { limit, interval } => {
+//         //             rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
+//         //                 limit: *limit,
+//         //                 interval: *interval,
+//         //             })
+//         //         }
+//         //     })
+//         //     .collect::<Vec<_>>();
 
-        libp2p::relay::v2::relay::Config {
-            max_reservations,
-            max_reservations_per_peer,
-            reservation_duration,
-            reservation_rate_limiters,
-            max_circuits,
-            max_circuits_per_peer,
-            max_circuit_duration,
-            max_circuit_bytes,
-            circuit_src_rate_limiters,
-        }
-    }
-}
+//         // libp2p::relay::Config {
+//         //     max_reservations,
+//         //     max_reservations_per_peer,
+//         //     reservation_duration,
+//         //     reservation_rate_limiters,
+//         //     max_circuits,
+//         //     max_circuits_per_peer,
+//         //     max_circuit_duration,
+//         //     max_circuit_bytes,
+//         //     circuit_src_rate_limiters,
+//         // }
+//     }
+// }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum RateLimit {
@@ -285,7 +286,7 @@ impl Behaviour {
                 enable_ipv6: options.mdns_ipv6,
                 ..Default::default()
             };
-            Mdns::new(config).ok()
+            Mdns::new(config, peer_id).ok()
         } else {
             None
         }
@@ -334,11 +335,11 @@ impl Behaviour {
         );
 
         let pubsub = {
-            let config = libp2p::gossipsub::GossipsubConfigBuilder::default()
+            let config = libp2p::gossipsub::ConfigBuilder::default()
                 .max_transmit_size(512 * 1024)
                 .build()
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            let gossipsub = libp2p::gossipsub::Gossipsub::new(
+            let gossipsub = libp2p::gossipsub::Behaviour::new(
                 libp2p::gossipsub::MessageAuthenticity::Signed(options.keypair),
                 config,
             )
@@ -349,23 +350,28 @@ impl Behaviour {
         let swarm = SwarmApi::default();
 
         // Maybe have this enable in conjunction with RelayClient?
-        let dcutr = Toggle::from(options.dcutr.then(Dcutr::new));
-        let relay_config = options
-            .relay_server_config
-            .map(|rc| rc.into())
-            .unwrap_or_default();
+        let dcutr = Toggle::from(options.dcutr.then_some(Dcutr::new(peer_id)));
+        //TODO: Fix RelayConfig
+        // let relay_config = options
+        //     .relay_server_config
+        //     .map(|rc| rc.into())
+        //     .unwrap_or_default();
 
         let relay = Toggle::from(
             options
                 .relay_server
-                .then(|| Relay::new(peer_id, relay_config)),
+                .then(|| Relay::new(peer_id, Default::default())),
         );
 
-        let upnp = Toggle::from(options.portmapping.then_some(libp2p_nat::Behaviour::new().await?));
+        let upnp = Toggle::from(
+            options
+                .portmapping
+                .then_some(libp2p_nat::Behaviour::new().await?),
+        );
 
         let (transport, relay_client) = match options.relay {
             true => {
-                let (transport, client) = RelayClient::new_transport_and_behaviour(peer_id);
+                let (transport, client) = client::new(peer_id);
                 (Some(transport), Some(client).into())
             }
             false => (None, None.into()),
@@ -407,6 +413,7 @@ impl Behaviour {
         // TODO self.bitswap.remove_peer(&peer);
     }
 
+    #[allow(deprecated)]
     pub fn addrs(&mut self) -> Vec<(PeerId, Vec<Multiaddr>)> {
         let peers = self
             .swarm

@@ -57,7 +57,6 @@ macro_rules! pinstore_interface_tests {
             use std::convert::TryFrom;
 
             #[tokio::test]
-            #[ignore = "Will evaluate"]
             async fn pin_direct_twice_is_good() {
                 let repo = DSTestContext::with($factory).await;
 
