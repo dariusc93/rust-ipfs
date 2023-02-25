@@ -14,7 +14,7 @@ use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
 use libp2p::yamux::{WindowUpdateMode, YamuxConfig};
 use libp2p::{PeerId, Transport};
-use std::io::{self, Error, ErrorKind};
+use std::io;
 use std::time::Duration;
 
 /// Transport type.
@@ -105,7 +105,6 @@ pub fn build_transport(
                 .multiplex(multiplex_upgrade)
                 .timeout(timeout)
                 .map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer)))
-                .map_err(|err| Error::new(ErrorKind::Other, err))
                 .boxed()
         }
         None => transport
@@ -114,7 +113,6 @@ pub fn build_transport(
             .multiplex(multiplex_upgrade)
             .timeout(timeout)
             .map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer)))
-            .map_err(|err| Error::new(ErrorKind::Other, err))
             .boxed(),
     };
 
