@@ -233,12 +233,12 @@ where
 
             if traverse_links {
                 for (link_name, next_cid) in ipld_links(&cid, ipld) {
-                    if unique && !queued_or_visited.insert(next_cid.clone()) {
+                    if unique && !queued_or_visited.insert(next_cid) {
                         trace!(queued = %next_cid, "skipping already queued");
                         continue;
                     }
 
-                    work.push_back((depth + 1, next_cid, cid.clone(), link_name));
+                    work.push_back((depth + 1, next_cid, cid, link_name));
                 }
             }
 
