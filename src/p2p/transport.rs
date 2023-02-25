@@ -32,6 +32,7 @@ pub struct TransportConfig {
     pub timeout: Duration,
     pub dns_resolver: Option<DnsResolver>,
     pub version: Option<UpgradeVersion>,
+    pub support_quic_draft_29: bool,
 }
 
 impl Default for TransportConfig {
@@ -43,6 +44,7 @@ impl Default for TransportConfig {
             mplex_max_buffer_size: 1024,
             no_delay: true,
             port_reuse: true,
+            support_quic_draft_29: true,
             timeout: Duration::from_secs(30),
             dns_resolver: None,
             version: None,
@@ -109,6 +111,7 @@ pub fn build_transport(
         mplex_max_buffer_size,
         dns_resolver,
         version,
+        support_quic_draft_29,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     let xx_keypair = noise::Keypair::<noise::X25519Spec>::new()
@@ -140,7 +143,9 @@ pub fn build_transport(
         .nodelay(no_delay)
         .port_reuse(port_reuse);
 
-    let quic_config = QuicConfig::new(&keypair);
+    let mut quic_config = QuicConfig::new(&keypair);
+    quic_config.support_draft_29 = support_quic_draft_29;
+    
     let quic_transport = TokioQuicTransport::new(quic_config);
 
     let tcp_transport = TokioTcpTransport::new(tcp_config.clone());
