@@ -3,7 +3,7 @@ use crate::Channel;
 use anyhow::Error;
 use core::task::{Context, Poll};
 use futures::channel::oneshot;
-use libp2p::core::{ConnectedPoint, Multiaddr, PeerId};
+use libp2p::core::{ConnectedPoint, Multiaddr, PeerId, Endpoint};
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::{
@@ -12,7 +12,7 @@ use libp2p::swarm::{
     dummy::ConnectionHandler as DummyConnectionHandler,
     DialError, NetworkBehaviour, PollParameters,
 };
-use libp2p::swarm::{ConnectionClosed, DialFailure};
+use libp2p::swarm::{ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, THandler};
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::time::{Duration, Instant};
@@ -164,10 +164,6 @@ impl SwarmApi {
 impl NetworkBehaviour for SwarmApi {
     type ConnectionHandler = DummyConnectionHandler;
     type OutEvent = void::Void;
-
-    fn new_handler(&mut self) -> Self::ConnectionHandler {
-        DummyConnectionHandler
-    }
 
     fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
         // when libp2p starts dialing, it'll collect these from all of known addresses for the peer
@@ -414,6 +410,26 @@ impl NetworkBehaviour for SwarmApi {
         _connection_id: swarm::ConnectionId,
         _event: swarm::THandlerOutEvent<Self>,
     ) {
+    }
+
+    fn handle_established_inbound_connection(
+        &mut self,
+        _: ConnectionId,
+        _: PeerId,
+        _: &Multiaddr,
+        _: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        Ok(DummyConnectionHandler)
+    }
+
+    fn handle_established_outbound_connection(
+        &mut self,
+        _: ConnectionId,
+        _: PeerId,
+        _: &Multiaddr,
+        _: Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        Ok(DummyConnectionHandler)
     }
 
     fn poll(

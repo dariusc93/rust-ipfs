@@ -8,13 +8,16 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
-use libp2p::core::{Multiaddr, PeerId};
+use libp2p::core::{Endpoint, Multiaddr, PeerId};
 
 use libp2p::gossipsub::{
     self, Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,
     Message as GossipsubMessage, MessageAuthenticity, MessageId, TopicHash,
 };
-use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourAction, PollParameters, THandlerInEvent};
+use libp2p::swarm::{
+    ConnectionDenied, ConnectionId, NetworkBehaviour, NetworkBehaviourAction, PollParameters,
+    THandler, THandlerInEvent,
+};
 
 /// Currently a thin wrapper around Gossipsub.
 /// Allows single subscription to a topic with only unbounded senders. Tracks the peers subscribed
@@ -223,10 +226,6 @@ impl NetworkBehaviour for GossipsubStream {
     type ConnectionHandler = <Gossipsub as NetworkBehaviour>::ConnectionHandler;
     type OutEvent = GossipsubEvent;
 
-    fn new_handler(&mut self) -> Self::ConnectionHandler {
-        self.gossipsub.new_handler()
-    }
-
     fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
         self.gossipsub.addresses_of_peer(peer_id)
     }
@@ -243,6 +242,36 @@ impl NetworkBehaviour for GossipsubStream {
     ) {
         self.gossipsub
             .on_connection_handler_event(peer_id, connection_id, event)
+    }
+
+    fn handle_established_inbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.gossipsub.handle_established_inbound_connection(
+            connection_id,
+            peer,
+            local_addr,
+            remote_addr,
+        )
+    }
+
+    fn handle_established_outbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        addr: &Multiaddr,
+        role_override: Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.gossipsub.handle_established_outbound_connection(
+            connection_id,
+            peer,
+            addr,
+            role_override,
+        )
     }
 
     fn poll(

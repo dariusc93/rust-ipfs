@@ -17,8 +17,8 @@ use libp2p_swarm::derive_prelude::ConnectionEstablished;
 use libp2p_swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p_swarm::handler::OneShotHandler;
 use libp2p_swarm::{
-    ConnectionClosed, ConnectionId, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler,
-    PollParameters,
+    ConnectionClosed, ConnectionDenied, ConnectionId, NetworkBehaviour, NetworkBehaviourAction,
+    NotifyHandler, PollParameters, THandler,
 };
 use std::task::{Context, Poll};
 use std::{
@@ -220,11 +220,6 @@ impl NetworkBehaviour for Bitswap {
     type ConnectionHandler = OneShotHandler<BitswapConfig, Message, MessageWrapper>;
     type OutEvent = BitswapEvent;
 
-    fn new_handler(&mut self) -> Self::ConnectionHandler {
-        debug!("bitswap: new_handler");
-        Default::default()
-    }
-
     fn addresses_of_peer(&mut self, _peer_id: &PeerId) -> Vec<Multiaddr> {
         debug!("bitswap: addresses_of_peer");
         Vec::new()
@@ -254,31 +249,25 @@ impl NetworkBehaviour for Bitswap {
         }
     }
 
-    // fn inject_connection_established(
-    //     &mut self,
-    //     peer_id: &PeerId,
-    //     connection_id: &ConnectionId,
-    //     _endpoint: &ConnectedPoint,
-    //     _failed_addresses: Option<&Vec<Multiaddr>>,
-    //     _other_established: usize,
-    // ) {
+    fn handle_established_inbound_connection(
+        &mut self,
+        _connection_id: ConnectionId,
+        _peer: PeerId,
+        _local_addr: &Multiaddr,
+        _remote_addr: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        Ok(Self::ConnectionHandler::default())
+    }
 
-    // }
-
-    // fn inject_connection_closed(
-    //     &mut self,
-    //     peer_id: &PeerId,
-    //     _connection_id: &ConnectionId,
-    //     _endpoint: &ConnectedPoint,
-    //     _handler: Self::ConnectionHandler,
-    //     _remaining_established: usize,
-    // ) {
-    //     debug!("bitswap: inject_disconnected {:?}", peer_id);
-    //     self.connected_peers.remove(peer_id);
-    //     self.peer_connection_id.remove(peer_id);
-    //     // the related stats are not dropped, so that they
-    //     // persist for peers regardless of disconnects
-    // }
+    fn handle_established_outbound_connection(
+        &mut self,
+        _connection_id: ConnectionId,
+        _peer: PeerId,
+        _addr: &Multiaddr,
+        _role_override: libp2p_core::Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        Ok(Self::ConnectionHandler::default())
+    }
 
     fn on_connection_handler_event(
         &mut self,
