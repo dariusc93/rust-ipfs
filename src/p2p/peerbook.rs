@@ -20,12 +20,96 @@ use super::PeerInfo;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ConnectionLimits {
-    pub(crate) max_pending_incoming: Option<u32>,
-    pub(crate) max_pending_outgoing: Option<u32>,
-    pub(crate) max_established_incoming: Option<u32>,
-    pub(crate) max_established_outgoing: Option<u32>,
-    pub(crate) max_established_per_peer: Option<u32>,
-    pub(crate) max_established_total: Option<u32>,
+    max_pending_incoming: Option<u32>,
+    max_pending_outgoing: Option<u32>,
+    max_established_incoming: Option<u32>,
+    max_established_outgoing: Option<u32>,
+    max_established_per_peer: Option<u32>,
+    max_established_total: Option<u32>,
+}
+
+impl ConnectionLimits {
+    pub fn max_pending_incoming(&self) -> Option<u32> {
+        self.max_pending_incoming
+    }
+
+    pub fn max_pending_outgoing(&self) -> Option<u32> {
+        self.max_pending_outgoing
+    }
+
+    pub fn max_established_incoming(&self) -> Option<u32> {
+        self.max_established_incoming
+    }
+
+    pub fn max_established_outgoing(&self) -> Option<u32> {
+        self.max_established_outgoing
+    }
+
+    pub fn max_established(&self) -> Option<u32> {
+        self.max_established_total
+    }
+
+    pub fn max_established_per_peer(&self) -> Option<u32> {
+        self.max_established_per_peer
+    }
+}
+
+impl ConnectionLimits {
+    pub fn set_max_pending_incoming(&mut self, limit: Option<u32>) {
+        self.max_pending_incoming = limit;
+    }
+
+    pub fn set_max_pending_outgoing(&mut self, limit: Option<u32>) {
+        self.max_pending_outgoing = limit;
+    }
+
+    pub fn set_max_established_incoming(&mut self, limit: Option<u32>) {
+        self.max_established_incoming = limit;
+    }
+
+    pub fn set_max_established_outgoing(&mut self, limit: Option<u32>) {
+        self.max_established_outgoing = limit;
+    }
+
+    pub fn set_max_established(&mut self, limit: Option<u32>) {
+        self.max_established_total = limit;
+    }
+
+    pub fn set_max_established_per_peer(&mut self, limit: Option<u32>) {
+        self.max_established_per_peer = limit;
+    }
+}
+
+impl ConnectionLimits {
+    pub fn with_max_pending_incoming(mut self, limit: Option<u32>) -> Self {
+        self.max_pending_incoming = limit;
+        self
+    }
+
+    pub fn with_max_pending_outgoing(mut self, limit: Option<u32>) -> Self {
+        self.max_pending_outgoing = limit;
+        self
+    }
+
+    pub fn with_max_established_incoming(mut self, limit: Option<u32>) -> Self {
+        self.max_established_incoming = limit;
+        self
+    }
+
+    pub fn with_max_established_outgoing(mut self, limit: Option<u32>) -> Self {
+        self.max_established_outgoing = limit;
+        self
+    }
+
+    pub fn with_max_established(mut self, limit: Option<u32>) -> Self {
+        self.max_established_total = limit;
+        self
+    }
+
+    pub fn with_max_established_per_peer(mut self, limit: Option<u32>) -> Self {
+        self.max_established_per_peer = limit;
+        self
+    }
 }
 
 #[derive(Debug)]
