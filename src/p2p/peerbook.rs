@@ -77,11 +77,11 @@ impl Behaviour {
         self.limits = limit;
     }
 
-    pub fn insert_into_whitelist(&mut self, peer_id: PeerId) {
+    pub fn add(&mut self, peer_id: PeerId) {
         self.whitelist.insert(peer_id);
     }
 
-    pub fn remove_from_whitelist(&mut self, peer_id: PeerId) {
+    pub fn remove(&mut self, peer_id: PeerId) {
         self.whitelist.remove(&peer_id);
     }
 
@@ -344,7 +344,7 @@ mod test {
                 break;
             }
         }
-        swarm1.behaviour_mut().peerbook.insert_into_whitelist(peer3);
+        swarm1.behaviour_mut().peerbook.add(peer3);
         swarm3.dial(addr1.clone()).unwrap();
 
         tokio::time::timeout(Duration::from_secs(10), async {

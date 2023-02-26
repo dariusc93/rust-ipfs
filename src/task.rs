@@ -843,14 +843,14 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 self.swarm
                     .behaviour_mut()
                     .peerbook
-                    .insert_into_whitelist(peer_id);
+                    .add(peer_id);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
                 self.swarm
                     .behaviour_mut()
                     .peerbook
-                    .remove_from_whitelist(peer_id);
+                    .remove(peer_id);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::GetProviders(cid, ret) => {
@@ -945,7 +945,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     self.swarm
                         .behaviour_mut()
                         .peerbook
-                        .insert_into_whitelist(peer_id);
+                        .add(peer_id);
                     // the return value of add_address doesn't implement Debug
                     trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                 }
@@ -970,7 +970,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     self.swarm
                         .behaviour_mut()
                         .peerbook
-                        .remove_from_whitelist(peer_id);
+                        .remove(peer_id);
                 }
                 let _ = ret.send(Ok(result));
             }
@@ -995,7 +995,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     self.swarm
                         .behaviour_mut()
                         .peerbook
-                        .remove_from_whitelist(peer_id);
+                        .remove(peer_id);
                 }
                 let _ = ret.send(list);
             }
@@ -1025,7 +1025,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         self.swarm
                             .behaviour_mut()
                             .peerbook
-                            .insert_into_whitelist(peer_id);
+                            .add(peer_id);
                         // report with the peerid
                         let reported: Multiaddr = addr.into();
                         rets.push(reported);
