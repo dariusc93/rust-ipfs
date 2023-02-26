@@ -283,7 +283,20 @@ impl NetworkBehaviour for Behaviour {
             return Poll::Ready(event);
         }
 
-        while let Poll::Ready(Some(_)) = self.cleanup_interval.poll_next_unpin(cx) {}
+        // Used to cleanup any info that may be left behind after a peer is no longer connected while giving time to all
+        // Note: If a peer is whitelisted, this will retain the info as a cache, although this may change in the future
+        //
+        while let Poll::Ready(Some(_)) = self.cleanup_interval.poll_next_unpin(cx) {
+            let list = self.peer_info.keys().copied().collect::<Vec<_>>();
+            for peer_id in list {
+                if !self.established_per_peer.contains_key(&peer_id)
+                    && !self.whitelist.contains(&peer_id)
+                {
+                    self.peer_info.remove(&peer_id);
+                    self.peer_rtt.remove(&peer_id);
+                }
+            }
+        }
 
         Poll::Pending
     }
