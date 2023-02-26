@@ -3,8 +3,7 @@ use crate::Channel;
 use anyhow::Error;
 use core::task::{Context, Poll};
 use futures::channel::oneshot;
-use libp2p::core::{ConnectedPoint, Multiaddr, PeerId, Endpoint};
-use libp2p::identify::Info as IdentifyInfo;
+use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr, PeerId};
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::{
     self,
@@ -13,6 +12,7 @@ use libp2p::swarm::{
     DialError, NetworkBehaviour, PollParameters,
 };
 use libp2p::swarm::{ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, THandler};
+use std::collections::HashSet;
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::time::{Duration, Instant};
@@ -33,7 +33,7 @@ type NetworkBehaviourAction = swarm::NetworkBehaviourAction<void::Void, void::Vo
 pub struct SwarmApi {
     events: VecDeque<NetworkBehaviourAction>,
 
-    peers: HashMap<PeerId, Option<IdentifyInfo>>,
+    peers: HashSet<PeerId>,
 
     // connect_registry: SubscriptionRegistry<(), String>,
     connect_registry: HashMap<MultiaddrWithPeerId, Vec<Channel<()>>>,
@@ -56,7 +56,7 @@ pub struct SwarmApi {
 
 impl SwarmApi {
     pub fn add_peer(&mut self, peer_id: PeerId) {
-        self.peers.insert(peer_id, None);
+        self.peers.insert(peer_id);
     }
 
     pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
@@ -65,25 +65,8 @@ impl SwarmApi {
             .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
     }
 
-    //Note: This may get pushed into its own behaviour in the near future
-    pub fn inject_identify_info(&mut self, peer_id: PeerId, peer_info: IdentifyInfo) {
-        self.peers
-            .entry(peer_id)
-            .and_modify(|e| *e = Some(peer_info.clone()))
-            .or_insert(Some(peer_info));
-    }
-
-    pub fn peers(&self) -> impl Iterator<Item = (&PeerId, &Option<IdentifyInfo>)> {
+    pub fn peers(&self) -> impl Iterator<Item = &PeerId> {
         self.peers.iter()
-    }
-
-    //Note: This may get pushed into its own behaviour in the near future
-    pub fn identify_info(&self) -> impl Iterator<Item = &IdentifyInfo> {
-        self.peers.values().filter_map(|s| s.as_ref())
-    }
-
-    pub fn get_identify_info(&self, peer_id: &PeerId) -> Option<IdentifyInfo> {
-        self.peers.get(peer_id).cloned()?
     }
 
     pub fn remove_peer(&mut self, peer_id: &PeerId) {
@@ -198,7 +181,7 @@ impl NetworkBehaviour for SwarmApi {
                     }
                 };
 
-                self.peers.entry(peer_id).or_default();
+                self.peers.insert(peer_id);
 
                 let connections = self.connected_peers.entry(peer_id).or_default();
                 connections.push(addr.clone());

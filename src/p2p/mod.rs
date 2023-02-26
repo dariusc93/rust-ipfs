@@ -11,17 +11,19 @@ use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
 use libp2p::ping::Config as PingConfig;
-use libp2p::swarm::ConnectionLimits;
 use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
 use tracing::Span;
 
 pub(crate) mod addr;
+pub(crate) mod peerbook;
+
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::KadStoreConfig;
 pub use self::behaviour::{RateLimit, RelayConfig};
+use self::peerbook::ConnectionLimits;
 pub use self::stream::ProviderStream;
 pub use self::stream::RecordStream;
 pub use self::transport::TransportConfig;
@@ -206,7 +208,8 @@ pub async fn create_swarm(
     let keypair = options.keypair.clone();
 
     // Create a Kademlia behaviour
-    let (behaviour, relay_transport) = behaviour::build_behaviour(options).await?;
+    let (behaviour, relay_transport) =
+        behaviour::build_behaviour(options, swarm_config.connection).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = transport::build_transport(keypair, relay_transport, transport_config)?;
@@ -218,7 +221,6 @@ pub async fn create_swarm(
         peer_id,
         SpannedExecutor(span),
     )
-    .connection_limits(swarm_config.connection)
     .notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
     .per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
     .dial_concurrency_factor(swarm_config.dial_concurrency_factor)

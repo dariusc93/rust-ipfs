@@ -565,8 +565,8 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 IdentifyEvent::Received { peer_id, info } => {
                     self.swarm
                         .behaviour_mut()
-                        .swarm
-                        .inject_identify_info(peer_id, info.clone());
+                        .peerbook
+                        .inject_peer_info(info.clone());
 
                     if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
                         for ret in rets {
@@ -793,13 +793,13 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let _ = ret.send(peers);
             }
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
-                let locally_known = self.swarm.behaviour().swarm.get_identify_info(&peer_id);
+                let locally_known = self.swarm.behaviour().peerbook.get_peer_info(peer_id);
 
                 let (tx, rx) = oneshot::channel();
 
                 match locally_known {
                     Some(info) => {
-                        let _ = tx.send(Ok(PeerInfo::from(info)));
+                        let _ = tx.send(Ok(info.clone()));
                     }
                     None => {
                         self.swarm
