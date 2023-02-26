@@ -288,3 +288,99 @@ impl NetworkBehaviour for Behaviour {
         Poll::Pending
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use super::Behaviour as PeerBook;
+    use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
+    use futures::StreamExt;
+    use libp2p::{
+        identity::Keypair,
+        swarm::{keep_alive, NetworkBehaviour, SwarmBuilder, SwarmEvent},
+        Multiaddr, PeerId, Swarm,
+    };
+
+    #[derive(NetworkBehaviour)]
+    struct Behaviour {
+        peerbook: PeerBook,
+        keep_alive: keep_alive::Behaviour,
+    }
+
+    //TODO: Expand test out
+    #[tokio::test]
+    async fn connection_limits() {
+        let (_, addr1, mut swarm1) = build_swarm().await;
+        let (peer2, _, mut swarm2) = build_swarm().await;
+        let (peer3, _, mut swarm3) = build_swarm().await;
+        let (peer4, _, mut swarm4) = build_swarm().await;
+
+        swarm1
+            .behaviour_mut()
+            .peerbook
+            .set_connection_limit(ConnectionLimits {
+                max_established_incoming: Some(1),
+                ..Default::default()
+            });
+
+        swarm2.dial(addr1.clone()).unwrap();
+
+        loop {
+            if let Some(SwarmEvent::ConnectionEstablished { .. }) = swarm1.next().await {
+                break;
+            }
+        }
+        swarm1.behaviour_mut().peerbook.insert_into_whitelist(peer3);
+        swarm3.dial(addr1.clone()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(SwarmEvent::ConnectionEstablished { .. }) = swarm1.next().await {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        swarm4.dial(addr1.clone()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(SwarmEvent::IncomingConnectionError { .. }) = swarm1.next().await {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        let list = swarm1.connected_peers().copied().collect::<Vec<_>>();
+
+        assert!(list.contains(&peer2));
+        assert!(list.contains(&peer3));
+        assert!(!list.contains(&peer4));
+    }
+
+    async fn build_swarm() -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
+        let key = Keypair::generate_ed25519();
+        let peer_id = key.public().to_peer_id();
+        let transport = build_transport(key, None, Default::default()).unwrap();
+
+        let behaviour = Behaviour {
+            peerbook: PeerBook::default(),
+            keep_alive: keep_alive::Behaviour,
+        };
+
+        let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build();
+
+        Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
+
+        if let Some(SwarmEvent::NewListenAddr { address, .. }) = swarm.next().await {
+            return (peer_id, address, swarm);
+        }
+
+        panic!("no new addrs")
+    }
+}
