@@ -145,14 +145,22 @@ impl NetworkBehaviour for Behaviour {
     fn handle_pending_outbound_connection(
         &mut self,
         connection_id: ConnectionId,
-        _: Option<PeerId>,
+        peer_id: Option<PeerId>,
         _: &[Multiaddr],
         _: Endpoint,
     ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
-        self.check_limit(
-            self.limits.max_pending_outgoing,
-            self.pending_outbound_connections.len(),
-        )?;
+        let mut is_whitelisted = false;
+
+        if let Some(peer_id) = peer_id {
+            is_whitelisted = self.whitelist.contains(&peer_id);
+        }
+
+        if !is_whitelisted {
+            self.check_limit(
+                self.limits.max_pending_outgoing,
+                self.pending_outbound_connections.len(),
+            )?;
+        }
 
         self.pending_outbound_connections.insert(connection_id);
 
