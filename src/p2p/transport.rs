@@ -32,7 +32,11 @@ pub struct TransportConfig {
     pub timeout: Duration,
     pub dns_resolver: Option<DnsResolver>,
     pub version: Option<UpgradeVersion>,
+    pub enable_quic: bool,
+    pub enable_websocket: bool,
+    pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
+    pub enable_webrtc: bool,
 }
 
 impl Default for TransportConfig {
@@ -44,7 +48,11 @@ impl Default for TransportConfig {
             mplex_max_buffer_size: 1024,
             no_delay: true,
             port_reuse: true,
+            enable_quic: true,
+            enable_websocket: false,
+            enable_secure_websocket: false,
             support_quic_draft_29: true,
+            enable_webrtc: false,
             timeout: Duration::from_secs(30),
             dns_resolver: None,
             version: None,
@@ -111,7 +119,9 @@ pub fn build_transport(
         mplex_max_buffer_size,
         dns_resolver,
         version,
+        enable_quic,
         support_quic_draft_29,
+        ..
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     let xx_keypair = noise::Keypair::<noise::X25519Spec>::new()
@@ -143,17 +153,14 @@ pub fn build_transport(
         .nodelay(no_delay)
         .port_reuse(port_reuse);
 
-    let mut quic_config = QuicConfig::new(&keypair);
-    quic_config.support_draft_29 = support_quic_draft_29;
-    
-    let quic_transport = TokioQuicTransport::new(quic_config);
-
     let tcp_transport = TokioTcpTransport::new(tcp_config.clone());
+
+    //TODO: Make togglable by flag in config
     let ws_transport = libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
 
     let transport = tcp_transport.or_transport(ws_transport);
 
-    let transport_timeout = TransportTimeout::new(transport, Duration::from_secs(30));
+    let transport_timeout = TransportTimeout::new(transport, timeout);
 
     let (cfg, opts) = dns_resolver.unwrap_or_default().into();
 
@@ -182,12 +189,22 @@ pub fn build_transport(
             .boxed(),
     };
 
-    let transport = OrTransport::new(quic_transport, transport)
-        .map(|either_output, _| match either_output {
-            Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-            Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-        })
-        .boxed();
+    let transport = match enable_quic {
+        true => {
+            let mut quic_config = QuicConfig::new(&keypair);
+            quic_config.support_draft_29 = support_quic_draft_29;
+
+            let quic_transport = TokioQuicTransport::new(quic_config);
+
+            OrTransport::new(quic_transport, transport)
+                .map(|either_output, _| match either_output {
+                    Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                    Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                })
+                .boxed()
+        }
+        false => transport,
+    };
 
     Ok(transport)
 }
