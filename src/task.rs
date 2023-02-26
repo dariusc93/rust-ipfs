@@ -183,7 +183,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().remove_peer(&peer);
+                                self.swarm.behaviour_mut().remove_peer(&peer, false);
                             }
                         }
                     }
@@ -546,7 +546,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                 } => {
                     trace!("ping: timeout to {}", peer);
-                    self.swarm.behaviour_mut().remove_peer(&peer);
+                    self.swarm.behaviour_mut().remove_peer(&peer, false);
                 }
                 libp2p::ping::Event {
                     peer,

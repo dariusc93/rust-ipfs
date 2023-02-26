@@ -12,7 +12,6 @@ use libp2p::swarm::{
     DialError, NetworkBehaviour, PollParameters,
 };
 use libp2p::swarm::{ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, THandler};
-use std::collections::HashSet;
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::time::{Duration, Instant};
@@ -32,8 +31,6 @@ type NetworkBehaviourAction = swarm::NetworkBehaviourAction<void::Void, void::Vo
 #[derive(Default)]
 pub struct SwarmApi {
     events: VecDeque<NetworkBehaviourAction>,
-
-    peers: HashSet<PeerId>,
 
     // connect_registry: SubscriptionRegistry<(), String>,
     connect_registry: HashMap<MultiaddrWithPeerId, Vec<Channel<()>>>,
@@ -55,22 +52,10 @@ pub struct SwarmApi {
 }
 
 impl SwarmApi {
-    pub fn add_peer(&mut self, peer_id: PeerId) {
-        self.peers.insert(peer_id);
-    }
-
     pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
         self.protocols
             .iter()
             .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
-    }
-
-    pub fn peers(&self) -> impl Iterator<Item = &PeerId> {
-        self.peers.iter()
-    }
-
-    pub fn remove_peer(&mut self, peer_id: &PeerId) {
-        self.peers.remove(peer_id);
     }
 
     pub fn connections(&self) -> impl Iterator<Item = Connection> + '_ {
@@ -181,8 +166,6 @@ impl NetworkBehaviour for SwarmApi {
                     }
                 };
 
-                self.peers.insert(peer_id);
-
                 let connections = self.connected_peers.entry(peer_id).or_default();
                 connections.push(addr.clone());
 
@@ -286,10 +269,6 @@ impl NetworkBehaviour for SwarmApi {
                         closed_addr
                     );
                 }
-
-                //TODO: Maybe mark the peer for removal instead of instantly removing the peer and their info
-                //Note: This may get pushed into its own behaviour in the near future
-                self.peers.remove(&peer_id);
 
                 self.roundtrip_times.remove(&peer_id);
                 self.connected_times.remove(&peer_id);

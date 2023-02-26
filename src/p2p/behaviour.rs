@@ -410,24 +410,24 @@ impl Behaviour {
         if let Some(addr) = addr {
             self.kademlia.add_address(&peer, addr);
         }
-        self.swarm.add_peer(peer);
         self.pubsub.add_explicit_peer(&peer);
         self.bitswap.connect(peer);
         self.peerbook.insert_into_whitelist(peer);
     }
 
-    pub fn remove_peer(&mut self, peer: &PeerId) {
-        self.swarm.remove_peer(peer);
+    pub fn remove_peer(&mut self, peer: &PeerId, remove_from_whitelist: bool) {
         self.pubsub.remove_explicit_peer(peer);
         self.kademlia.remove_peer(peer);
-        self.peerbook.remove_from_whitelist(*peer);
+        if remove_from_whitelist {
+            self.peerbook.remove_from_whitelist(*peer);
+        }
     }
 
     #[allow(deprecated)]
     pub fn addrs(&mut self) -> Vec<(PeerId, Vec<Multiaddr>)> {
-        let peers = self.swarm.peers().copied().collect::<Vec<_>>();
-        let mut addrs = Vec::with_capacity(peers.len());
-        for peer_id in peers.into_iter() {
+        let mut addrs = Vec::new();
+        let list = self.peerbook.peers().copied().collect::<Vec<_>>();
+        for peer_id in list {
             let peer_addrs = self.addresses_of_peer(&peer_id);
             addrs.push((peer_id, peer_addrs));
         }

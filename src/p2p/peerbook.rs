@@ -20,12 +20,12 @@ use super::PeerInfo;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ConnectionLimits {
-    max_pending_incoming: Option<u32>,
-    max_pending_outgoing: Option<u32>,
-    max_established_incoming: Option<u32>,
-    max_established_outgoing: Option<u32>,
-    max_established_per_peer: Option<u32>,
-    max_established_total: Option<u32>,
+    pub(crate) max_pending_incoming: Option<u32>,
+    pub(crate) max_pending_outgoing: Option<u32>,
+    pub(crate) max_established_incoming: Option<u32>,
+    pub(crate) max_established_outgoing: Option<u32>,
+    pub(crate) max_established_per_peer: Option<u32>,
+    pub(crate) max_established_total: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -88,6 +88,10 @@ impl Behaviour {
     pub fn inject_peer_info<I: Into<PeerInfo>>(&mut self, info: I) {
         let info = info.into();
         self.peer_info.insert(info.peer_id, info);
+    }
+
+    pub fn peers(&self) -> impl Iterator<Item = &PeerId> {
+        self.peer_info.keys()
     }
 
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, rtt: Duration) {
