@@ -840,13 +840,19 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let _ = ret.send(addrs);
             }
             IpfsEvent::WhitelistPeer(peer_id, ret) => {
-                self.swarm.behaviour_mut().peerbook.insert_into_whitelist(peer_id);
+                self.swarm
+                    .behaviour_mut()
+                    .peerbook
+                    .insert_into_whitelist(peer_id);
                 let _ = ret.send(Ok(()));
-            },
+            }
             IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
-                self.swarm.behaviour_mut().peerbook.remove_from_whitelist(peer_id);
+                self.swarm
+                    .behaviour_mut()
+                    .peerbook
+                    .remove_from_whitelist(peer_id);
                 let _ = ret.send(Ok(()));
-            },
+            }
             IpfsEvent::GetProviders(cid, ret) => {
                 let key = Key::from(cid.hash().to_bytes());
                 let id = self.swarm.behaviour_mut().kademlia.get_providers(key);
@@ -936,6 +942,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         .behaviour_mut()
                         .kademlia
                         .add_address(&peer_id, ma.into());
+                    self.swarm
+                        .behaviour_mut()
+                        .peerbook
+                        .insert_into_whitelist(peer_id);
                     // the return value of add_address doesn't implement Debug
                     trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                 }
@@ -957,6 +967,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     } else {
                         warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
                     }
+                    self.swarm
+                        .behaviour_mut()
+                        .peerbook
+                        .remove_from_whitelist(peer_id);
                 }
                 let _ = ret.send(Ok(result));
             }
@@ -964,20 +978,24 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let removed = self.bootstraps.drain().collect::<Vec<_>>();
                 let mut list = Vec::with_capacity(removed.len());
                 for addr_with_peer_id in removed {
-                    let peer_id = &addr_with_peer_id.peer_id;
+                    let peer_id = addr_with_peer_id.peer_id;
                     let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
 
                     if let Some(e) = self
                         .swarm
                         .behaviour_mut()
                         .kademlia
-                        .remove_address(peer_id, &prefix)
+                        .remove_address(&peer_id, &prefix)
                     {
                         info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
                         list.push(addr_with_peer_id.into());
                     } else {
                         error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
                     }
+                    self.swarm
+                        .behaviour_mut()
+                        .peerbook
+                        .remove_from_whitelist(peer_id);
                 }
                 let _ = ret.send(list);
             }
@@ -1004,7 +1022,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                             .kademlia
                             .add_address(&peer_id, ma.clone());
                         trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
-
+                        self.swarm
+                            .behaviour_mut()
+                            .peerbook
+                            .insert_into_whitelist(peer_id);
                         // report with the peerid
                         let reported: Multiaddr = addr.into();
                         rets.push(reported);
