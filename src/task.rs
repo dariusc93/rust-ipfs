@@ -533,7 +533,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         peer.to_base58(),
                         rtt.as_millis()
                     );
-                    self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
+                    self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
                 }
                 libp2p::ping::Event {
                     peer,
