@@ -413,13 +413,14 @@ impl Behaviour {
         self.swarm.add_peer(peer);
         self.pubsub.add_explicit_peer(&peer);
         self.bitswap.connect(peer);
+        self.peerbook.insert_into_whitelist(peer);
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId) {
         self.swarm.remove_peer(peer);
         self.pubsub.remove_explicit_peer(peer);
         self.kademlia.remove_peer(peer);
-        // TODO self.bitswap.remove_peer(&peer);
+        self.peerbook.remove_from_whitelist(*peer);
     }
 
     #[allow(deprecated)]

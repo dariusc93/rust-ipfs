@@ -839,6 +839,14 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 };
                 let _ = ret.send(addrs);
             }
+            IpfsEvent::WhitelistPeer(peer_id, ret) => {
+                self.swarm.behaviour_mut().peerbook.insert_into_whitelist(peer_id);
+                let _ = ret.send(Ok(()));
+            },
+            IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
+                self.swarm.behaviour_mut().peerbook.remove_from_whitelist(peer_id);
+                let _ = ret.send(Ok(()));
+            },
             IpfsEvent::GetProviders(cid, ret) => {
                 let key = Key::from(cid.hash().to_bytes());
                 let id = self.swarm.behaviour_mut().kademlia.get_providers(key);
