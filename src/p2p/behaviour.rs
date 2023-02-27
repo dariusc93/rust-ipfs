@@ -1,4 +1,5 @@
 use super::gossipsub::GossipsubStream;
+use super::peerbook::{self, ConnectionLimits};
 use futures::channel::oneshot;
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,7 @@ pub struct Behaviour {
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
     pub swarm: SwarmApi,
+    pub peerbook: peerbook::Behaviour,
 }
 
 #[derive(Debug)]
@@ -276,7 +278,10 @@ pub struct KadStoreConfig {
 
 impl Behaviour {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
-    pub async fn new(options: SwarmOptions) -> Result<(Self, Option<ClientTransport>), Error> {
+    pub async fn new(
+        options: SwarmOptions,
+        limits: ConnectionLimits,
+    ) -> Result<(Self, Option<ClientTransport>), Error> {
         let peer_id = options.peer_id;
 
         info!("net: starting with peer id {}", peer_id);
@@ -377,6 +382,9 @@ impl Behaviour {
             false => (None, None.into()),
         };
 
+        let mut peerbook = peerbook::Behaviour::default();
+        peerbook.set_connection_limit(limits);
+
         Ok((
             Behaviour {
                 mdns,
@@ -392,6 +400,7 @@ impl Behaviour {
                 relay,
                 relay_client,
                 upnp,
+                peerbook,
             },
             transport,
         ))
@@ -401,28 +410,24 @@ impl Behaviour {
         if let Some(addr) = addr {
             self.kademlia.add_address(&peer, addr);
         }
-        self.swarm.add_peer(peer);
         self.pubsub.add_explicit_peer(&peer);
         self.bitswap.connect(peer);
+        self.peerbook.add(peer);
     }
 
-    pub fn remove_peer(&mut self, peer: &PeerId) {
-        self.swarm.remove_peer(peer);
+    pub fn remove_peer(&mut self, peer: &PeerId, remove_from_whitelist: bool) {
         self.pubsub.remove_explicit_peer(peer);
         self.kademlia.remove_peer(peer);
-        // TODO self.bitswap.remove_peer(&peer);
+        if remove_from_whitelist {
+            self.peerbook.remove(*peer);
+        }
     }
 
     #[allow(deprecated)]
     pub fn addrs(&mut self) -> Vec<(PeerId, Vec<Multiaddr>)> {
-        let peers = self
-            .swarm
-            .peers()
-            .map(|(k, _)| k)
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut addrs = Vec::with_capacity(peers.len());
-        for peer_id in peers.into_iter() {
+        let mut addrs = Vec::new();
+        let list = self.peerbook.peers().copied().collect::<Vec<_>>();
+        for peer_id in list {
             let peer_addrs = self.addresses_of_peer(&peer_id);
             addrs.push((peer_id, peer_addrs));
         }
@@ -475,6 +480,7 @@ impl Behaviour {
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
 pub async fn build_behaviour(
     options: SwarmOptions,
+    limits: ConnectionLimits,
 ) -> Result<(Behaviour, Option<ClientTransport>), Error> {
-    Behaviour::new(options).await
+    Behaviour::new(options, limits).await
 }

@@ -180,7 +180,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().remove_peer(&peer);
+                                self.swarm.behaviour_mut().remove_peer(&peer, false);
                             }
                         }
                     }
@@ -530,7 +530,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         peer.to_base58(),
                         rtt.as_millis()
                     );
-                    self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
+                    self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
                 }
                 libp2p::ping::Event {
                     peer,
@@ -543,7 +543,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                 } => {
                     trace!("ping: timeout to {}", peer);
-                    self.swarm.behaviour_mut().remove_peer(&peer);
+                    self.swarm.behaviour_mut().remove_peer(&peer, false);
                 }
                 libp2p::ping::Event {
                     peer,
@@ -562,8 +562,8 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 IdentifyEvent::Received { peer_id, info } => {
                     self.swarm
                         .behaviour_mut()
-                        .swarm
-                        .inject_identify_info(peer_id, info.clone());
+                        .peerbook
+                        .inject_peer_info(info.clone());
 
                     if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
                         for ret in rets {
@@ -781,13 +781,13 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let _ = ret.send(peers);
             }
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
-                let locally_known = self.swarm.behaviour().swarm.get_identify_info(&peer_id);
+                let locally_known = self.swarm.behaviour().peerbook.get_peer_info(peer_id);
 
                 let (tx, rx) = oneshot::channel();
 
                 match locally_known {
                     Some(info) => {
-                        let _ = tx.send(Ok(PeerInfo::from(info)));
+                        let _ = tx.send(Ok(info.clone()));
                     }
                     None => {
                         self.swarm
@@ -826,6 +826,20 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     })
                 };
                 let _ = ret.send(addrs);
+            }
+            IpfsEvent::WhitelistPeer(peer_id, ret) => {
+                self.swarm
+                    .behaviour_mut()
+                    .peerbook
+                    .add(peer_id);
+                let _ = ret.send(Ok(()));
+            }
+            IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
+                self.swarm
+                    .behaviour_mut()
+                    .peerbook
+                    .remove(peer_id);
+                let _ = ret.send(Ok(()));
             }
             IpfsEvent::GetProviders(cid, ret) => {
                 let key = Key::from(cid.hash().to_bytes());
@@ -916,6 +930,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         .behaviour_mut()
                         .kademlia
                         .add_address(&peer_id, ma.into());
+                    self.swarm
+                        .behaviour_mut()
+                        .peerbook
+                        .add(peer_id);
                     // the return value of add_address doesn't implement Debug
                     trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                 }
@@ -937,6 +955,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     } else {
                         warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
                     }
+                    self.swarm
+                        .behaviour_mut()
+                        .peerbook
+                        .remove(peer_id);
                 }
                 let _ = ret.send(Ok(result));
             }
@@ -944,20 +966,24 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let removed = self.bootstraps.drain().collect::<Vec<_>>();
                 let mut list = Vec::with_capacity(removed.len());
                 for addr_with_peer_id in removed {
-                    let peer_id = &addr_with_peer_id.peer_id;
+                    let peer_id = addr_with_peer_id.peer_id;
                     let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
 
                     if let Some(e) = self
                         .swarm
                         .behaviour_mut()
                         .kademlia
-                        .remove_address(peer_id, &prefix)
+                        .remove_address(&peer_id, &prefix)
                     {
                         info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
                         list.push(addr_with_peer_id.into());
                     } else {
                         error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
                     }
+                    self.swarm
+                        .behaviour_mut()
+                        .peerbook
+                        .remove(peer_id);
                 }
                 let _ = ret.send(list);
             }
@@ -984,7 +1010,10 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                             .kademlia
                             .add_address(&peer_id, ma.clone());
                         trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
-
+                        self.swarm
+                            .behaviour_mut()
+                            .peerbook
+                            .add(peer_id);
                         // report with the peerid
                         let reported: Multiaddr = addr.into();
                         rets.push(reported);

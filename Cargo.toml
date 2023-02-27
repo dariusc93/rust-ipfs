@@ -83,6 +83,8 @@ prost = { default-features = false, version = "0.11" }
 
 rlimit = "0.9"
 
+wasm-timer = "0.2"
+
 [build-dependencies]
 prost-build = { default-features = false, version = "0.11" }
 
