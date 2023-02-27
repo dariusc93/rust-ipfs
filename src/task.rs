@@ -21,7 +21,6 @@ use tokio::sync::Notify;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
     },
     time::Duration,
@@ -84,8 +83,6 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
     pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
-    pub(crate) autonat_limit: Arc<AtomicU64>,
-    pub(crate) autonat_counter: Arc<AtomicU64>,
     pub(crate) bootstraps: HashSet<MultiaddrWithPeerId>,
     pub(crate) swarm_event: Option<TSwarmEventFn>,
 }
@@ -592,24 +589,15 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         }
                     }
 
-                    #[allow(clippy::collapsible_if)]
                     if protocols
                         .iter()
                         .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
                     {
-                        if self.autonat_counter.load(Ordering::Relaxed)
-                            <= self.autonat_limit.load(Ordering::Relaxed)
-                        {
-                            for addr in listen_addrs {
-                                self.swarm
-                                    .behaviour_mut()
-                                    .autonat
-                                    .add_server(peer_id, Some(addr));
-                            }
-
-                            let mut counter = self.autonat_counter.load(Ordering::Relaxed);
-                            counter += 1;
-                            self.autonat_counter.store(counter, Ordering::Relaxed);
+                        for addr in listen_addrs {
+                            self.swarm
+                                .behaviour_mut()
+                                .autonat
+                                .add_server(peer_id, Some(addr));
                         }
                     }
                 }

@@ -63,10 +63,7 @@ use std::{
     env, fmt,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::{atomic::Ordering, Arc},
 };
 
 use self::{
@@ -93,7 +90,7 @@ use libipld::{Cid, Ipld, IpldCodec};
 pub use libp2p::{
     self,
     core::transport::ListenerId,
-    gossipsub::{PublishError, MessageId},
+    gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},
@@ -553,7 +550,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     }
 
     /// Used to delay the loop
-    /// Note: This may be removed in future 
+    /// Note: This may be removed in future
     pub fn disable_delay(mut self) -> Self {
         self.delay = false;
         self
@@ -643,8 +640,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
             .await?;
 
-        let autonat_limit = Arc::new(AtomicU64::new(64));
-        let autonat_counter = Arc::new(Default::default());
         let kad_subscriptions = Default::default();
         let listener_subscriptions = Default::default();
         let listeners = Default::default();
@@ -666,8 +661,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             kad_subscriptions,
             listener_subscriptions,
             repo,
-            autonat_limit,
-            autonat_counter,
             bootstraps,
             swarm_event,
         };
