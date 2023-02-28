@@ -61,6 +61,7 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
     env, fmt,
+    marker::PhantomData,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc},
@@ -297,10 +298,11 @@ impl<I: Borrow<Keypair>> DebuggableKeypair<I> {
 #[derive(Debug)]
 pub struct Ipfs<Types: IpfsTypes> {
     span: Span,
-    repo: Arc<Repo<Types>>,
+    repo: Arc<Repo>,
     keys: DebuggableKeypair<Keypair>,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
+    _marker: PhantomData<Types>,
 }
 
 impl<Types: IpfsTypes> Clone for Ipfs<Types> {
@@ -311,6 +313,7 @@ impl<Types: IpfsTypes> Clone for Ipfs<Types> {
             identify_conf: self.identify_conf.clone(),
             keys: self.keys.clone(),
             to_task: self.to_task.clone(),
+            _marker: PhantomData,
         }
     }
 }
@@ -404,13 +407,14 @@ pub enum FDLimit {
 
 /// Configured Ipfs which can only be started.
 pub struct UninitializedIpfs<Types: IpfsTypes> {
-    repo: Arc<Repo<Types>>,
+    repo: Arc<Repo>,
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     delay: bool,
     repo_events: Receiver<RepoEvent>,
     swarm_event: Option<TSwarmEventFn>,
+    _marker: PhantomData<Types>,
 }
 
 impl<Types: IpfsTypes> Default for UninitializedIpfs<Types> {
@@ -432,7 +436,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// `libp2p::Swarm`.
     pub fn with_opt(options: IpfsOptions) -> Self {
         let repo_options = RepoOptions::from(&options);
-        let (repo, repo_events) = create_repo(repo_options);
+        let (repo, repo_events) = create_repo::<Types>(repo_options);
         let keys = options.keypair.clone();
         let fdlimit = None;
         let delay = true;
@@ -444,6 +448,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             delay,
             repo_events,
             swarm_event: None,
+            _marker: PhantomData,
         }
     }
 
@@ -575,6 +580,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             delay,
             mut options,
             swarm_event,
+            ..
         } = self;
 
         let root_span = options
@@ -628,6 +634,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             identify_conf: id_conf,
             keys: DebuggableKeypair(keys),
             to_task,
+            _marker: PhantomData
         };
 
         // FIXME: mutating options above is an unfortunate side-effect of this call, which could be

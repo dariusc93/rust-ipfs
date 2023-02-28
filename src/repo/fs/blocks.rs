@@ -37,6 +37,19 @@ pub struct FsBlockStore {
     written_bytes: AtomicU64,
 }
 
+impl FsBlockStore {
+    pub fn new(path: PathBuf) -> Self {
+        FsBlockStore {
+            path,
+            writes: Arc::new(Mutex::new(HashedMap::with_capacity_and_hasher(
+                8,
+                HashBuildHasher::default(),
+            ))),
+            written_bytes: Default::default(),
+        }
+    }
+}
+
 /// A helper used to remove our key from `FsBlockStore::writes`. It is quite inefficient, some
 /// kind of reference counting would be great.
 ///
@@ -104,17 +117,6 @@ impl FsBlockStore {
 
 #[async_trait]
 impl BlockStore for FsBlockStore {
-    fn new(path: PathBuf) -> Self {
-        FsBlockStore {
-            path,
-            writes: Arc::new(Mutex::new(HashedMap::with_capacity_and_hasher(
-                8,
-                HashBuildHasher::default(),
-            ))),
-            written_bytes: Default::default(),
-        }
-    }
-
     async fn init(&self) -> Result<(), Error> {
         fs::create_dir_all(self.path.clone()).await?;
         Ok(())

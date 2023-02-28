@@ -26,7 +26,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{config::BOOTSTRAP_NODES, repo::BlockPut, IpfsEvent, IpfsTypes, TSwarmEventFn};
+use crate::{config::BOOTSTRAP_NODES, repo::BlockPut, IpfsEvent, TSwarmEventFn};
 
 use crate::{
     p2p::TSwarm,
@@ -71,7 +71,7 @@ use libp2p::{
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
-pub(crate) struct IpfsTask<Types: IpfsTypes> {
+pub(crate) struct IpfsTask {
     pub(crate) swarm: TSwarm,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
@@ -79,7 +79,7 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) listeners: HashSet<ListenerId>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub(crate) repo: Arc<Repo<Types>>,
+    pub(crate) repo: Arc<Repo>,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
     pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
@@ -87,7 +87,7 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) swarm_event: Option<TSwarmEventFn>,
 }
 
-impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
+impl IpfsTask {
     pub(crate) async fn run(&mut self, delay: bool, notify: Arc<Notify>) {
         let mut first_run = false;
         let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
