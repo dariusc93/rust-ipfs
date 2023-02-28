@@ -2,7 +2,7 @@ use clap::Parser;
 use futures::{channel::mpsc, pin_mut, FutureExt};
 use libipld::ipld;
 use libp2p::{futures::StreamExt, swarm::SwarmEvent};
-use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, TestTypes, UninitializedIpfs};
+use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, UninitializedIpfs};
 use rustyline_async::{Readline, ReadlineError};
 use std::{io::Write, sync::Arc};
 use tokio::sync::Notify;
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (tx, mut rx) = mpsc::unbounded();
 
-    let ipfs: Ipfs = UninitializedIpfs::with_opt::<TestTypes>(opts)
+    let ipfs: Ipfs = UninitializedIpfs::with_opt(opts)
         .swarm_events({
             move |_, event| {
                 if let SwarmEvent::Behaviour(BehaviourEvent::Autonat(

@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::p2p::KadResult;
 use crate::path::IpfsPath;
 use crate::subscription::{RequestKind, SubscriptionRegistry};
-use crate::{Block, IpfsOptions, ReceiverChannel, TestTypes};
+use crate::{Block, ReceiverChannel, StoragePath};
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -30,29 +30,11 @@ pub mod fs;
 pub mod kv;
 pub mod mem;
 
-/// Consolidates `BlockStore` and `DataStore` into a representation of storage.
-pub trait RepoTypes: Send + Sync + 'static {}
-
-/// Configuration for a repo.
-#[derive(Clone, Debug)]
-pub struct RepoOptions {
-    path: PathBuf,
-}
-
-impl From<&IpfsOptions> for RepoOptions {
-    fn from(options: &IpfsOptions) -> Self {
-        RepoOptions {
-            path: options.ipfs_path.clone(),
-        }
-    }
-}
-
 /// Convenience for creating a new `Repo` from the `RepoOptions`.
-pub fn create_repo<TRepoTypes: RepoTypes>(options: RepoOptions) -> (Repo, Receiver<RepoEvent>) {
-    if std::any::TypeId::of::<TRepoTypes>() == std::any::TypeId::of::<TestTypes>() {
-        Repo::new_memory()
-    } else {
-        Repo::new(options)
+pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
+    match storage_type {
+        StoragePath::Memory => Repo::new_memory(),
+        StoragePath::Disk(path) => Repo::new(path)
     }
 }
 
@@ -102,7 +84,6 @@ pub enum BlockRmError {
 /// This API is being discussed and evolved, which will likely lead to breakage.
 #[async_trait]
 pub trait BlockStore: Debug + Send + Sync + 'static {
-    // fn new(path: PathBuf) -> Self;
     async fn init(&self) -> Result<(), Error>;
     /// FIXME: redundant and never called during initialization, which is expected to happen during [`init`].
     async fn open(&self) -> Result<(), Error>;
@@ -123,7 +104,6 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
 #[async_trait]
 /// Generic layer of abstraction for a key-value data store.
 pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
-    // fn new(path: PathBuf) -> Self;
     async fn init(&self) -> Result<(), Error>;
     async fn open(&self) -> Result<(), Error>;
     /// Checks if a key is present in the datastore.
@@ -360,10 +340,10 @@ impl TryFrom<RequestKind> for RepoEvent {
 }
 
 impl Repo {
-    pub fn new(options: RepoOptions) -> (Self, Receiver<RepoEvent>) {
-        let mut blockstore_path = options.path.clone();
-        let mut datastore_path = options.path.clone();
-        let mut lockfile_path = options.path;
+    pub fn new(path: PathBuf) -> (Self, Receiver<RepoEvent>) {
+        let mut blockstore_path = path.clone();
+        let mut datastore_path = path.clone();
+        let mut lockfile_path = path;
         blockstore_path.push("blockstore");
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");

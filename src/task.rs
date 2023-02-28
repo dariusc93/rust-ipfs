@@ -36,7 +36,7 @@ pub use crate::{
     p2p::BehaviourEvent,
     p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
-    repo::{PinKind, PinMode, RepoTypes},
+    repo::{PinKind, PinMode},
 };
 
 use libipld::multibase::{self, Base};
