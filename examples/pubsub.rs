@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (tx, mut rx) = mpsc::unbounded();
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts)
+    let ipfs: Ipfs = UninitializedIpfs::with_opt::<TestTypes>(opts)
         .swarm_events({
             move |_, event| {
                 if let SwarmEvent::Behaviour(BehaviourEvent::Autonat(
@@ -177,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 //Note: This is temporary as a similar implementation will be used internally in the future
-async fn topic_discovery(ipfs: Ipfs<TestTypes>, topic: String) -> anyhow::Result<()> {
+async fn topic_discovery(ipfs: Ipfs, topic: String) -> anyhow::Result<()> {
     let cid = ipfs.put_dag(ipld!(topic)).await?;
     ipfs.provide(cid).await?;
     loop {

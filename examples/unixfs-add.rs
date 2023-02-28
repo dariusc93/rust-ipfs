@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use futures::StreamExt;
 
-use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, TestTypes, UninitializedIpfs};
+use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, UninitializedIpfs};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-add")]
@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().enable_mdns().start().await?;
+    let ipfs: Ipfs = UninitializedIpfs::new().enable_mdns().start().await?;
 
     let mut stream = ipfs.add_file_unixfs(opt.file).await?;
 

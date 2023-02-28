@@ -4,18 +4,17 @@ use futures::{stream::BoxStream, StreamExt};
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
 
-use crate::{Ipfs, IpfsPath, IpfsTypes};
+use crate::{Ipfs, IpfsPath};
 
 use super::UnixfsStatus;
 
-pub async fn get<'a, Types, MaybeOwned, P: AsRef<Path>>(
+pub async fn get<'a, MaybeOwned, P: AsRef<Path>>(
     ipfs: MaybeOwned,
     path: IpfsPath,
     dest: P,
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
 where
-    Types: IpfsTypes,
-    MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
+    MaybeOwned: Borrow<Ipfs> + Send + 'a,
 {
     let mut file = tokio::fs::File::create(dest).await?;
     let ipfs = ipfs.borrow().clone();
@@ -40,7 +39,7 @@ where
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
                     return;
-                } 
+                }
             };
             let block_data = block.data();
 

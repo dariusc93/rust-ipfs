@@ -1,4 +1,4 @@
-use rust_ipfs::{p2p::PeerInfo, Ipfs, PublicKey, TestTypes, UninitializedIpfs};
+use rust_ipfs::{p2p::PeerInfo, Ipfs, PublicKey, UninitializedIpfs};
 use tokio::sync::Notify;
 
 #[tokio::main]
@@ -6,7 +6,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new()
+    let ipfs: Ipfs = UninitializedIpfs::new()
         .enable_mdns()
         .enable_relay(true)
         .enable_relay_server(None)

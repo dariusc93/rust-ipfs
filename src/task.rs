@@ -20,9 +20,7 @@ use tokio::sync::Notify;
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    sync::{
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 
@@ -79,7 +77,7 @@ pub(crate) struct IpfsTask {
     pub(crate) listeners: HashSet<ListenerId>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub(crate) repo: Arc<Repo>,
+    pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
     pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
@@ -828,17 +826,11 @@ impl IpfsTask {
                 let _ = ret.send(addrs);
             }
             IpfsEvent::WhitelistPeer(peer_id, ret) => {
-                self.swarm
-                    .behaviour_mut()
-                    .peerbook
-                    .add(peer_id);
+                self.swarm.behaviour_mut().peerbook.add(peer_id);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
-                self.swarm
-                    .behaviour_mut()
-                    .peerbook
-                    .remove(peer_id);
+                self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::GetProviders(cid, ret) => {
@@ -930,10 +922,7 @@ impl IpfsTask {
                         .behaviour_mut()
                         .kademlia
                         .add_address(&peer_id, ma.into());
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .add(peer_id);
+                    self.swarm.behaviour_mut().peerbook.add(peer_id);
                     // the return value of add_address doesn't implement Debug
                     trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                 }
@@ -955,10 +944,7 @@ impl IpfsTask {
                     } else {
                         warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
                     }
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .remove(peer_id);
+                    self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 }
                 let _ = ret.send(Ok(result));
             }
@@ -980,10 +966,7 @@ impl IpfsTask {
                     } else {
                         error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
                     }
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .remove(peer_id);
+                    self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 }
                 let _ = ret.send(list);
             }
@@ -1010,10 +993,7 @@ impl IpfsTask {
                             .kademlia
                             .add_address(&peer_id, ma.clone());
                         trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
-                        self.swarm
-                            .behaviour_mut()
-                            .peerbook
-                            .add(peer_id);
+                        self.swarm.behaviour_mut().peerbook.add(peer_id);
                         // report with the peerid
                         let reported: Multiaddr = addr.into();
                         rets.push(reported);

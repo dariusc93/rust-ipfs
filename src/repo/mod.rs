@@ -31,13 +31,7 @@ pub mod kv;
 pub mod mem;
 
 /// Consolidates `BlockStore` and `DataStore` into a representation of storage.
-pub trait RepoTypes: Send + Sync + 'static {
-    /// Describes a blockstore.
-    type TBlockStore: BlockStore;
-    /// Describes a datastore.
-    type TDataStore: DataStore;
-    type TLock: Lock;
-}
+pub trait RepoTypes: Send + Sync + 'static {}
 
 /// Configuration for a repo.
 #[derive(Clone, Debug)]
@@ -328,12 +322,12 @@ impl<C: Borrow<Cid>> PinKind<C> {
 /// Describes a repo.
 ///
 /// Consolidates a blockstore, a datastore and a subscription registry.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Repo {
     block_store: Arc<dyn BlockStore>,
     data_store: Arc<dyn DataStore>,
     events: Sender<RepoEvent>,
-    pub(crate) subscriptions: SubscriptionRegistry<Block, String>,
+    pub(crate) subscriptions: Arc<SubscriptionRegistry<Block, String>>,
     lockfile: Arc<Mutex<dyn Lock>>,
 }
 
@@ -375,7 +369,10 @@ impl Repo {
         lockfile_path.push("repo_lock");
 
         let block_store = Arc::new(fs::FsBlockStore::new(blockstore_path));
+        #[cfg(not(feature = "sled_data_store"))]
         let data_store = Arc::new(fs::FsDataStore::new(datastore_path));
+        #[cfg(feature = "sled_data_store")]
+        let data_store = Arc::new(kv::KvDataStore::new(datastore_path));
         let lockfile = Arc::new(Mutex::new(fs::FsLock::new(lockfile_path)));
         let (sender, receiver) = channel(1);
 
