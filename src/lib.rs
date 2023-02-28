@@ -551,6 +551,12 @@ impl UninitializedIpfs {
             ..
         } = self;
 
+        if let StoragePath::Disk(path) = &options.ipfs_path {
+            if !path.is_dir() {
+                tokio::fs::create_dir_all(path).await?;
+            }
+        }
+
         let (repo, repo_events) = create_repo(options.ipfs_path.clone());
 
         let root_span = options
