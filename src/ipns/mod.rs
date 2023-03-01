@@ -2,7 +2,6 @@
 
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot};
-use crate::repo::RepoTypes;
 use crate::Ipfs;
 
 mod dnslink;
@@ -12,14 +11,14 @@ mod dnslink;
 
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
-pub struct Ipns<Types: RepoTypes> {
+pub struct Ipns {
     // FIXME(unused): scaffolding while ipns functionality as a whole suggests we should have dht
     // queries etc. here (currently unimplemented).
-    _ipfs: Ipfs<Types>,
+    _ipfs: Ipfs,
 }
 
-impl<Types: RepoTypes> Ipns<Types> {
-    pub fn new(_ipfs: Ipfs<Types>) -> Self {
+impl Ipns {
+    pub fn new(_ipfs: Ipfs) -> Self {
         Ipns { _ipfs }
     }
 

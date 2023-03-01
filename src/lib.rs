@@ -41,7 +41,7 @@ use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Sender},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
     sink::SinkExt,
@@ -60,7 +60,7 @@ use unixfs::UnixfsStatus;
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    env, fmt,
+    fmt,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc},
@@ -70,7 +70,7 @@ use self::{
     dag::IpldDag,
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
-    repo::{create_repo, Repo, RepoEvent, RepoOptions},
+    repo::{create_repo, Repo, RepoEvent},
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -80,7 +80,7 @@ pub use self::{
     p2p::BehaviourEvent,
     p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
-    repo::{PinKind, PinMode, RepoTypes},
+    repo::{PinKind, PinMode},
 };
 
 pub type Block = libipld::Block<libipld::DefaultParams>;
@@ -106,29 +106,10 @@ use libp2p::{
     swarm::{dial_opts::DialOpts, DialError},
 };
 
-/// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
-pub trait IpfsTypes: RepoTypes {}
-impl<T: RepoTypes> IpfsTypes for T {}
-
-/// Default node configuration, currently with persistent block store and data store for pins.
-#[derive(Debug)]
-pub struct Types;
-impl RepoTypes for Types {
-    type TBlockStore = repo::fs::FsBlockStore;
-    #[cfg(feature = "sled_data_store")]
-    type TDataStore = repo::kv::KvDataStore;
-    #[cfg(not(feature = "sled_data_store"))]
-    type TDataStore = repo::fs::FsDataStore;
-    type TLock = repo::fs::FsLock;
-}
-
-/// In-memory testing configuration used in tests.
-#[derive(Debug)]
-pub struct TestTypes;
-impl RepoTypes for TestTypes {
-    type TBlockStore = repo::mem::MemBlockStore;
-    type TDataStore = repo::mem::MemDataStore;
-    type TLock = repo::mem::MemLock;
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StoragePath {
+    Disk(PathBuf),
+    Memory,
 }
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
@@ -144,7 +125,7 @@ pub struct IpfsOptions {
     ///
     /// It is **not** recommended to set this to IPFS_PATH without first at least backing up your
     /// existing repository.
-    pub ipfs_path: PathBuf,
+    pub ipfs_path: StoragePath,
 
     /// The keypair used with libp2p, the identity of the node.
     pub keypair: Keypair,
@@ -209,7 +190,7 @@ pub struct IpfsOptions {
 impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
-            ipfs_path: env::temp_dir(),
+            ipfs_path: StoragePath::Memory,
             keypair: Keypair::generate_ed25519(),
             mdns: Default::default(),
             mdns_ipv6: Default::default(),
@@ -295,19 +276,19 @@ impl<I: Borrow<Keypair>> DebuggableKeypair<I> {
 ///
 /// The facade is created through [`UninitializedIpfs`] which is configured with [`IpfsOptions`].
 #[derive(Debug)]
-pub struct Ipfs<Types: IpfsTypes> {
+pub struct Ipfs {
     span: Span,
-    repo: Arc<Repo<Types>>,
+    repo: Repo,
     keys: DebuggableKeypair<Keypair>,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
 }
 
-impl<Types: IpfsTypes> Clone for Ipfs<Types> {
+impl Clone for Ipfs {
     fn clone(&self) -> Self {
         Ipfs {
             span: self.span.clone(),
-            repo: Arc::clone(&self.repo),
+            repo: self.repo.clone(),
             identify_conf: self.identify_conf.clone(),
             keys: self.keys.clone(),
             to_task: self.to_task.clone(),
@@ -403,23 +384,21 @@ pub enum FDLimit {
 }
 
 /// Configured Ipfs which can only be started.
-pub struct UninitializedIpfs<Types: IpfsTypes> {
-    repo: Arc<Repo<Types>>,
+pub struct UninitializedIpfs {
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     delay: bool,
-    repo_events: Receiver<RepoEvent>,
     swarm_event: Option<TSwarmEventFn>,
 }
 
-impl<Types: IpfsTypes> Default for UninitializedIpfs<Types> {
+impl Default for UninitializedIpfs {
     fn default() -> Self {
         Self::with_opt(Default::default())
     }
 }
 
-impl<Types: IpfsTypes> UninitializedIpfs<Types> {
+impl UninitializedIpfs {
     pub fn new() -> Self {
         Self::default()
     }
@@ -431,18 +410,14 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// operations done in the background task as well as tasks spawned by the underlying
     /// `libp2p::Swarm`.
     pub fn with_opt(options: IpfsOptions) -> Self {
-        let repo_options = RepoOptions::from(&options);
-        let (repo, repo_events) = create_repo(repo_options);
         let keys = options.keypair.clone();
         let fdlimit = None;
         let delay = true;
         UninitializedIpfs {
-            repo: Arc::new(repo),
             keys,
             options,
             fdlimit,
             delay,
-            repo_events,
             swarm_event: None,
         }
     }
@@ -466,7 +441,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// Sets a path
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
-        self.options.ipfs_path = path;
+        self.options.ipfs_path = StoragePath::Disk(path);
         self
     }
 
@@ -566,16 +541,23 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     }
 
     /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync.
-    pub async fn start(self) -> Result<Ipfs<Types>, Error> {
+    pub async fn start(self) -> Result<Ipfs, Error> {
         let UninitializedIpfs {
-            repo,
             keys,
-            repo_events,
             fdlimit,
             delay,
             mut options,
             swarm_event,
+            ..
         } = self;
+
+        if let StoragePath::Disk(path) = &options.ipfs_path {
+            if !path.is_dir() {
+                tokio::fs::create_dir_all(path).await?;
+            }
+        }
+
+        let (repo, repo_events) = create_repo(options.ipfs_path.clone());
 
         let root_span = options
             .span
@@ -684,13 +666,13 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     }
 }
 
-impl<Types: IpfsTypes> Ipfs<Types> {
+impl Ipfs {
     /// Return an [`IpldDag`] for DAG operations
-    pub fn dag(&self) -> IpldDag<Types> {
+    pub fn dag(&self) -> IpldDag {
         IpldDag::new(self.clone())
     }
 
-    fn ipns(&self) -> Ipns<Types> {
+    fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
 
@@ -1831,7 +1813,7 @@ mod node {
     /// easier.
     pub struct Node {
         /// The Ipfs facade.
-        pub ipfs: Ipfs<TestTypes>,
+        pub ipfs: Ipfs,
         /// The peer identifier on the network.
         pub id: PeerId,
         /// The listened to and externally visible addresses. The addresses are suffixed with the
@@ -1873,7 +1855,10 @@ mod node {
 
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts).start().await.unwrap();
+            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts)
+                .start()
+                .await
+                .unwrap();
 
             let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 
@@ -1906,7 +1891,7 @@ mod node {
     }
 
     impl Deref for Node {
-        type Target = Ipfs<TestTypes>;
+        type Target = Ipfs;
 
         fn deref(&self) -> &Self::Target {
             &self.ipfs

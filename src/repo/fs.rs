@@ -4,6 +4,7 @@
 
 use crate::error::Error;
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,17 +44,19 @@ pub struct FsDataStore {
     lock: Arc<Semaphore>,
 }
 
-/// The column operations are all unimplemented pending at least downscoping of the
-/// DataStore trait itself.
-#[async_trait]
-impl DataStore for FsDataStore {
-    fn new(root: PathBuf) -> Self {
+impl FsDataStore {
+    pub fn new(root: PathBuf) -> Self {
         FsDataStore {
             path: root,
             lock: Arc::new(Semaphore::new(1)),
         }
     }
+}
 
+/// The column operations are all unimplemented pending at least downscoping of the
+/// DataStore trait itself.
+#[async_trait]
+impl DataStore for FsDataStore {
     async fn init(&self) -> Result<(), Error> {
         // Although `pins` directory is created when inserting a data, is it not created when there are any attempts at listing the pins (thus causing to fail)
         tokio::fs::create_dir_all(&self.path.join("pins")).await?;
@@ -85,9 +88,9 @@ impl DataStore for FsDataStore {
 
 #[derive(Debug)]
 pub struct FsLock {
-    file: Option<File>,
+    file: Mutex<Option<File>>,
     path: PathBuf,
-    state: State,
+    state: Mutex<State>,
 }
 
 #[derive(Debug)]
@@ -96,15 +99,17 @@ enum State {
     Exclusive,
 }
 
-impl Lock for FsLock {
-    fn new(path: PathBuf) -> Self {
+impl FsLock {
+    pub fn new(path: PathBuf) -> Self {
         Self {
-            file: None,
+            file: Mutex::new(None),
             path,
-            state: State::Unlocked,
+            state: Mutex::new(State::Unlocked),
         }
     }
+}
 
+impl Lock for FsLock {
     fn try_exclusive(&mut self) -> Result<(), LockError> {
         use fs2::FileExt;
         use std::fs::OpenOptions;
@@ -117,8 +122,8 @@ impl Lock for FsLock {
 
         file.try_lock_exclusive()?;
 
-        self.state = State::Exclusive;
-        self.file = Some(file);
+        *self.state.lock() = State::Exclusive;
+        *self.file.lock() = Some(file);
 
         Ok(())
     }

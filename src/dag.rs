@@ -2,7 +2,6 @@
 
 use crate::error::Error;
 use crate::path::{IpfsPath, SlashedPath};
-use crate::repo::RepoTypes;
 use crate::{Block, Ipfs};
 use libipld::{
     cid::{
@@ -166,8 +165,8 @@ impl RawResolveLocalError {
 
 /// `ipfs.dag` interface providing wrapper around Ipfs.
 #[derive(Clone, Debug)]
-pub struct IpldDag<Types: RepoTypes> {
-    ipfs: Ipfs<Types>,
+pub struct IpldDag {
+    ipfs: Ipfs,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -181,10 +180,10 @@ pub struct DagPinOpt {
     pub recursive: bool,
 }
 
-impl<Types: RepoTypes> IpldDag<Types> {
+impl IpldDag {
     /// Creates a new `IpldDag` for DAG operations.
     // FIXME: duplicates Ipfs::dag(), having both is redundant.
-    pub fn new(ipfs: Ipfs<Types>) -> Self {
+    pub fn new(ipfs: Ipfs) -> Self {
         IpldDag { ipfs }
     }
 

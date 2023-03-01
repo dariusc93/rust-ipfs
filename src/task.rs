@@ -20,13 +20,11 @@ use tokio::sync::Notify;
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    sync::{
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 
-use crate::{config::BOOTSTRAP_NODES, repo::BlockPut, IpfsEvent, IpfsTypes, TSwarmEventFn};
+use crate::{config::BOOTSTRAP_NODES, repo::BlockPut, IpfsEvent, TSwarmEventFn};
 
 use crate::{
     p2p::TSwarm,
@@ -38,7 +36,7 @@ pub use crate::{
     p2p::BehaviourEvent,
     p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
-    repo::{PinKind, PinMode, RepoTypes},
+    repo::{PinKind, PinMode},
 };
 
 use libipld::multibase::{self, Base};
@@ -71,7 +69,7 @@ use libp2p::{
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
-pub(crate) struct IpfsTask<Types: IpfsTypes> {
+pub(crate) struct IpfsTask {
     pub(crate) swarm: TSwarm,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
@@ -79,7 +77,7 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) listeners: HashSet<ListenerId>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub(crate) repo: Arc<Repo<Types>>,
+    pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
     pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
@@ -87,7 +85,7 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) swarm_event: Option<TSwarmEventFn>,
 }
 
-impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
+impl IpfsTask {
     pub(crate) async fn run(&mut self, delay: bool, notify: Arc<Notify>) {
         let mut first_run = false;
         let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
@@ -828,17 +826,11 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let _ = ret.send(addrs);
             }
             IpfsEvent::WhitelistPeer(peer_id, ret) => {
-                self.swarm
-                    .behaviour_mut()
-                    .peerbook
-                    .add(peer_id);
+                self.swarm.behaviour_mut().peerbook.add(peer_id);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
-                self.swarm
-                    .behaviour_mut()
-                    .peerbook
-                    .remove(peer_id);
+                self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::GetProviders(cid, ret) => {
@@ -930,10 +922,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         .behaviour_mut()
                         .kademlia
                         .add_address(&peer_id, ma.into());
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .add(peer_id);
+                    self.swarm.behaviour_mut().peerbook.add(peer_id);
                     // the return value of add_address doesn't implement Debug
                     trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                 }
@@ -955,10 +944,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     } else {
                         warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
                     }
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .remove(peer_id);
+                    self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 }
                 let _ = ret.send(Ok(result));
             }
@@ -980,10 +966,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     } else {
                         error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
                     }
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .remove(peer_id);
+                    self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 }
                 let _ = ret.send(list);
             }
@@ -1010,10 +993,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                             .kademlia
                             .add_address(&peer_id, ma.clone());
                         trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
-                        self.swarm
-                            .behaviour_mut()
-                            .peerbook
-                            .add(peer_id);
+                        self.swarm.behaviour_mut().peerbook.add(peer_id);
                         // report with the peerid
                         let reported: Multiaddr = addr.into();
                         rets.push(reported);

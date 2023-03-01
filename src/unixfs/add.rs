@@ -5,7 +5,7 @@ use crate::Block;
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use tokio_util::io::ReaderStream;
 
-use crate::{Ipfs, IpfsPath, IpfsTypes};
+use crate::{Ipfs, IpfsPath};
 
 use super::UnixfsStatus;
 
@@ -26,14 +26,13 @@ impl Default for AddOption {
     }
 }
 
-pub async fn add_file<'a, Types, MaybeOwned, P: AsRef<Path>>(
+pub async fn add_file<'a, MaybeOwned, P: AsRef<Path>>(
     ipfs: MaybeOwned,
     path: P,
     opt: Option<AddOption>,
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
 where
-    Types: IpfsTypes,
-    MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
+    MaybeOwned: Borrow<Ipfs> + Send + 'a,
 {
     let path = path.as_ref();
 
@@ -48,15 +47,14 @@ where
     add(ipfs, Some(size), stream.boxed(), opt).await
 }
 
-pub async fn add<'a, Types, MaybeOwned>(
+pub async fn add<'a, MaybeOwned>(
     ipfs: MaybeOwned,
     total_size: Option<usize>,
     mut stream: BoxStream<'a, Vec<u8>>,
     opt: Option<AddOption>,
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
 where
-    Types: IpfsTypes,
-    MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
+    MaybeOwned: Borrow<Ipfs> + Send + 'a,
 {
     let stream = async_stream::stream! {
             let ipfs = ipfs.borrow();

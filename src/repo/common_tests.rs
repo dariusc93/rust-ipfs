@@ -49,12 +49,12 @@ macro_rules! pinstore_interface_tests {
         #[cfg(test)]
         mod $module_name {
 
-            use $crate::repo::common_tests::DSTestContext;
-            use $crate::repo::{DataStore, PinKind, PinMode, PinStore};
             use futures::{StreamExt, TryStreamExt};
             use hash_hasher::HashedMap;
             use libipld::Cid;
             use std::convert::TryFrom;
+            use $crate::repo::common_tests::DSTestContext;
+            use $crate::repo::{PinKind, PinMode, PinStore};
 
             #[tokio::test]
             async fn pin_direct_twice_is_good() {

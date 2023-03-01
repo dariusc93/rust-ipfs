@@ -3,11 +3,12 @@
 This also re-enables quic-v1 that was disabled due to versioning issues after the release of 0.51.0
 - refactor/transport: Simplify TransportConfig and added additional options [PR 32]
 - feat: basic PeerBook implementation [PR 34]
+- refactor(repo): Remove RepoTypes and IpfsTypes [PR 35]
 
 [PR 31]: https://github.com/dariusc93/rust-ipfs/pull/31
 [PR 32]: https://github.com/dariusc93/rust-ipfs/pull/32
 [PR 34]: https://github.com/dariusc93/rust-ipfs/pull/34
-
+[PR 35]: https://github.com/dariusc93/rust-ipfs/pull/35
 # 0.3.0-alpha.6
 - chore: Disable quic-v1 until 0.51 update
 
