@@ -129,6 +129,15 @@ pub async fn add<'a>(
                     if let Err(_e) = ipfs.insert_pin(&cid, true).await {}
                 }
             }
+            if opt.provide {
+                tokio::spawn({
+                    let ipfs = ipfs;
+                    let cid = cid;
+                    async move {
+                        if ipfs.provide(cid).await.is_err() {}
+                    }
+                });
+            }
         }
 
         yield UnixfsStatus::CompletedStatus { path: IpfsPath::from(cid), written, total_size }
