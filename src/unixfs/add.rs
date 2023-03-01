@@ -9,7 +9,7 @@ use crate::{Ipfs, IpfsPath};
 
 use super::UnixfsStatus;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct AddOption {
     pub chunk: Option<Chunker>,
     pub pin: bool,
@@ -53,7 +53,7 @@ pub async fn add<'a>(
     let ipfs = ipfs.clone();
     let stream = async_stream::stream! {
         let mut adder = FileAdderBuilder::default()
-            .with_chunker(opt.clone().map(|o| o.chunk.unwrap_or_default()).unwrap_or_default())
+            .with_chunker(opt.map(|o| o.chunk.unwrap_or_default()).unwrap_or_default())
             .build();
 
         let mut written = 0;
@@ -123,7 +123,7 @@ pub async fn add<'a>(
             }
         };
 
-        if let Some(opt) = opt.clone() {
+        if let Some(opt) = opt {
             if opt.pin {
                 if let Ok(false) = ipfs.is_pinned(&cid).await {
                     if let Err(_e) = ipfs.insert_pin(&cid, true).await {}

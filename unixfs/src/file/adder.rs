@@ -319,7 +319,7 @@ fn render_and_hash(flat: &FlatUnixFs<'_>) -> (Cid, Vec<u8>) {
 }
 
 /// Chunker strategy
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Chunker {
     /// Size based chunking
     Size(usize),
