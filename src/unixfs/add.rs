@@ -124,20 +124,24 @@ pub async fn add<'a>(
         };
 
         if let Some(opt) = opt {
-            if opt.pin {
-                if let Ok(false) = ipfs.is_pinned(&cid).await {
-                    if let Err(_e) = ipfs.insert_pin(&cid, true).await {}
-                }
-            }
-            if opt.provide {
-                tokio::spawn({
-                    let ipfs = ipfs;
-                    let cid = cid;
-                    async move {
-                        if ipfs.provide(cid).await.is_err() {}
+            tokio::spawn({
+                let opt = opt;
+                let ipfs = ipfs;
+                async move {
+                    if opt.pin {
+                        if let Ok(false) = ipfs.is_pinned(&cid).await {
+                            if let Err(e) = ipfs.insert_pin(&cid, true).await {
+                                error!("Unable to pin {cid}: {e}");
+                            }
+                        }
                     }
-                });
-            }
+                    if opt.provide {
+                        if let Err(e) = ipfs.provide(cid).await {
+                            error!("Unable to provide {cid}: {e}");
+                        }
+                    }
+                }
+            });
         }
 
         yield UnixfsStatus::CompletedStatus { path: IpfsPath::from(cid), written, total_size }
