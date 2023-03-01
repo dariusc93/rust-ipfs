@@ -15,14 +15,13 @@ use std::ops::Range;
 /// be helpful in some contexts, like the http.
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
-pub async fn cat<'a, MaybeOwned>(
-    ipfs: MaybeOwned,
+pub async fn cat<'a>(
+    ipfs: &Ipfs,
     starting_point: impl Into<StartingPoint>,
     range: Option<Range<u64>>,
 ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed>
-where
-    MaybeOwned: Borrow<Ipfs> + Send + 'a,
 {
+    let ipfs = ipfs.clone();
     let mut visit = IdleFileVisit::default();
     if let Some(range) = range {
         visit = visit.with_target_range(range);
@@ -32,7 +31,7 @@ where
     // metadata. To get to it the user needs to create a Visitor over the first block.
     let block = match starting_point.into() {
         StartingPoint::Left(path) => {
-            let borrow = ipfs.borrow();
+            let borrow = ipfs.clone();
             let dag = borrow.dag();
             let (resolved, _) = dag
                 .resolve(path, true)

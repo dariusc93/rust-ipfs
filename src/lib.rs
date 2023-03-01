@@ -925,10 +925,10 @@ impl Ipfs {
     }
 
     /// Add a file through a stream of data to the blockstore
-    pub async fn add_unixfs(
+    pub async fn add_unixfs<'a>(
         &self,
-        stream: BoxStream<'static, Vec<u8>>,
-    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
+        stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
+    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
         unixfs::add(self, None, stream, None)
             .instrument(self.span.clone())
             .await
@@ -1855,10 +1855,7 @@ mod node {
 
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts)
-                .start()
-                .await
-                .unwrap();
+            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts).start().await.unwrap();
 
             let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 
