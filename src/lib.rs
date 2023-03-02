@@ -915,6 +915,8 @@ impl Ipfs {
     }
 
     /// Add a file from a path to the blockstore
+    /// 
+    /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
         &self,
         path: P,
@@ -925,16 +927,20 @@ impl Ipfs {
     }
 
     /// Add a file through a stream of data to the blockstore
-    pub async fn add_unixfs(
+    /// 
+    /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
+    pub async fn add_unixfs<'a>(
         &self,
-        stream: BoxStream<'static, Vec<u8>>,
-    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
+        stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
+    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
         unixfs::add(self, None, stream, None)
             .instrument(self.span.clone())
             .await
     }
 
     /// Retreive a file and saving it to a path.
+    /// 
+    /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
         path: IpfsPath,
@@ -1855,10 +1861,7 @@ mod node {
 
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts)
-                .start()
-                .await
-                .unwrap();
+            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts).start().await.unwrap();
 
             let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 

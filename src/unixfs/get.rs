@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, path::Path};
+use std::{path::Path};
 
 use futures::{stream::BoxStream, StreamExt};
 use rust_unixfs::walk::{ContinuedWalk, Walker};
@@ -8,16 +8,13 @@ use crate::{Ipfs, IpfsPath};
 
 use super::UnixfsStatus;
 
-pub async fn get<'a, MaybeOwned, P: AsRef<Path>>(
-    ipfs: MaybeOwned,
+pub async fn get<'a, P: AsRef<Path>>(
+    ipfs: &Ipfs,
     path: IpfsPath,
     dest: P,
-) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
-where
-    MaybeOwned: Borrow<Ipfs> + Send + 'a,
-{
+) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
     let mut file = tokio::fs::File::create(dest).await?;
-    let ipfs = ipfs.borrow().clone();
+    let ipfs = ipfs.clone();
 
     let (resolved, _) = ipfs.dag().resolve(path.clone(), true).await?;
 
