@@ -915,6 +915,8 @@ impl Ipfs {
     }
 
     /// Add a file from a path to the blockstore
+    /// 
+    /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
         &self,
         path: P,
@@ -925,6 +927,8 @@ impl Ipfs {
     }
 
     /// Add a file through a stream of data to the blockstore
+    /// 
+    /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
     pub async fn add_unixfs<'a>(
         &self,
         stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
@@ -935,6 +939,8 @@ impl Ipfs {
     }
 
     /// Retreive a file and saving it to a path.
+    /// 
+    /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
         path: IpfsPath,
