@@ -1,4 +1,4 @@
-# 0.3.0-alpha.7 [unrelease]
+# 0.3.0 [unrelease]
 - chore: Update to libp2p 0.51.0 [PR 31]
 This also re-enables quic-v1 that was disabled due to versioning issues after the release of 0.51.0
 - refactor/transport: Simplify TransportConfig and added additional options [PR 32]
