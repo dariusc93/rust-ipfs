@@ -7,6 +7,7 @@ use std::num::{NonZeroU8, NonZeroUsize};
 use crate::error::Error;
 use crate::IpfsOptions;
 
+use libp2p::gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
@@ -126,6 +127,8 @@ pub struct SwarmOptions {
     /// Kad store config
     /// Note: Only supports MemoryStoreConfig at this time
     pub kad_store_config: Option<KadStoreConfig>,
+    /// Pubsub configuration,
+    pub pubsub_config: Option<PubsubConfig>,
     /// UPnP/PortMapping
     pub portmapping: bool,
     /// Keep alive
@@ -154,6 +157,7 @@ impl From<&IpfsOptions> for SwarmOptions {
         let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
         let portmapping = options.port_mapping;
+        let pubsub_config = options.pubsub_config.clone();
 
         SwarmOptions {
             keypair,
@@ -171,6 +175,59 @@ impl From<&IpfsOptions> for SwarmOptions {
             keep_alive,
             identify_config,
             portmapping,
+            pubsub_config,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubsubConfig {
+    /// Custom protocol name
+    pub custom_protocol_id: Option<String>,
+
+    /// Max size that can be transmitted over gossipsub
+    pub max_transmit_size: usize,
+
+    /// Floodsub compatibility
+    pub floodsub_compat: bool,
+
+    /// Validation
+    pub validate: PubsubValidation,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PubsubValidation {
+    /// See [`ValidationMode::Strict`]
+    Strict,
+
+    /// See [`ValidationMode::Permissive`]
+    Permissive,
+
+    /// See [`ValidationMode::Anonymous`]
+    Anonymous,
+
+    /// See [`ValidationMode::None`]
+    Relaxed,
+}
+
+impl From<PubsubValidation> for ValidationMode {
+    fn from(validation: PubsubValidation) -> Self {
+        match validation {
+            PubsubValidation::Strict => ValidationMode::Strict,
+            PubsubValidation::Permissive => ValidationMode::Permissive,
+            PubsubValidation::Anonymous => ValidationMode::Anonymous,
+            PubsubValidation::Relaxed => ValidationMode::None,
+        }
+    }
+}
+
+impl Default for PubsubConfig {
+    fn default() -> Self {
+        Self {
+            custom_protocol_id: None,
+            max_transmit_size: 2 * 1024 * 1024,
+            validate: PubsubValidation::Strict,
+            floodsub_compat: false,
         }
     }
 }

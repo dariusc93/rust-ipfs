@@ -340,15 +340,29 @@ impl Behaviour {
         );
 
         let pubsub = {
-            let config = libp2p::gossipsub::ConfigBuilder::default()
-                .max_transmit_size(512 * 1024)
-                .build()
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let pubsub_config = options.pubsub_config.unwrap_or_default();
+            let mut builder = libp2p::gossipsub::ConfigBuilder::default();
+
+            if let Some(protocol) = pubsub_config.custom_protocol_id {
+                builder.protocol_id(protocol, libp2p::gossipsub::Version::V1_1);
+            }
+
+            builder.max_transmit_size(pubsub_config.max_transmit_size);
+
+            if pubsub_config.floodsub_compat {
+                builder.support_floodsub();
+            }
+
+            builder.validation_mode(pubsub_config.validate.into());
+
+            let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
+
             let gossipsub = libp2p::gossipsub::Behaviour::new(
                 libp2p::gossipsub::MessageAuthenticity::Signed(options.keypair),
                 config,
             )
             .map_err(|e| anyhow::anyhow!("{}", e))?;
+
             GossipsubStream::from(gossipsub)
         };
 

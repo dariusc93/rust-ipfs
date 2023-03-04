@@ -166,6 +166,9 @@ pub struct IpfsOptions {
     /// Identify configuration
     pub identify_configuration: Option<crate::p2p::IdentifyConfiguration>,
 
+    /// Pubsub configuration
+    pub pubsub_config: Option<crate::p2p::PubsubConfig>,
+
     /// Kad configuration
     pub kad_configuration: Option<KademliaConfig>,
 
@@ -212,6 +215,7 @@ impl Default for IpfsOptions {
             ],
             port_mapping: false,
             transport_configuration: None,
+            pubsub_config: None,
             swarm_configuration: None,
             span: None,
         }
