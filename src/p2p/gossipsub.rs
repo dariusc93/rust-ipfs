@@ -341,6 +341,7 @@ impl NetworkBehaviour for GossipsubStream {
                                 .unwrap_or_default(),
                             "Failed to unsubscribe a dropped subscription"
                         );
+                        self.active_streams.remove(&dropped);
                     }
                 }
                 Poll::Ready(None) => unreachable!("we own the sender"),
@@ -365,6 +366,7 @@ impl NetworkBehaviour for GossipsubStream {
                                     .unwrap_or_default(),
                                 "Failed to unsubscribe following SendError"
                             );
+                            self.active_streams.remove(&topic);
                         }
                     }
                     continue;
