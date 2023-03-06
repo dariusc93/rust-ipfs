@@ -1,4 +1,4 @@
-# 0.3.1 [unrelease]
+# 0.3.1
 -  chore: Minor Config for Pubsub [PR 38]
 
 [PR 38]: https://github.com/dariusc93/rust-ipfs/pull/38
