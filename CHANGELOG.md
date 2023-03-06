@@ -1,3 +1,8 @@
+# 0.3.1 [unrelease]
+-  chore: Minor Config for Pubsub [PR 38]
+
+[PR 38]: https://github.com/dariusc93/rust-ipfs/pull/38
+
 # 0.3.0
 - chore: Update to libp2p 0.51.0 [PR 31]
 This also re-enables quic-v1 that was disabled due to versioning issues after the release of 0.51.0

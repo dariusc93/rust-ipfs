@@ -220,14 +220,23 @@ impl GossipsubStream {
     }
 }
 
-#[allow(deprecated)]
-//TODO: Remove deprecated functions
 impl NetworkBehaviour for GossipsubStream {
     type ConnectionHandler = <Gossipsub as NetworkBehaviour>::ConnectionHandler;
     type OutEvent = GossipsubEvent;
 
-    fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
-        self.gossipsub.addresses_of_peer(peer_id)
+    fn handle_pending_outbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        maybe_peer: Option<PeerId>,
+        addresses: &[Multiaddr],
+        effective_role: Endpoint,
+    ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
+        self.gossipsub.handle_pending_outbound_connection(
+            connection_id,
+            maybe_peer,
+            addresses,
+            effective_role,
+        )
     }
 
     fn on_swarm_event(&mut self, event: libp2p::swarm::FromSwarm<Self::ConnectionHandler>) {
