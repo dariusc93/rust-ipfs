@@ -8,10 +8,18 @@ mod common;
 use common::{spawn_nodes, Topology};
 
 #[tokio::test]
+#[ignore = "Implemented a broadcast so subscribing multiple times is allowed"]
 async fn subscribe_only_once() {
     let a = Node::new("test_node").await;
     let _stream = a.pubsub_subscribe("some_topic".into()).await.unwrap();
     a.pubsub_subscribe("some_topic".into()).await.unwrap_err();
+}
+
+#[tokio::test]
+async fn subscribe_multiple_times() {
+    let a = Node::new("test_node").await;
+    let _stream = a.pubsub_subscribe("some_topic".into()).await.unwrap();
+    a.pubsub_subscribe("some_topic".into()).await.unwrap();
 }
 
 #[tokio::test]
@@ -39,15 +47,6 @@ async fn unsubscribe_via_drop() {
     let empty: &[&str] = &[];
     assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
 }
-
-// This test may not be needed since rust-libp2p gossip implementation doesnt allow publishing without first subscribing(?)
-// #[tokio::test]
-// async fn cant_publish_without_subscribing() {
-//     let a = Node::new("test_node").await;
-//     a.pubsub_publish("topic".into(), b"foobar".to_vec())
-//         .await
-//         .unwrap();
-// }
 
 #[tokio::test]
 async fn publish_between_two_nodes_single_topic() {
