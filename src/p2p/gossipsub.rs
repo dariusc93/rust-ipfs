@@ -6,6 +6,7 @@ use libp2p::identity::Keypair;
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::{debug, warn};
@@ -28,7 +29,7 @@ pub struct GossipsubStream {
     // Tracks the topic subscriptions.
     streams: HashMap<TopicHash, async_broadcast::Sender<GossipsubMessage>>,
 
-    active_streams: HashMap<TopicHash, Arc<()>>,
+    active_streams: HashMap<TopicHash, Arc<AtomicUsize>>,
 
     // Gossipsub protocol
     gossipsub: Gossipsub,
@@ -59,11 +60,12 @@ pub struct SubscriptionStream {
     on_drop: Option<channel::UnboundedSender<TopicHash>>,
     topic: Option<TopicHash>,
     inner: async_broadcast::Receiver<GossipsubMessage>,
-    counter: Arc<()>,
+    counter: Arc<AtomicUsize>,
 }
 
 impl Clone for SubscriptionStream {
     fn clone(&self) -> Self {
+        self.counter.fetch_add(1, Ordering::SeqCst);
         Self {
             on_drop: self.on_drop.clone(),
             topic: self.topic.clone(),
@@ -75,7 +77,7 @@ impl Clone for SubscriptionStream {
 
 impl Drop for SubscriptionStream {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.counter) == 1 {
+        if self.counter.load(Ordering::SeqCst) == 1 {
             // the on_drop option allows us to disable this unsubscribe on drop once the stream has
             // ended.
             if let Some(sender) = self.on_drop.take() {
@@ -83,6 +85,8 @@ impl Drop for SubscriptionStream {
                     let _ = sender.unbounded_send(topic);
                 }
             }
+        } else {
+            self.counter.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -171,7 +175,9 @@ impl GossipsubStream {
             Entry::Vacant(ve) => {
                 match self.gossipsub.subscribe(&topic) {
                     Ok(true) => {
-                        self.active_streams.insert(topic.hash(), Arc::default());
+                        let counter = Arc::new(AtomicUsize::new(1));
+                        self.active_streams
+                            .insert(topic.hash(), Arc::clone(&counter));
                         // TODO: this could also be bounded; we could send the message and drop the
                         // subscription if it ever became full.
                         let (tx, rx) = async_broadcast::broadcast(92160);
@@ -181,10 +187,10 @@ impl GossipsubStream {
                             on_drop: Some(self.unsubscriptions.0.clone()),
                             topic: Some(key),
                             inner: rx,
-                            counter: Arc::new(()),
+                            counter,
                         })
                     }
-                    Ok(false) => anyhow::bail!("Already subscribed to topic"),
+                    Ok(false) => anyhow::bail!("Already subscribed to topic; shouldnt reach this"),
                     Err(e) => {
                         debug!("{}", e); //"subscribing to a unsubscribed topic should have succeeded"
                         Err(anyhow::Error::from(e))
@@ -199,6 +205,7 @@ impl GossipsubStream {
                     .get(&key)
                     .cloned()
                     .ok_or(anyhow::anyhow!("No active stream"))?;
+                counter.fetch_add(1, Ordering::SeqCst);
                 Ok(SubscriptionStream {
                     on_drop: Some(self.unsubscriptions.0.clone()),
                     topic: Some(key),
