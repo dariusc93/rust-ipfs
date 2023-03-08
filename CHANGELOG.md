@@ -1,5 +1,10 @@
+# 0.3.2 [unrelease]
+- refactor: Use async-broadcast for pubsub stream [PR 39]
+
+[PR 39]: https://github.com/dariusc93/rust-ipfs/pull/39
+
 # 0.3.1
--  chore: Minor Config for Pubsub [PR 38]
+- chore: Minor Config for Pubsub [PR 38]
 
 [PR 38]: https://github.com/dariusc93/rust-ipfs/pull/38
 
