@@ -1,4 +1,4 @@
-# 0.3.2 [unrelease]
+# 0.3.2
 - refactor: Use async-broadcast for pubsub stream [PR 39]
 
 [PR 39]: https://github.com/dariusc93/rust-ipfs/pull/39
