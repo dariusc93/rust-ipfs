@@ -194,70 +194,68 @@ impl IdentifyConfiguration {
     }
 }
 
-// impl From<RelayConfig> for libp2p::relay::Config {
-//     fn from(
-//         RelayConfig {
-//             max_reservations,
-//             max_reservations_per_peer,
-//             reservation_duration,
-//             reservation_rate_limiters,
-//             max_circuits,
-//             max_circuits_per_peer,
-//             max_circuit_duration,
-//             max_circuit_bytes,
-//             circuit_src_rate_limiters,
-//         }: RelayConfig,
-//     ) -> Self {
-//         unimplemented!()
-//         // let reservation_rate_limiters = reservation_rate_limiters
-//         //     .iter()
-//         //     .map(|rate| match rate {
-//         //         RateLimit::PerPeer { limit, interval } => {
-//         //             rate_limiter::new_per_peer(rate_limiter::generic::GenericRateLimiterConfig {
-//         //                 limit: *limit,
-//         //                 interval: *interval,
-//         //             })
-//         //         }
-//         //         RateLimit::PerIp { limit, interval } => {
-//         //             rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
-//         //                 limit: *limit,
-//         //                 interval: *interval,
-//         //             })
-//         //         }
-//         //     })
-//         //     .collect::<Vec<_>>();
+impl From<RelayConfig> for libp2p::relay::Config {
+    fn from(
+        RelayConfig {
+            max_reservations,
+            max_reservations_per_peer,
+            reservation_duration,
+            max_circuits,
+            max_circuits_per_peer,
+            max_circuit_duration,
+            max_circuit_bytes,
+            ..
+        }: RelayConfig,
+    ) -> Self {
+        // let reservation_rate_limiters = reservation_rate_limiters
+        //     .iter()
+        //     .map(|rate| match rate {
+        //         RateLimit::PerPeer { limit, interval } => {
+        //             libp2p::relay::
+        //             GenericRateLimiter(GenericRateLimiterConfig {
+        //                 limit: *limit,
+        //                 interval: *interval,
+        //             })
+        //         }
+        //         RateLimit::PerIp { limit, interval } => {
+        //             new_per_ip(rate_limiter::GenericRateLimiterConfig {
+        //                 limit: *limit,
+        //                 interval: *interval,
+        //             })
+        //         }
+        //     })
+        //     .collect::<Vec<_>>();
 
-//         // let circuit_src_rate_limiters = circuit_src_rate_limiters
-//         //     .iter()
-//         //     .map(|rate| match rate {
-//         //         RateLimit::PerPeer { limit, interval } => {
-//         //             rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
-//         //                 limit: *limit,
-//         //                 interval: *interval,
-//         //             })
-//         //         }
-//         //         RateLimit::PerIp { limit, interval } => {
-//         //             rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
-//         //                 limit: *limit,
-//         //                 interval: *interval,
-//         //             })
-//         //         }
-//         //     })
-//         //     .collect::<Vec<_>>();
+        // let circuit_src_rate_limiters = circuit_src_rate_limiters
+        //     .iter()
+        //     .map(|rate| match rate {
+        //         RateLimit::PerPeer { limit, interval } => {
+        //             rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
+        //                 limit: *limit,
+        //                 interval: *interval,
+        //             })
+        //         }
+        //         RateLimit::PerIp { limit, interval } => {
+        //             rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
+        //                 limit: *limit,
+        //                 interval: *interval,
+        //             })
+        //         }
+        //     })
+        //     .collect::<Vec<_>>();
 
-//         // libp2p::relay::Config {
-//         //     max_reservations,
-//         //     max_reservations_per_peer,
-//         //     reservation_duration,
-//         //     reservation_rate_limiters,
-//         //     max_circuits,
-//         //     max_circuits_per_peer,
-//         //     max_circuit_duration,
-//         //     max_circuit_bytes,
-//         //     circuit_src_rate_limiters,
-//         // }
-//     }
-// }
+        libp2p::relay::Config {
+            max_reservations,
+            max_reservations_per_peer,
+            reservation_duration,
+            max_circuits,
+            max_circuits_per_peer,
+            max_circuit_duration,
+            max_circuit_bytes,
+            ..Default::default()
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum RateLimit {
@@ -370,16 +368,15 @@ impl Behaviour {
 
         // Maybe have this enable in conjunction with RelayClient?
         let dcutr = Toggle::from(options.dcutr.then_some(Dcutr::new(peer_id)));
-        //TODO: Fix RelayConfig
-        // let relay_config = options
-        //     .relay_server_config
-        //     .map(|rc| rc.into())
-        //     .unwrap_or_default();
+        let relay_config = options
+            .relay_server_config
+            .map(|rc| rc.into())
+            .unwrap_or_default();
 
         let relay = Toggle::from(
             options
                 .relay_server
-                .then(|| Relay::new(peer_id, Default::default())),
+                .then(|| Relay::new(peer_id, relay_config)),
         );
 
         let upnp = Toggle::from(
