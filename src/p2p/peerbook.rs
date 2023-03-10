@@ -170,7 +170,7 @@ impl Behaviour {
     }
 
     pub fn inject_peer_info<I: Into<PeerInfo>>(&mut self, info: I) {
-        let info = info.into();
+        let info: PeerInfo = info.into();
         self.peer_info.insert(info.peer_id, info);
     }
 
