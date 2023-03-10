@@ -60,7 +60,7 @@ use unixfs::UnixfsStatus;
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    fmt,
+    fmt, io,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc},
@@ -305,6 +305,7 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 /// Events used internally to communicate with the swarm, which is executed in the the background
 /// task.
 #[derive(Debug)]
+#[allow(clippy::type_complexity)]
 enum IpfsEvent {
     /// Connect
     Connect(
@@ -348,11 +349,11 @@ enum IpfsEvent {
     SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(
         Multiaddr,
-        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
+        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     RemoveListeningAddress(
         Multiaddr,
-        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
+        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Option<Multiaddr>),
@@ -919,7 +920,7 @@ impl Ipfs {
     }
 
     /// Add a file from a path to the blockstore
-    /// 
+    ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
         &self,
@@ -931,7 +932,7 @@ impl Ipfs {
     }
 
     /// Add a file through a stream of data to the blockstore
-    /// 
+    ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
     pub async fn add_unixfs<'a>(
         &self,
@@ -943,7 +944,7 @@ impl Ipfs {
     }
 
     /// Retreive a file and saving it to a path.
-    /// 
+    ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
@@ -1360,14 +1361,17 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::AddListeningAddress(addr, tx))
                 .await?;
-
-            rx.await.map_err(anyhow::Error::from)?
+            let rx = rx.await??;
+            match rx.await? {
+                Either::Left(addr) => Ok(addr),
+                Either::Right(result) => {
+                    result?;
+                    Err(anyhow::anyhow!("No multiaddr provided"))
+                }
+            }
         }
         .instrument(self.span.clone())
-        .await?
-        .await??
-        .and_then(|addr| addr)
-        .ok_or_else(|| anyhow::anyhow!("No multiaddr provided"))
+        .await
     }
 
     /// Stop listening on a previously added listening address. Fails if the address is not being
@@ -1382,14 +1386,16 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::RemoveListeningAddress(addr, tx))
                 .await?;
-
-            rx.await?
+            let rx = rx.await??;
+            match rx.await? {
+                Either::Left(addr) => Err(anyhow::anyhow!(
+                    "Error: Address {addr} was returned while removing listener"
+                )),
+                Either::Right(result) => result.map_err(anyhow::Error::from),
+            }
         }
         .instrument(self.span.clone())
-        .await?
-        .await??
-        .ok_or_else(|| anyhow::anyhow!("Error removing address"))
-        .map(|_| ())
+        .await
     }
 
     /// Obtain the addresses associated with the given `PeerId`; they are first searched for locally

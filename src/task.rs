@@ -20,6 +20,7 @@ use tokio::sync::Notify;
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
+    io,
     sync::Arc,
     time::Duration,
 };
@@ -80,7 +81,8 @@ pub(crate) struct IpfsTask {
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
-    pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
+    pub(crate) listener_subscriptions:
+        HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<MultiaddrWithPeerId>,
     pub(crate) swarm_event: Option<TSwarmEventFn>,
 }
@@ -133,7 +135,7 @@ impl IpfsTask {
                     .insert(address.clone(), listener_id);
 
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Ok(Some(Some(address))));
+                    let _ = ret.send(Either::Left(address));
                 }
             }
             SwarmEvent::ExpiredListenAddr {
@@ -143,7 +145,8 @@ impl IpfsTask {
                 self.listeners.remove(&listener_id);
                 self.listening_addresses.remove(&address);
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Ok(Some(None)));
+                    //TODO: Determine if we want to return the address or use the right side and return an error?
+                    let _ = ret.send(Either::Left(address));
                 }
             }
             SwarmEvent::ListenerClosed {
@@ -155,15 +158,14 @@ impl IpfsTask {
                 for address in addresses {
                     self.listening_addresses.remove(&address);
                 }
-                let reason = reason.map(|_| Some(None)).map_err(anyhow::Error::from);
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(reason);
+                    let _ = ret.send(Either::Right(reason));
                 }
             }
             SwarmEvent::ListenerError { listener_id, error } => {
                 self.listeners.remove(&listener_id);
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Err(error.into()));
+                    let _ = ret.send(Either::Right(Err(error)));
                 }
             }
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
@@ -720,23 +722,27 @@ impl IpfsTask {
                 }
             },
             IpfsEvent::RemoveListeningAddress(addr, ret) => {
-                let removed = if let Some(id) = self.listening_addresses.remove(&addr) {
-                    if !self.swarm.remove_listener(id) {
-                        Err(format_err!(
-                            "Failed to remove previously added listening address: {}",
-                            addr
-                        ))
-                    } else {
-                        self.listeners.remove(&id);
-                        let (tx, rx) = oneshot::channel();
-                        self.listener_subscriptions.insert(id, tx);
-                        Ok(rx)
+                if let Some(id) = self.listening_addresses.remove(&addr) {
+                    match self.swarm.remove_listener(id) {
+                        true => {
+                            self.listeners.remove(&id);
+                            let (tx, rx) = oneshot::channel();
+                            self.listener_subscriptions.insert(id, tx);
+                            let _ = ret.send(Ok(rx));
+                        }
+                        false => {
+                            let _ = ret.send(Err(anyhow::anyhow!(
+                                "Failed to remove previously added listening address: {}",
+                                addr
+                            )));
+                        }
                     }
                 } else {
-                    Err(format_err!("Address was not listened to before: {}", addr))
-                };
-
-                let _ = ret.send(removed);
+                    let _ = ret.send(Err(format_err!(
+                        "Address was not listened to before: {}",
+                        addr
+                    )));
+                }
             }
             IpfsEvent::Bootstrap(ret) => {
                 let future = match self.swarm.behaviour_mut().kademlia.bootstrap() {
