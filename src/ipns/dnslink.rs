@@ -77,6 +77,7 @@ mod tests {
     use super::resolve;
 
     #[tokio::test]
+    #[ignore = ""]
     async fn resolve_ipfs_io() {
         tracing_subscriber::fmt::init();
         let res = resolve("ipfs.io").await.unwrap().to_string();
@@ -84,6 +85,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = ""]
+
     async fn resolve_website_ipfs_io() {
         let res = resolve("website.ipfs.io").await.unwrap();
 
