@@ -81,6 +81,7 @@ pub(crate) struct IpfsTask {
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
+    pub(crate) dialing_event: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) listener_subscriptions:
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<MultiaddrWithPeerId>,
@@ -127,6 +128,27 @@ impl IpfsTask {
             handler(&mut self.swarm, &swarm_event)
         }
         match swarm_event {
+            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                if let Some(channels) = self.dialing_event.remove(&peer_id) {
+                    tokio::spawn(async move {
+                        for channel in channels {
+                            let _ = channel.send(Ok(()));
+                        }
+                    });
+                }
+            }
+            SwarmEvent::OutgoingConnectionError { peer_id, error } => {
+                if let Some(peer_id) = peer_id {
+                    if let Some(channels) = self.dialing_event.remove(&peer_id) {
+                        tokio::spawn(async move {
+                            let error = error;
+                            for channel in channels {
+                                let _ = channel.send(Err(anyhow::anyhow!("{error}")));
+                            }
+                        });
+                    }
+                }
+            }
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
@@ -620,7 +642,16 @@ impl IpfsTask {
     fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {
-                ret.send(self.swarm.behaviour_mut().connect(target)).ok();
+                let (tx, rx) = oneshot::channel();
+                let _ = ret.send(rx);
+                let peer_id = target.get_peer_id();
+                if let Err(e) = self.swarm.dial(target) {
+                    let _ = tx.send(Err(anyhow::anyhow!("{e}")));
+                } else if let Some(peer_id) = peer_id {
+                    self.dialing_event.entry(peer_id).or_default().push(tx);
+                } else {
+                    let _ = tx.send(Ok(()));
+                }
             }
             IpfsEvent::Protocol(ret) => {
                 let info = self.swarm.behaviour().supported_protocols();

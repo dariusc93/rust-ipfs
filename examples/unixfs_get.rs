@@ -1,11 +1,9 @@
-use std::{convert::TryInto, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 use futures::StreamExt;
 
-use rust_ipfs::{
-    unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr, UninitializedIpfs,
-};
+use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr, UninitializedIpfs};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-get")]
@@ -31,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if let Some(addr) = opt.connect {
-        ipfs.connect(addr.try_into()?).await?;
+        ipfs.connect(addr).await?;
     }
 
     let dest = opt.dest;

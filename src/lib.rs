@@ -308,10 +308,7 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 #[allow(clippy::type_complexity)]
 enum IpfsEvent {
     /// Connect
-    Connect(
-        MultiaddrWithPeerId,
-        OneshotSender<Option<Option<ReceiverChannel<()>>>>,
-    ),
+    Connect(DialOpts, OneshotSender<ReceiverChannel<()>>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     /// Addresses
@@ -642,6 +639,7 @@ impl UninitializedIpfs {
             swarm,
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
             listeners,
+            dialing_event: Default::default(),
             provider_stream: HashMap::new(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
@@ -984,20 +982,18 @@ impl Ipfs {
     /// Returns a future which will complete when the connection has been successfully made or
     /// failed for whatever reason. It is possible for this method to return an error, while ending
     /// up being connected to the peer by the means of another connection.
-    pub async fn connect(&self, target: MultiaddrWithPeerId) -> Result<(), Error> {
+    pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<(), Error> {
         async move {
+            let target = target.into();
             let (tx, rx) = oneshot_channel();
             self.to_task
                 .clone()
                 .send(IpfsEvent::Connect(target, tx))
                 .await?;
+
             let subscription = rx.await?;
 
-            match subscription {
-                Some(Some(future)) => future.await?,
-                Some(None) => futures::future::ready(Ok(())).await,
-                None => futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await,
-            }
+            subscription.await?
         }
         .instrument(self.span.clone())
         .await

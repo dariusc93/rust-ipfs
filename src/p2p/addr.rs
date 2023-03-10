@@ -1,5 +1,6 @@
 use libp2p::{
     multiaddr::{self, Protocol},
+    swarm::dial_opts::DialOpts,
     Multiaddr, PeerId,
 };
 use std::{
@@ -106,6 +107,14 @@ pub struct MultiaddrWithPeerId {
     pub multiaddr: MultiaddrWithoutPeerId,
     /// The peer id from the [`Protocol::P2p`] suffix.
     pub peer_id: PeerId,
+}
+
+impl From<MultiaddrWithPeerId> for DialOpts {
+    fn from(value: MultiaddrWithPeerId) -> Self {
+        DialOpts::peer_id(value.peer_id)
+            .addresses(vec![value.multiaddr.0])
+            .build()
+    }
 }
 
 impl From<(MultiaddrWithoutPeerId, PeerId)> for MultiaddrWithPeerId {
