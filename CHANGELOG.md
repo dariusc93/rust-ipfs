@@ -1,3 +1,6 @@
+# 0.3.3
+- chore: Reenable relay configuration
+
 # 0.3.2
 - refactor: Use async-broadcast for pubsub stream [PR 39]
 
