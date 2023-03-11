@@ -1,6 +1,5 @@
 use super::gossipsub::GossipsubStream;
 use super::peerbook::{self, ConnectionLimits};
-use futures::channel::oneshot;
 use serde::{Deserialize, Serialize};
 
 use super::swarm::{Connection, SwarmApi};
@@ -447,13 +446,6 @@ impl Behaviour {
 
     pub fn connections(&self) -> impl Iterator<Item = Connection> + '_ {
         self.swarm.connections()
-    }
-
-    pub fn connect(
-        &mut self,
-        addr: MultiaddrWithPeerId,
-    ) -> Option<Option<oneshot::Receiver<Result<(), Error>>>> {
-        self.swarm.connect(addr)
     }
 
     // FIXME: it would be best if get_providers is called only in case the already connected
