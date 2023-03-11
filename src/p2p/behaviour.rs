@@ -19,7 +19,7 @@ use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
 };
-use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
+use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent};
 use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::client::{self, Transport as ClientTransport};
@@ -282,6 +282,23 @@ pub struct KadConfig {
     pub parallelism: Option<NonZeroUsize>,
     pub publication_interval: Option<Duration>,
     pub provider_record_ttl: Option<Duration>,
+    pub insert_method: KadInserts,
+}
+
+#[derive(Clone, Debug, Default, Copy)]
+pub enum KadInserts {
+    #[default]
+    Auto,
+    Manual,
+}
+
+impl From<KadInserts> for KademliaBucketInserts {
+    fn from(value: KadInserts) -> Self {
+        match value {
+            KadInserts::Auto => KademliaBucketInserts::OnConnected,
+            KadInserts::Manual => KademliaBucketInserts::Manual,
+        }
+    }
 }
 
 impl From<KadConfig> for KademliaConfig {
@@ -297,6 +314,7 @@ impl From<KadConfig> for KademliaConfig {
         }
         kad_config.set_publication_interval(config.publication_interval);
         kad_config.set_provider_record_ttl(config.provider_record_ttl);
+        kad_config.set_kbucket_inserts(config.insert_method.into());
         kad_config
     }
 }
@@ -307,9 +325,10 @@ impl Default for KadConfig {
             protocol: None,
             disjoint_query_paths: false,
             query_timeout: Duration::from_secs(120),
-            parallelism: Some(10.try_into().unwrap()),
+            parallelism: Some(2.try_into().unwrap()),
             provider_record_ttl: None,
             publication_interval: None,
+            insert_method: Default::default(),
         }
     }
 }
