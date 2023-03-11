@@ -1,13 +1,16 @@
 /// PeerBook with connection limits based on https://github.com/libp2p/rust-libp2p/pull/3386
 use core::task::{Context, Poll};
+use futures::channel::oneshot;
 use futures::StreamExt;
 use libp2p::core::{Endpoint, Multiaddr};
+use libp2p::swarm::derive_prelude::ConnectionEstablished;
+use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{
     self, dummy::ConnectionHandler as DummyConnectionHandler, NetworkBehaviour, PollParameters,
 };
 use libp2p::swarm::{
-    ConnectionClosed, ConnectionDenied, ConnectionId, ConnectionLimit, FromSwarm, THandler,
-    THandlerInEvent,
+    ConnectionClosed, ConnectionDenied, ConnectionId, ConnectionLimit, DialFailure, FromSwarm,
+    NetworkBehaviourAction, THandler, THandlerInEvent,
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
@@ -122,10 +125,14 @@ pub struct Behaviour {
     >,
     cleanup_interval: Interval,
 
+    pending_connections: HashMap<ConnectionId, oneshot::Sender<anyhow::Result<()>>>,
+
     peer_info: HashMap<PeerId, PeerInfo>,
     peer_rtt: HashMap<PeerId, [Duration; 3]>,
 
     whitelist: HashSet<PeerId>,
+
+    protocols: Vec<Vec<u8>>,
 
     // For connection limits (took from )
     pending_inbound_connections: HashSet<ConnectionId>,
@@ -144,9 +151,11 @@ impl Default for Behaviour {
                 std::time::Instant::now() + Duration::from_secs(60),
                 Duration::from_secs(60),
             ),
+            pending_connections: Default::default(),
             peer_info: Default::default(),
             peer_rtt: Default::default(),
             whitelist: Default::default(),
+            protocols: Default::default(),
             pending_inbound_connections: Default::default(),
             pending_outbound_connections: Default::default(),
             established_inbound_connections: Default::default(),
@@ -157,6 +166,22 @@ impl Default for Behaviour {
 }
 
 impl Behaviour {
+    pub fn connect(&mut self, opt: impl Into<DialOpts>) -> oneshot::Receiver<anyhow::Result<()>> {
+        let opts: DialOpts = opt.into();
+        let (tx, rx) = oneshot::channel();
+        let id = opts.connection_id();
+        self.events.push_back(NetworkBehaviourAction::Dial { opts });
+        self.pending_connections.insert(id, tx);
+        rx
+    }
+
+    pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
+        self.protocols
+            .iter()
+            .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
+    }
+
+
     pub fn set_connection_limit(&mut self, limit: ConnectionLimits) {
         self.limits = limit;
     }
@@ -170,7 +195,7 @@ impl Behaviour {
     }
 
     pub fn inject_peer_info<I: Into<PeerInfo>>(&mut self, info: I) {
-        let info = info.into();
+        let info: PeerInfo = info.into();
         self.peer_info.insert(info.peer_id, info);
     }
 
@@ -188,6 +213,14 @@ impl Behaviour {
                 })
                 .or_insert([Duration::from_millis(0), Duration::from_millis(0), rtt]);
         }
+    }
+
+    pub fn get_peet_rtt(&self, peer_id: PeerId) -> Option<[Duration; 3]> {
+        self.peer_rtt.get(&peer_id).copied()
+    }
+
+    pub fn get_peet_latest_rtt(&self, peer_id: PeerId) -> Option<Duration> {
+        self.get_peet_rtt(peer_id).map(|rtt| rtt[2])
     }
 
     pub fn get_peer_info(&self, peer_id: PeerId) -> Option<&PeerInfo> {
@@ -338,8 +371,22 @@ impl NetworkBehaviour for Behaviour {
     }
 
     #[allow(clippy::single_match)]
-    fn on_swarm_event(&mut self, event: swarm::FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
         match event {
+            FromSwarm::ConnectionEstablished(ConnectionEstablished { connection_id, .. }) => {
+                if let Some(ch) = self.pending_connections.remove(&connection_id) {
+                    let _ = ch.send(Ok(()));
+                }
+            }
+            FromSwarm::DialFailure(DialFailure {
+                error,
+                connection_id,
+                ..
+            }) => {
+                if let Some(ch) = self.pending_connections.remove(&connection_id) {
+                    let _ = ch.send(Err(anyhow::anyhow!("{error}")));
+                }
+            }
             FromSwarm::ConnectionClosed(ConnectionClosed {
                 peer_id,
                 connection_id,
@@ -353,6 +400,9 @@ impl NetworkBehaviour for Behaviour {
                         entry.remove();
                     }
                 }
+                if let Some(ch) = self.pending_connections.remove(&connection_id) {
+                    let _ = ch.send(Ok(()));
+                }
             }
             _ => {}
         }
@@ -361,8 +411,13 @@ impl NetworkBehaviour for Behaviour {
     fn poll(
         &mut self,
         cx: &mut Context,
-        _: &mut impl PollParameters,
+        params: &mut impl PollParameters,
     ) -> Poll<swarm::NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
+        let supported_protocols = params.supported_protocols();
+        if supported_protocols.len() != self.protocols.len() {
+            self.protocols = supported_protocols.collect();
+        }
+
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }

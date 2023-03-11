@@ -60,10 +60,11 @@ use unixfs::UnixfsStatus;
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    fmt,
+    fmt, io,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc},
+    time::Duration,
 };
 
 use self::{
@@ -100,11 +101,7 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
-use libp2p::{
-    kad::KademliaConfig,
-    ping::Config as PingConfig,
-    swarm::{dial_opts::DialOpts, DialError},
-};
+use libp2p::{kad::KademliaConfig, ping::Config as PingConfig, swarm::dial_opts::DialOpts};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StoragePath {
@@ -305,12 +302,10 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 /// Events used internally to communicate with the swarm, which is executed in the the background
 /// task.
 #[derive(Debug)]
+#[allow(clippy::type_complexity)]
 enum IpfsEvent {
     /// Connect
-    Connect(
-        MultiaddrWithPeerId,
-        OneshotSender<Option<Option<ReceiverChannel<()>>>>,
-    ),
+    Connect(DialOpts, OneshotSender<ReceiverChannel<()>>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     /// Addresses
@@ -345,14 +340,13 @@ enum IpfsEvent {
         OneshotSender<Vec<(Cid, ipfs_bitswap::Priority)>>,
     ),
     BitswapStats(OneshotSender<BitswapStats>),
-    SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(
         Multiaddr,
-        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
+        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     RemoveListeningAddress(
         Multiaddr,
-        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
+        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Option<Multiaddr>),
@@ -919,7 +913,7 @@ impl Ipfs {
     }
 
     /// Add a file from a path to the blockstore
-    /// 
+    ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
         &self,
@@ -931,7 +925,7 @@ impl Ipfs {
     }
 
     /// Add a file through a stream of data to the blockstore
-    /// 
+    ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
     pub async fn add_unixfs<'a>(
         &self,
@@ -943,7 +937,7 @@ impl Ipfs {
     }
 
     /// Retreive a file and saving it to a path.
-    /// 
+    ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
@@ -976,44 +970,19 @@ impl Ipfs {
         .await
     }
 
-    /// Connects to the peer at the given Multiaddress.
-    ///
-    /// Accepts only multiaddresses with the PeerId to authenticate the connection.
-    ///
-    /// Returns a future which will complete when the connection has been successfully made or
-    /// failed for whatever reason. It is possible for this method to return an error, while ending
-    /// up being connected to the peer by the means of another connection.
-    pub async fn connect(&self, target: MultiaddrWithPeerId) -> Result<(), Error> {
+    /// Connects to the peer
+    pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<(), Error> {
         async move {
+            let target = target.into();
             let (tx, rx) = oneshot_channel();
             self.to_task
                 .clone()
                 .send(IpfsEvent::Connect(target, tx))
                 .await?;
+
             let subscription = rx.await?;
 
-            match subscription {
-                Some(Some(future)) => future.await?,
-                Some(None) => futures::future::ready(Ok(())).await,
-                None => futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await,
-            }
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Dials a peer using [`Swarm::dial`].
-    // TODO: Remove once improvements are done
-    pub async fn dial(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
-        async move {
-            let opt = opt.into();
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::SwarmDial(opt, tx))
-                .await?;
-
-            rx.await?.map_err(anyhow::Error::from)
+            subscription.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1354,20 +1323,28 @@ impl Ipfs {
     /// has now been changed.
     pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
+            //Note: This is due to a possible race when doing an initial dial out to a relay
+            //      Without this delay, the listener may close, resulting in an error here
+            if addr.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
                 .send(IpfsEvent::AddListeningAddress(addr, tx))
                 .await?;
-
-            rx.await.map_err(anyhow::Error::from)?
+            let rx = rx.await??;
+            match rx.await? {
+                Either::Left(addr) => Ok(addr),
+                Either::Right(result) => {
+                    result?;
+                    Err(anyhow::anyhow!("No multiaddr provided"))
+                }
+            }
         }
         .instrument(self.span.clone())
-        .await?
-        .await??
-        .and_then(|addr| addr)
-        .ok_or_else(|| anyhow::anyhow!("No multiaddr provided"))
+        .await
     }
 
     /// Stop listening on a previously added listening address. Fails if the address is not being
@@ -1382,14 +1359,16 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::RemoveListeningAddress(addr, tx))
                 .await?;
-
-            rx.await?
+            let rx = rx.await??;
+            match rx.await? {
+                Either::Left(addr) => Err(anyhow::anyhow!(
+                    "Error: Address {addr} was returned while removing listener"
+                )),
+                Either::Right(result) => result.map_err(anyhow::Error::from),
+            }
         }
         .instrument(self.span.clone())
-        .await?
-        .await??
-        .ok_or_else(|| anyhow::anyhow!("Error removing address"))
-        .map(|_| ())
+        .await
     }
 
     /// Obtain the addresses associated with the given `PeerId`; they are first searched for locally
@@ -1845,15 +1824,7 @@ mod node {
         /// Connects to a peer at the given address.
         pub async fn connect(&self, addr: Multiaddr) -> Result<(), Error> {
             let addr = MultiaddrWithPeerId::try_from(addr).unwrap();
-            if self
-                .ipfs
-                .peers()
-                .await
-                .unwrap_or_default()
-                .iter()
-                .map(|c| c.addr.peer_id)
-                .any(|p| p == addr.peer_id)
-            {
+            if self.ipfs.is_connected(addr.peer_id).await? {
                 return Ok(());
             }
             self.ipfs.connect(addr).await

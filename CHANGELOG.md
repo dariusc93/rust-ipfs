@@ -1,7 +1,9 @@
 # 0.3.4 [unrelease]
+- refactor: Changes to connection and listening functions [PR 41]
 - chore: Add KadConfig [PR 42]
 
-[PR 49]: https://github.com/dariusc93/rust-ipfs/pull/42
+[PR 41]: https://github.com/dariusc93/rust-ipfs/pull/41
+[PR 42]: https://github.com/dariusc93/rust-ipfs/pull/42
 
 # 0.3.3
 - chore: Reenable relay configuration

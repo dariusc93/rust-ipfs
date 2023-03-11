@@ -255,11 +255,7 @@ impl GossipsubStream {
     /// Returns the list of currently subscribed topics. This can contain topics for which stream
     /// has been dropped but no messages have yet been received on the topics after the drop.
     pub fn subscribed_topics(&self) -> Vec<String> {
-        self.streams
-            .keys()
-            .into_iter()
-            .map(|t| t.to_string())
-            .collect()
+        self.streams.keys().map(|t| t.to_string()).collect()
     }
 }
 

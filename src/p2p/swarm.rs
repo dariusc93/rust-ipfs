@@ -46,17 +46,9 @@ pub struct SwarmApi {
     /// The connections which have been requested, and the swarm/network has requested the
     /// addresses of. Used to keep finishing all of the subscriptions.
     pending_connections: HashMap<PeerId, Vec<MultiaddrWithPeerId>>,
-
-    /// List of supported protocols of local node
-    pub protocols: Vec<Vec<u8>>,
 }
 
 impl SwarmApi {
-    pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
-        self.protocols
-            .iter()
-            .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
-    }
 
     pub fn connections(&self) -> impl Iterator<Item = Connection> + '_ {
         self.connected_peers
@@ -73,11 +65,6 @@ impl SwarmApi {
                     rtt,
                 })
             })
-    }
-
-    pub fn set_rtt(&mut self, peer_id: &PeerId, rtt: Duration) {
-        // NOTE: this is for any connection
-        self.roundtrip_times.insert(*peer_id, rtt);
     }
 
     pub fn connect(
@@ -397,13 +384,8 @@ impl NetworkBehaviour for SwarmApi {
     fn poll(
         &mut self,
         _: &mut Context,
-        params: &mut impl PollParameters,
+        _: &mut impl PollParameters,
     ) -> Poll<NetworkBehaviourAction> {
-        let supported_protocols = params.supported_protocols();
-        if supported_protocols.len() != self.protocols.len() {
-            self.protocols = supported_protocols.collect();
-        }
-
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
