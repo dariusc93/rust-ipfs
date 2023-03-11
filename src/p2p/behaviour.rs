@@ -1,5 +1,6 @@
 use super::gossipsub::GossipsubStream;
 use super::peerbook::{self, ConnectionLimits};
+use either::Either;
 use futures::channel::oneshot;
 use serde::{Deserialize, Serialize};
 
@@ -28,8 +29,9 @@ use libp2p::relay::{Behaviour as Relay, Event as RelayEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
+use std::borrow::Cow;
 use std::convert::TryFrom;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
 
 /// Behaviour type.
@@ -273,6 +275,45 @@ pub enum RateLimit {
 pub struct KadStoreConfig {
     pub memory: Option<MemoryStoreConfig>,
 }
+#[derive(Clone, Debug)]
+pub struct KadConfig {
+    pub protocol: Option<Vec<Cow<'static, [u8]>>>,
+    pub disjoint_query_paths: bool,
+    pub query_timeout: Duration,
+    pub parallelism: Option<NonZeroUsize>,
+    pub publication_interval: Option<Duration>,
+    pub provider_record_ttl: Option<Duration>,
+}
+
+impl From<KadConfig> for KademliaConfig {
+    fn from(config: KadConfig) -> Self {
+        let mut kad_config = KademliaConfig::default();
+        if let Some(protocol) = config.protocol {
+            kad_config.set_protocol_names(protocol);
+        }
+        kad_config.disjoint_query_paths(config.disjoint_query_paths);
+        kad_config.set_query_timeout(config.query_timeout);
+        if let Some(p) = config.parallelism {
+            kad_config.set_parallelism(p);
+        }
+        kad_config.set_publication_interval(config.publication_interval);
+        kad_config.set_provider_record_ttl(config.provider_record_ttl);
+        kad_config
+    }
+}
+
+impl Default for KadConfig {
+    fn default() -> Self {
+        Self {
+            protocol: None,
+            disjoint_query_paths: false,
+            query_timeout: Duration::from_secs(120),
+            parallelism: Some(10.try_into().unwrap()),
+            provider_record_ttl: None,
+            publication_interval: None,
+        }
+    }
+}
 
 impl Behaviour {
     /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
@@ -307,14 +348,13 @@ impl Behaviour {
             MemoryStore::with_config(peer_id, config)
         };
 
-        let kad_config = match options.kad_config.clone() {
-            Some(config) => config,
-            None => {
-                let mut kad_config = KademliaConfig::default();
-                kad_config.disjoint_query_paths(true);
-                kad_config.set_query_timeout(std::time::Duration::from_secs(300));
-                kad_config
-            }
+        let kad_config = match options
+            .kad_config
+            .clone()
+            .unwrap_or(Either::Left(KadConfig::default()))
+        {
+            Either::Left(kad) => kad.into(),
+            Either::Right(kad) => kad,
         };
 
         let mut kademlia = Kademlia::with_config(peer_id, store, kad_config);

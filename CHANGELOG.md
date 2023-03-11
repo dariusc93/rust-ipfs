@@ -1,3 +1,8 @@
+# 0.3.4 [unrelease]
+- chore: Add KadConfig [PR 42]
+
+[PR 49]: https://github.com/dariusc93/rust-ipfs/pull/42
+
 # 0.3.3
 - chore: Reenable relay configuration
 
