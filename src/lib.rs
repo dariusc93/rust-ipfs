@@ -639,7 +639,6 @@ impl UninitializedIpfs {
             swarm,
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
             listeners,
-            dialing_event: Default::default(),
             provider_stream: HashMap::new(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
