@@ -132,6 +132,8 @@ pub struct Behaviour {
 
     whitelist: HashSet<PeerId>,
 
+    protocols: Vec<Vec<u8>>,
+
     // For connection limits (took from )
     pending_inbound_connections: HashSet<ConnectionId>,
     pending_outbound_connections: HashSet<ConnectionId>,
@@ -153,6 +155,7 @@ impl Default for Behaviour {
             peer_info: Default::default(),
             peer_rtt: Default::default(),
             whitelist: Default::default(),
+            protocols: Default::default(),
             pending_inbound_connections: Default::default(),
             pending_outbound_connections: Default::default(),
             established_inbound_connections: Default::default(),
@@ -163,7 +166,6 @@ impl Default for Behaviour {
 }
 
 impl Behaviour {
-
     pub fn connect(&mut self, opt: impl Into<DialOpts>) -> oneshot::Receiver<anyhow::Result<()>> {
         let opts: DialOpts = opt.into();
         let (tx, rx) = oneshot::channel();
@@ -172,6 +174,13 @@ impl Behaviour {
         self.pending_connections.insert(id, tx);
         rx
     }
+
+    pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
+        self.protocols
+            .iter()
+            .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
+    }
+
 
     pub fn set_connection_limit(&mut self, limit: ConnectionLimits) {
         self.limits = limit;
@@ -402,8 +411,13 @@ impl NetworkBehaviour for Behaviour {
     fn poll(
         &mut self,
         cx: &mut Context,
-        _: &mut impl PollParameters,
+        params: &mut impl PollParameters,
     ) -> Poll<swarm::NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
+        let supported_protocols = params.supported_protocols();
+        if supported_protocols.len() != self.protocols.len() {
+            self.protocols = supported_protocols.collect();
+        }
+
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }

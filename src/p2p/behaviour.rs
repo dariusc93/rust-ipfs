@@ -472,7 +472,7 @@ impl Behaviour {
     }
 
     pub fn supported_protocols(&self) -> Vec<String> {
-        self.swarm.protocols().collect::<Vec<_>>()
+        self.peerbook.protocols().collect::<Vec<_>>()
     }
 
     pub fn pubsub(&mut self) -> &mut GossipsubStream {

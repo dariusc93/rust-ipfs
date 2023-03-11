@@ -52,11 +52,6 @@ pub struct SwarmApi {
 }
 
 impl SwarmApi {
-    pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
-        self.protocols
-            .iter()
-            .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
-    }
 
     pub fn connections(&self) -> impl Iterator<Item = Connection> + '_ {
         self.connected_peers
@@ -73,11 +68,6 @@ impl SwarmApi {
                     rtt,
                 })
             })
-    }
-
-    pub fn set_rtt(&mut self, peer_id: &PeerId, rtt: Duration) {
-        // NOTE: this is for any connection
-        self.roundtrip_times.insert(*peer_id, rtt);
     }
 
     pub fn connect(
