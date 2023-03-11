@@ -64,6 +64,7 @@ use std::{
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc},
+    time::Duration,
 };
 
 use self::{
@@ -1350,6 +1351,8 @@ impl Ipfs {
     /// has now been changed.
     pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
+            //Note: This is used to give swarm more time to process any connections
+            tokio::time::sleep(Duration::from_millis(500)).await;
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1846,15 +1849,7 @@ mod node {
         /// Connects to a peer at the given address.
         pub async fn connect(&self, addr: Multiaddr) -> Result<(), Error> {
             let addr = MultiaddrWithPeerId::try_from(addr).unwrap();
-            if self
-                .ipfs
-                .peers()
-                .await
-                .unwrap_or_default()
-                .iter()
-                .map(|c| c.addr.peer_id)
-                .any(|p| p == addr.peer_id)
-            {
+            if self.ipfs.is_connected(addr.peer_id).await? {
                 return Ok(());
             }
             self.ipfs.connect(addr).await
