@@ -1,3 +1,6 @@
+# 0.3.5
+- fix: Export KadInserts
+
 # 0.3.4
 - refactor: Changes to connection and listening functions [PR 41]
 - chore: Add KadConfig [PR 42]
