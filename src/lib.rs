@@ -101,11 +101,7 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
-use libp2p::{
-    kad::KademliaConfig,
-    ping::Config as PingConfig,
-    swarm::{dial_opts::DialOpts, DialError},
-};
+use libp2p::{kad::KademliaConfig, ping::Config as PingConfig, swarm::dial_opts::DialOpts};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StoragePath {
@@ -344,7 +340,6 @@ enum IpfsEvent {
         OneshotSender<Vec<(Cid, ipfs_bitswap::Priority)>>,
     ),
     BitswapStats(OneshotSender<BitswapStats>),
-    SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(
         Multiaddr,
         OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
@@ -975,13 +970,7 @@ impl Ipfs {
         .await
     }
 
-    /// Connects to the peer at the given Multiaddress.
-    ///
-    /// Accepts only multiaddresses with the PeerId to authenticate the connection.
-    ///
-    /// Returns a future which will complete when the connection has been successfully made or
-    /// failed for whatever reason. It is possible for this method to return an error, while ending
-    /// up being connected to the peer by the means of another connection.
+    /// Connects to the peer
     pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<(), Error> {
         async move {
             let target = target.into();
@@ -994,23 +983,6 @@ impl Ipfs {
             let subscription = rx.await?;
 
             subscription.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Dials a peer using [`Swarm::dial`].
-    // TODO: Remove once improvements are done
-    pub async fn dial(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
-        async move {
-            let opt = opt.into();
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::SwarmDial(opt, tx))
-                .await?;
-
-            rx.await?.map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await

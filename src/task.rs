@@ -627,10 +627,6 @@ impl IpfsTask {
                 let info = self.swarm.behaviour().supported_protocols();
                 let _ = ret.send(info);
             }
-            IpfsEvent::SwarmDial(opt, ret) => {
-                let result = self.swarm.dial(opt);
-                let _ = ret.send(result);
-            }
             IpfsEvent::Addresses(ret) => {
                 let addrs = self.swarm.behaviour_mut().addrs();
                 ret.send(Ok(addrs)).ok();
