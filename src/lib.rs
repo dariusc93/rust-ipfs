@@ -1323,8 +1323,11 @@ impl Ipfs {
     /// has now been changed.
     pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
-            //Note: This is used to give swarm more time to process any connections
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            //Note: This is due to a possible race when doing an initial dial out to a relay
+            //      Without this delay, the listener may close, resulting in an error here
+            if addr.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
             let (tx, rx) = oneshot_channel();
 
             self.to_task
