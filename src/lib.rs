@@ -480,7 +480,7 @@ impl UninitializedIpfs {
 
     /// Set keypair
     pub fn set_keypair(mut self, keypair: Keypair) -> Self {
-        self.options.keypair = keypair;
+        self.keys = keypair;
         self
     }
 
