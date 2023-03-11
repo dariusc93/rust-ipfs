@@ -1,3 +1,8 @@
+# 0.3.4 [unrelease]
+- refactor: Changes to connection and listening functions [PR 41]
+
+[PR 41]: https://github.com/dariusc93/rust-ipfs/pull/41
+
 # 0.3.3
 - chore: Reenable relay configuration
 
