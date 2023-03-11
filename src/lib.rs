@@ -50,7 +50,7 @@ use futures::{
 };
 
 use p2p::{
-    IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
+    IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig, KadConfig,
 };
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
@@ -167,7 +167,7 @@ pub struct IpfsOptions {
     pub pubsub_config: Option<crate::p2p::PubsubConfig>,
 
     /// Kad configuration
-    pub kad_configuration: Option<KademliaConfig>,
+    pub kad_configuration: Option<Either<KadConfig, KademliaConfig>>,
 
     /// Kad Store Config
     /// Note: Only supports MemoryStoreConfig at this time
@@ -464,10 +464,10 @@ impl UninitializedIpfs {
     /// Set kad configuration
     pub fn set_kad_configuration(
         mut self,
-        config: KademliaConfig,
+        config: KadConfig,
         store: Option<KadStoreConfig>,
     ) -> Self {
-        self.options.kad_configuration = Some(config);
+        self.options.kad_configuration = Some(Either::Left(config));
         self.options.kad_store_config = store;
         self
     }

@@ -7,6 +7,7 @@ use std::num::{NonZeroU8, NonZeroUsize};
 use crate::error::Error;
 use crate::IpfsOptions;
 
+use either::Either;
 use libp2p::gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
@@ -22,6 +23,7 @@ pub(crate) mod peerbook;
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
+pub use self::behaviour::KadConfig;
 pub use self::behaviour::KadStoreConfig;
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
@@ -119,7 +121,7 @@ pub struct SwarmOptions {
     /// Relay Server Configuration
     pub relay_server_config: Option<RelayConfig>,
     /// Kademlia Configuration
-    pub kad_config: Option<KademliaConfig>,
+    pub kad_config: Option<Either<KadConfig, KademliaConfig>>,
     /// Ping Configuration
     pub ping_config: Option<PingConfig>,
     /// identify configuration
