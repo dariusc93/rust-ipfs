@@ -1,3 +1,6 @@
+# 0.3.6
+- fix: Change condition when attempting to clear out cache
+
 # 0.3.5
 - fix: Export KadInserts
 
