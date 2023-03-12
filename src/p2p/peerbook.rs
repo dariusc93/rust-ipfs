@@ -181,7 +181,6 @@ impl Behaviour {
             .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
     }
 
-
     pub fn set_connection_limit(&mut self, limit: ConnectionLimits) {
         self.limits = limit;
     }
@@ -429,7 +428,7 @@ impl NetworkBehaviour for Behaviour {
             let list = self.peer_info.keys().copied().collect::<Vec<_>>();
             for peer_id in list {
                 if !self.established_per_peer.contains_key(&peer_id)
-                    && !self.whitelist.contains(&peer_id)
+                    || !self.whitelist.contains(&peer_id)
                 {
                     self.peer_info.remove(&peer_id);
                     self.peer_rtt.remove(&peer_id);
