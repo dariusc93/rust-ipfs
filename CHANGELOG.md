@@ -1,3 +1,8 @@
+# 0.3.7 [unrelease]
+- chore: Cleanup deprecation [PR 44]
+
+[PR 44]: https://github.com/dariusc93/rust-ipfs/pull/44
+
 # 0.3.6
 - fix: Change condition when attempting to clear out cache
 
