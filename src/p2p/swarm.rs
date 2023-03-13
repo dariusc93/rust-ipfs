@@ -3,7 +3,8 @@ use crate::Channel;
 use anyhow::Error;
 use core::task::{Context, Poll};
 use futures::channel::oneshot;
-use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr, PeerId};
+use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
+use libp2p::identity::PeerId;
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::{
     self,
@@ -49,7 +50,6 @@ pub struct SwarmApi {
 }
 
 impl SwarmApi {
-
     pub fn connections(&self) -> impl Iterator<Item = Connection> + '_ {
         self.connected_peers
             .iter()

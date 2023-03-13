@@ -1,4 +1,4 @@
-use rust_ipfs::{p2p::PeerInfo, Ipfs, PublicKey, UninitializedIpfs};
+use rust_ipfs::{p2p::PeerInfo, Ipfs, UninitializedIpfs};
 use tokio::sync::Notify;
 
 #[tokio::main]
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         ..
     } = ipfs.identity(None).await?;
 
-    if let PublicKey::Ed25519(publickey) = &key {
+    if let Some(publickey) = key.clone().into_ed25519() {
         println!(
             "Public Key: {}",
             bs58::encode(publickey.encode()).into_string()
