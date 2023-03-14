@@ -1,4 +1,4 @@
-# 0.3.7 [unrelease]
+# 0.3.7
 - chore: Cleanup deprecation [PR 44]
 
 [PR 44]: https://github.com/dariusc93/rust-ipfs/pull/44
