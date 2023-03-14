@@ -35,6 +35,13 @@ pub struct KvDataStore {
 }
 
 impl KvDataStore {
+    pub fn new(root: PathBuf) -> KvDataStore {
+        KvDataStore {
+            path: root,
+            db: Default::default(),
+        }
+    }
+
     fn get_db(&self) -> &Db {
         self.db.get().unwrap()
     }
@@ -42,13 +49,6 @@ impl KvDataStore {
 
 #[async_trait]
 impl DataStore for KvDataStore {
-    fn new(root: PathBuf) -> KvDataStore {
-        KvDataStore {
-            path: root,
-            db: Default::default(),
-        }
-    }
-
     async fn init(&self) -> Result<(), Error> {
         let config = DbConfig::new();
 

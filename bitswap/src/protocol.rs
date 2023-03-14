@@ -11,7 +11,7 @@ use futures::{
     io::{AsyncRead, AsyncWrite},
     AsyncWriteExt,
 };
-use libp2p_core::{upgrade, InboundUpgrade, OutboundUpgrade, UpgradeInfo};
+use libp2p::core::{upgrade, InboundUpgrade, OutboundUpgrade, UpgradeInfo};
 use std::io;
 
 const MAX_BUF_SIZE: usize = 2_097_152;

@@ -28,12 +28,14 @@ pub struct MemBlockStore {
     blocks: Mutex<HashedMap<RepoCid, Block>>,
 }
 
-#[async_trait]
-impl BlockStore for MemBlockStore {
-    fn new(_path: PathBuf) -> Self {
+impl MemBlockStore {
+    pub fn new(_: PathBuf) -> Self {
         Default::default()
     }
+}
 
+#[async_trait]
+impl BlockStore for MemBlockStore {
     async fn init(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -105,6 +107,10 @@ pub struct MemDataStore {
 }
 
 impl MemDataStore {
+    pub fn new(_: PathBuf) -> Self {
+        Default::default()
+    }
+
     /// Returns true if the pin document was changed, false otherwise.
     fn insert_pin<'a>(
         g: &mut OwnedMutexGuard<HashMap<Vec<u8>, Vec<u8>>>,
@@ -392,10 +398,6 @@ impl PinStore for MemDataStore {
 
 #[async_trait]
 impl DataStore for MemDataStore {
-    fn new(_path: PathBuf) -> Self {
-        Default::default()
-    }
-
     async fn init(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -665,11 +667,13 @@ pub enum PinUpdateError {
 #[derive(Debug)]
 pub struct MemLock;
 
-impl Lock for MemLock {
-    fn new(_path: PathBuf) -> Self {
+impl MemLock {
+    pub fn new(_path: PathBuf) -> Self {
         Self
     }
+}
 
+impl Lock for MemLock {
     fn try_exclusive(&mut self) -> Result<(), LockError> {
         Ok(())
     }

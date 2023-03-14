@@ -6,23 +6,27 @@ use std::num::{NonZeroU8, NonZeroUsize};
 
 use crate::error::Error;
 use crate::repo::Repo;
-use crate::{IpfsOptions, RepoTypes};
+use crate::{IpfsOptions};
 
+use either::Either;
+use libp2p::gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
 use libp2p::ping::Config as PingConfig;
-use libp2p::swarm::ConnectionLimits;
 use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
 use tracing::Span;
 
 pub(crate) mod addr;
+pub(crate) mod peerbook;
+
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
-pub use self::behaviour::KadStoreConfig;
+pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
+pub use self::peerbook::ConnectionLimits;
 pub use self::stream::ProviderStream;
 pub use self::stream::RecordStream;
 pub use self::transport::TransportConfig;
@@ -34,7 +38,7 @@ pub use addr::{MultiaddrWithPeerId, MultiaddrWithoutPeerId};
 pub use {behaviour::KadResult, swarm::Connection};
 
 /// Type alias for [`libp2p::Swarm`] running the [`behaviour::Behaviour`] with the given [`IpfsTypes`].
-pub type TSwarm<TRepoTypes> = Swarm<behaviour::Behaviour<TRepoTypes>>;
+pub type TSwarm = Swarm<behaviour::Behaviour>;
 
 /// Abstraction of IdentifyInfo but includes PeerId
 #[derive(Clone, Debug, Eq)]
@@ -117,7 +121,7 @@ pub struct SwarmOptions {
     /// Relay Server Configuration
     pub relay_server_config: Option<RelayConfig>,
     /// Kademlia Configuration
-    pub kad_config: Option<KademliaConfig>,
+    pub kad_config: Option<Either<KadConfig, KademliaConfig>>,
     /// Ping Configuration
     pub ping_config: Option<PingConfig>,
     /// identify configuration
@@ -125,6 +129,8 @@ pub struct SwarmOptions {
     /// Kad store config
     /// Note: Only supports MemoryStoreConfig at this time
     pub kad_store_config: Option<KadStoreConfig>,
+    /// Pubsub configuration,
+    pub pubsub_config: Option<PubsubConfig>,
     /// UPnP/PortMapping
     pub portmapping: bool,
     /// Keep alive
@@ -153,6 +159,7 @@ impl From<&IpfsOptions> for SwarmOptions {
         let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
         let portmapping = options.port_mapping;
+        let pubsub_config = options.pubsub_config.clone();
 
         SwarmOptions {
             keypair,
@@ -170,6 +177,59 @@ impl From<&IpfsOptions> for SwarmOptions {
             keep_alive,
             identify_config,
             portmapping,
+            pubsub_config,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubsubConfig {
+    /// Custom protocol name
+    pub custom_protocol_id: Option<String>,
+
+    /// Max size that can be transmitted over gossipsub
+    pub max_transmit_size: usize,
+
+    /// Floodsub compatibility
+    pub floodsub_compat: bool,
+
+    /// Validation
+    pub validate: PubsubValidation,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PubsubValidation {
+    /// See [`ValidationMode::Strict`]
+    Strict,
+
+    /// See [`ValidationMode::Permissive`]
+    Permissive,
+
+    /// See [`ValidationMode::Anonymous`]
+    Anonymous,
+
+    /// See [`ValidationMode::None`]
+    Relaxed,
+}
+
+impl From<PubsubValidation> for ValidationMode {
+    fn from(validation: PubsubValidation) -> Self {
+        match validation {
+            PubsubValidation::Strict => ValidationMode::Strict,
+            PubsubValidation::Permissive => ValidationMode::Permissive,
+            PubsubValidation::Anonymous => ValidationMode::Anonymous,
+            PubsubValidation::Relaxed => ValidationMode::None,
+        }
+    }
+}
+
+impl Default for PubsubConfig {
+    fn default() -> Self {
+        Self {
+            custom_protocol_id: None,
+            max_transmit_size: 2 * 1024 * 1024,
+            validate: PubsubValidation::Strict,
+            floodsub_compat: false,
         }
     }
 }
@@ -196,19 +256,19 @@ impl Default for SwarmConfig {
 }
 
 /// Creates a new IPFS swarm.
-pub async fn create_swarm<TRepoTypes: RepoTypes>(
+pub async fn create_swarm(
     options: SwarmOptions,
     swarm_config: SwarmConfig,
     transport_config: TransportConfig,
-    repo: Repo<TRepoTypes>,
+    repo: Repo,
     span: Span,
-) -> Result<TSwarm<TRepoTypes>, Error> {
+) -> Result<TSwarm, Error> {
     let peer_id = options.peer_id;
 
     let keypair = options.keypair.clone();
 
-    // Create a Kademlia behaviour
-    let (behaviour, relay_transport) = behaviour::build_behaviour(options, repo).await?;
+    let (behaviour, relay_transport) =
+        behaviour::build_behaviour(options, repo, swarm_config.connection).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = transport::build_transport(keypair, relay_transport, transport_config)?;
@@ -220,9 +280,8 @@ pub async fn create_swarm<TRepoTypes: RepoTypes>(
         peer_id,
         SpannedExecutor(span),
     )
-    .connection_limits(swarm_config.connection)
     .notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
-    .connection_event_buffer_size(swarm_config.connection_event_buffer_size)
+    .per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
     .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
     .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
     .build();

@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::p2p::KadResult;
 use crate::path::IpfsPath;
 use crate::subscription::{RequestKind, SubscriptionRegistry};
-use crate::{Block, IpfsOptions, ReceiverChannel};
+use crate::{Block, ReceiverChannel, StoragePath};
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -13,12 +13,14 @@ use futures::channel::{
 };
 use futures::sink::SinkExt;
 use libipld::cid::Cid;
-use libp2p::core::PeerId;
+use libp2p::identity::PeerId;
 use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::{error, fmt, io};
+
+use self::mem::MemBlockStore;
 
 #[macro_use]
 #[cfg(test)]
@@ -37,25 +39,12 @@ pub trait RepoTypes: Debug + Send + Sync + 'static {
     type TLock: Lock;
 }
 
-/// Configuration for a repo.
-#[derive(Clone, Debug)]
-pub struct RepoOptions {
-    path: PathBuf,
-}
-
-impl From<&IpfsOptions> for RepoOptions {
-    fn from(options: &IpfsOptions) -> Self {
-        RepoOptions {
-            path: options.ipfs_path.clone(),
-        }
-    }
-}
-
 /// Convenience for creating a new `Repo` from the `RepoOptions`.
-pub fn create_repo<TRepoTypes: RepoTypes>(
-    options: RepoOptions,
-) -> (Repo<TRepoTypes>, Receiver<RepoEvent>) {
-    Repo::new(options)
+pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
+    match storage_type {
+        StoragePath::Memory => Repo::new_memory(),
+        StoragePath::Disk(path) => Repo::new(path)
+    }
 }
 
 /// A wrapper for `Cid` that has a `Multihash`-based equality check.
@@ -104,7 +93,6 @@ pub enum BlockRmError {
 /// This API is being discussed and evolved, which will likely lead to breakage.
 #[async_trait]
 pub trait BlockStore: Debug + Send + Sync + 'static {
-    fn new(path: PathBuf) -> Self;
     async fn init(&self) -> Result<(), Error>;
     /// FIXME: redundant and never called during initialization, which is expected to happen during [`init`].
     async fn open(&self) -> Result<(), Error>;
@@ -125,7 +113,6 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
 #[async_trait]
 /// Generic layer of abstraction for a key-value data store.
 pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
-    fn new(path: PathBuf) -> Self;
     async fn init(&self) -> Result<(), Error>;
     async fn open(&self) -> Result<(), Error>;
     /// Checks if a key is present in the datastore.
@@ -184,7 +171,7 @@ impl error::Error for LockError {
 /// This ensures no two IPFS nodes can be started with the same peer ID, as exclusive access to the
 /// repository is guarenteed. This is most useful when using an fs backed repo.
 pub trait Lock: Debug + Send + Sync {
-    fn new(path: PathBuf) -> Self;
+    // fn new(path: PathBuf) -> Self;
     fn try_exclusive(&mut self) -> Result<(), LockError>;
 }
 
@@ -324,29 +311,18 @@ impl<C: Borrow<Cid>> PinKind<C> {
 /// Describes a repo.
 ///
 /// Consolidates a blockstore, a datastore and a subscription registry.
-#[derive(Debug)]
-pub struct Repo<TRepoTypes: RepoTypes> {
-    block_store: Arc<TRepoTypes::TBlockStore>,
-    data_store: Arc<TRepoTypes::TDataStore>,
-    events: Sender<RepoEvent>,
-    pub(crate) subscriptions: SubscriptionRegistry<Block, String>,
-    lockfile: Arc<Mutex<TRepoTypes::TLock>>,
-}
 
-impl<TRepoTypes: RepoTypes> Clone for Repo<TRepoTypes> {
-    fn clone(&self) -> Self {
-        Self {
-            block_store: self.block_store.clone(),
-            data_store: self.data_store.clone(),
-            events: self.events.clone(),
-            subscriptions: self.subscriptions.clone(),
-            lockfile: self.lockfile.clone(),
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct Repo {
+    block_store: Arc<dyn BlockStore>,
+    data_store: Arc<dyn DataStore>,
+    events: Sender<RepoEvent>,
+    pub(crate) subscriptions: Arc<SubscriptionRegistry<Block, String>>,
+    lockfile: Arc<Mutex<dyn Lock>>,
 }
 
 #[async_trait]
-impl<TRepoTypes: RepoTypes> iroh_bitswap::Store for Repo<TRepoTypes> {
+impl iroh_bitswap::Store for Repo {
     async fn get_size(&self, cid: &Cid) -> anyhow::Result<usize> {
         self.get_block_now(cid)
             .await?
@@ -396,18 +372,21 @@ impl TryFrom<RequestKind> for RepoEvent {
     }
 }
 
-impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
-    pub fn new(options: RepoOptions) -> (Self, Receiver<RepoEvent>) {
-        let mut blockstore_path = options.path.clone();
-        let mut datastore_path = options.path.clone();
-        let mut lockfile_path = options.path;
+impl Repo {
+    pub fn new(path: PathBuf) -> (Self, Receiver<RepoEvent>) {
+        let mut blockstore_path = path.clone();
+        let mut datastore_path = path.clone();
+        let mut lockfile_path = path;
         blockstore_path.push("blockstore");
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Arc::new(TRepoTypes::TBlockStore::new(blockstore_path));
-        let data_store = Arc::new(TRepoTypes::TDataStore::new(datastore_path));
-        let lockfile = TRepoTypes::TLock::new(lockfile_path);
+        let block_store = Arc::new(fs::FsBlockStore::new(blockstore_path));
+        #[cfg(not(feature = "sled_data_store"))]
+        let data_store = Arc::new(fs::FsDataStore::new(datastore_path));
+        #[cfg(feature = "sled_data_store")]
+        let data_store = Arc::new(kv::KvDataStore::new(datastore_path));
+        let lockfile = Arc::new(Mutex::new(fs::FsLock::new(lockfile_path)));
         let (sender, receiver) = channel(1);
 
         (
@@ -416,7 +395,25 @@ impl<TRepoTypes: RepoTypes> Repo<TRepoTypes> {
                 data_store,
                 events: sender,
                 subscriptions: Default::default(),
-                lockfile: Arc::new(Mutex::new(lockfile)),
+                lockfile,
+            },
+            receiver,
+        )
+    }
+
+    pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
+        let block_store = Arc::new(MemBlockStore::new(Default::default()));
+        let data_store = Arc::new(mem::MemDataStore::new(Default::default()));
+        let lockfile = Arc::new(Mutex::new(mem::MemLock::new(Default::default())));
+        let (sender, receiver) = channel(1);
+
+        (
+            Repo {
+                block_store,
+                data_store,
+                events: sender,
+                subscriptions: Default::default(),
+                lockfile,
             },
             receiver,
         )

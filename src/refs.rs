@@ -1,6 +1,6 @@
 //! `refs` or the references of dag-pb and other supported IPLD formats functionality.
 
-use crate::{Ipfs, IpfsTypes};
+use crate::{Ipfs};
 use async_stream::stream;
 use futures::stream::Stream;
 use libipld::{Cid, Ipld, IpldCodec};
@@ -78,14 +78,13 @@ impl IpldRefs {
         self
     }
 
-    pub fn refs_of_resolved<'a, Types, MaybeOwned, Iter>(
+    pub fn refs_of_resolved<'a, MaybeOwned, Iter>(
         self,
         ipfs: MaybeOwned,
         iplds: Iter,
     ) -> impl Stream<Item = Result<Edge, IpldRefsError>> + Send + 'a
     where
-        Types: IpfsTypes,
-        MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
+        MaybeOwned: Borrow<Ipfs> + Send + 'a,
         Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
     {
         iplds_refs_inner(ipfs, iplds, self)
@@ -109,15 +108,14 @@ impl IpldRefs {
 ///
 /// Depending on how this function is called, the lifetime will be tied to the lifetime of given
 /// `&Ipfs` or `'static` when given ownership of `Ipfs`.
-pub fn iplds_refs<'a, Types, MaybeOwned, Iter>(
+pub fn iplds_refs<'a, MaybeOwned, Iter>(
     ipfs: MaybeOwned,
     iplds: Iter,
     max_depth: Option<u64>,
     unique: bool,
 ) -> impl Stream<Item = Result<Edge, libipld::error::Error>> + Send + 'a
 where
-    Types: IpfsTypes,
-    MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
+    MaybeOwned: Borrow<Ipfs> + Send + 'a,
     Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
 {
     use futures::stream::TryStreamExt;
@@ -135,14 +133,13 @@ where
     })
 }
 
-fn iplds_refs_inner<'a, Types, MaybeOwned, Iter>(
+fn iplds_refs_inner<'a, MaybeOwned, Iter>(
     ipfs: MaybeOwned,
     iplds: Iter,
     opts: IpldRefs,
 ) -> impl Stream<Item = Result<Edge, IpldRefsError>> + Send + 'a
 where
-    Types: IpfsTypes,
-    MaybeOwned: Borrow<Ipfs<Types>> + Send + 'a,
+    MaybeOwned: Borrow<Ipfs> + Send + 'a,
     Iter: IntoIterator<Item = (Cid, Ipld)>,
 {
     let mut work = VecDeque::new();
@@ -233,12 +230,12 @@ where
 
             if traverse_links {
                 for (link_name, next_cid) in ipld_links(&cid, ipld) {
-                    if unique && !queued_or_visited.insert(next_cid.clone()) {
+                    if unique && !queued_or_visited.insert(next_cid) {
                         trace!(queued = %next_cid, "skipping already queued");
                         continue;
                     }
 
-                    work.push_back((depth + 1, next_cid, cid.clone(), link_name));
+                    work.push_back((depth + 1, next_cid, cid, link_name));
                 }
             }
 

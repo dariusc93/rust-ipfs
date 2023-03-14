@@ -2,7 +2,7 @@ use clap::Parser;
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use rust_ipfs::p2p::PeerInfo;
-use rust_ipfs::{Ipfs, IpfsPath, Multiaddr, TestTypes, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsPath, Multiaddr, UninitializedIpfs};
 use std::process::exit;
 use tokio::io::AsyncWriteExt;
 
@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon.
     // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
-    let ipfs: Ipfs<TestTypes> = UninitializedIpfs::new().start().await?;
+    let ipfs: Ipfs = UninitializedIpfs::new().start().await?;
 
 
     if opt.default_bootstrappers {
@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         // bootstrappers which are hopefully updated between releases
         ipfs.default_bootstrap().await?;
     } else if let Some(target) = opt.target {
-        ipfs.connect(target.try_into()?).await?;
+        ipfs.connect(target).await?;
     } else {
         let PeerInfo {
             listen_addrs: addresses,

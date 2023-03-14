@@ -1,25 +1,26 @@
+use async_broadcast::TrySendError;
 use futures::channel::mpsc as channel;
 use futures::stream::{FusedStream, Stream};
-use libp2p::gossipsub::error::PublishError;
+use libp2p::gossipsub::PublishError;
 use libp2p::identity::Keypair;
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
-use libp2p::core::{
-    connection::{ConnectedPoint, ConnectionId},
-    transport::ListenerId,
-    Multiaddr, PeerId,
-};
+use libp2p::identity::PeerId;
+use libp2p::core::{Endpoint, Multiaddr};
 
 use libp2p::gossipsub::{
-    self, Gossipsub, GossipsubEvent, GossipsubMessage, IdentTopic as Topic, MessageAuthenticity,
-    MessageId, TopicHash,
+    self, Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,
+    Message as GossipsubMessage, MessageAuthenticity, MessageId, TopicHash,
 };
 use libp2p::swarm::{
-    ConnectionHandler, DialError, NetworkBehaviour, NetworkBehaviourAction, PollParameters,
+    ConnectionDenied, ConnectionId, NetworkBehaviour, NetworkBehaviourAction, PollParameters,
+    THandler, THandlerInEvent,
 };
 
 /// Currently a thin wrapper around Gossipsub.
@@ -27,7 +28,9 @@ use libp2p::swarm::{
 /// to different topics.
 pub struct GossipsubStream {
     // Tracks the topic subscriptions.
-    streams: HashMap<TopicHash, channel::UnboundedSender<GossipsubMessage>>,
+    streams: HashMap<TopicHash, async_broadcast::Sender<GossipsubMessage>>,
+
+    active_streams: HashMap<TopicHash, Arc<AtomicUsize>>,
 
     // Gossipsub protocol
     gossipsub: Gossipsub,
@@ -57,17 +60,34 @@ impl core::ops::DerefMut for GossipsubStream {
 pub struct SubscriptionStream {
     on_drop: Option<channel::UnboundedSender<TopicHash>>,
     topic: Option<TopicHash>,
-    inner: channel::UnboundedReceiver<GossipsubMessage>,
+    inner: async_broadcast::Receiver<GossipsubMessage>,
+    counter: Arc<AtomicUsize>,
+}
+
+impl Clone for SubscriptionStream {
+    fn clone(&self) -> Self {
+        self.counter.fetch_add(1, Ordering::SeqCst);
+        Self {
+            on_drop: self.on_drop.clone(),
+            topic: self.topic.clone(),
+            inner: self.inner.clone(),
+            counter: self.counter.clone(),
+        }
+    }
 }
 
 impl Drop for SubscriptionStream {
     fn drop(&mut self) {
-        // the on_drop option allows us to disable this unsubscribe on drop once the stream has
-        // ended.
-        if let Some(sender) = self.on_drop.take() {
-            if let Some(topic) = self.topic.take() {
-                let _ = sender.unbounded_send(topic);
+        if self.counter.load(Ordering::SeqCst) == 1 {
+            // the on_drop option allows us to disable this unsubscribe on drop once the stream has
+            // ended.
+            if let Some(sender) = self.on_drop.take() {
+                if let Some(topic) = self.topic.take() {
+                    let _ = sender.unbounded_send(topic);
+                }
             }
+        } else {
+            self.counter.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -122,6 +142,7 @@ impl From<Gossipsub> for GossipsubStream {
             streams: HashMap::new(),
             gossipsub,
             unsubscriptions: (tx, rx),
+            active_streams: Default::default(),
         }
     }
 }
@@ -131,7 +152,7 @@ impl GossipsubStream {
     /// top of the gossip.
     pub fn new(keypair: Keypair) -> anyhow::Result<Self> {
         let (tx, rx) = channel::unbounded();
-        let config = gossipsub::GossipsubConfigBuilder::default()
+        let config = gossipsub::ConfigBuilder::default()
             .build()
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -140,6 +161,7 @@ impl GossipsubStream {
             gossipsub: Gossipsub::new(MessageAuthenticity::Signed(keypair), config)
                 .map_err(|e| anyhow::anyhow!("{}", e))?,
             unsubscriptions: (tx, rx),
+            active_streams: Default::default(),
         })
     }
 
@@ -154,25 +176,42 @@ impl GossipsubStream {
             Entry::Vacant(ve) => {
                 match self.gossipsub.subscribe(&topic) {
                     Ok(true) => {
-                        // TODO: this could also be bounded; we could send the message and drop the
-                        // subscription if it ever became full.
-                        let (tx, rx) = channel::unbounded();
+                        let counter = Arc::new(AtomicUsize::new(1));
+                        self.active_streams
+                            .insert(topic.hash(), Arc::clone(&counter));
+                        let (tx, rx) = async_broadcast::broadcast(92160);
                         let key = ve.key().clone();
                         ve.insert(tx);
                         Ok(SubscriptionStream {
                             on_drop: Some(self.unsubscriptions.0.clone()),
                             topic: Some(key),
                             inner: rx,
+                            counter,
                         })
                     }
-                    Ok(false) => anyhow::bail!("Already subscribed to topic"),
+                    Ok(false) => anyhow::bail!("Already subscribed to topic; shouldnt reach this"),
                     Err(e) => {
                         debug!("{}", e); //"subscribing to a unsubscribed topic should have succeeded"
                         Err(anyhow::Error::from(e))
                     }
                 }
             }
-            Entry::Occupied(_) => anyhow::bail!("Already subscribed to topic"),
+            Entry::Occupied(entry) => {
+                let rx = entry.get().clone().new_receiver();
+                let key = entry.key().clone();
+                let counter = self
+                    .active_streams
+                    .get(&key)
+                    .cloned()
+                    .ok_or(anyhow::anyhow!("No active stream"))?;
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(SubscriptionStream {
+                    on_drop: Some(self.unsubscriptions.0.clone()),
+                    topic: Some(key),
+                    inner: rx,
+                    counter,
+                })
+            }
         }
     }
 
@@ -182,7 +221,9 @@ impl GossipsubStream {
     /// Returns true if an existing subscription was dropped, false otherwise
     pub fn unsubscribe(&mut self, topic: impl Into<String>) -> anyhow::Result<bool> {
         let topic = Topic::new(topic.into());
-        if self.streams.remove(&topic.hash()).is_some() {
+        if let Some(sender) = self.streams.remove(&topic.hash()) {
+            sender.close();
+            self.active_streams.remove(&topic.hash());
             Ok(self.gossipsub.unsubscribe(&topic)?)
         } else {
             anyhow::bail!("Unable to unsubscribe from topic.")
@@ -215,146 +256,86 @@ impl GossipsubStream {
     /// Returns the list of currently subscribed topics. This can contain topics for which stream
     /// has been dropped but no messages have yet been received on the topics after the drop.
     pub fn subscribed_topics(&self) -> Vec<String> {
-        self.streams
-            .keys()
-            .into_iter()
-            .map(|t| t.to_string())
-            .collect()
+        self.streams.keys().map(|t| t.to_string()).collect()
     }
 }
 
-type GossipsubNetworkBehaviourAction = NetworkBehaviourAction<
-    <Gossipsub as NetworkBehaviour>::OutEvent,
-    <GossipsubStream as NetworkBehaviour>::ConnectionHandler,
-    <<GossipsubStream as NetworkBehaviour>::ConnectionHandler as ConnectionHandler>::InEvent,
->;
-
-#[allow(deprecated)]
-//TODO: Remove deprecated functions
 impl NetworkBehaviour for GossipsubStream {
     type ConnectionHandler = <Gossipsub as NetworkBehaviour>::ConnectionHandler;
     type OutEvent = GossipsubEvent;
 
-    fn new_handler(&mut self) -> Self::ConnectionHandler {
-        self.gossipsub.new_handler()
-    }
-
-    fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
-        self.gossipsub.addresses_of_peer(peer_id)
-    }
-
-    fn inject_connection_established(
+    fn handle_pending_outbound_connection(
         &mut self,
-        peer_id: &PeerId,
-        connection_id: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        failed_addresses: Option<&Vec<Multiaddr>>,
-        other_established: usize,
-    ) {
-        self.gossipsub.inject_connection_established(
-            peer_id,
+        connection_id: ConnectionId,
+        maybe_peer: Option<PeerId>,
+        addresses: &[Multiaddr],
+        effective_role: Endpoint,
+    ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
+        self.gossipsub.handle_pending_outbound_connection(
             connection_id,
-            endpoint,
-            failed_addresses,
-            other_established,
+            maybe_peer,
+            addresses,
+            effective_role,
         )
     }
 
-    fn inject_connection_closed(
-        &mut self,
-        peer_id: &PeerId,
-        connection_id: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        handler: Self::ConnectionHandler,
-        remaining_established: usize,
-    ) {
-        self.gossipsub.inject_connection_closed(
-            peer_id,
-            connection_id,
-            endpoint,
-            handler,
-            remaining_established,
-        )
+    fn on_swarm_event(&mut self, event: libp2p::swarm::FromSwarm<Self::ConnectionHandler>) {
+        self.gossipsub.on_swarm_event(event)
     }
 
-    fn inject_event(
+    fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        connection: ConnectionId,
-        event: <Self::ConnectionHandler as ConnectionHandler>::OutEvent,
-    ) {
-        self.gossipsub.inject_event(peer_id, connection, event)
-    }
-
-    fn inject_dial_failure(
-        &mut self,
-        peer_id: Option<PeerId>,
-        handler: Self::ConnectionHandler,
-        error: &DialError,
-    ) {
-        self.gossipsub.inject_dial_failure(peer_id, handler, error)
-    }
-
-    fn inject_new_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.gossipsub.inject_new_listen_addr(id, addr)
-    }
-
-    fn inject_expired_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.gossipsub.inject_expired_listen_addr(id, addr)
-    }
-
-    fn inject_new_external_addr(&mut self, addr: &Multiaddr) {
-        self.gossipsub.inject_new_external_addr(addr)
-    }
-
-    fn inject_listener_error(&mut self, id: ListenerId, err: &(dyn std::error::Error + 'static)) {
-        self.gossipsub.inject_listener_error(id, err)
-    }
-
-    fn inject_address_change(
-        &mut self,
-        peer: &PeerId,
-        id: &ConnectionId,
-        old: &ConnectedPoint,
-        new: &ConnectedPoint,
-    ) {
-        self.gossipsub.inject_address_change(peer, id, old, new)
-    }
-
-    fn inject_listen_failure(
-        &mut self,
-        local_addr: &Multiaddr,
-        send_back_addr: &Multiaddr,
-        handler: Self::ConnectionHandler,
+        connection_id: libp2p::swarm::ConnectionId,
+        event: libp2p::swarm::THandlerOutEvent<Self>,
     ) {
         self.gossipsub
-            .inject_listen_failure(local_addr, send_back_addr, handler)
+            .on_connection_handler_event(peer_id, connection_id, event)
     }
 
-    fn inject_new_listener(&mut self, id: ListenerId) {
-        self.gossipsub.inject_new_listener(id)
+    fn handle_established_inbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.gossipsub.handle_established_inbound_connection(
+            connection_id,
+            peer,
+            local_addr,
+            remote_addr,
+        )
     }
 
-    fn inject_listener_closed(&mut self, id: ListenerId, reason: Result<(), &std::io::Error>) {
-        self.gossipsub.inject_listener_closed(id, reason)
-    }
-
-    fn inject_expired_external_addr(&mut self, addr: &Multiaddr) {
-        self.gossipsub.inject_expired_external_addr(addr)
+    fn handle_established_outbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        addr: &Multiaddr,
+        role_override: Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.gossipsub.handle_established_outbound_connection(
+            connection_id,
+            peer,
+            addr,
+            role_override,
+        )
     }
 
     fn poll(
         &mut self,
         ctx: &mut Context,
         poll: &mut impl PollParameters,
-    ) -> Poll<GossipsubNetworkBehaviourAction> {
+    ) -> Poll<NetworkBehaviourAction<libp2p::gossipsub::Event, THandlerInEvent<Self>>> {
         use futures::stream::StreamExt;
         use std::collections::hash_map::Entry;
 
         loop {
             match self.unsubscriptions.1.poll_next_unpin(ctx) {
                 Poll::Ready(Some(dropped)) => {
-                    if self.streams.remove(&dropped).is_some() {
+                    if let Some(sender) = self.streams.remove(&dropped) {
+                        sender.close();
                         debug!("unsubscribing via drop from {:?}", dropped);
                         assert!(
                             self.gossipsub
@@ -362,6 +343,7 @@ impl NetworkBehaviour for GossipsubStream {
                                 .unwrap_or_default(),
                             "Failed to unsubscribe a dropped subscription"
                         );
+                        self.active_streams.remove(&dropped);
                     }
                 }
                 Poll::Ready(None) => unreachable!("we own the sender"),
@@ -376,7 +358,7 @@ impl NetworkBehaviour for GossipsubStream {
                 }) => {
                     let topic = message.topic.clone();
                     if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(se) = oe.get().unbounded_send(message) {
+                        if let Err(TrySendError::Closed(_)) = oe.get().try_broadcast(message) {
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
@@ -386,7 +368,7 @@ impl NetworkBehaviour for GossipsubStream {
                                     .unwrap_or_default(),
                                 "Failed to unsubscribe following SendError"
                             );
-                            let _ = Some(se.into_inner());
+                            self.active_streams.remove(&topic);
                         }
                     }
                     continue;

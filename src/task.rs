@@ -20,13 +20,12 @@ use tokio::sync::Notify;
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    }, time::Duration,
+    io,
+    sync::Arc,
+    time::Duration,
 };
 
-use crate::{config::BOOTSTRAP_NODES, IpfsEvent, IpfsTypes, TSwarmEventFn};
+use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
 
 use crate::{
     p2p::TSwarm,
@@ -38,14 +37,14 @@ pub use crate::{
     p2p::BehaviourEvent,
     p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
-    repo::{PinKind, PinMode, RepoTypes},
+    repo::{PinKind, PinMode},
 };
 
 use libipld::multibase::{self, Base};
 pub use libp2p::{
     self,
     core::transport::ListenerId,
-    gossipsub::{error::PublishError, MessageId},
+    gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},
@@ -71,8 +70,8 @@ use libp2p::{
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
-pub(crate) struct IpfsTask<Types: IpfsTypes> {
-    pub(crate) swarm: TSwarm<Types>,
+pub(crate) struct IpfsTask {
+    pub(crate) swarm: TSwarm,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
     pub(crate) listening_addresses: HashMap<Multiaddr, ListenerId>,
@@ -81,28 +80,33 @@ pub(crate) struct IpfsTask<Types: IpfsTypes> {
     pub(crate) bitswap_provider_stream:
         HashMap<QueryId, tokio::sync::mpsc::Sender<Result<HashSet<PeerId>, String>>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub(crate) repo: Repo<Types>,
+    pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
-    pub(crate) listener_subscriptions: HashMap<ListenerId, Channel<Option<Option<Multiaddr>>>>,
-    pub(crate) autonat_limit: Arc<AtomicU64>,
-    pub(crate) autonat_counter: Arc<AtomicU64>,
+    pub(crate) listener_subscriptions:
+        HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<MultiaddrWithPeerId>,
-    pub(crate) swarm_event: Option<TSwarmEventFn<Types>>,
+    pub(crate) swarm_event: Option<TSwarmEventFn>,
 }
 
-impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
-    pub(crate) async fn run(&mut self, notify: Arc<Notify>) {
+impl IpfsTask {
+    pub(crate) async fn run(&mut self, delay: bool, notify: Arc<Notify>) {
         let mut first_run = false;
         let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
+                    if delay {
+                        tokio::time::sleep(Duration::from_nanos(10)).await;
+                    }
                     self.handle_swarm_event(swarm);
                 },
                 Some(event) = self.from_facade.next() => {
                     if matches!(event, IpfsEvent::Exit) {
                         break;
+                    }
+                    if delay {
+                        tokio::time::sleep(Duration::from_nanos(10)).await;
                     }
                     self.handle_event(event);
                 },
@@ -120,7 +124,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         }
     }
 
-    fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent<TRepoTypes>) {
+    fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
         if let Some(handler) = self.swarm_event.clone() {
             handler(&mut self.swarm, &swarm_event)
         }
@@ -133,7 +137,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     .insert(address.clone(), listener_id);
 
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Ok(Some(Some(address))));
+                    let _ = ret.send(Either::Left(address));
                 }
             }
             SwarmEvent::ExpiredListenAddr {
@@ -143,7 +147,8 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 self.listeners.remove(&listener_id);
                 self.listening_addresses.remove(&address);
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Ok(Some(None)));
+                    //TODO: Determine if we want to return the address or use the right side and return an error?
+                    let _ = ret.send(Either::Left(address));
                 }
             }
             SwarmEvent::ListenerClosed {
@@ -155,15 +160,14 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 for address in addresses {
                     self.listening_addresses.remove(&address);
                 }
-                let reason = reason.map(|_| Some(None)).map_err(anyhow::Error::from);
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(reason);
+                    let _ = ret.send(Either::Right(reason));
                 }
             }
             SwarmEvent::ListenerError { listener_id, error } => {
                 self.listeners.remove(&listener_id);
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Err(error.into()));
+                    let _ = ret.send(Either::Right(Err(error)));
                 }
             }
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
@@ -178,7 +182,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().remove_peer(&peer);
+                                self.swarm.behaviour_mut().remove_peer(&peer, false);
                             }
                         }
                     }
@@ -275,6 +279,17 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 key: _,
                                 providers,
                             })) => {
+                                if !providers.is_empty() {
+                                    if let Entry::Occupied(entry) =
+                                        self.bitswap_provider_stream.entry(id)
+                                    {
+                                        let providers = providers.clone();
+                                        let tx = entry.get().clone();
+                                        tokio::spawn(async move {
+                                            let _ = tx.send(Ok(providers)).await;
+                                        });
+                                    }
+                                }
                                 if let Entry::Occupied(entry) = self.provider_stream.entry(id) {
                                     if !providers.is_empty() {
                                         tokio::spawn({
@@ -294,6 +309,9 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                                 if step.last {
                                     if let Some(tx) = self.provider_stream.remove(&id) {
                                         tx.close_channel();
+                                    }
+                                    if let Some(tx) = self.bitswap_provider_stream.remove(&id) {
+                                        drop(tx);
                                     }
                                 }
                             }
@@ -477,6 +495,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         .ok();
                 }
                 BitswapEvent::FindProviders { key, response, .. } => {
+                    println!("Looking for providers");
                     let key = key.hash().to_bytes();
                     let id = self
                         .swarm
@@ -486,7 +505,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     self.bitswap_provider_stream.insert(id, response);
                 }
                 BitswapEvent::Ping { peer, response } => {
-                    let duration = self.swarm.behaviour().swarm.peer_rtt(&peer);
+                    let duration = self.swarm.behaviour().peerbook.get_peet_latest_rtt(peer);
                     let _ = response.send(duration).ok();
                 }
             },
@@ -500,7 +519,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         peer.to_base58(),
                         rtt.as_millis()
                     );
-                    self.swarm.behaviour_mut().swarm.set_rtt(&peer, rtt);
+                    self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
                 }
                 libp2p::ping::Event {
                     peer,
@@ -513,7 +532,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                 } => {
                     trace!("ping: timeout to {}", peer);
-                    self.swarm.behaviour_mut().remove_peer(&peer);
+                    self.swarm.behaviour_mut().remove_peer(&peer, false);
                 }
                 libp2p::ping::Event {
                     peer,
@@ -532,8 +551,8 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 IdentifyEvent::Received { peer_id, info } => {
                     self.swarm
                         .behaviour_mut()
-                        .swarm
-                        .inject_identify_info(peer_id, info.clone());
+                        .peerbook
+                        .inject_peer_info(info.clone());
 
                     if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
                         for ret in rets {
@@ -559,24 +578,15 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         }
                     }
 
-                    #[allow(clippy::collapsible_if)]
                     if protocols
                         .iter()
                         .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
                     {
-                        if self.autonat_counter.load(Ordering::Relaxed)
-                            <= self.autonat_limit.load(Ordering::Relaxed)
-                        {
-                            for addr in listen_addrs {
-                                self.swarm
-                                    .behaviour_mut()
-                                    .autonat
-                                    .add_server(peer_id, Some(addr));
-                            }
-
-                            let mut counter = self.autonat_counter.load(Ordering::Relaxed);
-                            counter += 1;
-                            self.autonat_counter.store(counter, Ordering::Relaxed);
+                        for addr in listen_addrs {
+                            self.swarm
+                                .behaviour_mut()
+                                .autonat
+                                .add_server(peer_id, Some(addr));
                         }
                     }
                 }
@@ -594,18 +604,17 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
         }
     }
 
+    #[allow(deprecated)]
+    //TODO: Replace addresses_of_peer
     fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {
-                ret.send(self.swarm.behaviour_mut().connect(target)).ok();
+                let rx = self.swarm.behaviour_mut().peerbook.connect(target);
+                let _ = ret.send(rx);
             }
             IpfsEvent::Protocol(ret) => {
                 let info = self.swarm.behaviour().supported_protocols();
                 let _ = ret.send(info);
-            }
-            IpfsEvent::SwarmDial(opt, ret) => {
-                let result = self.swarm.dial(opt);
-                let _ = ret.send(result);
             }
             IpfsEvent::Addresses(ret) => {
                 let addrs = self.swarm.behaviour_mut().addrs();
@@ -699,23 +708,27 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 }
             },
             IpfsEvent::RemoveListeningAddress(addr, ret) => {
-                let removed = if let Some(id) = self.listening_addresses.remove(&addr) {
-                    if !self.swarm.remove_listener(id) {
-                        Err(format_err!(
-                            "Failed to remove previously added listening address: {}",
-                            addr
-                        ))
-                    } else {
-                        self.listeners.remove(&id);
-                        let (tx, rx) = oneshot::channel();
-                        self.listener_subscriptions.insert(id, tx);
-                        Ok(rx)
+                if let Some(id) = self.listening_addresses.remove(&addr) {
+                    match self.swarm.remove_listener(id) {
+                        true => {
+                            self.listeners.remove(&id);
+                            let (tx, rx) = oneshot::channel();
+                            self.listener_subscriptions.insert(id, tx);
+                            let _ = ret.send(Ok(rx));
+                        }
+                        false => {
+                            let _ = ret.send(Err(anyhow::anyhow!(
+                                "Failed to remove previously added listening address: {}",
+                                addr
+                            )));
+                        }
                     }
                 } else {
-                    Err(format_err!("Address was not listened to before: {}", addr))
-                };
-
-                let _ = ret.send(removed);
+                    let _ = ret.send(Err(format_err!(
+                        "Address was not listened to before: {}",
+                        addr
+                    )));
+                }
             }
             IpfsEvent::Bootstrap(ret) => {
                 let future = match self.swarm.behaviour_mut().kademlia.bootstrap() {
@@ -758,13 +771,13 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
             //     let _ = ret.send(peers);
             // }
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
-                let locally_known = self.swarm.behaviour().swarm.get_identify_info(&peer_id);
+                let locally_known = self.swarm.behaviour().peerbook.get_peer_info(peer_id);
 
                 let (tx, rx) = oneshot::channel();
 
                 match locally_known {
                     Some(info) => {
-                        let _ = tx.send(Ok(PeerInfo::from(info)));
+                        let _ = tx.send(Ok(info.clone()));
                     }
                     None => {
                         self.swarm
@@ -803,6 +816,14 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     })
                 };
                 let _ = ret.send(addrs);
+            }
+            IpfsEvent::WhitelistPeer(peer_id, ret) => {
+                self.swarm.behaviour_mut().peerbook.add(peer_id);
+                let _ = ret.send(Ok(()));
+            }
+            IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
+                self.swarm.behaviour_mut().peerbook.remove(peer_id);
+                let _ = ret.send(Ok(()));
             }
             IpfsEvent::GetProviders(cid, ret) => {
                 let key = Key::from(cid.hash().to_bytes());
@@ -893,6 +914,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                         .behaviour_mut()
                         .kademlia
                         .add_address(&peer_id, ma.into());
+                    self.swarm.behaviour_mut().peerbook.add(peer_id);
                     // the return value of add_address doesn't implement Debug
                     trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                 }
@@ -914,6 +936,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                     } else {
                         warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
                     }
+                    self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 }
                 let _ = ret.send(Ok(result));
             }
@@ -921,20 +944,21 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let removed = self.bootstraps.drain().collect::<Vec<_>>();
                 let mut list = Vec::with_capacity(removed.len());
                 for addr_with_peer_id in removed {
-                    let peer_id = &addr_with_peer_id.peer_id;
+                    let peer_id = addr_with_peer_id.peer_id;
                     let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
 
                     if let Some(e) = self
                         .swarm
                         .behaviour_mut()
                         .kademlia
-                        .remove_address(peer_id, &prefix)
+                        .remove_address(&peer_id, &prefix)
                     {
                         info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
                         list.push(addr_with_peer_id.into());
                     } else {
                         error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
                     }
+                    self.swarm.behaviour_mut().peerbook.remove(peer_id);
                 }
                 let _ = ret.send(list);
             }
@@ -961,7 +985,7 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                             .kademlia
                             .add_address(&peer_id, ma.clone());
                         trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
-
+                        self.swarm.behaviour_mut().peerbook.add(peer_id);
                         // report with the peerid
                         let reported: Multiaddr = addr.into();
                         rets.push(reported);
@@ -983,14 +1007,18 @@ impl<TRepoTypes: RepoTypes> IpfsTask<TRepoTypes> {
                 let repo = self.repo.clone();
                 tokio::spawn(async move {
                     let session = client.new_session().await;
-                    if let Some(block) =
-                        session.get_block(&cid).await.ok().and_then(|block| {
-                            libipld::Block::new(block.cid, block.data.to_vec()).ok()
-                        })
-                    {
+                    let block = match session.get_block(&cid).await {
+                        Ok(block) => block,
+                        Err(e) => {
+                            println!("Error getting block: {e}");
+                            return;
+                        }
+                    };
+                    println!("Found block: {cid}");
+                    if let Ok(block) = libipld::Block::new(block.cid, block.data.to_vec()) {
                         let res = repo.put_block(block).await;
                         if let Err(e) = res {
-                            debug!("Got block {} but failed to store it: {}", cid, e);
+                            println!("Got block {} but failed to store it: {}", cid, e);
                         }
                     }
                     let _ = session.stop().await.ok();

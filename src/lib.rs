@@ -41,7 +41,7 @@ use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Sender},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
     sink::SinkExt,
@@ -50,7 +50,8 @@ use futures::{
 };
 
 use p2p::{
-    IdentifyConfiguration, KadStoreConfig, PeerInfo, ProviderStream, RecordStream, RelayConfig,
+    IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream, RecordStream,
+    RelayConfig,
 };
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
@@ -60,17 +61,18 @@ use unixfs::UnixfsStatus;
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    env, fmt,
+    fmt, io,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
-    sync::{atomic::AtomicU64, Arc},
+    sync::Arc,
+    time::Duration,
 };
 
 use self::{
     dag::IpldDag,
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
-    repo::{create_repo, Repo, RepoEvent, RepoOptions},
+    repo::{create_repo, Repo, RepoEvent},
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -80,7 +82,7 @@ pub use self::{
     p2p::BehaviourEvent,
     p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
-    repo::{PinKind, PinMode, RepoTypes},
+    repo::{PinKind, PinMode},
 };
 
 pub type Block = libipld::Block<libipld::DefaultParams>;
@@ -90,7 +92,7 @@ use libipld::{Cid, Ipld, IpldCodec};
 pub use libp2p::{
     self,
     core::transport::ListenerId,
-    gossipsub::{error::PublishError, MessageId},
+    gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},
@@ -100,35 +102,12 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
-use libp2p::{
-    kad::KademliaConfig,
-    ping::Config as PingConfig,
-    swarm::{dial_opts::DialOpts, DialError},
-};
+use libp2p::{kad::KademliaConfig, ping::Config as PingConfig, swarm::dial_opts::DialOpts};
 
-/// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
-pub trait IpfsTypes: RepoTypes {}
-impl<T: RepoTypes> IpfsTypes for T {}
-
-/// Default node configuration, currently with persistent block store and data store for pins.
-#[derive(Debug, Clone)]
-pub struct Types;
-impl RepoTypes for Types {
-    type TBlockStore = repo::fs::FsBlockStore;
-    #[cfg(feature = "sled_data_store")]
-    type TDataStore = repo::kv::KvDataStore;
-    #[cfg(not(feature = "sled_data_store"))]
-    type TDataStore = repo::fs::FsDataStore;
-    type TLock = repo::fs::FsLock;
-}
-
-/// In-memory testing configuration used in tests.
-#[derive(Debug, Clone)]
-pub struct TestTypes;
-impl RepoTypes for TestTypes {
-    type TBlockStore = repo::mem::MemBlockStore;
-    type TDataStore = repo::mem::MemDataStore;
-    type TLock = repo::mem::MemLock;
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StoragePath {
+    Disk(PathBuf),
+    Memory,
 }
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
@@ -144,7 +123,7 @@ pub struct IpfsOptions {
     ///
     /// It is **not** recommended to set this to IPFS_PATH without first at least backing up your
     /// existing repository.
-    pub ipfs_path: PathBuf,
+    pub ipfs_path: StoragePath,
 
     /// The keypair used with libp2p, the identity of the node.
     pub keypair: Keypair,
@@ -185,8 +164,11 @@ pub struct IpfsOptions {
     /// Identify configuration
     pub identify_configuration: Option<crate::p2p::IdentifyConfiguration>,
 
+    /// Pubsub configuration
+    pub pubsub_config: Option<crate::p2p::PubsubConfig>,
+
     /// Kad configuration
-    pub kad_configuration: Option<KademliaConfig>,
+    pub kad_configuration: Option<Either<KadConfig, KademliaConfig>>,
 
     /// Kad Store Config
     /// Note: Only supports MemoryStoreConfig at this time
@@ -209,7 +191,7 @@ pub struct IpfsOptions {
 impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
-            ipfs_path: env::temp_dir(),
+            ipfs_path: StoragePath::Memory,
             keypair: Keypair::generate_ed25519(),
             mdns: Default::default(),
             mdns_ipv6: Default::default(),
@@ -231,6 +213,7 @@ impl Default for IpfsOptions {
             ],
             port_mapping: false,
             transport_configuration: None,
+            pubsub_config: None,
             swarm_configuration: None,
             span: None,
         }
@@ -270,10 +253,11 @@ impl IpfsOptions {
 #[derive(Clone)]
 struct DebuggableKeypair<I: Borrow<Keypair>>(I);
 
+//TODO: Maybe remove this in the future?
 impl<I: Borrow<Keypair>> fmt::Debug for DebuggableKeypair<I> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kind = match self.get_ref() {
-            Keypair::Ed25519(_) => "Ed25519",
+        let kind = match self.get_ref().clone().into_ed25519() {
+            Some(_) => "Ed25519",
             _ => "Unknown",
         };
 
@@ -295,15 +279,15 @@ impl<I: Borrow<Keypair>> DebuggableKeypair<I> {
 ///
 /// The facade is created through [`UninitializedIpfs`] which is configured with [`IpfsOptions`].
 #[derive(Debug)]
-pub struct Ipfs<Types: IpfsTypes> {
+pub struct Ipfs {
     span: Span,
-    repo: Repo<Types>,
+    repo: Repo,
     keys: DebuggableKeypair<Keypair>,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
 }
 
-impl<Types: IpfsTypes> Clone for Ipfs<Types> {
+impl Clone for Ipfs {
     fn clone(&self) -> Self {
         Ipfs {
             span: self.span.clone(),
@@ -320,12 +304,10 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 /// Events used internally to communicate with the swarm, which is executed in the the background
 /// task.
 #[derive(Debug)]
+#[allow(clippy::type_complexity)]
 enum IpfsEvent {
     /// Connect
-    Connect(
-        MultiaddrWithPeerId,
-        OneshotSender<Option<Option<ReceiverChannel<()>>>>,
-    ),
+    Connect(DialOpts, OneshotSender<ReceiverChannel<()>>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     /// Addresses
@@ -355,14 +337,13 @@ enum IpfsEvent {
     ),
     PubsubPeers(Option<String>, OneshotSender<Vec<PeerId>>),
     PubsubSubscribed(OneshotSender<Vec<String>>),
-    SwarmDial(DialOpts, OneshotSender<Result<(), DialError>>),
     AddListeningAddress(
         Multiaddr,
-        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
+        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     RemoveListeningAddress(
         Multiaddr,
-        Channel<ReceiverChannel<Option<Option<Multiaddr>>>>,
+        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Option<Multiaddr>),
@@ -373,6 +354,8 @@ enum IpfsEvent {
         bool,
         OneshotSender<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
     ),
+    WhitelistPeer(PeerId, Channel<()>),
+    RemoveWhitelistPeer(PeerId, Channel<()>),
     GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtGet(Key, OneshotSender<RecordStream>),
@@ -385,32 +368,32 @@ enum IpfsEvent {
     Exit,
 }
 
-type TSwarmEvent<TRepoTypes> = <TSwarm<TRepoTypes> as Stream>::Item;
-type TSwarmEventFn<TRepoTypes> =
-    Arc<dyn Fn(&mut TSwarm<TRepoTypes>, &TSwarmEvent<TRepoTypes>) + Sync + Send>;
+type TSwarmEvent = <TSwarm as Stream>::Item;
+type TSwarmEventFn = Arc<dyn Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send>;
 
+#[derive(Debug, Copy, Clone)]
 pub enum FDLimit {
     Max,
     Custom(u64),
 }
 
 /// Configured Ipfs which can only be started.
-pub struct UninitializedIpfs<Types: IpfsTypes> {
-    repo: Repo<Types>,
+
+pub struct UninitializedIpfs {
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
-    repo_events: Receiver<RepoEvent>,
-    swarm_event: Option<TSwarmEventFn<Types>>,
+    delay: bool,
+    swarm_event: Option<TSwarmEventFn>,
 }
 
-impl<Types: IpfsTypes> Default for UninitializedIpfs<Types> {
+impl Default for UninitializedIpfs {
     fn default() -> Self {
         Self::with_opt(Default::default())
     }
 }
 
-impl<Types: IpfsTypes> UninitializedIpfs<Types> {
+impl UninitializedIpfs {
     pub fn new() -> Self {
         Self::default()
     }
@@ -422,16 +405,14 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// operations done in the background task as well as tasks spawned by the underlying
     /// `libp2p::Swarm`.
     pub fn with_opt(options: IpfsOptions) -> Self {
-        let repo_options = RepoOptions::from(&options);
-        let (repo, repo_events) = create_repo(repo_options);
         let keys = options.keypair.clone();
         let fdlimit = None;
+        let delay = true;
         UninitializedIpfs {
-            repo,
             keys,
             options,
             fdlimit,
-            repo_events,
+            delay,
             swarm_event: None,
         }
     }
@@ -455,7 +436,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// Sets a path
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
-        self.options.ipfs_path = path;
+        self.options.ipfs_path = StoragePath::Disk(path);
         self
     }
 
@@ -480,10 +461,10 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     /// Set kad configuration
     pub fn set_kad_configuration(
         mut self,
-        config: KademliaConfig,
+        config: KadConfig,
         store: Option<KadStoreConfig>,
     ) -> Self {
-        self.options.kad_configuration = Some(config);
+        self.options.kad_configuration = Some(Either::Left(config));
         self.options.kad_store_config = store;
         self
     }
@@ -496,7 +477,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
 
     /// Set keypair
     pub fn set_keypair(mut self, keypair: Keypair) -> Self {
-        self.options.keypair = keypair;
+        self.keys = keypair;
         self
     }
 
@@ -538,25 +519,40 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         self
     }
 
+    /// Used to delay the loop
+    /// Note: This may be removed in future
+    pub fn disable_delay(mut self) -> Self {
+        self.delay = false;
+        self
+    }
+
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
     where
-        F: Fn(&mut TSwarm<Types>, &TSwarmEvent<Types>) + Sync + Send + 'static,
+        F: Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send + 'static,
     {
         self.swarm_event = Some(Arc::new(func));
         self
     }
 
     /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync.
-    pub async fn start(self) -> Result<Ipfs<Types>, Error> {
+    pub async fn start(self) -> Result<Ipfs, Error> {
         let UninitializedIpfs {
-            repo,
             keys,
-            repo_events,
             fdlimit,
+            delay,
             mut options,
             swarm_event,
+            ..
         } = self;
+
+        if let StoragePath::Disk(path) = &options.ipfs_path {
+            if !path.is_dir() {
+                tokio::fs::create_dir_all(path).await?;
+            }
+        }
+
+        let (repo, repo_events) = create_repo(options.ipfs_path.clone());
 
         let root_span = options
             .span
@@ -595,7 +591,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             }
             #[cfg(not(unix))]
             {
-                warn!("Can only set a fd limit on unix systems. Ignoring...")
+                warn!("Cannot set {limit:?}. Can only set a fd limit on unix systems. Ignoring...")
             }
         }
 
@@ -627,8 +623,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
         .await?;
 
-        let autonat_limit = Arc::new(AtomicU64::new(64));
-        let autonat_counter = Arc::new(Default::default());
         let kad_subscriptions = Default::default();
         let listener_subscriptions = Default::default();
         let listeners = Default::default();
@@ -651,8 +645,6 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
             kad_subscriptions,
             listener_subscriptions,
             repo,
-            autonat_limit,
-            autonat_counter,
             bootstraps,
             swarm_event,
         };
@@ -668,7 +660,7 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
         tokio::spawn({
             let notify = notify.clone();
             async move {
-                fut.run(notify).instrument(swarm_span).await;
+                fut.run(delay, notify).instrument(swarm_span).await;
             }
         });
         notify.notified().await;
@@ -676,13 +668,13 @@ impl<Types: IpfsTypes> UninitializedIpfs<Types> {
     }
 }
 
-impl<Types: IpfsTypes> Ipfs<Types> {
+impl Ipfs {
     /// Return an [`IpldDag`] for DAG operations
-    pub fn dag(&self) -> IpldDag<Types> {
+    pub fn dag(&self) -> IpldDag {
         IpldDag::new(self.clone())
     }
 
-    fn ipns(&self) -> Ipns<Types> {
+    fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
 
@@ -925,6 +917,8 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Add a file from a path to the blockstore
+    ///
+    /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
         &self,
         path: P,
@@ -935,16 +929,20 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     }
 
     /// Add a file through a stream of data to the blockstore
-    pub async fn add_unixfs(
+    ///
+    /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
+    pub async fn add_unixfs<'a>(
         &self,
-        stream: BoxStream<'static, Vec<u8>>,
-    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
+        stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
+    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
         unixfs::add(self, None, stream, None)
             .instrument(self.span.clone())
             .await
     }
 
     /// Retreive a file and saving it to a path.
+    ///
+    /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub async fn get_unixfs<P: AsRef<Path>>(
         &self,
         path: IpfsPath,
@@ -976,41 +974,46 @@ impl<Types: IpfsTypes> Ipfs<Types> {
         .await
     }
 
-    /// Connects to the peer at the given Multiaddress.
-    ///
-    /// Accepts only multiaddresses with the PeerId to authenticate the connection.
-    ///
-    /// Returns a future which will complete when the connection has been successfully made or
-    /// failed for whatever reason. It is possible for this method to return an error, while ending
-    /// up being connected to the peer by the means of another connection.
-    pub async fn connect(&self, target: MultiaddrWithPeerId) -> Result<(), Error> {
+    /// Connects to the peer
+    pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<(), Error> {
         async move {
+            let target = target.into();
             let (tx, rx) = oneshot_channel();
             self.to_task
                 .clone()
                 .send(IpfsEvent::Connect(target, tx))
                 .await?;
+
             let subscription = rx.await?;
 
-            match subscription {
-                Some(Some(future)) => future.await?,
-                Some(None) => futures::future::ready(Ok(())).await,
-                None => futures::future::ready(Err(anyhow!("Duplicate connection attempt"))).await,
-            }
+            subscription.await?
         }
         .instrument(self.span.clone())
         .await
     }
 
-    /// Dials a peer using [`Swarm::dial`].
-    // TODO: Remove once improvements are done
-    pub async fn dial(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
+    /// Whitelist a peer
+    pub async fn whitelist(&self, peer_id: PeerId) -> Result<(), Error> {
         async move {
-            let opt = opt.into();
             let (tx, rx) = oneshot_channel();
             self.to_task
                 .clone()
-                .send(IpfsEvent::SwarmDial(opt, tx))
+                .send(IpfsEvent::WhitelistPeer(peer_id, tx))
+                .await?;
+
+            rx.await?.map_err(anyhow::Error::from)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Remove peer from whitelist
+    pub async fn remove_whitelisted_peer(&self, peer_id: PeerId) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RemoveWhitelistPeer(peer_id, tx))
                 .await?;
 
             rx.await?.map_err(anyhow::Error::from)
@@ -1324,20 +1327,28 @@ impl<Types: IpfsTypes> Ipfs<Types> {
     /// has now been changed.
     pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
+            //Note: This is due to a possible race when doing an initial dial out to a relay
+            //      Without this delay, the listener may close, resulting in an error here
+            if addr.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
                 .send(IpfsEvent::AddListeningAddress(addr, tx))
                 .await?;
-
-            rx.await.map_err(anyhow::Error::from)?
+            let rx = rx.await??;
+            match rx.await? {
+                Either::Left(addr) => Ok(addr),
+                Either::Right(result) => {
+                    result?;
+                    Err(anyhow::anyhow!("No multiaddr provided"))
+                }
+            }
         }
         .instrument(self.span.clone())
-        .await?
-        .await??
-        .and_then(|addr| addr)
-        .ok_or_else(|| anyhow::anyhow!("No multiaddr provided"))
+        .await
     }
 
     /// Stop listening on a previously added listening address. Fails if the address is not being
@@ -1352,14 +1363,16 @@ impl<Types: IpfsTypes> Ipfs<Types> {
                 .clone()
                 .send(IpfsEvent::RemoveListeningAddress(addr, tx))
                 .await?;
-
-            rx.await?
+            let rx = rx.await??;
+            match rx.await? {
+                Either::Left(addr) => Err(anyhow::anyhow!(
+                    "Error: Address {addr} was returned while removing listener"
+                )),
+                Either::Right(result) => result.map_err(anyhow::Error::from),
+            }
         }
         .instrument(self.span.clone())
-        .await?
-        .await??
-        .ok_or_else(|| anyhow::anyhow!("Error removing address"))
-        .map(|_| ())
+        .await
     }
 
     /// Obtain the addresses associated with the given `PeerId`; they are first searched for locally
@@ -2715,7 +2728,7 @@ mod node {
     /// easier.
     pub struct Node {
         /// The Ipfs facade.
-        pub ipfs: Ipfs<TestTypes>,
+        pub ipfs: Ipfs,
         /// The peer identifier on the network.
         pub id: PeerId,
         /// The listened to and externally visible addresses. The addresses are suffixed with the
@@ -2737,15 +2750,7 @@ mod node {
         /// Connects to a peer at the given address.
         pub async fn connect(&self, addr: Multiaddr) -> Result<(), Error> {
             let addr = MultiaddrWithPeerId::try_from(addr).unwrap();
-            if self
-                .ipfs
-                .peers()
-                .await
-                .unwrap_or_default()
-                .iter()
-                .map(|c| c.addr.peer_id)
-                .any(|p| p == addr.peer_id)
-            {
+            if self.ipfs.is_connected(addr.peer_id).await? {
                 return Ok(());
             }
             self.ipfs.connect(addr).await
@@ -2757,7 +2762,7 @@ mod node {
 
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs<TestTypes> = UninitializedIpfs::with_opt(opts).start().await.unwrap();
+            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts).start().await.unwrap();
 
             let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
 
@@ -2790,7 +2795,7 @@ mod node {
     }
 
     impl Deref for Node {
-        type Target = Ipfs<TestTypes>;
+        type Target = Ipfs;
 
         fn deref(&self) -> &Self::Target {
             &self.ipfs
