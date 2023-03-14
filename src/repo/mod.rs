@@ -13,7 +13,7 @@ use futures::channel::{
 };
 use futures::sink::SinkExt;
 use libipld::cid::Cid;
-use libp2p::core::PeerId;
+use libp2p::identity::PeerId;
 use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;

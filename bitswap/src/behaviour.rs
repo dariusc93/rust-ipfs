@@ -12,13 +12,14 @@ use fnv::{FnvHashMap, FnvHashSet};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use hash_hasher::HashedMap;
 use libipld::Cid;
-use libp2p_core::{Multiaddr, PeerId};
-use libp2p_swarm::derive_prelude::ConnectionEstablished;
-use libp2p_swarm::dial_opts::{DialOpts, PeerCondition};
-use libp2p_swarm::handler::OneShotHandler;
-use libp2p_swarm::{
+use libp2p::core::Multiaddr;
+use libp2p::identity::PeerId;
+use libp2p::swarm::derive_prelude::ConnectionEstablished;
+use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
+use libp2p::swarm::handler::OneShotHandler;
+use libp2p::swarm::{
     ConnectionClosed, ConnectionDenied, ConnectionId, NetworkBehaviour, NetworkBehaviourAction,
-    NotifyHandler, PollParameters, THandler,
+    NotifyHandler, PollParameters, THandler, FromSwarm,
 };
 use std::task::{Context, Poll};
 use std::{
@@ -225,9 +226,9 @@ impl NetworkBehaviour for Bitswap {
         Vec::new()
     }
 
-    fn on_swarm_event(&mut self, event: libp2p_swarm::FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
         match event {
-            libp2p_swarm::FromSwarm::ConnectionEstablished(ConnectionEstablished {
+            FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
                 connection_id,
                 ..
@@ -240,7 +241,7 @@ impl NetworkBehaviour for Bitswap {
                 self.peer_connection_id.insert(peer_id, connection_id);
                 self.send_want_list(peer_id);
             }
-            libp2p_swarm::FromSwarm::ConnectionClosed(ConnectionClosed { peer_id, .. }) => {
+            FromSwarm::ConnectionClosed(ConnectionClosed { peer_id, .. }) => {
                 debug!("bitswap: inject_disconnected {:?}", peer_id);
                 self.connected_peers.remove(&peer_id);
                 self.peer_connection_id.remove(&peer_id);
@@ -264,7 +265,7 @@ impl NetworkBehaviour for Bitswap {
         _connection_id: ConnectionId,
         _peer: PeerId,
         _addr: &Multiaddr,
-        _role_override: libp2p_core::Endpoint,
+        _role_override: libp2p::core::Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(Self::ConnectionHandler::default())
     }

@@ -11,7 +11,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
-use libp2p::core::{Endpoint, Multiaddr, PeerId};
+use libp2p::identity::PeerId;
+use libp2p::core::{Endpoint, Multiaddr};
 
 use libp2p::gossipsub::{
     self, Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,

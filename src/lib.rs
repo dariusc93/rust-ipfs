@@ -252,10 +252,11 @@ impl IpfsOptions {
 #[derive(Clone)]
 struct DebuggableKeypair<I: Borrow<Keypair>>(I);
 
+//TODO: Maybe remove this in the future?
 impl<I: Borrow<Keypair>> fmt::Debug for DebuggableKeypair<I> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kind = match self.get_ref() {
-            Keypair::Ed25519(_) => "Ed25519",
+        let kind = match self.get_ref().clone().into_ed25519() {
+            Some(_) => "Ed25519",
             _ => "Unknown",
         };
 
