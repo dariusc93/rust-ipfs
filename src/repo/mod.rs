@@ -17,8 +17,9 @@ use libp2p::identity::PeerId;
 use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{error, fmt, io};
+use tracing::log;
 
 use self::mem::MemBlockStore;
 
@@ -34,7 +35,7 @@ pub mod mem;
 pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
     match storage_type {
         StoragePath::Memory => Repo::new_memory(),
-        StoragePath::Disk(path) => Repo::new(path)
+        StoragePath::Disk(path) => Repo::new(path),
     }
 }
 
@@ -161,9 +162,9 @@ impl error::Error for LockError {
 ///
 /// This ensures no two IPFS nodes can be started with the same peer ID, as exclusive access to the
 /// repository is guarenteed. This is most useful when using an fs backed repo.
-pub trait Lock: Debug + Send + Sync {
+pub trait Lock: Debug + Send + Sync + 'static {
     // fn new(path: PathBuf) -> Self;
-    fn try_exclusive(&mut self) -> Result<(), LockError>;
+    fn try_exclusive(&self) -> Result<(), LockError>;
 }
 
 type References<'a> = futures::stream::BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
@@ -308,7 +309,7 @@ pub struct Repo {
     data_store: Arc<dyn DataStore>,
     events: Sender<RepoEvent>,
     pub(crate) subscriptions: Arc<SubscriptionRegistry<Block, String>>,
-    lockfile: Arc<Mutex<dyn Lock>>,
+    lockfile: Arc<dyn Lock>,
 }
 
 /// Events used to communicate to the swarm on repo changes.
@@ -353,7 +354,7 @@ impl Repo {
         let data_store = Arc::new(fs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
         let data_store = Arc::new(kv::KvDataStore::new(datastore_path));
-        let lockfile = Arc::new(Mutex::new(fs::FsLock::new(lockfile_path)));
+        let lockfile = Arc::new(fs::FsLock::new(lockfile_path));
         let (sender, receiver) = channel(1);
 
         (
@@ -371,9 +372,30 @@ impl Repo {
     pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
         let block_store = Arc::new(MemBlockStore::new(Default::default()));
         let data_store = Arc::new(mem::MemDataStore::new(Default::default()));
-        let lockfile = Arc::new(Mutex::new(mem::MemLock::new(Default::default())));
+        let lockfile = Arc::new(mem::MemLock::new(Default::default()));
         let (sender, receiver) = channel(1);
 
+        (
+            Repo {
+                block_store,
+                data_store,
+                events: sender,
+                subscriptions: Default::default(),
+                lockfile,
+            },
+            receiver,
+        )
+    }
+
+    pub fn new_direct(
+        block_store: impl BlockStore,
+        data_store: impl DataStore,
+        lockfile: impl Lock,
+    ) -> (Self, Receiver<RepoEvent>) {
+        let block_store = Arc::new(block_store);
+        let data_store = Arc::new(data_store);
+        let lockfile = Arc::new(lockfile);
+        let (sender, receiver) = channel(1);
         (
             Repo {
                 block_store,
@@ -396,8 +418,9 @@ impl Repo {
         // Dropping the guard (even though not strictly necessary to compile) to avoid potential
         // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
-            let mut guard = self.lockfile.lock().unwrap();
-            guard.try_exclusive()?;
+            log::debug!("Trying lockfile");
+            self.lockfile.try_exclusive()?;
+            log::debug!("lockfile tried");
         }
 
         let f1 = self.block_store.init();

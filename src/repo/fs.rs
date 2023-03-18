@@ -110,7 +110,7 @@ impl FsLock {
 }
 
 impl Lock for FsLock {
-    fn try_exclusive(&mut self) -> Result<(), LockError> {
+    fn try_exclusive(&self) -> Result<(), LockError> {
         use fs2::FileExt;
         use std::fs::OpenOptions;
 
@@ -141,11 +141,11 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let lockfile_path = temp_dir.join("repo_lock");
 
-        let mut lock = FsLock::new(lockfile_path.clone());
+        let lock = FsLock::new(lockfile_path.clone());
         let result = lock.try_exclusive();
         assert!(result.is_ok());
 
-        let mut failing_lock = FsLock::new(lockfile_path.clone());
+        let failing_lock = FsLock::new(lockfile_path.clone());
         let result = failing_lock.try_exclusive();
         assert!(result.is_err());
 
