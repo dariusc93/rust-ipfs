@@ -671,6 +671,11 @@ impl Ipfs {
         IpldDag::new(self.clone())
     }
 
+    /// Return an [`Repo`] to access the internal repo of the node
+    pub fn repo(&self) -> &Repo {
+        &self.repo
+    }
+
     fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
