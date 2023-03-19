@@ -11,11 +11,11 @@ use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
 use ipfs_bitswap::{Bitswap, BitswapEvent};
 use libipld::Cid;
 use libp2p::autonat;
-use libp2p::identity::PeerId;
-use libp2p::core::{Multiaddr};
+use libp2p::core::Multiaddr;
 use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::Event as GossipsubEvent;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
+use libp2p::identity::PeerId;
 use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
