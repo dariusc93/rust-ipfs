@@ -35,7 +35,12 @@ pub mod mem;
 pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
     match storage_type {
         StoragePath::Memory => Repo::new_memory(),
-        StoragePath::Disk(path) => Repo::new(path),
+        StoragePath::Disk(path) => Repo::new_fs(path),
+        StoragePath::Custom {
+            blockstore,
+            datastore,
+            lock,
+        } => Repo::new(blockstore, datastore, lock),
     }
 }
 
@@ -341,7 +346,25 @@ impl TryFrom<RequestKind> for RepoEvent {
 }
 
 impl Repo {
-    pub fn new(path: PathBuf) -> (Self, Receiver<RepoEvent>) {
+    pub fn new(
+        block_store: Arc<dyn BlockStore>,
+        data_store: Arc<dyn DataStore>,
+        lockfile: Arc<dyn Lock>,
+    ) -> (Self, Receiver<RepoEvent>) {
+        let (sender, receiver) = channel(1);
+        (
+            Repo {
+                block_store,
+                data_store,
+                events: sender,
+                subscriptions: Default::default(),
+                lockfile,
+            },
+            receiver,
+        )
+    }
+
+    pub fn new_fs(path: PathBuf) -> (Self, Receiver<RepoEvent>) {
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
         let mut lockfile_path = path;
@@ -355,57 +378,14 @@ impl Repo {
         #[cfg(feature = "sled_data_store")]
         let data_store = Arc::new(kv::KvDataStore::new(datastore_path));
         let lockfile = Arc::new(fs::FsLock::new(lockfile_path));
-        let (sender, receiver) = channel(1);
-
-        (
-            Repo {
-                block_store,
-                data_store,
-                events: sender,
-                subscriptions: Default::default(),
-                lockfile,
-            },
-            receiver,
-        )
+        Self::new(block_store, data_store, lockfile)
     }
 
     pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
         let block_store = Arc::new(MemBlockStore::new(Default::default()));
         let data_store = Arc::new(mem::MemDataStore::new(Default::default()));
         let lockfile = Arc::new(mem::MemLock::new(Default::default()));
-        let (sender, receiver) = channel(1);
-
-        (
-            Repo {
-                block_store,
-                data_store,
-                events: sender,
-                subscriptions: Default::default(),
-                lockfile,
-            },
-            receiver,
-        )
-    }
-
-    pub fn new_direct(
-        block_store: impl BlockStore,
-        data_store: impl DataStore,
-        lockfile: impl Lock,
-    ) -> (Self, Receiver<RepoEvent>) {
-        let block_store = Arc::new(block_store);
-        let data_store = Arc::new(data_store);
-        let lockfile = Arc::new(lockfile);
-        let (sender, receiver) = channel(1);
-        (
-            Repo {
-                block_store,
-                data_store,
-                events: sender,
-                subscriptions: Default::default(),
-                lockfile,
-            },
-            receiver,
-        )
+        Self::new(block_store, data_store, lockfile)
     }
 
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
