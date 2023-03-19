@@ -1,8 +1,9 @@
 # 0.3.8 [unreleased]
 - feat(repo): Allow custom repo store [PR 46]
+- chore: Make kademlia optional [PR #45]
 
 [PR 46]: https://github.com/dariusc93/rust-ipfs/pull/46
-
+[PR 45]: https://github.com/dariusc93/rust-ipfs/pull/45
 # 0.3.7
 - chore: Cleanup deprecation [PR 44]
 
