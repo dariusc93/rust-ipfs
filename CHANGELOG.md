@@ -1,3 +1,8 @@
+# 0.3.8 [unreleased]
+- feat(repo): Allow custom repo store [PR 46]
+
+[PR 46]: https://github.com/dariusc93/rust-ipfs/pull/46
+
 # 0.3.7
 - chore: Cleanup deprecation [PR 44]
 
