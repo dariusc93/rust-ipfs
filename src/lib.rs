@@ -53,6 +53,7 @@ use p2p::{
     IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream, RecordStream,
     RelayConfig,
 };
+use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -104,11 +105,36 @@ pub use libp2p::{
 
 use libp2p::{kad::KademliaConfig, ping::Config as PingConfig, swarm::dial_opts::DialOpts};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub enum StoragePath {
     Disk(PathBuf),
     Memory,
+    Custom {
+        blockstore: Arc<dyn BlockStore>,
+        datastore: Arc<dyn DataStore>,
+        lock: Arc<dyn Lock>,
+    },
 }
+
+impl PartialEq for StoragePath {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (StoragePath::Disk(left_path), StoragePath::Disk(right_path)) => {
+                left_path.eq(right_path)
+            }
+            (StoragePath::Memory, StoragePath::Memory) => true,
+            (StoragePath::Custom { .. }, StoragePath::Custom { .. }) => {
+                //Do we really care if they equal?
+                //TODO: Possibly implement PartialEq/Eq for the traits so we could make sure
+                //      that they do or dont eq each other. For now this will always be true
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for StoragePath {}
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
 // TODO: Refactor
@@ -680,6 +706,11 @@ impl Ipfs {
     /// Return an [`IpldDag`] for DAG operations
     pub fn dag(&self) -> IpldDag {
         IpldDag::new(self.clone())
+    }
+
+    /// Return an [`Repo`] to access the internal repo of the node
+    pub fn repo(&self) -> &Repo {
+        &self.repo
     }
 
     fn ipns(&self) -> Ipns {

@@ -17,8 +17,9 @@ use libp2p::identity::PeerId;
 use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{error, fmt, io};
+use tracing::log;
 
 use self::mem::MemBlockStore;
 
@@ -34,7 +35,12 @@ pub mod mem;
 pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
     match storage_type {
         StoragePath::Memory => Repo::new_memory(),
-        StoragePath::Disk(path) => Repo::new(path)
+        StoragePath::Disk(path) => Repo::new_fs(path),
+        StoragePath::Custom {
+            blockstore,
+            datastore,
+            lock,
+        } => Repo::new(blockstore, datastore, lock),
     }
 }
 
@@ -161,9 +167,9 @@ impl error::Error for LockError {
 ///
 /// This ensures no two IPFS nodes can be started with the same peer ID, as exclusive access to the
 /// repository is guarenteed. This is most useful when using an fs backed repo.
-pub trait Lock: Debug + Send + Sync {
+pub trait Lock: Debug + Send + Sync + 'static {
     // fn new(path: PathBuf) -> Self;
-    fn try_exclusive(&mut self) -> Result<(), LockError>;
+    fn try_exclusive(&self) -> Result<(), LockError>;
 }
 
 type References<'a> = futures::stream::BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
@@ -308,7 +314,7 @@ pub struct Repo {
     data_store: Arc<dyn DataStore>,
     events: Sender<RepoEvent>,
     pub(crate) subscriptions: Arc<SubscriptionRegistry<Block, String>>,
-    lockfile: Arc<Mutex<dyn Lock>>,
+    lockfile: Arc<dyn Lock>,
 }
 
 /// Events used to communicate to the swarm on repo changes.
@@ -340,7 +346,25 @@ impl TryFrom<RequestKind> for RepoEvent {
 }
 
 impl Repo {
-    pub fn new(path: PathBuf) -> (Self, Receiver<RepoEvent>) {
+    pub fn new(
+        block_store: Arc<dyn BlockStore>,
+        data_store: Arc<dyn DataStore>,
+        lockfile: Arc<dyn Lock>,
+    ) -> (Self, Receiver<RepoEvent>) {
+        let (sender, receiver) = channel(1);
+        (
+            Repo {
+                block_store,
+                data_store,
+                events: sender,
+                subscriptions: Default::default(),
+                lockfile,
+            },
+            receiver,
+        )
+    }
+
+    pub fn new_fs(path: PathBuf) -> (Self, Receiver<RepoEvent>) {
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
         let mut lockfile_path = path;
@@ -353,37 +377,15 @@ impl Repo {
         let data_store = Arc::new(fs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
         let data_store = Arc::new(kv::KvDataStore::new(datastore_path));
-        let lockfile = Arc::new(Mutex::new(fs::FsLock::new(lockfile_path)));
-        let (sender, receiver) = channel(1);
-
-        (
-            Repo {
-                block_store,
-                data_store,
-                events: sender,
-                subscriptions: Default::default(),
-                lockfile,
-            },
-            receiver,
-        )
+        let lockfile = Arc::new(fs::FsLock::new(lockfile_path));
+        Self::new(block_store, data_store, lockfile)
     }
 
     pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
         let block_store = Arc::new(MemBlockStore::new(Default::default()));
         let data_store = Arc::new(mem::MemDataStore::new(Default::default()));
-        let lockfile = Arc::new(Mutex::new(mem::MemLock::new(Default::default())));
-        let (sender, receiver) = channel(1);
-
-        (
-            Repo {
-                block_store,
-                data_store,
-                events: sender,
-                subscriptions: Default::default(),
-                lockfile,
-            },
-            receiver,
-        )
+        let lockfile = Arc::new(mem::MemLock::new(Default::default()));
+        Self::new(block_store, data_store, lockfile)
     }
 
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
@@ -396,8 +398,9 @@ impl Repo {
         // Dropping the guard (even though not strictly necessary to compile) to avoid potential
         // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
-            let mut guard = self.lockfile.lock().unwrap();
-            guard.try_exclusive()?;
+            log::debug!("Trying lockfile");
+            self.lockfile.try_exclusive()?;
+            log::debug!("lockfile tried");
         }
 
         let f1 = self.block_store.init();
