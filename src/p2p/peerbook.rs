@@ -13,9 +13,9 @@ use libp2p::swarm::{
     NetworkBehaviourAction, THandler, THandlerInEvent,
 };
 use libp2p::PeerId;
-use tracing::log;
 use std::collections::hash_map::Entry;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tracing::log;
 use wasm_timer::Interval;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -128,7 +128,7 @@ pub struct Behaviour {
 
     pending_connections: HashMap<ConnectionId, oneshot::Sender<anyhow::Result<()>>>,
 
-    pending_identify_timer: HashMap<PeerId, Interval>,
+    pending_identify_timer: HashMap<PeerId, (Interval, Instant)>,
 
     pending_identify: HashMap<PeerId, oneshot::Sender<anyhow::Result<()>>>,
 
@@ -206,7 +206,10 @@ impl Behaviour {
         self.peer_info.insert(info.peer_id, info);
         if let Some(ch) = self.pending_identify.remove(&peer_id) {
             let _ = ch.send(Ok(()));
-            let _ = self.pending_identify_timer.remove(&peer_id);
+            if let Some((_, instant)) = self.pending_identify_timer.remove(&peer_id) {
+                let elapse = instant.elapsed();
+                log::debug!("Took {:?} to obtain identify for {peer_id}", elapse);
+            }
         }
     }
 
@@ -394,9 +397,12 @@ impl NetworkBehaviour for Behaviour {
                         self.pending_identify.insert(peer_id, ch);
                         self.pending_identify_timer.insert(
                             peer_id,
-                            Interval::new_at(
-                                std::time::Instant::now() + Duration::from_secs(5),
-                                Duration::from_secs(5),
+                            (
+                                Interval::new_at(
+                                    std::time::Instant::now() + Duration::from_secs(5),
+                                    Duration::from_secs(5),
+                                ),
+                                Instant::now(),
                             ),
                         );
                     } else {
@@ -462,14 +468,14 @@ impl NetworkBehaviour for Behaviour {
                 }
             }
         }
-        
+
         let mut removal = vec![];
-        for (peer_id, timer) in self.pending_identify_timer.iter_mut() {
+        for (peer_id, (timer, _)) in self.pending_identify_timer.iter_mut() {
             match timer.poll_next_unpin(cx) {
                 Poll::Ready(Some(_)) => {
                     removal.push(*peer_id);
                     continue;
-                },
+                }
                 Poll::Ready(None) => {
                     log::error!("timer for {} was not available", peer_id);
                     removal.push(*peer_id);
@@ -483,7 +489,10 @@ impl NetworkBehaviour for Behaviour {
             if let Some(ch) = self.pending_identify.remove(peer_id) {
                 let _ = ch.send(Ok(()));
             }
-            self.pending_identify_timer.remove(peer_id);
+            if let Some((_, instant)) = self.pending_identify_timer.remove(peer_id) {
+                let elapse = instant.elapsed();
+                log::debug!("Took {:?} to complete", elapse);
+            }
         }
 
         Poll::Pending
