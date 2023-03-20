@@ -139,7 +139,7 @@ pub struct Behaviour {
 
     protocols: Vec<Vec<u8>>,
 
-    // For connection limits (took from )
+    // For connection limits (took from libp2p pr)
     pending_inbound_connections: HashSet<ConnectionId>,
     pending_outbound_connections: HashSet<ConnectionId>,
     established_inbound_connections: HashSet<ConnectionId>,
@@ -243,6 +243,7 @@ impl Behaviour {
 
     pub fn remove_peer_info(&mut self, peer_id: PeerId) {
         self.peer_info.remove(&peer_id);
+        self.peer_info.shrink_to_fit();
     }
 
     fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
@@ -454,21 +455,6 @@ impl NetworkBehaviour for Behaviour {
             return Poll::Ready(event);
         }
 
-        // Used to cleanup any info that may be left behind after a peer is no longer connected while giving time to all
-        // Note: If a peer is whitelisted, this will retain the info as a cache, although this may change in the future
-        //
-        while let Poll::Ready(Some(_)) = self.cleanup_interval.poll_next_unpin(cx) {
-            let list = self.peer_info.keys().copied().collect::<Vec<_>>();
-            for peer_id in list {
-                if !self.established_per_peer.contains_key(&peer_id)
-                    || !self.whitelist.contains(&peer_id)
-                {
-                    self.peer_info.remove(&peer_id);
-                    self.peer_rtt.remove(&peer_id);
-                }
-            }
-        }
-
         let mut removal = vec![];
         for (peer_id, (timer, _)) in self.pending_identify_timer.iter_mut() {
             match timer.poll_next_unpin(cx) {
@@ -493,6 +479,22 @@ impl NetworkBehaviour for Behaviour {
                 let elapse = instant.elapsed();
                 log::debug!("Took {:?} to complete", elapse);
             }
+        }
+
+        // Used to cleanup any info that may be left behind after a peer is no longer connected while giving time to all
+        // Note: If a peer is whitelisted, this will retain the info as a cache, although this may change in the future
+        //
+        while let Poll::Ready(Some(_)) = self.cleanup_interval.poll_next_unpin(cx) {
+            let list = self.peer_info.keys().copied().collect::<Vec<_>>();
+            for peer_id in list {
+                if !self.established_per_peer.contains_key(&peer_id) {
+                    if !self.whitelist.contains(&peer_id) {
+                        self.peer_info.remove(&peer_id);
+                        self.peer_rtt.remove(&peer_id);
+                    }
+                }
+            }
+            println!("PeerInfo Len: {}", self.peer_info.len());
         }
 
         Poll::Pending
