@@ -35,7 +35,7 @@ use crate::{
 pub use crate::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
+    p2p::{KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
@@ -635,10 +635,6 @@ impl IpfsTask {
                 let listeners = self.swarm.listeners().cloned().collect::<Vec<Multiaddr>>();
                 ret.send(Ok(listeners)).ok();
             }
-            IpfsEvent::Connections(ret) => {
-                let connections = self.swarm.behaviour_mut().connections();
-                ret.send(Ok(connections.collect())).ok();
-            }
             IpfsEvent::IsConnected(peer_id, ret) => {
                 let connected = self.swarm.is_connected(&peer_id);
                 ret.send(Ok(connected)).ok();
@@ -803,15 +799,23 @@ impl IpfsTask {
                 let _ = ret.send(rx);
             }
             IpfsEvent::FindPeer(peer_id, local_only, ret) => {
-                let swarm_addrs = self.swarm.behaviour_mut().swarm.connections_to(&peer_id);
-                let locally_known_addrs = if !swarm_addrs.is_empty() {
-                    swarm_addrs
+                let listener_addrs = self
+                    .swarm
+                    .behaviour_mut()
+                    .peerbook
+                    .get_peer_info(peer_id)
+                    .cloned()
+                    .map(|info| info.listen_addrs)
+                    .unwrap_or_default();
+                let locally_known_addrs = if !listener_addrs.is_empty() {
+                    listener_addrs
                 } else {
                     self.swarm
                         .behaviour_mut()
                         .kademlia()
                         .addresses_of_peer(&peer_id)
                 };
+
                 let addrs = if !locally_known_addrs.is_empty() || local_only {
                     Either::Left(locally_known_addrs)
                 } else {

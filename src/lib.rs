@@ -81,7 +81,7 @@ pub use self::p2p::gossipsub::SubscriptionStream;
 pub use self::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
+    p2p::{KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
@@ -340,8 +340,6 @@ enum IpfsEvent {
     Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     /// Local addresses
     Listeners(Channel<Vec<Multiaddr>>),
-    /// Connections
-    Connections(Channel<Vec<Connection>>),
     /// Connected peers
     Connected(Channel<Vec<PeerId>>),
     /// Is Connected
@@ -1067,20 +1065,6 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
             self.to_task.clone().send(IpfsEvent::Listeners(tx)).await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Returns the connected peers
-    pub async fn peers(&self) -> Result<Vec<Connection>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Connections(tx))
-                .await?;
             rx.await?
         }
         .instrument(self.span.clone())

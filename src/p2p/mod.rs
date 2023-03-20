@@ -30,11 +30,10 @@ pub use self::stream::ProviderStream;
 pub use self::stream::RecordStream;
 pub use self::transport::TransportConfig;
 pub(crate) mod gossipsub;
-mod swarm;
 mod transport;
 
 pub use addr::{MultiaddrWithPeerId, MultiaddrWithoutPeerId};
-pub use {behaviour::KadResult, swarm::Connection};
+pub use behaviour::KadResult;
 
 /// Type alias for [`libp2p::Swarm`] running the [`behaviour::Behaviour`] with the given [`IpfsTypes`].
 pub type TSwarm = Swarm<behaviour::Behaviour>;
