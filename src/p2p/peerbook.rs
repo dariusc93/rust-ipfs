@@ -13,6 +13,7 @@ use libp2p::swarm::{
     NetworkBehaviourAction, THandler, THandlerInEvent,
 };
 use libp2p::PeerId;
+use tracing::log;
 use std::collections::hash_map::Entry;
 use std::time::Duration;
 use wasm_timer::Interval;
@@ -127,6 +128,10 @@ pub struct Behaviour {
 
     pending_connections: HashMap<ConnectionId, oneshot::Sender<anyhow::Result<()>>>,
 
+    pending_identify_timer: HashMap<PeerId, Interval>,
+
+    pending_identify: HashMap<PeerId, oneshot::Sender<anyhow::Result<()>>>,
+
     peer_info: HashMap<PeerId, PeerInfo>,
     peer_rtt: HashMap<PeerId, [Duration; 3]>,
 
@@ -152,6 +157,8 @@ impl Default for Behaviour {
                 Duration::from_secs(60),
             ),
             pending_connections: Default::default(),
+            pending_identify_timer: Default::default(),
+            pending_identify: Default::default(),
             peer_info: Default::default(),
             peer_rtt: Default::default(),
             whitelist: Default::default(),
@@ -195,7 +202,12 @@ impl Behaviour {
 
     pub fn inject_peer_info<I: Into<PeerInfo>>(&mut self, info: I) {
         let info: PeerInfo = info.into();
+        let peer_id = info.peer_id;
         self.peer_info.insert(info.peer_id, info);
+        if let Some(ch) = self.pending_identify.remove(&peer_id) {
+            let _ = ch.send(Ok(()));
+            let _ = self.pending_identify_timer.remove(&peer_id);
+        }
     }
 
     pub fn peers(&self) -> impl Iterator<Item = &PeerId> {
@@ -372,9 +384,24 @@ impl NetworkBehaviour for Behaviour {
     #[allow(clippy::single_match)]
     fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
         match event {
-            FromSwarm::ConnectionEstablished(ConnectionEstablished { connection_id, .. }) => {
+            FromSwarm::ConnectionEstablished(ConnectionEstablished {
+                peer_id,
+                connection_id,
+                ..
+            }) => {
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
-                    let _ = ch.send(Ok(()));
+                    if self.get_peer_info(peer_id).is_none() {
+                        self.pending_identify.insert(peer_id, ch);
+                        self.pending_identify_timer.insert(
+                            peer_id,
+                            Interval::new_at(
+                                std::time::Instant::now() + Duration::from_secs(5),
+                                Duration::from_secs(5),
+                            ),
+                        );
+                    } else {
+                        let _ = ch.send(Ok(()));
+                    }
                 }
             }
             FromSwarm::DialFailure(DialFailure {
@@ -434,6 +461,29 @@ impl NetworkBehaviour for Behaviour {
                     self.peer_rtt.remove(&peer_id);
                 }
             }
+        }
+        
+        let mut removal = vec![];
+        for (peer_id, timer) in self.pending_identify_timer.iter_mut() {
+            match timer.poll_next_unpin(cx) {
+                Poll::Ready(Some(_)) => {
+                    removal.push(*peer_id);
+                    continue;
+                },
+                Poll::Ready(None) => {
+                    log::error!("timer for {} was not available", peer_id);
+                    removal.push(*peer_id);
+                    continue;
+                }
+                Poll::Pending => continue,
+            }
+        }
+
+        for peer_id in removal.iter() {
+            if let Some(ch) = self.pending_identify.remove(peer_id) {
+                let _ = ch.send(Ok(()));
+            }
+            self.pending_identify_timer.remove(peer_id);
         }
 
         Poll::Pending
