@@ -487,7 +487,9 @@ impl NetworkBehaviour for Behaviour {
         while let Poll::Ready(Some(_)) = self.cleanup_interval.poll_next_unpin(cx) {
             let list = self.peer_info.keys().copied().collect::<Vec<_>>();
             for peer_id in list {
-                if !self.established_per_peer.contains_key(&peer_id) && !self.whitelist.contains(&peer_id) {
+                if !self.established_per_peer.contains_key(&peer_id)
+                    && !self.whitelist.contains(&peer_id)
+                {
                     self.peer_info.remove(&peer_id);
                     self.peer_rtt.remove(&peer_id);
                 }
@@ -501,30 +503,32 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
-
     use super::Behaviour as PeerBook;
     use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
     use futures::StreamExt;
     use libp2p::{
+        identify::{self, Config},
         identity::Keypair,
-        swarm::{keep_alive, NetworkBehaviour, SwarmBuilder, SwarmEvent},
+        swarm::{
+            behaviour::toggle::Toggle, keep_alive, NetworkBehaviour, SwarmBuilder, SwarmEvent,
+        },
         Multiaddr, PeerId, Swarm,
     };
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
         peerbook: PeerBook,
+        identify: Toggle<identify::Behaviour>,
         keep_alive: keep_alive::Behaviour,
     }
 
     //TODO: Expand test out
     #[tokio::test]
     async fn connection_limits() {
-        let (_, addr1, mut swarm1) = build_swarm().await;
-        let (peer2, _, mut swarm2) = build_swarm().await;
-        let (peer3, _, mut swarm3) = build_swarm().await;
-        let (peer4, _, mut swarm4) = build_swarm().await;
+        let (_, addr1, mut swarm1) = build_swarm(false).await;
+        let (peer2, _, mut swarm2) = build_swarm(false).await;
+        let (peer3, _, mut swarm3) = build_swarm(false).await;
+        let (peer4, _, mut swarm4) = build_swarm(false).await;
 
         swarm1
             .behaviour_mut()
@@ -534,37 +538,51 @@ mod test {
                 ..Default::default()
             });
 
-        swarm2.dial(addr1.clone()).unwrap();
+        let mut oneshot = swarm2.behaviour_mut().peerbook.connect(addr1.clone());
 
         loop {
-            if let Some(SwarmEvent::ConnectionEstablished { .. }) = swarm1.next().await {
-                break;
+            tokio::select! {
+                biased;
+                _ = swarm1.next() => {},
+                _ = swarm2.next() => {},
+                conn_res = (&mut oneshot) => {
+                    conn_res.unwrap().unwrap();
+                    break;
+                }
             }
         }
         swarm1.behaviour_mut().peerbook.add(peer3);
-        swarm3.dial(addr1.clone()).unwrap();
+        let mut oneshot = swarm3.behaviour_mut().peerbook.connect(addr1.clone());
 
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                if let Some(SwarmEvent::ConnectionEstablished { .. }) = swarm1.next().await {
+        loop {
+            tokio::select! {
+                biased;
+                _ = swarm1.next() => {},
+                _ = swarm3.next() => {},
+                conn_res = (&mut oneshot) => {
+                    conn_res.unwrap().unwrap();
                     break;
                 }
             }
-        })
-        .await
-        .unwrap();
+        }
 
-        swarm4.dial(addr1.clone()).unwrap();
+        let mut oneshot = swarm4.behaviour_mut().peerbook.connect(addr1.clone());
 
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                if let Some(SwarmEvent::IncomingConnectionError { .. }) = swarm1.next().await {
+        loop {
+            tokio::select! {
+                biased;
+                e = swarm1.select_next_some() => {
+                    if matches!(e, SwarmEvent::IncomingConnectionError { .. }) {
+                        break;
+                    }
+                },
+                _ = swarm4.next() => {},
+                conn_res = (&mut oneshot) => {
+                    assert!(conn_res.unwrap().is_err());
                     break;
                 }
             }
-        })
-        .await
-        .unwrap();
+        }
 
         let list = swarm1.connected_peers().copied().collect::<Vec<_>>();
 
@@ -573,13 +591,78 @@ mod test {
         assert!(!list.contains(&peer4));
     }
 
-    async fn build_swarm() -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
+    #[tokio::test]
+    async fn connect_without_identify() {
+        let (_, addr1, mut swarm1) = build_swarm(false).await;
+        let (peer2, _, mut swarm2) = build_swarm(false).await;
+
+        let mut oneshot = swarm2.behaviour_mut().peerbook.connect(addr1.clone());
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = swarm1.next() => {},
+                _ = swarm2.next() => {},
+                conn_res = (&mut oneshot) => {
+                    conn_res.unwrap().unwrap();
+                    break;
+                }
+            }
+        }
+
+        let list = swarm1.connected_peers().copied().collect::<Vec<_>>();
+
+        assert!(list.contains(&peer2));
+    }
+
+    #[tokio::test]
+    async fn connect_with_identify() {
+        let (_, addr1, mut swarm1) = build_swarm(true).await;
+        let (peer2, _, mut swarm2) = build_swarm(true).await;
+
+        let mut oneshot = swarm2.behaviour_mut().peerbook.connect(addr1.clone());
+        let mut peer_1_identify = false;
+        let mut peer_2_identify = false;
+        loop {
+            tokio::select! {
+                biased;
+                Some(e) = swarm1.next() => {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received { .. })) = e {
+                        peer_2_identify = true;
+                    }
+                },
+                Some(e) = swarm2.next() => {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received { .. })) = e {
+                        peer_1_identify = true;
+                    }
+                },
+                conn_res = (&mut oneshot) => {
+                    conn_res.unwrap().unwrap();
+                }
+            }
+
+            if peer_1_identify && peer_2_identify {
+                break;
+            }
+        }
+
+        let list = swarm1.connected_peers().copied().collect::<Vec<_>>();
+
+        assert!(list.contains(&peer2));
+    }
+
+    async fn build_swarm(identify: bool) -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
         let key = Keypair::generate_ed25519();
-        let peer_id = key.public().to_peer_id();
+        let pubkey = key.public();
+        let peer_id = pubkey.to_peer_id();
         let transport = build_transport(key, None, Default::default()).unwrap();
 
         let behaviour = Behaviour {
             peerbook: PeerBook::default(),
+            identify: Toggle::from(identify.then_some(identify::Behaviour::new(Config::new(
+                "/peerbook/0.1".into(),
+                pubkey,
+            )))),
             keep_alive: keep_alive::Behaviour,
         };
 
