@@ -172,6 +172,9 @@ pub struct IpfsOptions {
     /// Enables relay client.
     pub relay: bool,
 
+    /// Disables kademlia protocol
+    pub disable_kad: bool,
+
     /// Enables relay server
     pub relay_server: bool,
 
@@ -224,6 +227,7 @@ impl Default for IpfsOptions {
             dcutr: Default::default(),
             bootstrap: Default::default(),
             relay: Default::default(),
+            disable_kad: Default::default(),
             keep_alive: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
@@ -513,6 +517,12 @@ impl UninitializedIpfs {
     /// Enable keep alive
     pub fn enable_keepalive(mut self) -> Self {
         self.options.keep_alive = true;
+        self
+    }
+
+    /// Disables kademlia
+    pub fn disable_kad(mut self) -> Self {
+        self.options.disable_kad = true;
         self
     }
 

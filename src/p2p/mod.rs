@@ -114,6 +114,8 @@ pub struct SwarmOptions {
     pub mdns: bool,
     /// enables ipv6 for mdns
     pub mdns_ipv6: bool,
+    /// disable kad
+    pub disable_kad: bool,
     /// Relay Server
     pub relay_server: bool,
     /// Relay Server Configuration
@@ -153,6 +155,7 @@ impl From<&IpfsOptions> for SwarmOptions {
         let kad_config = options.kad_configuration.clone();
         let ping_config = options.ping_configuration.clone();
         let kad_store_config = options.kad_store_config.clone();
+        let disable_kad = options.disable_kad;
 
         let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
@@ -164,6 +167,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             peer_id,
             bootstrap,
             mdns,
+            disable_kad,
             mdns_ipv6,
             relay_server,
             relay_server_config,
