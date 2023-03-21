@@ -3,19 +3,14 @@ use libipld::{
     multihash::{Code, MultihashDigest},
     Cid, IpldCodec,
 };
-use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
-use rust_ipfs::{p2p::MultiaddrWithPeerId, Block, Node};
+use libp2p::kad::Quorum;
+use rust_ipfs::{Block, Node};
 use tokio::time::timeout;
 
-use std::{convert::TryInto, time::Duration};
+use std::time::Duration;
 
 mod common;
 use common::{interop::ForeignNode, spawn_nodes, Topology};
-
-fn strip_peer_id(addr: Multiaddr) -> Multiaddr {
-    let MultiaddrWithPeerId { multiaddr, .. } = addr.try_into().unwrap();
-    multiaddr.into()
-}
 
 /// Check if `Ipfs::find_peer` works without DHT involvement.
 #[tokio::test]
@@ -28,7 +23,6 @@ async fn find_peer_local() {
     let mut found_addrs = nodes[0].find_peer(nodes[1].id).await.unwrap();
 
     for addr in &mut found_addrs {
-        addr.push(Protocol::P2p(nodes[1].id.into()));
         assert!(nodes[1].addrs.contains(addr));
     }
 }
@@ -117,7 +111,7 @@ async fn dht_find_peer() {
     // be connected to it after the bootstrap
     let found_addrs = nodes[0].find_peer(nodes[last_index].id).await.unwrap();
 
-    let to_be_found = strip_peer_id(nodes[last_index].addrs[0].clone());
+    let to_be_found = nodes[last_index].addrs[0].clone();
     assert_eq!(found_addrs, vec![to_be_found]);
 }
 

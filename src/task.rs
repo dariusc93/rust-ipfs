@@ -803,9 +803,7 @@ impl IpfsTask {
                     .swarm
                     .behaviour_mut()
                     .peerbook
-                    .get_peer_info(peer_id)
-                    .cloned()
-                    .map(|info| info.listen_addrs)
+                    .peer_connections(peer_id)
                     .unwrap_or_default();
                 let locally_known_addrs = if !listener_addrs.is_empty() {
                     listener_addrs
