@@ -10,7 +10,10 @@ use futures::{
     StreamExt,
 };
 
-use crate::{p2p::PeerInfo, Channel};
+use crate::{
+    p2p::{addr::extract_peer_id_from_multiaddr, PeerInfo},
+    Channel,
+};
 use crate::{
     p2p::{ProviderStream, RecordStream},
     TSwarmEvent,
@@ -804,7 +807,12 @@ impl IpfsTask {
                     .behaviour_mut()
                     .peerbook
                     .peer_connections(peer_id)
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|addr| extract_peer_id_from_multiaddr(addr.clone()))
+                    .map(|(_, addr)| addr)
+                    .collect::<Vec<_>>();
+
                 let locally_known_addrs = if !listener_addrs.is_empty() {
                     listener_addrs
                 } else {
