@@ -243,7 +243,6 @@ impl Behaviour {
 
     pub fn remove_peer_info(&mut self, peer_id: PeerId) {
         self.peer_info.remove(&peer_id);
-        self.peer_info.shrink_to_fit();
     }
 
     fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
@@ -494,7 +493,6 @@ impl NetworkBehaviour for Behaviour {
                     self.peer_rtt.remove(&peer_id);
                 }
             }
-            println!("PeerInfo Len: {}", self.peer_info.len());
         }
 
         Poll::Pending
