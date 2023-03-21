@@ -520,7 +520,6 @@ impl NetworkBehaviour for Behaviour {
                     self.peer_rtt.remove(&peer_id);
                 }
             }
-            println!("PeerInfo Len: {}", self.peer_info.len());
         }
 
         Poll::Pending
