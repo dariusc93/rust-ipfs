@@ -1,7 +1,9 @@
 # 0.3.8 [unreleased]
+- chore: Wait on identify before returning connection [PR 47]
 - feat(repo): Allow custom repo store [PR 46]
 - chore: Make kademlia optional [PR #45]
 
+[PR 47]: https://github.com/dariusc93/rust-ipfs/pull/47
 [PR 46]: https://github.com/dariusc93/rust-ipfs/pull/46
 [PR 45]: https://github.com/dariusc93/rust-ipfs/pull/45
 # 0.3.7
