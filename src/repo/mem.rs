@@ -674,7 +674,7 @@ impl MemLock {
 }
 
 impl Lock for MemLock {
-    fn try_exclusive(&mut self) -> Result<(), LockError> {
+    fn try_exclusive(&self) -> Result<(), LockError> {
         Ok(())
     }
 }

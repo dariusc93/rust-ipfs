@@ -1,4 +1,15 @@
-# 0.3.7 [unrelease]
+# 0.3.8 [unreleased]
+- chore: Wait on identify before returning connection [PR 47]
+- feat(repo): Allow custom repo store [PR 46]
+- chore: Make kademlia optional [PR 45]
+- chore: Make mplex optional [PR 51]
+
+[PR 47]: https://github.com/dariusc93/rust-ipfs/pull/47
+[PR 46]: https://github.com/dariusc93/rust-ipfs/pull/46
+[PR 45]: https://github.com/dariusc93/rust-ipfs/pull/45
+[PR 51]: https://github.com/dariusc93/rust-ipfs/pull/51
+
+# 0.3.7
 - chore: Cleanup deprecation [PR 44]
 
 [PR 44]: https://github.com/dariusc93/rust-ipfs/pull/44

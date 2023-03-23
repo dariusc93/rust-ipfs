@@ -14,11 +14,11 @@ use crate::repo::Repo;
 use iroh_bitswap::{Bitswap, BitswapEvent};
 use libipld::Cid;
 use libp2p::autonat;
-use libp2p::identity::PeerId;
-use libp2p::core::{Multiaddr};
+use libp2p::core::Multiaddr;
 use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::Event as GossipsubEvent;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
+use libp2p::identity::PeerId;
 use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
@@ -42,8 +42,8 @@ use std::time::Duration;
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct Behaviour {
     pub mdns: Toggle<Mdns>,
-    pub kademlia: Kademlia<MemoryStore>,
     pub bitswap: Bitswap<Repo>,
+    pub kademlia: Toggle<Kademlia<MemoryStore>>,
     pub ping: Ping,
     pub identify: Identify,
     pub keepalive: Toggle<KeepAliveBehaviour>,
@@ -380,11 +380,15 @@ impl Behaviour {
             Either::Right(kad) => kad,
         };
 
-        let mut kademlia = Kademlia::with_config(peer_id, store, kad_config);
+        let mut kademlia = Toggle::from(
+            (!options.disable_kad).then_some(Kademlia::with_config(peer_id, store, kad_config)),
+        );
 
-        for addr in &options.bootstrap {
-            let addr = MultiaddrWithPeerId::try_from(addr.clone())?;
-            kademlia.add_address(&addr.peer_id, addr.multiaddr.as_ref().clone());
+        if let Some(kad) = kademlia.as_mut() {
+            for addr in &options.bootstrap {
+                let addr = MultiaddrWithPeerId::try_from(addr.clone())?;
+                kad.add_address(&addr.peer_id, addr.multiaddr.as_ref().clone());
+            }
         }
 
         let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
@@ -481,8 +485,10 @@ impl Behaviour {
     }
 
     pub fn add_peer(&mut self, peer: PeerId, addr: Option<Multiaddr>) {
-        if let Some(addr) = addr {
-            self.kademlia.add_address(&peer, addr);
+        if let Some(kad) = self.kademlia.as_mut() {
+            if let Some(addr) = addr {
+                kad.add_address(&peer, addr);
+            }
         }
         self.pubsub.add_explicit_peer(&peer);
         self.peerbook.add(peer);
@@ -490,7 +496,9 @@ impl Behaviour {
 
     pub fn remove_peer(&mut self, peer: &PeerId, remove_from_whitelist: bool) {
         self.pubsub.remove_explicit_peer(peer);
-        self.kademlia.remove_peer(peer);
+        if let Some(kad) = self.kademlia.as_mut() {
+            kad.remove_peer(peer);
+        }
         if remove_from_whitelist {
             self.peerbook.remove(*peer);
         }
@@ -514,7 +522,9 @@ impl Behaviour {
     pub fn stop_providing_block(&mut self, cid: &Cid) {
         info!("Finished providing block {}", cid.to_string());
         let key = cid.hash().to_bytes();
-        self.kademlia.stop_providing(&key.into());
+        if let Some(kad) = self.kademlia.as_mut() {
+            kad.stop_providing(&key.into());
+        }
     }
 
     pub fn supported_protocols(&self) -> Vec<String> {
@@ -543,10 +553,6 @@ impl Behaviour {
 
     pub fn bitswap(&mut self) -> &mut Bitswap<Repo> {
         &mut self.bitswap
-    }
-
-    pub fn kademlia(&mut self) -> &mut Kademlia<MemoryStore> {
-        &mut self.kademlia
     }
 }
 
