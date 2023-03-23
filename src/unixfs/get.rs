@@ -5,7 +5,7 @@ use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
 
-use crate::{Ipfs, IpfsPath, dag::DagGetOpt};
+use crate::{Ipfs, IpfsPath};
 
 use super::UnixfsStatus;
 
@@ -18,16 +18,7 @@ pub async fn get<'a, P: AsRef<Path>>(
     let mut file = tokio::fs::File::create(dest).await?;
     let ipfs = ipfs.clone();
 
-    let (resolved, _) = ipfs
-        .dag()
-        .resolve(
-            path.clone(),
-            true,
-            Some(DagGetOpt {
-                providers: providers.to_vec(),
-            }),
-        )
-        .await?;
+    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers).await?;
 
     let block = resolved.into_unixfs_block()?;
 

@@ -1,5 +1,5 @@
 use crate::{
-    dag::{DagGetOpt, ResolveError, UnexpectedResolved},
+    dag::{ResolveError, UnexpectedResolved},
     Block, Error, Ipfs,
 };
 use async_stream::stream;
@@ -35,13 +35,7 @@ pub async fn cat<'a>(
             let borrow = ipfs.clone();
             let dag = borrow.dag();
             let (resolved, _) = dag
-                .resolve(
-                    path,
-                    true,
-                    Some(DagGetOpt {
-                        providers: providers.to_vec(),
-                    }),
-                )
+                .resolve(path, true, providers)
                 .await
                 .map_err(TraversalFailed::Resolving)?;
             resolved
