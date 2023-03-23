@@ -518,12 +518,14 @@ impl Behaviour {
 
     // FIXME: it would be best if get_providers is called only in case the already connected
     // peers don't have it
-    pub fn want_block(&mut self, cid: Cid) {
+    pub fn want_block(&mut self, cid: Cid, providers: &[PeerId]) {
         // TODO: Restructure this to utilize provider propertly
         let key = cid.hash().to_bytes();
-        self.kademlia
-            .as_mut()
-            .map(|kad| kad.get_providers(key.into()));
+        if providers.is_empty() {
+            self.kademlia
+                .as_mut()
+                .map(|kad| kad.get_providers(key.into()));
+        }
         self.bitswap.want_block(cid, 1);
     }
 

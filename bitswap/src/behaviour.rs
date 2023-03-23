@@ -18,8 +18,8 @@ use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::handler::OneShotHandler;
 use libp2p::swarm::{
-    ConnectionClosed, ConnectionDenied, ConnectionId, NetworkBehaviour, NetworkBehaviourAction,
-    NotifyHandler, PollParameters, THandler, FromSwarm,
+    ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour,
+    NetworkBehaviourAction, NotifyHandler, PollParameters, THandler,
 };
 use std::task::{Context, Poll};
 use std::{
@@ -201,6 +201,18 @@ impl Bitswap {
     pub fn want_block(&mut self, cid: Cid, priority: Priority) {
         for (_peer_id, ledger) in self.connected_peers.iter_mut() {
             ledger.want_block(&cid, priority);
+        }
+        self.wanted_blocks.insert(cid, priority);
+    }
+
+    /// Queues the wanted block for specific peers.
+    ///
+    /// A user request
+    pub fn want_block_from_peers(&mut self, cid: Cid, priority: Priority, peers: &[PeerId]) {
+        for peer in peers {
+            if let Some(ledger) = self.connected_peers.get_mut(peer) {
+                ledger.want_block(&cid, priority);
+            }
         }
         self.wanted_blocks.insert(cid, priority);
     }
