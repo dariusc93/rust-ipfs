@@ -1,4 +1,4 @@
-use futures::future::Either;
+use futures::future::Either as FutureEither;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
@@ -17,6 +17,7 @@ use libp2p::{PeerId, Transport};
 use std::io;
 use std::time::Duration;
 use trust_dns_resolver::system_conf;
+use either::Either;
 
 /// Transport type.
 pub(crate) type TTransport = Boxed<(PeerId, StreamMuxerBox)>;
@@ -26,6 +27,7 @@ pub struct TransportConfig {
     pub yamux_max_buffer_size: usize,
     pub yamux_receive_window_size: u32,
     pub yamux_update_mode: u8,
+    pub multiplex_option: MultiPlexOption,
     pub mplex_max_buffer_size: usize,
     pub no_delay: bool,
     pub port_reuse: bool,
@@ -39,12 +41,19 @@ pub struct TransportConfig {
     pub enable_webrtc: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum MultiPlexOption {
+    Yamux,
+    YmuxAndMplex,
+}
+
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
-            yamux_max_buffer_size: 8 * 1024 * 1024,
-            yamux_receive_window_size: 8 * 1024 * 1024,
+            yamux_max_buffer_size: 16 * 1024 * 1024,
+            yamux_receive_window_size: 16 * 1024 * 1024,
             yamux_update_mode: 0,
+            multiplex_option: MultiPlexOption::YmuxAndMplex,
             mplex_max_buffer_size: 1024,
             no_delay: true,
             port_reuse: true,
@@ -113,6 +122,7 @@ pub fn build_transport(
         no_delay,
         port_reuse,
         timeout,
+        multiplex_option,
         yamux_max_buffer_size,
         yamux_receive_window_size,
         yamux_update_mode,
@@ -129,24 +139,30 @@ pub fn build_transport(
         .unwrap();
     let noise_config = NoiseConfig::xx(xx_keypair).into_authenticated();
 
-    let multiplex_upgrade = SelectUpgrade::new(
-        {
-            let mut config = YamuxConfig::default();
-            config.set_max_buffer_size(yamux_max_buffer_size);
-            config.set_receive_window_size(yamux_receive_window_size);
-            config.set_window_update_mode(if yamux_update_mode == 0 {
-                WindowUpdateMode::on_receive()
-            } else {
-                WindowUpdateMode::on_read()
-            });
-            config
-        },
-        {
-            let mut config = MplexConfig::default();
-            config.set_max_buffer_size(mplex_max_buffer_size);
-            config
-        },
-    );
+    let yamux_config = {
+        let mut config = YamuxConfig::default();
+        config.set_max_buffer_size(yamux_max_buffer_size);
+        config.set_receive_window_size(yamux_receive_window_size);
+        config.set_window_update_mode(if yamux_update_mode == 0 {
+            WindowUpdateMode::on_receive()
+        } else {
+            WindowUpdateMode::on_read()
+        });
+        config
+    };
+
+    let mplex_config = {
+        let mut config = MplexConfig::default();
+        config.set_max_buffer_size(mplex_max_buffer_size);
+        config
+    };
+
+    let multiplex_upgrade = match multiplex_option {
+        MultiPlexOption::Yamux => Either::Left(yamux_config),
+        MultiPlexOption::YmuxAndMplex => {
+            Either::Right(SelectUpgrade::new(yamux_config, mplex_config))
+        }
+    };
 
     //TODO: Cleanup
     let tcp_config = GenTcpConfig::default()
@@ -198,8 +214,8 @@ pub fn build_transport(
 
             OrTransport::new(quic_transport, transport)
                 .map(|either_output, _| match either_output {
-                    Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-                    Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                    FutureEither::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                    FutureEither::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
                 })
                 .boxed()
         }
