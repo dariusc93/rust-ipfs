@@ -520,13 +520,16 @@ impl Behaviour {
     // peers don't have it
     pub fn want_block(&mut self, cid: Cid, providers: &[PeerId]) {
         // TODO: Restructure this to utilize provider propertly
-        let key = cid.hash().to_bytes();
+
         if providers.is_empty() {
+            let key = cid.hash().to_bytes();
             self.kademlia
                 .as_mut()
                 .map(|kad| kad.get_providers(key.into()));
+            self.bitswap.want_block(cid, 1);
+        } else {
+            self.bitswap.want_block_from_peers(cid, 1, providers);
         }
-        self.bitswap.want_block(cid, 1);
     }
 
     pub fn stop_providing_block(&mut self, cid: &Cid) {

@@ -1,11 +1,12 @@
 use crate::{
-    dag::{ResolveError, UnexpectedResolved},
+    dag::{DagGetOpt, ResolveError, UnexpectedResolved},
     Block, Error, Ipfs,
 };
 use async_stream::stream;
 use futures::stream::Stream;
-use rust_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
 use libipld::Cid;
+use libp2p::PeerId;
+use rust_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
 use std::borrow::Borrow;
 use std::ops::Range;
 
@@ -19,8 +20,8 @@ pub async fn cat<'a>(
     ipfs: &Ipfs,
     starting_point: impl Into<StartingPoint>,
     range: Option<Range<u64>>,
-) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed>
-{
+    providers: &'a [PeerId],
+) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed> {
     let ipfs = ipfs.clone();
     let mut visit = IdleFileVisit::default();
     if let Some(range) = range {
@@ -34,7 +35,13 @@ pub async fn cat<'a>(
             let borrow = ipfs.clone();
             let dag = borrow.dag();
             let (resolved, _) = dag
-                .resolve(path, true)
+                .resolve(
+                    path,
+                    true,
+                    Some(DagGetOpt {
+                        providers: providers.to_vec(),
+                    }),
+                )
                 .await
                 .map_err(TraversalFailed::Resolving)?;
             resolved
@@ -87,7 +94,7 @@ pub async fn cat<'a>(
             let (next, _) = visit.pending_links();
 
             let borrow = ipfs.borrow();
-            let block = match borrow.get_block(next).await {
+            let block = match borrow.repo().get_block(next, providers).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield Err(TraversalFailed::Loading(next.to_owned(), e));

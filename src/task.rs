@@ -1153,7 +1153,7 @@ impl IpfsTask {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(cid) => self.swarm.behaviour_mut().want_block(cid, &[]),
+            RepoEvent::WantBlock(cid, _) => self.swarm.behaviour_mut().want_block(cid, &[]),
             RepoEvent::UnwantBlock(cid) => self.swarm.behaviour_mut().bitswap().cancel_block(&cid),
             RepoEvent::NewBlock(cid, ret) => {
                 // TODO: consider if cancel is applicable in cases where we provide the

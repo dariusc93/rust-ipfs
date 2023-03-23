@@ -321,7 +321,7 @@ pub struct Repo {
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Cid),
+    WantBlock(Cid, Vec<PeerId>),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
@@ -456,7 +456,7 @@ impl Repo {
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
-    pub async fn get_block(&self, cid: &Cid) -> Result<Block, Error> {
+    pub async fn get_block(&self, cid: &Cid, peers: &[PeerId]) -> Result<Block, Error> {
         // FIXME: here's a race: block_store might give Ok(None) and we get to create our
         // subscription after the put has completed. So maybe create the subscription first, then
         // cancel it?
@@ -470,7 +470,7 @@ impl Repo {
             // and that is okay with us.
             self.events
                 .clone()
-                .send(RepoEvent::WantBlock(*cid))
+                .send(RepoEvent::WantBlock(*cid, peers.to_vec()))
                 .await
                 .ok();
             Ok(subscription.await?)
