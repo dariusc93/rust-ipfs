@@ -53,7 +53,7 @@ impl Default for TransportConfig {
             yamux_max_buffer_size: 16 * 1024 * 1024,
             yamux_receive_window_size: 16 * 1024 * 1024,
             yamux_update_mode: 0,
-            multiplex_option: MultiPlexOption::YmuxAndMplex,
+            multiplex_option: MultiPlexOption::Yamux,
             mplex_max_buffer_size: 1024,
             no_delay: true,
             port_reuse: true,
