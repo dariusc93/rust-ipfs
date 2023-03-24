@@ -734,7 +734,7 @@ impl Ipfs {
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
     pub async fn get_block(&self, cid: &Cid) -> Result<Block, Error> {
-        self.repo.get_block(cid).instrument(self.span.clone()).await
+        self.repo.get_block(cid, &[]).instrument(self.span.clone()).await
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
@@ -777,7 +777,7 @@ impl Ipfs {
 
         async move {
             // this needs to download everything but /pin/ls does not
-            let block = self.repo.get_block(cid).await?;
+            let block = self.repo.get_block(cid, &[]).await?;
 
             if !recursive {
                 self.repo.insert_direct_pin(cid).await
@@ -902,7 +902,7 @@ impl Ipfs {
     /// See [`IpldDag::get`] for more information.
     pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
         self.dag()
-            .get(path)
+            .get(path, &[])
             .instrument(self.span.clone())
             .await
             .map_err(Error::new)
@@ -950,7 +950,7 @@ impl Ipfs {
     > {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
-        unixfs::cat(self, starting_point, range)
+        unixfs::cat(self, starting_point, range, &[])
             .instrument(self.span.clone())
             .await
     }
@@ -987,7 +987,7 @@ impl Ipfs {
         path: IpfsPath,
         dest: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        unixfs::get(self, path, dest)
+        unixfs::get(self, path, dest, &[])
             .instrument(self.span.clone())
             .await
     }

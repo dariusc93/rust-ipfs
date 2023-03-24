@@ -11,6 +11,7 @@ use libipld::{
     codec::Codec,
     Ipld, IpldCodec,
 };
+use libp2p::PeerId;
 use rust_unixfs::{
     dagpb::{wrap_node_data, NodeData},
     dir::{Cache, ShardedLookup},
@@ -219,7 +220,7 @@ impl IpldDag {
     /// Resolves a `Cid`-rooted path to a document "node."
     ///
     /// Returns the resolved node as `Ipld`.
-    pub async fn get(&self, path: IpfsPath) -> Result<Ipld, ResolveError> {
+    pub async fn get(&self, path: IpfsPath, providers: &[PeerId]) -> Result<Ipld, ResolveError> {
         let resolved_path = self
             .ipfs
             .resolve_ipns(&path, true)
@@ -233,7 +234,7 @@ impl IpldDag {
 
         let mut iter = resolved_path.iter().peekable();
 
-        let (node, _) = match self.resolve0(cid, &mut iter, true).await {
+        let (node, _) = match self.resolve0(cid, &mut iter, true, providers).await {
             Ok(t) => t,
             Err(e) => {
                 drop(iter);
@@ -259,6 +260,7 @@ impl IpldDag {
         &self,
         path: IpfsPath,
         follow_links: bool,
+        providers: &[PeerId],
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
         let resolved_path = self
             .ipfs
@@ -273,7 +275,7 @@ impl IpldDag {
 
         let (node, matched_segments) = {
             let mut iter = resolved_path.iter().peekable();
-            match self.resolve0(cid, &mut iter, follow_links).await {
+            match self.resolve0(cid, &mut iter, follow_links, providers).await {
                 Ok(t) => t,
                 Err(e) => {
                     drop(iter);
@@ -296,6 +298,7 @@ impl IpldDag {
         cid: &Cid,
         segments: &mut Peekable<impl Iterator<Item = &'a str>>,
         follow_links: bool,
+        providers: &[PeerId],
     ) -> Result<(ResolvedNode, usize), RawResolveLocalError> {
         use LocallyResolved::*;
 
@@ -305,7 +308,7 @@ impl IpldDag {
         let mut cache = None;
 
         loop {
-            let block = match self.ipfs.repo.get_block(&current).await {
+            let block = match self.ipfs.repo.get_block(&current, providers).await {
                 Ok(block) => block,
                 Err(e) => return Err(RawResolveLocalError::Loading(current, e)),
             };
@@ -323,7 +326,10 @@ impl IpldDag {
 
             let (src, dest) = match resolution {
                 Complete(ResolvedNode::Link(src, dest)) => (src, dest),
-                Incomplete(src, lookup) => match self.resolve_hamt(lookup, &mut cache).await {
+                Incomplete(src, lookup) => match self
+                    .resolve_hamt(lookup, &mut cache, providers)
+                    .await
+                {
                     Ok(dest) => (src, dest),
                     Err(e) => return Err(RawResolveLocalError::UnsupportedDocument(src, e.into())),
                 },
@@ -349,13 +355,14 @@ impl IpldDag {
         &self,
         mut lookup: ShardedLookup<'_>,
         cache: &mut Option<Cache>,
+        providers: &[PeerId],
     ) -> Result<Cid, Error> {
         use MaybeResolved::*;
 
         loop {
             let (next, _) = lookup.pending_links();
 
-            let block = self.ipfs.repo.get_block(next).await?;
+            let block = self.ipfs.repo.get_block(next, providers).await?;
 
             match lookup.continue_walk(block.data(), cache)? {
                 NeedToLoadMore(next) => lookup = next,
@@ -642,7 +649,7 @@ mod tests {
             .put(IpldCodec::DagCbor, data.clone(), None)
             .await
             .unwrap();
-        let res = dag.get(IpfsPath::from(cid)).await.unwrap();
+        let res = dag.get(IpfsPath::from(cid), &[]).await.unwrap();
         assert_eq!(res, data);
     }
 
@@ -656,7 +663,7 @@ mod tests {
             .await
             .unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("1").unwrap())
+            .get(IpfsPath::from(cid).sub_path("1").unwrap(), &[])
             .await
             .unwrap();
         assert_eq!(res, ipld!(2));
@@ -669,7 +676,7 @@ mod tests {
         let data = ipld!([1, [2], 3,]);
         let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("1/0").unwrap())
+            .get(IpfsPath::from(cid).sub_path("1/0").unwrap(), &[])
             .await
             .unwrap();
         assert_eq!(res, ipld!(2));
@@ -684,7 +691,7 @@ mod tests {
         });
         let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("key").unwrap())
+            .get(IpfsPath::from(cid).sub_path("key").unwrap(), &[])
             .await
             .unwrap();
         assert_eq!(res, ipld!(false));
@@ -699,7 +706,7 @@ mod tests {
         let data2 = ipld!([cid1]);
         let cid2 = dag.put(IpldCodec::DagCbor, data2, None).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid2).sub_path("0/0").unwrap())
+            .get(IpfsPath::from(cid2).sub_path("0/0").unwrap(), &[])
             .await
             .unwrap();
         assert_eq!(res, ipld!(1));
@@ -898,7 +905,7 @@ mod tests {
 
         for p in equiv_paths {
             let cloned = p.clone();
-            match dag.resolve(p, true).await.unwrap() {
+            match dag.resolve(p, true, &[]).await.unwrap() {
                 (ResolvedNode::Projection(_, Ipld::Integer(1)), remaining_path) => {
                     assert_eq!(remaining_path, ["0"][..], "{cloned}");
                 }
@@ -919,7 +926,7 @@ mod tests {
         let path = IpfsPath::from(cid2).sub_path("1/a").unwrap();
 
         //let cloned = path.clone();
-        let e = dag.resolve(path, true).await.unwrap_err();
+        let e = dag.resolve(path, true, &[]).await.unwrap_err();
         assert_eq!(e.to_string(), format!("no link named \"1\" under {cid2}"));
     }
 
@@ -935,7 +942,7 @@ mod tests {
         let path = IpfsPath::from(cid2).sub_path("0/a").unwrap();
 
         //let cloned = path.clone();
-        let e = dag.resolve(path, true).await.unwrap_err();
+        let e = dag.resolve(path, true, &[]).await.unwrap_err();
         assert_eq!(e.to_string(), format!("no link named \"a\" under {cid1}"));
     }
 
@@ -958,7 +965,7 @@ mod tests {
 
         let path = IpfsPath::from(cid).sub_path("anything-here").unwrap();
 
-        let e = ipfs.dag().resolve(path, true).await.unwrap_err();
+        let e = ipfs.dag().resolve(path, true, &[]).await.unwrap_err();
 
         assert_eq!(
             e.to_string(),
@@ -1011,7 +1018,7 @@ mod tests {
             .sub_path("something/second-best-file")
             .unwrap();
 
-        let e = ipfs.dag().resolve(path, true).await.unwrap_err();
+        let e = ipfs.dag().resolve(path, true, &[]).await.unwrap_err();
 
         assert_eq!(
             e.to_string(),
