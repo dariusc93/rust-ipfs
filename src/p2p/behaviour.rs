@@ -15,7 +15,7 @@ use libp2p::core::Multiaddr;
 use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::Event as GossipsubEvent;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
-use libp2p::identity::PeerId;
+use libp2p::identity::{Keypair, PeerId};
 use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
@@ -335,12 +335,12 @@ impl Default for KadConfig {
 }
 
 impl Behaviour {
-    /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
     pub async fn new(
+        keypair: &Keypair,
         options: SwarmOptions,
         limits: ConnectionLimits,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
-        let peer_id = options.peer_id;
+        let peer_id = keypair.public().to_peer_id();
 
         info!("net: starting with peer id {}", peer_id);
 
@@ -387,7 +387,7 @@ impl Behaviour {
             }
         }
 
-        let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
+        let autonat = autonat::Behaviour::new(peer_id, Default::default());
         let bitswap = Bitswap::default();
         let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
 
@@ -397,7 +397,7 @@ impl Behaviour {
             options
                 .identify_config
                 .unwrap_or_default()
-                .into(options.keypair.public()),
+                .into(keypair.public()),
         );
 
         let pubsub = {
@@ -419,7 +419,7 @@ impl Behaviour {
             let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
 
             let gossipsub = libp2p::gossipsub::Behaviour::new(
-                libp2p::gossipsub::MessageAuthenticity::Signed(options.keypair),
+                libp2p::gossipsub::MessageAuthenticity::Signed(keypair.clone()),
                 config,
             )
             .map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -555,8 +555,9 @@ impl Behaviour {
 
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
 pub async fn build_behaviour(
+    keypair: &Keypair,
     options: SwarmOptions,
     limits: ConnectionLimits,
 ) -> Result<(Behaviour, Option<ClientTransport>), Error> {
-    Behaviour::new(options, limits).await
+    Behaviour::new(keypair, options, limits).await
 }

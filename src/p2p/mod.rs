@@ -105,10 +105,6 @@ impl From<IdentifyInfo> for PeerInfo {
 
 /// Defines the configuration for an IPFS swarm.
 pub struct SwarmOptions {
-    /// The keypair for the PKI based identity of the local node.
-    pub keypair: Keypair,
-    /// The peer address of the local node created from the keypair.
-    pub peer_id: PeerId,
     /// The peers to connect to on startup.
     pub bootstrap: Vec<Multiaddr>,
     /// Enables mdns for peer discovery and announcement when true.
@@ -144,8 +140,6 @@ pub struct SwarmOptions {
 
 impl From<&IpfsOptions> for SwarmOptions {
     fn from(options: &IpfsOptions) -> Self {
-        let keypair = options.keypair.clone();
-        let peer_id = keypair.public().to_peer_id();
         let bootstrap = options.bootstrap.clone();
         let mdns = options.mdns;
         let mdns_ipv6 = options.mdns_ipv6;
@@ -164,8 +158,6 @@ impl From<&IpfsOptions> for SwarmOptions {
         let pubsub_config = options.pubsub_config.clone();
 
         SwarmOptions {
-            keypair,
-            peer_id,
             bootstrap,
             mdns,
             disable_kad,
@@ -260,18 +252,20 @@ impl Default for SwarmConfig {
 
 /// Creates a new IPFS swarm.
 pub async fn create_swarm(
+    keypair: &Keypair,
     options: SwarmOptions,
     swarm_config: SwarmConfig,
     transport_config: TransportConfig,
     span: Span,
 ) -> Result<TSwarm, Error> {
-    let peer_id = options.peer_id;
 
-    let keypair = options.keypair.clone();
 
+    let keypair = keypair.clone();
+    let peer_id = keypair.public().to_peer_id();
+    
     // Create a Kademlia behaviour
     let (behaviour, relay_transport) =
-        behaviour::build_behaviour(options, swarm_config.connection).await?;
+        behaviour::build_behaviour(&keypair, options, swarm_config.connection).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = transport::build_transport(keypair, relay_transport, transport_config)?;
