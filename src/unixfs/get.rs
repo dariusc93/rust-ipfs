@@ -1,6 +1,7 @@
-use std::{path::Path};
+use std::path::Path;
 
 use futures::{stream::BoxStream, StreamExt};
+use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
 
@@ -12,11 +13,12 @@ pub async fn get<'a, P: AsRef<Path>>(
     ipfs: &Ipfs,
     path: IpfsPath,
     dest: P,
+    providers: &'a [PeerId],
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
     let mut file = tokio::fs::File::create(dest).await?;
     let ipfs = ipfs.clone();
 
-    let (resolved, _) = ipfs.dag().resolve(path.clone(), true).await?;
+    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers).await?;
 
     let block = resolved.into_unixfs_block()?;
 
@@ -31,7 +33,7 @@ pub async fn get<'a, P: AsRef<Path>>(
         let mut written = 0;
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match ipfs.get_block(next).await {
+            let block = match ipfs.repo().get_block(next, providers).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };

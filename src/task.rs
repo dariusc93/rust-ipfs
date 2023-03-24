@@ -1137,11 +1137,14 @@ impl IpfsTask {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(cid) => {
+            RepoEvent::WantBlock(cid, peers) => {
                 let client = self.swarm.behaviour_mut().bitswap().client().clone();
                 let repo = self.repo.clone();
                 tokio::spawn(async move {
                     let session = client.new_session().await;
+                    for peer in peers {
+                        session.add_provider(&cid, peer).await;
+                    }
                     let block = match session.get_block(&cid).await {
                         Ok(block) => block,
                         Err(e) => {
