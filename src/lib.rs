@@ -678,6 +678,7 @@ impl UninitializedIpfs {
             bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
+            bitswap_sessions: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,

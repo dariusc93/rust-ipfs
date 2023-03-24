@@ -16,7 +16,7 @@ use crate::{
     TSwarmEvent,
 };
 use iroh_bitswap::BitswapEvent;
-use tokio::sync::Notify;
+use tokio::{sync::Notify, task::JoinHandle};
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -87,6 +87,7 @@ pub(crate) struct IpfsTask {
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<MultiaddrWithPeerId>,
     pub(crate) swarm_event: Option<TSwarmEventFn>,
+    pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
 }
 
 impl IpfsTask {
@@ -639,6 +640,11 @@ impl IpfsTask {
                         ..
                     } = info;
 
+                    self.swarm
+                        .behaviour_mut()
+                        .bitswap
+                        .on_identify(&peer_id, &protocols);
+
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
                         if protocols
                             .iter()
@@ -1140,27 +1146,33 @@ impl IpfsTask {
             RepoEvent::WantBlock(cid, peers) => {
                 let client = self.swarm.behaviour_mut().bitswap().client().clone();
                 let repo = self.repo.clone();
-                tokio::spawn(async move {
-                    let session = client.new_session().await;
-                    for peer in peers {
-                        session.add_provider(&cid, peer).await;
-                    }
-                    let block = match session.get_block(&cid).await {
-                        Ok(block) => block,
-                        Err(e) => {
-                            println!("Error getting block: {e}");
-                            return;
+                let (closer_s, closer_r) = oneshot::channel();
+                let ctx = 0;
+                let entry = self.bitswap_sessions.entry(ctx).or_default();
+
+                let worker = tokio::task::spawn(async move {
+                    tokio::select! {
+                        _ = closer_r => {
+                            // Explicit sesssion stop.
+                            debug!("session {}: stopped: closed", ctx);
                         }
-                    };
-                    println!("Found block: {cid}");
-                    if let Ok(block) = libipld::Block::new(block.cid, block.data.to_vec()) {
-                        let res = repo.put_block(block).await;
-                        if let Err(e) = res {
-                            println!("Got block {} but failed to store it: {}", cid, e);
-                        }
+                        block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
+                            Ok(block) => {
+                                println!("Found block");
+                                let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
+                                let res = repo.put_block(block).await;
+                                if let Err(e) = res {
+                                    println!("Got block {} but failed to store it: {}", cid, e);
+                                }
+
+                            }
+                            Err(err) => {
+                                println!("Failed to get {}: {}", cid, err);
+                            }
+                        },
                     }
-                    let _ = session.stop().await.ok();
                 });
+                entry.push((closer_s, worker));
             }
             RepoEvent::UnwantBlock(_cid) => {}
             RepoEvent::NewBlock(block, ret) => {
