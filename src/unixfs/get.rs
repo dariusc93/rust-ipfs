@@ -18,7 +18,7 @@ pub async fn get<'a, P: AsRef<Path>>(
     let mut file = tokio::fs::File::create(dest).await?;
     let ipfs = ipfs.clone();
 
-    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers).await?;
+    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers, false).await?;
 
     let block = resolved.into_unixfs_block()?;
 

@@ -869,7 +869,7 @@ impl Ipfs {
     /// See [`IpldDag::get`] for more information.
     pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
         self.dag()
-            .get(path, &[])
+            .get(path, &[], false)
             .instrument(self.span.clone())
             .await
             .map_err(Error::new)

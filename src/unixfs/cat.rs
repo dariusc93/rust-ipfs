@@ -35,7 +35,7 @@ pub async fn cat<'a>(
             let borrow = ipfs.clone();
             let dag = borrow.dag();
             let (resolved, _) = dag
-                .resolve(path, true, providers)
+                .resolve(path, true, providers, false)
                 .await
                 .map_err(TraversalFailed::Resolving)?;
             resolved
