@@ -2,7 +2,7 @@
 use core::task::{Context, Poll};
 use futures::channel::oneshot;
 use futures::StreamExt;
-use libp2p::core::{Endpoint, Multiaddr};
+use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{
@@ -134,6 +134,7 @@ pub struct Behaviour {
 
     peer_info: HashMap<PeerId, PeerInfo>,
     peer_rtt: HashMap<PeerId, [Duration; 3]>,
+    peer_connections: HashMap<PeerId, Vec<(ConnectionId, Multiaddr)>>,
 
     whitelist: HashSet<PeerId>,
 
@@ -161,6 +162,7 @@ impl Default for Behaviour {
             pending_identify: Default::default(),
             peer_info: Default::default(),
             peer_rtt: Default::default(),
+            peer_connections: Default::default(),
             whitelist: Default::default(),
             protocols: Default::default(),
             pending_inbound_connections: Default::default(),
@@ -243,6 +245,12 @@ impl Behaviour {
 
     pub fn remove_peer_info(&mut self, peer_id: PeerId) {
         self.peer_info.remove(&peer_id);
+    }
+
+    pub fn peer_connections(&self, peer_id: PeerId) -> Option<Vec<Multiaddr>> {
+        self.peer_connections
+            .get(&peer_id)
+            .map(|list| list.iter().map(|(_, addr)| addr).cloned().collect())
     }
 
     fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
@@ -390,6 +398,7 @@ impl NetworkBehaviour for Behaviour {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
                 connection_id,
+                endpoint,
                 ..
             }) => {
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
@@ -409,6 +418,15 @@ impl NetworkBehaviour for Behaviour {
                         let _ = ch.send(Ok(()));
                     }
                 }
+                let multiaddr = match endpoint {
+                    ConnectedPoint::Dialer { address, .. } => address.clone(),
+                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
+                };
+
+                self.peer_connections
+                    .entry(peer_id)
+                    .or_default()
+                    .push((connection_id, multiaddr));
             }
             FromSwarm::DialFailure(DialFailure {
                 error,
@@ -426,6 +444,15 @@ impl NetworkBehaviour for Behaviour {
             }) => {
                 self.established_inbound_connections.remove(&connection_id);
                 self.established_outbound_connections.remove(&connection_id);
+                if let Entry::Occupied(mut entry) = self.peer_connections.entry(peer_id) {
+                    let list = entry.get_mut();
+                    if let Some(index) = list.iter().position(|(id, _)| connection_id.eq(id)) {
+                        list.swap_remove(index);
+                    }
+                    if list.is_empty() {
+                        entry.remove();
+                    }
+                }
                 if let Entry::Occupied(mut entry) = self.established_per_peer.entry(peer_id) {
                     entry.get_mut().remove(&connection_id);
                     if entry.get().is_empty() {

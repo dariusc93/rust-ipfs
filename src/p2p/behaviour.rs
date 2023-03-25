@@ -3,7 +3,6 @@ use super::peerbook::{self, ConnectionLimits};
 use either::Either;
 use serde::{Deserialize, Serialize};
 
-use super::swarm::{Connection, SwarmApi};
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
 
@@ -50,7 +49,6 @@ pub struct Behaviour {
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
-    pub swarm: SwarmApi,
     pub peerbook: peerbook::Behaviour,
 }
 
@@ -427,8 +425,6 @@ impl Behaviour {
             GossipsubStream::from(gossipsub)
         };
 
-        let swarm = SwarmApi::default();
-
         // Maybe have this enable in conjunction with RelayClient?
         let dcutr = Toggle::from(options.dcutr.then_some(Dcutr::new(peer_id)));
         let relay_config = options
@@ -469,7 +465,6 @@ impl Behaviour {
                 identify,
                 autonat,
                 pubsub,
-                swarm,
                 dcutr,
                 relay,
                 relay_client,
@@ -510,10 +505,6 @@ impl Behaviour {
             addrs.push((peer_id, peer_addrs));
         }
         addrs
-    }
-
-    pub fn connections(&self) -> impl Iterator<Item = Connection> + '_ {
-        self.swarm.connections()
     }
 
     // FIXME: it would be best if get_providers is called only in case the already connected
