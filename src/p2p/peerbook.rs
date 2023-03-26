@@ -216,7 +216,7 @@ impl Behaviour {
     }
 
     pub fn peers(&self) -> impl Iterator<Item = &PeerId> {
-        self.peer_info.keys()
+        self.peer_connections.keys()
     }
 
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, rtt: Duration) {
