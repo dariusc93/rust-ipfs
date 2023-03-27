@@ -1,3 +1,8 @@
+# 0.3.9 [unrelease]
+- fix: Use peer_connections for peers function [PR 54]
+
+[PR 54]: https://github.com/dariusc93/rust-ipfs/pull/54
+
 # 0.3.8
 - chore: Wait on identify before returning connection [PR 47]
 - feat(repo): Allow custom repo store [PR 46]
