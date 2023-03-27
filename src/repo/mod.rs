@@ -456,13 +456,18 @@ impl Repo {
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
-    pub async fn get_block(&self, cid: &Cid, peers: &[PeerId]) -> Result<Block, Error> {
+    pub async fn get_block(&self, cid: &Cid, peers: &[PeerId], local_only: bool) -> Result<Block, Error> {
         // FIXME: here's a race: block_store might give Ok(None) and we get to create our
         // subscription after the put has completed. So maybe create the subscription first, then
         // cancel it?
+
         if let Some(block) = self.get_block_now(cid).await? {
             Ok(block)
         } else {
+            if local_only {
+                anyhow::bail!("Unable to locate block {cid}");
+            }
+            
             let subscription = self
                 .subscriptions
                 .create_subscription((*cid).into(), Some(self.events.clone()));

@@ -699,7 +699,7 @@ impl Ipfs {
     /// already started fetch.
     pub async fn get_block(&self, cid: &Cid) -> Result<Block, Error> {
         self.repo
-            .get_block(cid, &[])
+            .get_block(cid, &[], false)
             .instrument(self.span.clone())
             .await
     }
@@ -744,7 +744,7 @@ impl Ipfs {
 
         async move {
             // this needs to download everything but /pin/ls does not
-            let block = self.repo.get_block(cid, &[]).await?;
+            let block = self.repo.get_block(cid, &[], false).await?;
 
             if !recursive {
                 self.repo.insert_direct_pin(cid).await
@@ -869,7 +869,7 @@ impl Ipfs {
     /// See [`IpldDag::get`] for more information.
     pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
         self.dag()
-            .get(path, &[])
+            .get(path, &[], false)
             .instrument(self.span.clone())
             .await
             .map_err(Error::new)
@@ -917,7 +917,7 @@ impl Ipfs {
     > {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
-        unixfs::cat(self, starting_point, range, &[])
+        unixfs::cat(self, starting_point, range, &[], false)
             .instrument(self.span.clone())
             .await
     }
@@ -954,7 +954,7 @@ impl Ipfs {
         path: IpfsPath,
         dest: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        unixfs::get(self, path, dest, &[])
+        unixfs::get(self, path, dest, &[], false)
             .instrument(self.span.clone())
             .await
     }

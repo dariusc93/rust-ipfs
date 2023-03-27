@@ -14,11 +14,12 @@ pub async fn get<'a, P: AsRef<Path>>(
     path: IpfsPath,
     dest: P,
     providers: &'a [PeerId],
+    local_only: bool
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
     let mut file = tokio::fs::File::create(dest).await?;
     let ipfs = ipfs.clone();
 
-    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers).await?;
+    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers, local_only).await?;
 
     let block = resolved.into_unixfs_block()?;
 
@@ -33,7 +34,7 @@ pub async fn get<'a, P: AsRef<Path>>(
         let mut written = 0;
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match ipfs.repo().get_block(next, providers).await {
+            let block = match ipfs.repo().get_block(next, providers, local_only).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
