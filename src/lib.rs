@@ -699,7 +699,7 @@ impl Ipfs {
     /// already started fetch.
     pub async fn get_block(&self, cid: &Cid) -> Result<Block, Error> {
         self.repo
-            .get_block(cid, &[])
+            .get_block(cid, &[], false)
             .instrument(self.span.clone())
             .await
     }
@@ -744,7 +744,7 @@ impl Ipfs {
 
         async move {
             // this needs to download everything but /pin/ls does not
-            let block = self.repo.get_block(cid, &[]).await?;
+            let block = self.repo.get_block(cid, &[], false).await?;
 
             if !recursive {
                 self.repo.insert_direct_pin(cid).await

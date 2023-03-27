@@ -89,7 +89,7 @@ pub async fn cat<'a>(
             let (next, _) = visit.pending_links();
 
             let borrow = ipfs.borrow();
-            let block = match borrow.repo().get_block(next, providers).await {
+            let block = match borrow.repo().get_block(next, providers, local_only).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield Err(TraversalFailed::Loading(next.to_owned(), e));

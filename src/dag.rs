@@ -310,7 +310,7 @@ impl IpldDag {
         let mut cache = None;
 
         loop {
-            let block = match self.ipfs.repo.get_block(&current, providers).await {
+            let block = match self.ipfs.repo.get_block(&current, providers, local_only).await {
                 Ok(block) => block,
                 Err(e) => return Err(RawResolveLocalError::Loading(current, e)),
             };
@@ -365,13 +365,7 @@ impl IpldDag {
         loop {
             let (next, _) = lookup.pending_links();
 
-            let block = match local_only {
-                true => match self.ipfs.repo.get_block_now(next).await? {
-                    Some(block) => block,
-                    None => anyhow::bail!("Block not found"),
-                },
-                false => self.ipfs.repo.get_block(next, providers).await?,
-            };
+            let block = self.ipfs.repo.get_block(next, providers, local_only).await?;
 
             match lookup.continue_walk(block.data(), cache)? {
                 NeedToLoadMore(next) => lookup = next,

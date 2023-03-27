@@ -34,7 +34,7 @@ pub async fn get<'a, P: AsRef<Path>>(
         let mut written = 0;
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match ipfs.repo().get_block(next, providers).await {
+            let block = match ipfs.repo().get_block(next, providers, local_only).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
