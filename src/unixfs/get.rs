@@ -14,11 +14,12 @@ pub async fn get<'a, P: AsRef<Path>>(
     path: IpfsPath,
     dest: P,
     providers: &'a [PeerId],
+    local_only: bool
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
     let mut file = tokio::fs::File::create(dest).await?;
     let ipfs = ipfs.clone();
 
-    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers, false).await?;
+    let (resolved, _) = ipfs.dag().resolve(path.clone(), true, providers, local_only).await?;
 
     let block = resolved.into_unixfs_block()?;
 

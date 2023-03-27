@@ -917,7 +917,7 @@ impl Ipfs {
     > {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
-        unixfs::cat(self, starting_point, range, &[])
+        unixfs::cat(self, starting_point, range, &[], false)
             .instrument(self.span.clone())
             .await
     }
@@ -954,7 +954,7 @@ impl Ipfs {
         path: IpfsPath,
         dest: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        unixfs::get(self, path, dest, &[])
+        unixfs::get(self, path, dest, &[], false)
             .instrument(self.span.clone())
             .await
     }

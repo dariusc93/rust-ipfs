@@ -21,6 +21,7 @@ pub async fn cat<'a>(
     starting_point: impl Into<StartingPoint>,
     range: Option<Range<u64>>,
     providers: &'a [PeerId],
+    local_only: bool,
 ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed> {
     let ipfs = ipfs.clone();
     let mut visit = IdleFileVisit::default();
@@ -35,7 +36,7 @@ pub async fn cat<'a>(
             let borrow = ipfs.clone();
             let dag = borrow.dag();
             let (resolved, _) = dag
-                .resolve(path, true, providers, false)
+                .resolve(path, true, providers, local_only)
                 .await
                 .map_err(TraversalFailed::Resolving)?;
             resolved
