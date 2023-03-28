@@ -608,3 +608,9 @@ impl Repo {
         self.data_store.query(cids, requirement).await
     }
 }
+
+impl Repo {
+    pub fn data_store(&self) -> &dyn DataStore {
+        &*self.data_store
+    }
+}
