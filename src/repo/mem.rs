@@ -1,7 +1,7 @@
 //! Volatile memory backed repo
 use crate::error::Error;
 use crate::repo::{
-    BlockPut, BlockStore, Column, DataStore, Lock, LockError, PinKind, PinMode, PinModeRequirement,
+    BlockPut, BlockStore, DataStore, Lock, LockError, PinKind, PinMode, PinModeRequirement,
     PinStore,
 };
 use crate::Block;
@@ -100,7 +100,7 @@ impl BlockStore for MemBlockStore {
 /// Describes an in-memory `DataStore`.
 #[derive(Debug, Default)]
 pub struct MemDataStore {
-    ipns: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
+    inner: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
     // this could also be PinDocument however doing any serialization allows to see the required
     // error types easier
     pin: Arc<Mutex<HashMap<Vec<u8>, Vec<u8>>>>,
@@ -406,40 +406,28 @@ impl DataStore for MemDataStore {
         Ok(())
     }
 
-    async fn contains(&self, col: Column, key: &[u8]) -> Result<bool, Error> {
-        let map = match col {
-            Column::Ipns => &self.ipns,
-        };
-        let contains = map.lock().await.contains_key(key);
+    async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
+        let contains = self.inner.lock().await.contains_key(key);
         Ok(contains)
     }
 
-    async fn get(&self, col: Column, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        let map = match col {
-            Column::Ipns => &self.ipns,
-        };
-        let value = map.lock().await.get(key).map(|value| value.to_owned());
+    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        let value = self.inner.lock().await.get(key).map(|value| value.to_owned());
         Ok(value)
     }
 
-    async fn put(&self, col: Column, key: &[u8], value: &[u8]) -> Result<(), Error> {
-        let map = match col {
-            Column::Ipns => &self.ipns,
-        };
-        map.lock().await.insert(key.to_owned(), value.to_owned());
+    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
+        self.inner.lock().await.insert(key.to_owned(), value.to_owned());
         Ok(())
     }
 
-    async fn remove(&self, col: Column, key: &[u8]) -> Result<(), Error> {
-        let map = match col {
-            Column::Ipns => &self.ipns,
-        };
-        map.lock().await.remove(key);
+    async fn remove(&self, key: &[u8]) -> Result<(), Error> {
+        self.inner.lock().await.remove(key);
         Ok(())
     }
 
     async fn wipe(&self) {
-        self.ipns.lock().await.clear();
+        self.inner.lock().await.clear();
         self.pin.lock().await.clear();
     }
 }
@@ -751,30 +739,29 @@ mod tests {
     async fn test_mem_datastore() {
         let tmp = std::env::temp_dir();
         let store = MemDataStore::new(tmp);
-        let col = Column::Ipns;
         let key = [1, 2, 3, 4];
         let value = [5, 6, 7, 8];
 
         store.init().await.unwrap();
         store.open().await.unwrap();
 
-        let contains = store.contains(col, &key);
+        let contains = store.contains(&key);
         assert!(!contains.await.unwrap());
-        let get = store.get(col, &key);
+        let get = store.get(&key);
         assert_eq!(get.await.unwrap(), None);
-        store.remove(col, &key).await.unwrap();
+        store.remove( &key).await.unwrap();
 
-        let put = store.put(col, &key, &value);
+        let put = store.put(&key, &value);
         put.await.unwrap();
-        let contains = store.contains(col, &key);
+        let contains = store.contains( &key);
         assert!(contains.await.unwrap());
-        let get = store.get(col, &key);
+        let get = store.get(&key);
         assert_eq!(get.await.unwrap(), Some(value.to_vec()));
 
-        store.remove(col, &key).await.unwrap();
-        let contains = store.contains(col, &key);
+        store.remove(&key).await.unwrap();
+        let contains = store.contains(&key);
         assert!(!contains.await.unwrap());
-        let get = store.get(col, &key);
+        let get = store.get(&key);
         assert_eq!(get.await.unwrap(), None);
     }
 

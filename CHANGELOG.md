@@ -1,9 +1,12 @@
 # 0.3.9 [unrelease]
 - fix: Use peer_connections for peers function [PR 54]
 - chore(repo): chore(repo): Added field to only check locally [PR 55]
+- refactor: Remove Column from DataStore [PR 56]
 
 [PR 54]: https://github.com/dariusc93/rust-ipfs/pull/54
 [PR 55]: https://github.com/dariusc93/rust-ipfs/pull/55
+[PR 56]: https://github.com/dariusc93/rust-ipfs/pull/56
+
 # 0.3.8
 - chore: Wait on identify before returning connection [PR 47]
 - feat(repo): Allow custom repo store [PR 46]

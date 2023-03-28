@@ -113,13 +113,13 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn init(&self) -> Result<(), Error>;
     async fn open(&self) -> Result<(), Error>;
     /// Checks if a key is present in the datastore.
-    async fn contains(&self, col: Column, key: &[u8]) -> Result<bool, Error>;
+    async fn contains(&self, key: &[u8]) -> Result<bool, Error>;
     /// Returns the value associated with a key from the datastore.
-    async fn get(&self, col: Column, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
+    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
     /// Puts the value under the key in the datastore.
-    async fn put(&self, col: Column, key: &[u8], value: &[u8]) -> Result<(), Error>;
+    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error>;
     /// Removes a key-value pair from the datastore.
-    async fn remove(&self, col: Column, key: &[u8]) -> Result<(), Error>;
+    async fn remove(&self, key: &[u8]) -> Result<(), Error>;
     /// Wipes the datastore.
     async fn wipe(&self);
 }
@@ -211,11 +211,6 @@ pub trait PinStore: Debug + Send + Sync + Unpin + 'static {
         ids: Vec<Cid>,
         requirement: Option<PinMode>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error>;
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Column {
-    Ipns,
 }
 
 /// `PinMode` is the description of pin type for quering purposes.
@@ -527,7 +522,8 @@ impl Repo {
         let data_store = &self.data_store;
         let key = ipns.to_owned();
         // FIXME: needless vec<u8> creation
-        let bytes = data_store.get(Column::Ipns, &key.to_bytes()).await?;
+        let key = format!("ipns/{key}");
+        let bytes = data_store.get(key.as_bytes()).await?;
         match bytes {
             Some(ref bytes) => {
                 let string = String::from_utf8_lossy(bytes);
@@ -543,8 +539,9 @@ impl Repo {
         let string = path.to_string();
         let value = string.as_bytes();
         // FIXME: needless vec<u8> creation
+        let key = format!("ipns/{ipns}");
         self.data_store
-            .put(Column::Ipns, &ipns.to_bytes(), value)
+            .put(key.as_bytes(), value)
             .await
     }
 
@@ -552,7 +549,8 @@ impl Repo {
     pub async fn remove_ipns(&self, ipns: &PeerId) -> Result<(), Error> {
         // FIXME: us needing to clone the peerid is wasteful to pass it as a reference only to be
         // cloned again
-        self.data_store.remove(Column::Ipns, &ipns.to_bytes()).await
+        let key = format!("ipns/{ipns}");
+        self.data_store.remove(key.as_bytes()).await
     }
 
     /// Inserts a direct pin for a `Cid`.
