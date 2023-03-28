@@ -1,4 +1,4 @@
-use super::{Column, DataStore, PinModeRequirement};
+use super::{DataStore, PinModeRequirement};
 use crate::error::Error;
 use crate::repo::{PinKind, PinMode, PinStore, References};
 use async_trait::async_trait;
@@ -68,28 +68,27 @@ impl DataStore for KvDataStore {
     }
 
     /// Checks if a key is present in the datastore.
-    async fn contains(&self, _col: Column, _key: &[u8]) -> Result<bool, Error> {
+    async fn contains(&self, _key: &[u8]) -> Result<bool, Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
     /// Returns the value associated with a key from the datastore.
-    async fn get(&self, _col: Column, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+    async fn get(&self, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
     /// Puts the value under the key in the datastore.
-    async fn put(&self, _col: Column, _key: &[u8], _value: &[u8]) -> Result<(), Error> {
+    async fn put(&self, _key: &[u8], _value: &[u8]) -> Result<(), Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
     /// Removes a key-value pair from the datastore.
-    async fn remove(&self, _col: Column, _key: &[u8]) -> Result<(), Error> {
+    async fn remove(&self, _key: &[u8]) -> Result<(), Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
     /// Wipes the datastore.
-    async fn wipe(&self) {
-    }
+    async fn wipe(&self) {}
 }
 
 // in the transactional parts of the [`Infallible`] is used to signal there is no additional

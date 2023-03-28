@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use super::{BlockRm, BlockRmError, Column, DataStore, Lock, LockError, RepoCid};
+use super::{BlockRm, BlockRmError, DataStore, Lock, LockError, RepoCid};
 
 /// The PinStore implementation for FsDataStore
 mod pinstore;
@@ -67,19 +67,19 @@ impl DataStore for FsDataStore {
         Ok(())
     }
 
-    async fn contains(&self, _col: Column, _key: &[u8]) -> Result<bool, Error> {
+    async fn contains(&self, _key: &[u8]) -> Result<bool, Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
-    async fn get(&self, _col: Column, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+    async fn get(&self, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
-    async fn put(&self, _col: Column, _key: &[u8], _value: &[u8]) -> Result<(), Error> {
+    async fn put(&self, _key: &[u8], _value: &[u8]) -> Result<(), Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
-    async fn remove(&self, _col: Column, _key: &[u8]) -> Result<(), Error> {
+    async fn remove(&self, _key: &[u8]) -> Result<(), Error> {
         Err(anyhow::anyhow!("not implemented"))
     }
 
