@@ -100,7 +100,7 @@ impl BlockStore for MemBlockStore {
 /// Describes an in-memory `DataStore`.
 #[derive(Debug, Default)]
 pub struct MemDataStore {
-    ipns: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
+    inner: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
     // this could also be PinDocument however doing any serialization allows to see the required
     // error types easier
     pin: Arc<Mutex<HashMap<Vec<u8>, Vec<u8>>>>,
@@ -407,27 +407,27 @@ impl DataStore for MemDataStore {
     }
 
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
-        let contains = self.ipns.lock().await.contains_key(key);
+        let contains = self.inner.lock().await.contains_key(key);
         Ok(contains)
     }
 
     async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        let value = self.ipns.lock().await.get(key).map(|value| value.to_owned());
+        let value = self.inner.lock().await.get(key).map(|value| value.to_owned());
         Ok(value)
     }
 
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
-        self.ipns.lock().await.insert(key.to_owned(), value.to_owned());
+        self.inner.lock().await.insert(key.to_owned(), value.to_owned());
         Ok(())
     }
 
     async fn remove(&self, key: &[u8]) -> Result<(), Error> {
-        self.ipns.lock().await.remove(key);
+        self.inner.lock().await.remove(key);
         Ok(())
     }
 
     async fn wipe(&self) {
-        self.ipns.lock().await.clear();
+        self.inner.lock().await.clear();
         self.pin.lock().await.clear();
     }
 }
