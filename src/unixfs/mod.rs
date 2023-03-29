@@ -109,6 +109,7 @@ impl IpfsFiles {
         get(&self.ipfs, path, dest, peers, local).await
     }
 
+    /// List directory contents
     pub async fn ls<'a>(
         &self,
         path: IpfsPath,
