@@ -13,9 +13,11 @@ pub use rust_unixfs as ll;
 mod add;
 mod cat;
 mod get;
+mod ls;
 pub use add::{add, add_file, AddOption};
 pub use cat::{cat, StartingPoint, TraversalFailed};
 pub use get::get;
+pub use ls::{ls, NodeItem};
 
 use crate::{Ipfs, IpfsPath};
 
@@ -105,6 +107,15 @@ impl IpfsFiles {
         local: bool,
     ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
         get(&self.ipfs, path, dest, peers, local).await
+    }
+
+    pub async fn ls<'a>(
+        &self,
+        path: IpfsPath,
+        peers: &'a [PeerId],
+        local: bool,
+    ) -> Result<BoxStream<'a, NodeItem>, Error> {
+        ls(&self.ipfs, path, peers, local).await
     }
 }
 
