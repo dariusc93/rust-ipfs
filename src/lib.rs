@@ -57,7 +57,7 @@ use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{IpfsFiles, NodeItem, UnixfsStatus};
+use unixfs::{IpfsUnixfs, NodeItem, UnixfsStatus};
 
 use std::{
     borrow::Borrow,
@@ -678,8 +678,8 @@ impl Ipfs {
     }
 
     /// Returns an [`IpfsFiles`] for files operations
-    pub fn files(&self) -> IpfsFiles {
-        IpfsFiles::new(self.clone())
+    pub fn unixfs(&self) -> IpfsUnixfs {
+        IpfsUnixfs::new(self.clone())
     }
 
     fn ipns(&self) -> Ipns {
@@ -920,7 +920,7 @@ impl Ipfs {
         impl Stream<Item = Result<Vec<u8>, unixfs::TraversalFailed>> + Send + '_,
         unixfs::TraversalFailed,
     > {
-        self.files()
+        self.unixfs()
             .cat(starting_point, range)
             .instrument(self.span.clone())
             .await
@@ -934,7 +934,7 @@ impl Ipfs {
         path: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
         let path = path.as_ref();
-        self.files()
+        self.unixfs()
             .add(path, None)
             .instrument(self.span.clone())
             .await
@@ -947,7 +947,7 @@ impl Ipfs {
         &self,
         stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
     ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
-        self.files()
+        self.unixfs()
             .add(stream, None)
             .instrument(self.span.clone())
             .await
@@ -961,7 +961,7 @@ impl Ipfs {
         path: IpfsPath,
         dest: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        self.files()
+        self.unixfs()
             .get(path, dest, &[], false)
             .instrument(self.span.clone())
             .await
@@ -969,7 +969,7 @@ impl Ipfs {
 
     /// List directory contents
     pub async fn ls_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'_, NodeItem>, Error> {
-        self.files()
+        self.unixfs()
             .ls(path, &[], false)
             .instrument(self.span.clone())
             .await

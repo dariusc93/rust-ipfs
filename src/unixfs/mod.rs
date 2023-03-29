@@ -21,7 +21,7 @@ pub use ls::{ls, NodeItem};
 
 use crate::{Ipfs, IpfsPath};
 
-pub struct IpfsFiles {
+pub struct IpfsUnixfs {
     ipfs: Ipfs,
 }
 
@@ -60,7 +60,7 @@ impl<'a> From<BoxStream<'a, std::io::Result<Vec<u8>>>> for AddOpt<'a> {
     }
 }
 
-impl IpfsFiles {
+impl IpfsUnixfs {
     pub fn new(ipfs: Ipfs) -> Self {
         Self { ipfs }
     }
