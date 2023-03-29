@@ -57,7 +57,7 @@ use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::UnixfsStatus;
+use unixfs::{IpfsUnixfs, NodeItem, UnixfsStatus};
 
 use std::{
     borrow::Borrow,
@@ -677,6 +677,11 @@ impl Ipfs {
         &self.repo
     }
 
+    /// Returns an [`IpfsFiles`] for files operations
+    pub fn unixfs(&self) -> IpfsUnixfs {
+        IpfsUnixfs::new(self.clone())
+    }
+
     fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
@@ -915,9 +920,8 @@ impl Ipfs {
         impl Stream<Item = Result<Vec<u8>, unixfs::TraversalFailed>> + Send + '_,
         unixfs::TraversalFailed,
     > {
-        // convert early not to worry about the lifetime of parameter
-        let starting_point = starting_point.into();
-        unixfs::cat(self, starting_point, range, &[], false)
+        self.unixfs()
+            .cat(starting_point, range, &[], false)
             .instrument(self.span.clone())
             .await
     }
@@ -929,7 +933,9 @@ impl Ipfs {
         &self,
         path: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        unixfs::add_file(self, path, None)
+        let path = path.as_ref();
+        self.unixfs()
+            .add(path, None)
             .instrument(self.span.clone())
             .await
     }
@@ -941,7 +947,8 @@ impl Ipfs {
         &self,
         stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
     ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
-        unixfs::add(self, None, stream, None)
+        self.unixfs()
+            .add(stream, None)
             .instrument(self.span.clone())
             .await
     }
@@ -954,7 +961,16 @@ impl Ipfs {
         path: IpfsPath,
         dest: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        unixfs::get(self, path, dest, &[], false)
+        self.unixfs()
+            .get(path, dest, &[], false)
+            .instrument(self.span.clone())
+            .await
+    }
+
+    /// List directory contents
+    pub async fn ls_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'_, NodeItem>, Error> {
+        self.unixfs()
+            .ls(path, &[], false)
             .instrument(self.span.clone())
             .await
     }
