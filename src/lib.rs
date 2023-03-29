@@ -57,7 +57,7 @@ use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{IpfsFiles, UnixfsStatus};
+use unixfs::{IpfsFiles, NodeItem, UnixfsStatus};
 
 use std::{
     borrow::Borrow,
@@ -963,6 +963,14 @@ impl Ipfs {
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
         self.files()
             .get(path, dest, &[], false)
+            .instrument(self.span.clone())
+            .await
+    }
+
+    /// List directory contents
+    pub async fn ls_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'_, NodeItem>, Error> {
+        self.files()
+            .ls(path, &[], false)
             .instrument(self.span.clone())
             .await
     }
