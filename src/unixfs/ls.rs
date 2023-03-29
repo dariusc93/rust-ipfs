@@ -8,8 +8,9 @@ use crate::{Ipfs, IpfsPath};
 #[derive(Debug)]
 pub enum NodeItem {
     Error { error: anyhow::Error },
+    RootDirectory { cid: Cid, path: String },
     Directory { cid: Cid, path: String },
-    File { cid: Cid, path: String, size: usize },
+    File { cid: Cid, file: String, size: usize },
 }
 
 pub async fn ls<'a>(
@@ -34,6 +35,7 @@ pub async fn ls<'a>(
 
     let stream = async_stream::stream! {
         let mut cache = None;
+        let mut root_directory = String::new();
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
             let block = match ipfs.repo().get_block(next, providers, local_only).await {
@@ -48,13 +50,17 @@ pub async fn ls<'a>(
             match walker.next(block_data, &mut cache) {
                 Ok(ContinuedWalk::Bucket(..)) => {}
                 Ok(ContinuedWalk::File(_, cid, path, _, size)) => {
-                    yield NodeItem::File { cid: *cid, path: path.to_string_lossy().to_string(), size: size as _ };
+                    let file = path.to_string_lossy().to_string().replace(&format!("{root_directory}/"), "");
+                    yield NodeItem::File { cid: *cid, file, size: size as _ };
                 },
                 Ok(ContinuedWalk::RootDirectory( cid, path, _)) => {
-                    yield NodeItem::Directory { cid: *cid, path: path.to_string_lossy().to_string() };
+                    let path = path.to_string_lossy().to_string();
+                    root_directory = path.clone();
+                    yield NodeItem::RootDirectory { cid: *cid, path };
                 }
                 Ok(ContinuedWalk::Directory( cid, path, _)) => {
-                    yield NodeItem::Directory { cid: *cid, path: path.to_string_lossy().to_string() };
+                    let path = path.to_string_lossy().to_string().replace(&format!("{root_directory}/"), "");
+                    yield NodeItem::Directory { cid: *cid, path };
                 }
                 Ok(ContinuedWalk::Symlink( .. )) => {},
                 Err(error) => {
