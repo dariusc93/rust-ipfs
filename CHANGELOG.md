@@ -1,6 +1,6 @@
 # 0.3.9 [unrelease]
 - fix: Use peer_connections for peers function [PR 54]
-- chore(repo): chore(repo): Added field to only check locally [PR 55]
+- chore(repo): Added field to only check locally [PR 55]
 - refactor: Remove Column from DataStore [PR 56]
 - feat: Add IpfsUnixfs [PR: 57]
 
