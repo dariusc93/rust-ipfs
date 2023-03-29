@@ -28,7 +28,7 @@ pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
 pub use self::stream::ProviderStream;
 pub use self::stream::RecordStream;
-pub use self::transport::TransportConfig;
+pub use self::transport::{UpdateMode, UpgradeVersion, DnsResolver, MultiPlexOption, TransportConfig};
 pub(crate) mod gossipsub;
 mod transport;
 
@@ -257,11 +257,9 @@ pub async fn create_swarm(
     transport_config: TransportConfig,
     span: Span,
 ) -> Result<TSwarm, Error> {
-
-
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
-    
+
     // Create a Kademlia behaviour
     let (behaviour, relay_transport) =
         behaviour::build_behaviour(&keypair, options, swarm_config.connection).await?;
