@@ -921,7 +921,7 @@ impl Ipfs {
         unixfs::TraversalFailed,
     > {
         self.unixfs()
-            .cat(starting_point, range)
+            .cat(starting_point, range, &[], false)
             .instrument(self.span.clone())
             .await
     }

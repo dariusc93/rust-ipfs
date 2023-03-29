@@ -74,11 +74,13 @@ impl IpfsUnixfs {
         &self,
         starting_point: impl Into<StartingPoint>,
         range: Option<Range<u64>>,
+        peers: &'a [PeerId],
+        local: bool,
     ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed>
     {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
-        cat(&self.ipfs, starting_point, range, &[], false).await
+        cat(&self.ipfs, starting_point, range, peers, local).await
     }
 
     /// Add a file from either a file or stream
