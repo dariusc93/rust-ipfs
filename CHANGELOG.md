@@ -1,3 +1,6 @@
+# 0.3.11
+- chore: Lock libp2p to 0.51.1
+
 # 0.3.10
 - chore: Reexport transport items
 
