@@ -56,7 +56,7 @@ libp2p = { default-features = false, features = [
     "ecdsa",
     "rsa",
     "serde",
-], version = "=0.51.1" }
+], version = "0.51.2" }
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }

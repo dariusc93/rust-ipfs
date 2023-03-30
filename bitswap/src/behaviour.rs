@@ -19,7 +19,7 @@ use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::handler::OneShotHandler;
 use libp2p::swarm::{
     ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour,
-    NetworkBehaviourAction, NotifyHandler, PollParameters, THandler,
+    ToSwarm as NetworkBehaviourAction, NotifyHandler, PollParameters, THandler,
 };
 use std::task::{Context, Poll};
 use std::{

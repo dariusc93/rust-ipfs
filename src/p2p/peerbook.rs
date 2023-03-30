@@ -8,9 +8,10 @@ use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{
     self, dummy::ConnectionHandler as DummyConnectionHandler, NetworkBehaviour, PollParameters,
 };
+#[allow(deprecated)]
 use libp2p::swarm::{
     ConnectionClosed, ConnectionDenied, ConnectionId, ConnectionLimit, DialFailure, FromSwarm,
-    NetworkBehaviourAction, THandler, THandlerInEvent,
+    ToSwarm as NetworkBehaviourAction, THandler, THandlerInEvent,
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
@@ -122,7 +123,7 @@ pub struct Behaviour {
     limits: ConnectionLimits,
 
     events: VecDeque<
-        swarm::NetworkBehaviourAction<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>,
+        NetworkBehaviourAction<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>,
     >,
     cleanup_interval: Interval,
 
@@ -253,6 +254,7 @@ impl Behaviour {
             .map(|list| list.iter().map(|(_, addr)| addr).cloned().collect())
     }
 
+    #[allow(deprecated)]
     fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
         let limit = limit.unwrap_or(u32::MAX);
         let current = current as u32;
@@ -471,7 +473,7 @@ impl NetworkBehaviour for Behaviour {
         &mut self,
         cx: &mut Context,
         params: &mut impl PollParameters,
-    ) -> Poll<swarm::NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
+    ) -> Poll<NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
         let supported_protocols = params.supported_protocols();
         if supported_protocols.len() != self.protocols.len() {
             self.protocols = supported_protocols.collect();

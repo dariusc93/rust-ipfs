@@ -19,7 +19,7 @@ use libp2p::gossipsub::{
     Message as GossipsubMessage, MessageAuthenticity, MessageId, TopicHash,
 };
 use libp2p::swarm::{
-    ConnectionDenied, ConnectionId, NetworkBehaviour, NetworkBehaviourAction, PollParameters,
+    ConnectionDenied, ConnectionId, NetworkBehaviour, ToSwarm as NetworkBehaviourAction, PollParameters,
     THandler, THandlerInEvent,
 };
 
