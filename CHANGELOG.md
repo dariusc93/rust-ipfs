@@ -1,3 +1,6 @@
+# 0.3.12
+- chore: Update libp2p to 0.51.2 and add message_id_fn
+
 # 0.3.11
 - chore: Lock libp2p to 0.51.1
 
