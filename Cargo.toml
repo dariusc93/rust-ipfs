@@ -90,6 +90,8 @@ rlimit = "0.9"
 
 wasm-timer = "0.2"
 
+rand = "0.8"
+
 [build-dependencies]
 prost-build = { default-features = false, version = "0.11" }
 
