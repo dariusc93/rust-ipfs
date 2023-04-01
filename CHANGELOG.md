@@ -1,3 +1,8 @@
+# 0.3.13 [unreleased]
+- chore: Remove condition that prevents storing rtt [PR 58]
+
+[PR 58]: https://github.com/dariusc93/rust-ipfs/pull/58
+
 # 0.3.12
 - chore: Update libp2p to 0.51.2 and add message_id_fn
 
