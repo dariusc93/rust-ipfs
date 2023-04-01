@@ -11,7 +11,7 @@ use libp2p::swarm::{
 #[allow(deprecated)]
 use libp2p::swarm::{
     ConnectionClosed, ConnectionDenied, ConnectionId, ConnectionLimit, DialFailure, FromSwarm,
-    ToSwarm as NetworkBehaviourAction, THandler, THandlerInEvent,
+    THandler, THandlerInEvent, ToSwarm as NetworkBehaviourAction,
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
@@ -221,15 +221,13 @@ impl Behaviour {
     }
 
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, rtt: Duration) {
-        if self.peer_info.contains_key(&peer_id) {
-            self.peer_rtt
-                .entry(peer_id)
-                .and_modify(|r| {
-                    r.rotate_left(1);
-                    r[2] = rtt;
-                })
-                .or_insert([Duration::from_millis(0), Duration::from_millis(0), rtt]);
-        }
+        self.peer_rtt
+            .entry(peer_id)
+            .and_modify(|r| {
+                r.rotate_left(1);
+                r[2] = rtt;
+            })
+            .or_insert([Duration::from_millis(0), Duration::from_millis(0), rtt]);
     }
 
     pub fn get_peet_rtt(&self, peer_id: PeerId) -> Option<[Duration; 3]> {
