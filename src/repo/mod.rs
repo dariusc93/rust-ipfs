@@ -430,6 +430,22 @@ impl Repo {
         if let BlockPut::NewBlock = res {
             self.subscriptions
                 .finish_subscription(cid.into(), Ok(block));
+        }
+
+        Ok((cid, res))
+    }
+
+    /// Puts a block into the block store with bitswap cancellation
+    pub(crate) async fn put_block_with_cancellation(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+        let cid = *block.cid();
+        let (_cid, res) = self.block_store.put(block.clone()).await?;
+
+        // FIXME: this doesn't cause actual DHT providing yet, only some
+        // bitswap housekeeping; we might want to not ignore the channel
+        // errors when we actually start providing on the DHT
+        if let BlockPut::NewBlock = res {
+            self.subscriptions
+                .finish_subscription(cid.into(), Ok(block));
 
             // sending only fails if no one is listening anymore
             // and that is okay with us.
@@ -451,7 +467,12 @@ impl Repo {
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
-    pub async fn get_block(&self, cid: &Cid, peers: &[PeerId], local_only: bool) -> Result<Block, Error> {
+    pub async fn get_block(
+        &self,
+        cid: &Cid,
+        peers: &[PeerId],
+        local_only: bool,
+    ) -> Result<Block, Error> {
         // FIXME: here's a race: block_store might give Ok(None) and we get to create our
         // subscription after the put has completed. So maybe create the subscription first, then
         // cancel it?
@@ -462,7 +483,7 @@ impl Repo {
             if local_only {
                 anyhow::bail!("Unable to locate block {cid}");
             }
-            
+
             let subscription = self
                 .subscriptions
                 .create_subscription((*cid).into(), Some(self.events.clone()));
@@ -540,9 +561,7 @@ impl Repo {
         let value = string.as_bytes();
         // FIXME: needless vec<u8> creation
         let key = format!("ipns/{ipns}");
-        self.data_store
-            .put(key.as_bytes(), value)
-            .await
+        self.data_store.put(key.as_bytes(), value).await
     }
 
     /// Remove an ipld path from the datastore.

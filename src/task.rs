@@ -556,7 +556,7 @@ impl IpfsTask {
                         Arc::clone(self.swarm.behaviour().bitswap.stats.get(&peer_id).unwrap());
                     tokio::task::spawn(async move {
                         let bytes = block.data().len() as u64;
-                        let res = repo.put_block(block.clone()).await;
+                        let res = repo.put_block_with_cancellation(block.clone()).await;
                         match res {
                             Ok((_, uniqueness)) => match uniqueness {
                                 BlockPut::NewBlock => peer_stats.update_incoming_unique(bytes),
