@@ -179,7 +179,7 @@ impl GossipsubStream {
                         let counter = Arc::new(AtomicUsize::new(1));
                         self.active_streams
                             .insert(topic.hash(), Arc::clone(&counter));
-                        let (tx, rx) = async_broadcast::broadcast(92160);
+                        let (tx, rx) = async_broadcast::broadcast(15000);
                         let key = ve.key().clone();
                         ve.insert(tx);
                         Ok(SubscriptionStream {

@@ -1,7 +1,9 @@
 # 0.3.13 [unreleased]
 - chore: Remove condition that prevents storing rtt [PR 58]
+- chore: Reduce allocation in bitswap and pubsub [PR 59]
 
 [PR 58]: https://github.com/dariusc93/rust-ipfs/pull/58
+[PR 59]: https://github.com/dariusc93/rust-ipfs/pull/59
 
 # 0.3.12
 - chore: Update libp2p to 0.51.2 and add message_id_fn
