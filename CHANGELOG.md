@@ -1,4 +1,4 @@
-# 0.3.13 [unreleased]
+# 0.3.13
 - chore: Remove condition that prevents storing rtt [PR 58]
 - chore: Reduce allocation in bitswap and pubsub [PR 59]
 
