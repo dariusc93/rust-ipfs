@@ -44,10 +44,10 @@ pub use crate::{
 };
 
 use libipld::multibase::{self, Base};
+
 pub use libp2p::{
     self,
     core::transport::ListenerId,
-    gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},
@@ -1172,7 +1172,7 @@ impl IpfsTask {
                     }
                 }
                 self.swarm.behaviour_mut().want_block(cid, &peers)
-            },
+            }
             RepoEvent::UnwantBlock(cid) => self.swarm.behaviour_mut().bitswap().cancel_block(&cid),
             RepoEvent::NewBlock(cid, ret) => {
                 // TODO: consider if cancel is applicable in cases where we provide the

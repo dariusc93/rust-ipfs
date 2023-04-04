@@ -90,10 +90,11 @@ pub type Block = libipld::Block<libipld::DefaultParams>;
 
 use libipld::{Cid, Ipld, IpldCodec};
 
+pub use libp2p_gossipsub::{MessageId, PublishError};
+
 pub use libp2p::{
     self,
     core::transport::ListenerId,
-    gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
     kad::{record::Key, Quorum},

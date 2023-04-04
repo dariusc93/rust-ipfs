@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::IpfsOptions;
 
 use either::Either;
-use libp2p::gossipsub::ValidationMode;
+use libp2p_gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
