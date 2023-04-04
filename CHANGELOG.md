@@ -1,3 +1,6 @@
+# 0.3.14
+- chore: Downgrade libp2p-gossipsub (temporarily)
+
 # 0.3.13
 - chore: Remove condition that prevents storing rtt [PR 58]
 - chore: Reduce allocation in bitswap and pubsub [PR 59]
