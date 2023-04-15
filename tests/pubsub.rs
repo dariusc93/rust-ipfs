@@ -97,13 +97,13 @@ async fn publish_between_two_nodes_single_topic() {
 
     let expected = [
         (
-            libp2p_gossipsub::IdentTopic::new(topic.clone()),
+            libp2p::gossipsub::IdentTopic::new(topic.clone()),
             Some(nodes[0].id),
             b"foobar",
             nodes[1].id,
         ),
         (
-            libp2p_gossipsub::IdentTopic::new(topic.clone()),
+            libp2p::gossipsub::IdentTopic::new(topic.clone()),
             Some(nodes[1].id),
             b"barfoo",
             nodes[0].id,
@@ -224,13 +224,13 @@ async fn publish_between_two_nodes_different_topics() {
     // subscribing to the streams they are sending to.
     let expected = [
         (
-            libp2p_gossipsub::IdentTopic::new(topic_a.clone()),
+            libp2p::gossipsub::IdentTopic::new(topic_a.clone()),
             Some(node_a.id),
             b"foobar",
             node_b.id,
         ),
         (
-            libp2p_gossipsub::IdentTopic::new(topic_b.clone()),
+            libp2p::gossipsub::IdentTopic::new(topic_b.clone()),
             Some(node_b.id),
             b"barfoo",
             node_a.id,
