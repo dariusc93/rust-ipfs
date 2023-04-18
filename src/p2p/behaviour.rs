@@ -1,7 +1,6 @@
 use super::gossipsub::GossipsubStream;
 use super::peerbook::{self, ConnectionLimits};
 use either::Either;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -30,7 +29,6 @@ use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
 use std::borrow::Cow;
-use std::collections::hash_map::DefaultHasher;
 use std::convert::TryFrom;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
@@ -415,17 +413,6 @@ impl Behaviour {
             }
 
             builder.validation_mode(pubsub_config.validate.into());
-            
-            //Workaround due to recent changes made upstream. See https://github.com/libp2p/rust-libp2p/issues/3714
-            builder.message_id_fn(|message| {
-                use std::hash::{Hash, Hasher};
-                let mut rng = rand::thread_rng();
-                let mut s = DefaultHasher::new();
-                message.data.hash(&mut s);
-                let ran_num = rng.gen::<u64>();
-                ran_num.hash(&mut s);
-                libp2p::gossipsub::MessageId::from(s.finish().to_string())
-            });
 
             let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
 

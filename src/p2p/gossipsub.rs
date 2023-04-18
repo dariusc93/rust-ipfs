@@ -2,7 +2,6 @@ use async_broadcast::TrySendError;
 use futures::channel::mpsc as channel;
 use futures::stream::{FusedStream, Stream};
 use libp2p::gossipsub::PublishError;
-use libp2p::identity::Keypair;
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
@@ -11,16 +10,16 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
-use libp2p::identity::PeerId;
 use libp2p::core::{Endpoint, Multiaddr};
+use libp2p::identity::PeerId;
 
 use libp2p::gossipsub::{
-    self, Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,
-    Message as GossipsubMessage, MessageAuthenticity, MessageId, TopicHash,
+    Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,
+    Message as GossipsubMessage, MessageId, TopicHash,
 };
 use libp2p::swarm::{
-    ConnectionDenied, ConnectionId, NetworkBehaviour, ToSwarm as NetworkBehaviourAction, PollParameters,
-    THandler, THandlerInEvent,
+    ConnectionDenied, ConnectionId, NetworkBehaviour, PollParameters, THandler, THandlerInEvent,
+    ToSwarm as NetworkBehaviourAction,
 };
 
 /// Currently a thin wrapper around Gossipsub.
@@ -148,23 +147,6 @@ impl From<Gossipsub> for GossipsubStream {
 }
 
 impl GossipsubStream {
-    /// Delegates the `peer_id` over to [`Gossipsub`] and internally only does accounting on
-    /// top of the gossip.
-    pub fn new(keypair: Keypair) -> anyhow::Result<Self> {
-        let (tx, rx) = channel::unbounded();
-        let config = gossipsub::ConfigBuilder::default()
-            .build()
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        Ok(GossipsubStream {
-            streams: HashMap::new(),
-            gossipsub: Gossipsub::new(MessageAuthenticity::Signed(keypair), config)
-                .map_err(|e| anyhow::anyhow!("{}", e))?,
-            unsubscriptions: (tx, rx),
-            active_streams: Default::default(),
-        })
-    }
-
     /// Subscribes to a currently unsubscribed topic.
     /// Returns a receiver for messages sent to the topic or `None` if subscription existed
     /// already.
