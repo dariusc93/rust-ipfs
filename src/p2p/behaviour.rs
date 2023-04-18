@@ -177,9 +177,9 @@ impl Default for IdentifyConfiguration {
         Self {
             protocol_version: "/ipfs/0.1.0".into(),
             agent_version: "rust-ipfs".into(),
-            initial_delay: Duration::from_millis(0),
+            initial_delay: Duration::from_millis(200),
             interval: Duration::from_secs(5 * 60),
-            push_update: false,
+            push_update: true,
             cache: 100,
         }
     }
