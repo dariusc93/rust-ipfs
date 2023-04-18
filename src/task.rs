@@ -867,7 +867,7 @@ impl IpfsTask {
                     .bitswap()
                     .connected_peers
                     .keys()
-                    .cloned()
+                    .copied()
                     .collect();
                 let _ = ret.send(peers);
             }
