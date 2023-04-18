@@ -528,6 +528,8 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use super::Behaviour as PeerBook;
     use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
     use futures::StreamExt;
@@ -684,10 +686,12 @@ mod test {
 
         let behaviour = Behaviour {
             peerbook: PeerBook::default(),
-            identify: Toggle::from(identify.then_some(identify::Behaviour::new(Config::new(
-                "/peerbook/0.1".into(),
-                pubkey,
-            )))),
+            identify: Toggle::from(
+                identify.then_some(identify::Behaviour::new(
+                    Config::new("/peerbook/0.1".into(), pubkey)
+                        .with_initial_delay(Duration::from_secs(0)),
+                )),
+            ),
             keep_alive: keep_alive::Behaviour,
         };
 
