@@ -720,7 +720,7 @@ impl IpfsTask {
                 ret.send(Ok(connected)).ok();
             }
             IpfsEvent::Connected(ret) => {
-                let connections = self.swarm.connected_peers().cloned();
+                let connections = self.swarm.connected_peers().copied();
                 ret.send(Ok(connections.collect())).ok();
             }
             IpfsEvent::Disconnect(peer, ret) => {
