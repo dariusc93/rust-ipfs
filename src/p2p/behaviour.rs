@@ -12,14 +12,15 @@ use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::Multiaddr;
 use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
-use libp2p_gossipsub::{Event as GossipsubEvent};
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
 use libp2p::identity::{Keypair, PeerId};
 use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
 };
-use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent};
+use libp2p::kad::{
+    Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent, KademliaStoreInserts,
+};
 use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::client::{self, Transport as ClientTransport};
@@ -28,11 +29,11 @@ use libp2p::relay::{Behaviour as Relay, Event as RelayEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
+use libp2p_gossipsub::Event as GossipsubEvent;
 use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
-
 
 /// Behaviour type.
 #[derive(NetworkBehaviour)]
@@ -283,6 +284,7 @@ pub struct KadConfig {
     pub publication_interval: Option<Duration>,
     pub provider_record_ttl: Option<Duration>,
     pub insert_method: KadInserts,
+    pub store_filter: KadStoreInserts,
 }
 
 #[derive(Clone, Debug, Default, Copy)]
@@ -290,6 +292,22 @@ pub enum KadInserts {
     #[default]
     Auto,
     Manual,
+}
+
+#[derive(Clone, Debug, Default, Copy)]
+pub enum KadStoreInserts {
+    Unfiltered,
+    #[default]
+    Filtered,
+}
+
+impl From<KadStoreInserts> for KademliaStoreInserts {
+    fn from(value: KadStoreInserts) -> Self {
+        match value {
+            KadStoreInserts::Filtered => KademliaStoreInserts::FilterBoth,
+            KadStoreInserts::Unfiltered => KademliaStoreInserts::Unfiltered,
+        }
+    }
 }
 
 impl From<KadInserts> for KademliaBucketInserts {
@@ -315,6 +333,7 @@ impl From<KadConfig> for KademliaConfig {
         kad_config.set_publication_interval(config.publication_interval);
         kad_config.set_provider_record_ttl(config.provider_record_ttl);
         kad_config.set_kbucket_inserts(config.insert_method.into());
+        kad_config.set_record_filtering(config.store_filter.into());
         kad_config
     }
 }
@@ -329,6 +348,7 @@ impl Default for KadConfig {
             provider_record_ttl: None,
             publication_interval: None,
             insert_method: Default::default(),
+            store_filter: Default::default(),
         }
     }
 }
@@ -414,7 +434,7 @@ impl Behaviour {
             }
 
             builder.validation_mode(pubsub_config.validate.into());
-            
+
             let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
 
             let gossipsub = libp2p_gossipsub::Behaviour::new(
