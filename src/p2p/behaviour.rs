@@ -296,8 +296,8 @@ pub enum KadInserts {
 
 #[derive(Clone, Debug, Default, Copy)]
 pub enum KadStoreInserts {
-    Unfiltered,
     #[default]
+    Unfiltered,
     Filtered,
 }
 
