@@ -1,7 +1,7 @@
 use async_broadcast::TrySendError;
 use futures::channel::mpsc as channel;
 use futures::stream::{FusedStream, Stream};
-use libp2p_gossipsub::PublishError;
+use libp2p::gossipsub::PublishError;
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
@@ -10,16 +10,16 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
-use libp2p::identity::PeerId;
 use libp2p::core::{Endpoint, Multiaddr};
+use libp2p::identity::PeerId;
 
-use libp2p_gossipsub::{
-    self, Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,
+use libp2p::gossipsub::{
+    Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,
     Message as GossipsubMessage, MessageId, TopicHash,
 };
 use libp2p::swarm::{
-    ConnectionDenied, ConnectionId, NetworkBehaviour, ToSwarm as NetworkBehaviourAction, PollParameters,
-    THandler, THandlerInEvent,
+    ConnectionDenied, ConnectionId, NetworkBehaviour, PollParameters, THandler, THandlerInEvent,
+    ToSwarm as NetworkBehaviourAction,
 };
 
 /// Currently a thin wrapper around Gossipsub.
@@ -309,7 +309,7 @@ impl NetworkBehaviour for GossipsubStream {
         &mut self,
         ctx: &mut Context,
         poll: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<libp2p_gossipsub::Event, THandlerInEvent<Self>>> {
+    ) -> Poll<NetworkBehaviourAction<libp2p::gossipsub::Event, THandlerInEvent<Self>>> {
         use futures::stream::StreamExt;
         use std::collections::hash_map::Entry;
 

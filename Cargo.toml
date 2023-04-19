@@ -1,5 +1,6 @@
 [package]
 authors = ["Darius C", "Rust-IPFS contributors"]
+rust-version = "1.68"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 name = "rust-ipfs"
@@ -34,6 +35,7 @@ futures = { default-features = false, version = "0.3", features = [
 hash_hasher = "2.0.3"
 rust-unixfs = { version = "=0.3.0", path = "unixfs" }
 libp2p = { default-features = false, features = [
+    "gossipsub",
     "autonat",
     "relay",
     "dcutr",
@@ -55,8 +57,7 @@ libp2p = { default-features = false, features = [
     "ecdsa",
     "rsa",
     "serde",
-], version = "0.51.2" }
-libp2p-gossipsub = "=0.44.1"
+], version = "0.51.3" }
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }

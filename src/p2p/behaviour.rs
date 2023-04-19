@@ -12,6 +12,7 @@ use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::Multiaddr;
 use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
+use libp2p::gossipsub::Event as GossipsubEvent;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
 use libp2p::identity::{Keypair, PeerId};
 use libp2p::kad::record::{
@@ -29,7 +30,6 @@ use libp2p::relay::{Behaviour as Relay, Event as RelayEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p_gossipsub::Event as GossipsubEvent;
 use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::num::{NonZeroU32, NonZeroUsize};
@@ -421,10 +421,10 @@ impl Behaviour {
 
         let pubsub = {
             let pubsub_config = options.pubsub_config.unwrap_or_default();
-            let mut builder = libp2p_gossipsub::ConfigBuilder::default();
+            let mut builder = libp2p::gossipsub::ConfigBuilder::default();
 
             if let Some(protocol) = pubsub_config.custom_protocol_id {
-                builder.protocol_id(protocol, libp2p_gossipsub::Version::V1_1);
+                builder.protocol_id(protocol, libp2p::gossipsub::Version::V1_1);
             }
 
             builder.max_transmit_size(pubsub_config.max_transmit_size);
@@ -437,8 +437,8 @@ impl Behaviour {
 
             let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
 
-            let gossipsub = libp2p_gossipsub::Behaviour::new(
-                libp2p_gossipsub::MessageAuthenticity::Signed(keypair.clone()),
+            let gossipsub = libp2p::gossipsub::Behaviour::new(
+                libp2p::gossipsub::MessageAuthenticity::Signed(keypair.clone()),
                 config,
             )
             .map_err(|e| anyhow::anyhow!("{}", e))?;
