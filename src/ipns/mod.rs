@@ -1,6 +1,7 @@
 //! IPNS functionality around [`Ipfs`].
 
 use crate::error::Error;
+use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
 use crate::Ipfs;
 
@@ -23,12 +24,12 @@ impl Ipns {
     }
 
     /// Resolves a ipns path to an ipld path.
-    pub async fn resolve(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
+    pub async fn resolve(&self, resolver: DnsResolver, path: &IpfsPath) -> Result<IpfsPath, Error> {
         let path = path.to_owned();
         match path.root() {
             PathRoot::Ipld(_) => Ok(path),
             PathRoot::Ipns(_) => Err(anyhow::anyhow!("unimplemented")),
-            PathRoot::Dns(domain) => Ok(dnslink::resolve(domain).await?),
+            PathRoot::Dns(domain) => Ok(dnslink::resolve(resolver, domain).await?),
         }
     }
 }

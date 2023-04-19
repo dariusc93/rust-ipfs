@@ -959,7 +959,7 @@ impl Ipfs {
     pub async fn resolve_ipns(&self, path: &IpfsPath, recursive: bool) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
-            let mut resolved = ipns.resolve(path).await;
+            let mut resolved = ipns.resolve(p2p::DnsResolver::Cloudflare, path).await;
 
             if recursive {
                 let mut seen = HashSet::with_capacity(1);
@@ -967,7 +967,7 @@ impl Ipfs {
                     if !seen.insert(res.clone()) {
                         break;
                     }
-                    resolved = ipns.resolve(res).await;
+                    resolved = ipns.resolve(p2p::DnsResolver::Cloudflare, res).await;
                 }
             }
             resolved
