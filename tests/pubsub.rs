@@ -34,17 +34,20 @@ async fn resubscribe_after_unsubscribe() {
 
 #[tokio::test]
 async fn unsubscribe_cloned_via_drop() {
+    let empty: &[&str] = &[];
     let a = Node::new("test_node").await;
 
     let msgs_1 = a.pubsub_subscribe("topic".into()).await.unwrap();
     let msgs_2 = a.pubsub_subscribe("topic".into()).await.unwrap();
 
     drop(msgs_1);
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    assert_ne!(a.pubsub_subscribed().await.unwrap(), empty);
+
     drop(msgs_2);
 
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-    let empty: &[&str] = &[];
     assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
 }
 
