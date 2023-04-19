@@ -1,3 +1,8 @@
+# 0.3.15 [unreleased]
+- chore: Update libp2p to 0.51.3 [PR 61]
+
+[PR 61]: https://github.com/dariusc93/rust-ipfs/pull/61
+
 # 0.3.14
 - chore: Downgrade libp2p-gossipsub (temporarily)
 
