@@ -19,7 +19,9 @@ use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
 };
-use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent};
+use libp2p::kad::{
+    Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent, KademliaStoreInserts,
+};
 use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::client::{self, Transport as ClientTransport};
@@ -175,10 +177,10 @@ impl Default for IdentifyConfiguration {
         Self {
             protocol_version: "/ipfs/0.1.0".into(),
             agent_version: "rust-ipfs".into(),
-            initial_delay: Duration::from_millis(500),
+            initial_delay: Duration::from_millis(200),
             interval: Duration::from_secs(5 * 60),
-            push_update: false,
-            cache: 0,
+            push_update: true,
+            cache: 100,
         }
     }
 }
@@ -282,6 +284,7 @@ pub struct KadConfig {
     pub publication_interval: Option<Duration>,
     pub provider_record_ttl: Option<Duration>,
     pub insert_method: KadInserts,
+    pub store_filter: KadStoreInserts,
 }
 
 #[derive(Clone, Debug, Default, Copy)]
@@ -289,6 +292,22 @@ pub enum KadInserts {
     #[default]
     Auto,
     Manual,
+}
+
+#[derive(Clone, Debug, Default, Copy)]
+pub enum KadStoreInserts {
+    #[default]
+    Unfiltered,
+    Filtered,
+}
+
+impl From<KadStoreInserts> for KademliaStoreInserts {
+    fn from(value: KadStoreInserts) -> Self {
+        match value {
+            KadStoreInserts::Filtered => KademliaStoreInserts::FilterBoth,
+            KadStoreInserts::Unfiltered => KademliaStoreInserts::Unfiltered,
+        }
+    }
 }
 
 impl From<KadInserts> for KademliaBucketInserts {
@@ -314,6 +333,7 @@ impl From<KadConfig> for KademliaConfig {
         kad_config.set_publication_interval(config.publication_interval);
         kad_config.set_provider_record_ttl(config.provider_record_ttl);
         kad_config.set_kbucket_inserts(config.insert_method.into());
+        kad_config.set_record_filtering(config.store_filter.into());
         kad_config
     }
 }
@@ -328,6 +348,7 @@ impl Default for KadConfig {
             provider_record_ttl: None,
             publication_interval: None,
             insert_method: Default::default(),
+            store_filter: Default::default(),
         }
     }
 }

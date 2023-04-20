@@ -2,8 +2,9 @@ use crate::error::Error;
 use crate::path::IpfsPath;
 use std::str::FromStr;
 use tracing_futures::Instrument;
+use crate::p2p::DnsResolver;
 
-pub async fn resolve(domain: &str) -> Result<IpfsPath, Error> {
+pub async fn resolve(resolver: DnsResolver, domain: &str) -> Result<IpfsPath, Error> {
     use std::borrow::Cow;
     use trust_dns_resolver::AsyncResolver;
 
@@ -28,7 +29,8 @@ pub async fn resolve(domain: &str) -> Result<IpfsPath, Error> {
         // FIXME: this uses caching trust-dns resolver even though it's discarded right away
         // when trust-dns support lands in future libp2p-dns investigate if we could share one, no need
         // to have multiple related caches.
-        let resolver = AsyncResolver::tokio_from_system_conf()?;
+        let (config, opt) = resolver.into();
+        let resolver = AsyncResolver::tokio(config, opt)?;
 
         // previous implementation searched $domain and _dnslink.$domain concurrently. not sure did
         // `domain` assume fqdn names or not, but local suffices were not being searched on windows at
@@ -79,13 +81,13 @@ mod tests {
     #[tokio::test]
     async fn resolve_ipfs_io() {
         tracing_subscriber::fmt::init();
-        let res = resolve("ipfs.io").await.unwrap().to_string();
+        let res = resolve(crate::p2p::DnsResolver::Google, "ipfs.io").await.unwrap().to_string();
         assert_eq!(res, "/ipns/website.ipfs.io");
     }
 
     #[tokio::test]
     async fn resolve_website_ipfs_io() {
-        let res = resolve("website.ipfs.io").await.unwrap();
+        let res = resolve(crate::p2p::DnsResolver::Google, "website.ipfs.io").await.unwrap();
 
         assert!(
             matches!(res.root(), crate::path::PathRoot::Ipld(_)),

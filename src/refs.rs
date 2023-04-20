@@ -1,6 +1,6 @@
 //! `refs` or the references of dag-pb and other supported IPLD formats functionality.
 
-use crate::{Ipfs};
+use crate::repo::Repo;
 use async_stream::stream;
 use futures::stream::Stream;
 use libipld::{Cid, Ipld, IpldCodec};
@@ -80,14 +80,14 @@ impl IpldRefs {
 
     pub fn refs_of_resolved<'a, MaybeOwned, Iter>(
         self,
-        ipfs: MaybeOwned,
+        repo: MaybeOwned,
         iplds: Iter,
     ) -> impl Stream<Item = Result<Edge, IpldRefsError>> + Send + 'a
     where
-        MaybeOwned: Borrow<Ipfs> + Send + 'a,
+        MaybeOwned: Borrow<Repo> + Send + 'a,
         Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
     {
-        iplds_refs_inner(ipfs, iplds, self)
+        iplds_refs_inner(repo, iplds, self)
     }
 }
 
@@ -109,13 +109,13 @@ impl IpldRefs {
 /// Depending on how this function is called, the lifetime will be tied to the lifetime of given
 /// `&Ipfs` or `'static` when given ownership of `Ipfs`.
 pub fn iplds_refs<'a, MaybeOwned, Iter>(
-    ipfs: MaybeOwned,
+    repo: MaybeOwned,
     iplds: Iter,
     max_depth: Option<u64>,
     unique: bool,
 ) -> impl Stream<Item = Result<Edge, libipld::error::Error>> + Send + 'a
 where
-    MaybeOwned: Borrow<Ipfs> + Send + 'a,
+    MaybeOwned: Borrow<Repo> + Send + 'a,
     Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
 {
     use futures::stream::TryStreamExt;
@@ -124,7 +124,7 @@ where
         unique,
         download_blocks: true,
     };
-    iplds_refs_inner(ipfs, iplds, opts).map_err(|e| match e {
+    iplds_refs_inner(repo, iplds, opts).map_err(|e| match e {
         IpldRefsError::Loading(e) => e,
         x => unreachable!(
             "iplds_refs_inner should not return other errors for download_blocks: false; {}",
@@ -134,12 +134,12 @@ where
 }
 
 fn iplds_refs_inner<'a, MaybeOwned, Iter>(
-    ipfs: MaybeOwned,
+    repo: MaybeOwned,
     iplds: Iter,
     opts: IpldRefs,
 ) -> impl Stream<Item = Result<Edge, IpldRefsError>> + Send + 'a
 where
-    MaybeOwned: Borrow<Ipfs> + Send + 'a,
+    MaybeOwned: Borrow<Repo> + Send + 'a,
     Iter: IntoIterator<Item = (Cid, Ipld)>,
 {
     let mut work = VecDeque::new();
@@ -187,10 +187,10 @@ where
 
             // if this is not bound to a local variable it'll introduce a Sync requirement on
             // `MaybeOwned` which we don't necessarily need.
-            let borrowed = ipfs.borrow();
+            let borrowed = repo.borrow();
 
             let block = if download_blocks {
-                match borrowed.get_block(&cid).await {
+                match borrowed.get_block(&cid, &[], false).await {
                     Ok(block) => block,
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);
@@ -202,7 +202,7 @@ where
                     }
                 }
             } else {
-                match borrowed.repo.get_block_now(&cid).await {
+                match borrowed.get_block_now(&cid).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         yield Err(IpldRefsError::BlockNotFound(cid.to_owned()));
@@ -380,7 +380,7 @@ mod tests {
         let root_block = ipfs.get_block(&Cid::try_from(root).unwrap()).await.unwrap();
         let ipld = root_block.decode::<IpldCodec, Ipld>().unwrap();
 
-        let all_edges: Vec<_> = iplds_refs(ipfs, vec![(*root_block.cid(), ipld)], None, false)
+        let all_edges: Vec<_> = iplds_refs(ipfs.repo(), vec![(*root_block.cid(), ipld)], None, false)
             .map_ok(
                 |Edge {
                      source,
@@ -428,7 +428,7 @@ mod tests {
         let ipld = root_block.decode::<IpldCodec, Ipld>().unwrap();
 
         let destinations: HashSet<_> =
-            iplds_refs(ipfs, vec![(*root_block.cid(), ipld)], None, true)
+            iplds_refs(ipfs.repo(), vec![(*root_block.cid(), ipld)], None, true)
                 .map_ok(|Edge { destination, .. }| destination.to_string())
                 .try_collect()
                 .await

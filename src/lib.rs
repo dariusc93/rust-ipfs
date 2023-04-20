@@ -418,6 +418,15 @@ impl UninitializedIpfs {
         self
     }
 
+    /// Adds a listening addresses
+    pub fn add_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
+        if !addrs.is_empty() {
+            self.options.listening_addrs = addrs;
+        }
+
+        self
+    }
+
     /// Adds a bootstrap node
     pub fn add_bootstrap(mut self, addr: Multiaddr) -> Self {
         if !self.options.bootstrap.contains(&addr) {
@@ -743,32 +752,12 @@ impl Ipfs {
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
     pub async fn insert_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        use futures::stream::TryStreamExt;
         let span = debug_span!(parent: &self.span, "insert_pin", cid = %cid, recursive);
-        let refs_span = debug_span!(parent: &span, "insert_pin refs");
 
-        async move {
-            // this needs to download everything but /pin/ls does not
-            let block = self.repo.get_block(cid, &[], false).await?;
-
-            if !recursive {
-                self.repo.insert_direct_pin(cid).await
-            } else {
-                let ipld = block.decode::<IpldCodec, Ipld>()?;
-
-                let st = crate::refs::IpldRefs::default()
-                    .with_only_unique()
-                    .refs_of_resolved(self, vec![(*cid, ipld.clone())].into_iter())
-                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
-                    .into_stream()
-                    .instrument(refs_span)
-                    .boxed();
-
-                self.repo.insert_recursive_pin(cid, st).await
-            }
-        }
-        .instrument(span)
-        .await
+        self.repo()
+            .insert_pin(cid, recursive, false)
+            .instrument(span)
+            .await
     }
 
     /// Unpins a given Cid recursively or only directly.
@@ -797,7 +786,7 @@ impl Ipfs {
                 let st = crate::refs::IpldRefs::default()
                     .with_only_unique()
                     .with_existing_blocks()
-                    .refs_of_resolved(self.to_owned(), vec![(*cid, ipld.clone())].into_iter())
+                    .refs_of_resolved(self.repo(), vec![(*cid, ipld.clone())].into_iter())
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()
                     .boxed();
@@ -979,7 +968,7 @@ impl Ipfs {
     pub async fn resolve_ipns(&self, path: &IpfsPath, recursive: bool) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
-            let mut resolved = ipns.resolve(path).await;
+            let mut resolved = ipns.resolve(p2p::DnsResolver::Cloudflare, path).await;
 
             if recursive {
                 let mut seen = HashSet::with_capacity(1);
@@ -987,7 +976,7 @@ impl Ipfs {
                     if !seen.insert(res.clone()) {
                         break;
                     }
-                    resolved = ipns.resolve(res).await;
+                    resolved = ipns.resolve(p2p::DnsResolver::Cloudflare, res).await;
                 }
             }
             resolved
@@ -1589,7 +1578,7 @@ impl Ipfs {
     where
         Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
     {
-        refs::iplds_refs(self, iplds, max_depth, unique)
+        refs::iplds_refs(self.repo(), iplds, max_depth, unique)
     }
 
     /// Obtain the list of addresses of bootstrapper nodes that are currently used.

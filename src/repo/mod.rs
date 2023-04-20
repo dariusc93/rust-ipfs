@@ -12,7 +12,9 @@ use futures::channel::{
     oneshot,
 };
 use futures::sink::SinkExt;
+use futures::{StreamExt, TryStreamExt};
 use libipld::cid::Cid;
+use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
 use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
@@ -434,7 +436,10 @@ impl Repo {
 
     /// Puts a block into the block store with bitswap cancellation
     // TODO: after changing bitswap implementation
-    pub(crate) async fn put_block_with_cancellation(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+    pub(crate) async fn put_block_with_cancellation(
+        &self,
+        block: Block,
+    ) -> Result<(Cid, BlockPut), Error> {
         let cid = *block.cid();
         let (_cid, res) = self.block_store.put(block.clone()).await?;
 
@@ -568,6 +573,33 @@ impl Repo {
         // cloned again
         let key = format!("ipns/{ipns}");
         self.data_store.remove(key.as_bytes()).await
+    }
+
+    /// Pins a given Cid recursively or directly (non-recursively).
+    pub async fn insert_pin(
+        &self,
+        cid: &Cid,
+        recursive: bool,
+        local_only: bool,
+    ) -> Result<(), Error> {
+        // Can download if `local_only` is false
+        let block = self.get_block(cid, &[], local_only).await?;
+
+        if !recursive {
+            self.insert_direct_pin(cid).await?
+        } else {
+            let ipld = block.decode::<IpldCodec, Ipld>()?;
+
+            let st = crate::refs::IpldRefs::default()
+                .with_only_unique()
+                .refs_of_resolved(self, vec![(*cid, ipld.clone())].into_iter())
+                .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                .into_stream()
+                .boxed();
+
+            self.insert_recursive_pin(cid, st).await?
+        }
+        Ok(())
     }
 
     /// Inserts a direct pin for a `Cid`.
