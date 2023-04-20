@@ -418,6 +418,15 @@ impl UninitializedIpfs {
         self
     }
 
+    /// Adds a listening addresses
+    pub fn add_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
+        if !addrs.is_empty() {
+            self.options.listening_addrs = addrs;
+        }
+
+        self
+    }
+
     /// Adds a bootstrap node
     pub fn add_bootstrap(mut self, addr: Multiaddr) -> Self {
         if !self.options.bootstrap.contains(&addr) {
