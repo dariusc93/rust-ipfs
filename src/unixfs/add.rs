@@ -19,7 +19,7 @@ pub struct AddOption {
 impl Default for AddOption {
     fn default() -> Self {
         Self {
-            chunk: Some(Chunker::Size(1024 * 1024)),
+            chunk: Some(Chunker::Size(256 * 1024)),
             pin: false,
             provide: false,
         }
@@ -124,17 +124,17 @@ pub async fn add<'a>(
         };
 
         if let Some(opt) = opt {
+            if opt.pin {
+                if let Ok(false) = ipfs.is_pinned(&cid).await {
+                    if let Err(e) = ipfs.insert_pin(&cid, true).await {
+                        error!("Unable to pin {cid}: {e}");
+                    }
+                }
+            }
             tokio::spawn({
                 let opt = opt;
                 let ipfs = ipfs;
                 async move {
-                    if opt.pin {
-                        if let Ok(false) = ipfs.is_pinned(&cid).await {
-                            if let Err(e) = ipfs.insert_pin(&cid, true).await {
-                                error!("Unable to pin {cid}: {e}");
-                            }
-                        }
-                    }
                     if opt.provide {
                         if let Err(e) = ipfs.provide(cid).await {
                             error!("Unable to provide {cid}: {e}");
