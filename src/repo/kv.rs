@@ -68,23 +68,39 @@ impl DataStore for KvDataStore {
     }
 
     /// Checks if a key is present in the datastore.
-    async fn contains(&self, _key: &[u8]) -> Result<bool, Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || db.contains_key(&key).map_err(anyhow::Error::from))
+            .await?
     }
 
     /// Returns the value associated with a key from the datastore.
-    async fn get(&self, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            db.get(key)
+                .map_err(Error::from)
+                .map(|item| item.map(|v| v.to_vec()))
+        })
+        .await?
     }
 
     /// Puts the value under the key in the datastore.
-    async fn put(&self, _key: &[u8], _value: &[u8]) -> Result<(), Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        let value = value.to_owned();
+        tokio::task::spawn_blocking(move || db.insert(key, value).map_err(Error::from).map(|_| ()))
+            .await?
     }
 
     /// Removes a key-value pair from the datastore.
-    async fn remove(&self, _key: &[u8]) -> Result<(), Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn remove(&self, key: &[u8]) -> Result<(), Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || db.remove(key).map_err(Error::from).map(|_| ())).await?
     }
 
     /// Wipes the datastore.
