@@ -71,7 +71,7 @@ impl DataStore for KvDataStore {
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
         let db = self.get_db().to_owned();
         let key = key.to_owned();
-        tokio::task::spawn_blocking(move || db.contains_key(&key).map_err(anyhow::Error::from))
+        tokio::task::spawn_blocking(move || db.contains_key(key).map_err(anyhow::Error::from))
             .await?
     }
 
@@ -538,3 +538,39 @@ fn is_not_pinned_or_pinned_indirectly(
 
 #[cfg(test)]
 crate::pinstore_interface_tests!(common_tests, crate::repo::kv::KvDataStore::new);
+
+#[cfg(test)]
+mod test {
+    use crate::repo::{kv::KvDataStore, DataStore};
+
+    #[tokio::test]
+    async fn test_kv_datastore() {
+        let tmp = std::env::temp_dir();
+        let store = KvDataStore::new(tmp.clone());
+        let key = [1, 2, 3, 4];
+        let value = [5, 6, 7, 8];
+
+        store.init().await.unwrap();
+        store.open().await.unwrap();
+
+        let contains = store.contains(&key);
+        assert!(!contains.await.unwrap());
+        let get = store.get(&key);
+        assert_eq!(get.await.unwrap(), None);
+        store.remove(&key).await.unwrap();
+
+        let put = store.put(&key, &value);
+        put.await.unwrap();
+        let contains = store.contains(&key);
+        assert!(contains.await.unwrap());
+        let get = store.get(&key);
+        assert_eq!(get.await.unwrap(), Some(value.to_vec()));
+
+        store.remove(&key).await.unwrap();
+        let contains = store.contains(&key);
+        assert!(!contains.await.unwrap());
+        let get = store.get(&key);
+        assert_eq!(get.await.unwrap(), None);
+        drop(store);
+    }
+}
