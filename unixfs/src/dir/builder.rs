@@ -60,7 +60,7 @@ pub struct TreeOptions {
 impl Default for TreeOptions {
     fn default() -> Self {
         TreeOptions {
-            block_size_limit: Some(2 * 1024 * 1024),
+            block_size_limit: Some(512 * 1024),
             wrap_with_directory: false,
         }
     }
