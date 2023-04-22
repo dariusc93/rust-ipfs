@@ -33,7 +33,7 @@ futures = { default-features = false, version = "0.3", features = [
     "std",
 ] }
 hash_hasher = "2.0.3"
-rust-unixfs = { version = "=0.3.0", path = "unixfs" }
+rust-unixfs = { version = "=0.3.1", path = "unixfs" }
 libp2p = { default-features = false, features = [
     "gossipsub",
     "autonat",
