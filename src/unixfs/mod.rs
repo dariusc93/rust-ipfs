@@ -28,6 +28,7 @@ pub struct IpfsUnixfs {
 pub enum AddOpt<'a> {
     Path(PathBuf),
     Stream(BoxStream<'a, std::io::Result<Vec<u8>>>),
+    StreamWithName(String, BoxStream<'a, std::io::Result<Vec<u8>>>),
 }
 
 impl<'a> From<&'a str> for AddOpt<'a> {
@@ -57,6 +58,12 @@ impl From<PathBuf> for AddOpt<'_> {
 impl<'a> From<BoxStream<'a, std::io::Result<Vec<u8>>>> for AddOpt<'a> {
     fn from(stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> Self {
         AddOpt::Stream(stream)
+    }
+}
+
+impl<'a> From<(String, BoxStream<'a, std::io::Result<Vec<u8>>>)> for AddOpt<'a> {
+    fn from((name, stream): (String, BoxStream<'a, std::io::Result<Vec<u8>>>)) -> Self {
+        AddOpt::StreamWithName(name, stream)
     }
 }
 
@@ -95,6 +102,7 @@ impl IpfsUnixfs {
         match item {
             AddOpt::Path(path) => add_file(&self.ipfs, path, option).await,
             AddOpt::Stream(stream) => add(&self.ipfs, None, None, stream, option).await,
+            AddOpt::StreamWithName(name, stream) => add(&self.ipfs, Some(name), None, stream, option).await,
         }
     }
 
