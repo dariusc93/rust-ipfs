@@ -1,9 +1,11 @@
 # 0.3.15 [unreleased]
+- feat: Added AddOption::wrap [PR 62]
 - chore: Update configuration and behaviour cleanup [PR 60]
 - chore: Update libp2p to 0.51.3 [PR 61]
 
 [PR 60]: https://github.com/dariusc93/rust-ipfs/pull/60
 [PR 61]: https://github.com/dariusc93/rust-ipfs/pull/61
+[PR 62]: https://github.com/dariusc93/rust-ipfs/pull/62
 
 # 0.3.14
 - chore: Downgrade libp2p-gossipsub (temporarily)
