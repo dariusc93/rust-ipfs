@@ -14,6 +14,7 @@ pub struct AddOption {
     pub chunk: Option<Chunker>,
     pub pin: bool,
     pub provide: bool,
+    pub wrap: bool,
 }
 
 impl Default for AddOption {
@@ -22,6 +23,7 @@ impl Default for AddOption {
             chunk: Some(Chunker::Size(256 * 1024)),
             pin: false,
             provide: false,
+            wrap: false,
         }
     }
 }
@@ -33,25 +35,29 @@ pub async fn add_file<'a, P: AsRef<Path>>(
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
 where
 {
-    let path = path.as_ref();
+    let path = path.as_ref().to_path_buf();
 
-    let file = tokio::fs::File::open(path).await?;
+    let file = tokio::fs::File::open(&path).await?;
 
     let size = file.metadata().await?.len() as usize;
 
     let stream = ReaderStream::new(file).map(|x| x.map(|x| x.into()));
 
-    add(ipfs, Some(size), stream.boxed(), opt).await
+    let name = path.file_name().map(|f| f.to_string_lossy().to_string());
+
+    add(ipfs, name, Some(size), stream.boxed(), opt).await
 }
 
 pub async fn add<'a>(
     ipfs: &Ipfs,
+    name: Option<String>,
     total_size: Option<usize>,
     mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
     opt: Option<AddOption>,
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
     let ipfs = ipfs.clone();
     let stream = async_stream::stream! {
+
         let mut adder = FileAdderBuilder::default()
             .with_chunker(opt.map(|o| o.chunk.unwrap_or_default()).unwrap_or_default())
             .build();
@@ -123,7 +129,52 @@ pub async fn add<'a>(
             }
         };
 
+        let mut path = IpfsPath::from(cid);
+
         if let Some(opt) = opt {
+
+            if opt.wrap {
+                if let Some(name) = name {
+                    let result = {
+                        let ipfs = ipfs.clone();
+                        async move {
+                            let mut opts = rust_unixfs::dir::builder::TreeOptions::default();
+                            opts.wrap_with_directory();
+
+                            let mut tree = rust_unixfs::dir::builder::BufferingTreeBuilder::new(opts);
+                            tree.put_link(&name, cid, written as _)?;
+
+                            let mut iter = tree.build();
+                            let mut cids = Vec::new();
+
+                            while let Some(node) = iter.next_borrowed() {
+                                let node = node?;
+                                let block = Block::new(node.cid.to_owned(), node.block.into())?;
+
+                                ipfs.put_block(block).await?;
+
+                                cids.push(*node.cid);
+                            }
+                            let cid = cids.last().ok_or(anyhow::anyhow!("no cid available"))?;
+                            let path = IpfsPath::from(*cid).sub_path(&name)?;
+                            
+                            Ok::<_, anyhow::Error>(path)
+                        }
+                    };
+                    
+                    path = match result.await {
+                        Ok(path) => path,
+                        Err(e) => {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                            return;
+                        }
+                    };
+
+                }
+            }
+
+            let cid = path.root().cid().copied().expect("Cid is apart of the path");
+
             if opt.pin {
                 if let Ok(false) = ipfs.is_pinned(&cid).await {
                     if let Err(e) = ipfs.insert_pin(&cid, true).await {
@@ -144,7 +195,7 @@ pub async fn add<'a>(
             });
         }
 
-        yield UnixfsStatus::CompletedStatus { path: IpfsPath::from(cid), written, total_size }
+        yield UnixfsStatus::CompletedStatus { path, written, total_size }
     };
 
     Ok(stream.boxed())

@@ -94,7 +94,7 @@ impl IpfsUnixfs {
         let item = item.into();
         match item {
             AddOpt::Path(path) => add_file(&self.ipfs, path, option).await,
-            AddOpt::Stream(stream) => add(&self.ipfs, None, stream, option).await,
+            AddOpt::Stream(stream) => add(&self.ipfs, None, None, stream, option).await,
         }
     }
 
