@@ -53,7 +53,7 @@ impl PinStore for FsDataStore {
     }
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
+        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await?;
 
         let mut path = pin_path(self.path.join("pins"), target);
 
@@ -89,7 +89,7 @@ impl PinStore for FsDataStore {
             .try_collect::<std::collections::BTreeSet<_>>()
             .await?;
 
-        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
+        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await?;
 
         let mut path = pin_path(self.path.join("pins"), target);
 
@@ -148,7 +148,7 @@ impl PinStore for FsDataStore {
     }
 
     async fn remove_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
+        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await?;
 
         let mut path = pin_path(self.path.join("pins"), target);
 
@@ -183,7 +183,7 @@ impl PinStore for FsDataStore {
     }
 
     async fn remove_recursive_pin(&self, target: &Cid, _: References<'_>) -> Result<(), Error> {
-        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await;
+        let permit = Semaphore::acquire_owned(Arc::clone(&self.lock)).await?;
 
         let mut path = pin_path(self.path.join("pins"), target);
 
