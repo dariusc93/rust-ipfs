@@ -106,7 +106,7 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;
     /// Wipes the blockstore.
-    async fn wipe(&self);
+    async fn wipe(&self) {}
 }
 
 #[async_trait]
@@ -123,7 +123,7 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     /// Removes a key-value pair from the datastore.
     async fn remove(&self, key: &[u8]) -> Result<(), Error>;
     /// Wipes the datastore.
-    async fn wipe(&self);
+    async fn wipe(&self) {}
 }
 
 /// Errors variants describing the possible failures for `Lock::try_exclusive`.
