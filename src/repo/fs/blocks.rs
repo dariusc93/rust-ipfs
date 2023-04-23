@@ -185,7 +185,6 @@ impl BlockStore for FsBlockStore {
 
         let target_path = block_path(self.path.clone(), block.cid());
         let cid = *block.cid();
-        let block = block.clone();
 
         let inner_span = debug_span!(parent: &span, "blocking");
 
