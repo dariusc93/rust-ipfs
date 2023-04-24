@@ -1,7 +1,7 @@
 //! Persistent filesystem backed pin store. See [`FsDataStore`] for more information.
-use super::{filestem_to_pin_cid, pin_path, FsDataStore};
+use crate::repo::paths::{filestem_to_pin_cid, pin_path};
 use crate::error::Error;
-use crate::repo::{PinKind, PinMode, PinModeRequirement, PinStore, References};
+use crate::repo::{PinKind, PinMode, PinModeRequirement, PinStore, References, DataStore};
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use futures::stream::TryStreamExt;
@@ -15,9 +15,73 @@ use tokio::sync::Semaphore;
 use tokio_stream::{empty, wrappers::ReadDirStream, StreamExt};
 use tokio_util::either::Either;
 
+
+/// FsDataStore which uses the filesystem as a lockable key-value store. Maintains a similar to
+/// [`FsBlockStore`] sharded two level storage. Direct have empty files, recursive pins record all of
+/// their indirect descendants. Pin files are separated by their file extensions.
+///
+/// When modifying, single lock is used.
+///
+/// For the [`crate::repo::PinStore`] implementation see `fs/pinstore.rs`.
+#[derive(Debug)]
+pub struct FsDataStore {
+    /// The base directory under which we have a sharded directory structure, and the individual
+    /// blocks are stored under the shard. See unixfs/examples/cat.rs for read example.
+    path: PathBuf,
+
+    /// Start with simple, conservative solution, allows concurrent queries but single writer.
+    /// It is assumed the reads do not require permit as non-empty writes are done through
+    /// tempfiles and the consistency regarding reads is not a concern right now. For garbage
+    /// collection implementation, it might be needed to hold this permit for the duration of
+    /// garbage collection, or something similar.
+    lock: Arc<Semaphore>,
+}
+
+impl FsDataStore {
+    pub fn new(root: PathBuf) -> Self {
+        FsDataStore {
+            path: root,
+            lock: Arc::new(Semaphore::new(1)),
+        }
+    }
+}
+
+/// The column operations are all unimplemented pending at least downscoping of the
+/// DataStore trait itself.
+#[async_trait]
+impl DataStore for FsDataStore {
+    async fn init(&self) -> Result<(), Error> {
+        // Although `pins` directory is created when inserting a data, is it not created when there are any attempts at listing the pins (thus causing to fail)
+        tokio::fs::create_dir_all(&self.path.join("pins")).await?;
+        Ok(())
+    }
+
+    async fn open(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn contains(&self, _key: &[u8]) -> Result<bool, Error> {
+        Err(anyhow::anyhow!("not implemented"))
+    }
+
+    async fn get(&self, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        Err(anyhow::anyhow!("not implemented"))
+    }
+
+    async fn put(&self, _key: &[u8], _value: &[u8]) -> Result<(), Error> {
+        Err(anyhow::anyhow!("not implemented"))
+    }
+
+    async fn remove(&self, _key: &[u8]) -> Result<(), Error> {
+        Err(anyhow::anyhow!("not implemented"))
+    }
+
+    async fn wipe(&self) {}
+}
+
+
 // PinStore is a trait from ipfs::repo implemented on FsDataStore defined at ipfs::repo::fs or
 // parent module.
-
 #[async_trait]
 impl PinStore for FsDataStore {
     async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
@@ -561,3 +625,6 @@ fn sync_write_recursive_pin(
     file.sync_all()?;
     Ok(())
 }
+
+#[cfg(test)]
+crate::pinstore_interface_tests!(common_tests, crate::repo::datastore::flatfs::FsDataStore::new);

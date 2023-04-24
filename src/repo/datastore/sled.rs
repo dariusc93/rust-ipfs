@@ -1,5 +1,5 @@
-use super::{DataStore, PinModeRequirement};
 use crate::error::Error;
+use crate::repo::{DataStore, PinModeRequirement};
 use crate::repo::{PinKind, PinMode, PinStore, References};
 use async_trait::async_trait;
 use futures::stream::{StreamExt, TryStreamExt};
@@ -28,15 +28,15 @@ use std::str::{self, FromStr};
 ///
 /// [`sled`]: https://github.com/spacejam/sled
 #[derive(Debug)]
-pub struct KvDataStore {
+pub struct SledDataStore {
     path: PathBuf,
     // it is a trick for not modifying the Data:init
     db: OnceCell<Db>,
 }
 
-impl KvDataStore {
-    pub fn new(root: PathBuf) -> KvDataStore {
-        KvDataStore {
+impl SledDataStore {
+    pub fn new(root: PathBuf) -> SledDataStore {
+        SledDataStore {
             path: root,
             db: Default::default(),
         }
@@ -48,7 +48,7 @@ impl KvDataStore {
 }
 
 #[async_trait]
-impl DataStore for KvDataStore {
+impl DataStore for SledDataStore {
     async fn init(&self) -> Result<(), Error> {
         let config = DbConfig::new();
 
@@ -111,7 +111,7 @@ impl DataStore for KvDataStore {
 // custom error, not that the transaction was infallible in itself.
 
 #[async_trait]
-impl PinStore for KvDataStore {
+impl PinStore for SledDataStore {
     async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
         let cid = cid.to_owned();
         let db = self.get_db().to_owned();
@@ -537,16 +537,19 @@ fn is_not_pinned_or_pinned_indirectly(
 }
 
 #[cfg(test)]
-crate::pinstore_interface_tests!(common_tests, crate::repo::kv::KvDataStore::new);
+crate::pinstore_interface_tests!(
+    common_tests,
+    crate::repo::datastore::sled::SledDataStore::new
+);
 
 #[cfg(test)]
 mod test {
-    use crate::repo::{kv::KvDataStore, DataStore};
+    use crate::repo::{datastore::sled::SledDataStore, DataStore};
 
     #[tokio::test]
     async fn test_kv_datastore() {
         let tmp = std::env::temp_dir();
-        let store = KvDataStore::new(tmp.clone());
+        let store = SledDataStore::new(tmp.clone());
         let key = [1, 2, 3, 4];
         let value = [5, 6, 7, 8];
 

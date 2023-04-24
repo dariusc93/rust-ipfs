@@ -1,5 +1,5 @@
-use super::{block_path, filestem_to_block_cid};
-use super::{BlockRm, BlockRmError, RepoCid};
+use crate::repo::paths::{block_path, filestem_to_block_cid};
+use crate::repo::{BlockRm, BlockRmError, RepoCid};
 use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;

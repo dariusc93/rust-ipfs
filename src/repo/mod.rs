@@ -23,15 +23,17 @@ use std::sync::Arc;
 use std::{error, fmt, io};
 use tracing::log;
 
-use self::mem::MemBlockStore;
-
 #[macro_use]
 #[cfg(test)]
 mod common_tests;
 
-pub mod fs;
-pub mod kv;
+pub mod datastore;
+pub mod blockstore;
+pub mod lock;
 pub mod mem;
+
+/// Path mangling done for pins and blocks
+pub(crate) mod paths;
 
 /// Convenience for creating a new `Repo` from the `RepoOptions`.
 pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
@@ -369,19 +371,19 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Arc::new(fs::FsBlockStore::new(blockstore_path));
+        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(blockstore_path));
         #[cfg(not(feature = "sled_data_store"))]
-        let data_store = Arc::new(fs::FsDataStore::new(datastore_path));
+        let data_store = Arc::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
-        let data_store = Arc::new(kv::KvDataStore::new(datastore_path));
-        let lockfile = Arc::new(fs::FsLock::new(lockfile_path));
+        let data_store = Arc::new(datastore::SledDataStore::new(datastore_path));
+        let lockfile = Arc::new(lock::FsLock::new(lockfile_path));
         Self::new(block_store, data_store, lockfile)
     }
 
     pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
-        let block_store = Arc::new(MemBlockStore::new(Default::default()));
-        let data_store = Arc::new(mem::MemDataStore::new(Default::default()));
-        let lockfile = Arc::new(mem::MemLock::new(Default::default()));
+        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default()));
+        let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
+        let lockfile = Arc::new(lock::MemLock::default());
         Self::new(block_store, data_store, lockfile)
     }
 
