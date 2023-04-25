@@ -580,21 +580,30 @@ impl IpfsTask {
                     );
 
                     let queued_blocks = self.swarm.behaviour_mut().bitswap().queued_blocks.clone();
+                    let dont_have_blocks =
+                        self.swarm.behaviour_mut().bitswap().dont_have_tx.clone();
                     let repo = self.repo.clone();
 
                     tokio::task::spawn(async move {
-                        match repo.get_block_now(&cid).await {
-                            Ok(Some(block)) => {
-                                let _ = queued_blocks.unbounded_send((peer_id, block));
-                            }
-                            Ok(None) => {}
-                            Err(err) => {
-                                warn!(
-                                    "Peer {} wanted block {} but we failed: {}",
-                                    peer_id.to_base58(),
-                                    cid,
-                                    err,
-                                );
+                        if !repo.contains(&cid).await.unwrap_or_default() {
+                           let _ = dont_have_blocks.unbounded_send((peer_id, cid));
+                        } else {
+                            match repo.get_block_now(&cid).await {
+                                Ok(Some(block)) => {
+                                    let _ = queued_blocks.unbounded_send((peer_id, block));
+                                }
+                                Ok(None) => {
+                                    let _ = dont_have_blocks.unbounded_send((peer_id, cid));
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "Peer {} wanted block {} but we failed: {}",
+                                        peer_id.to_base58(),
+                                        cid,
+                                        err,
+                                    );
+                                    let _ = dont_have_blocks.unbounded_send((peer_id, cid));
+                                }
                             }
                         }
                     });
@@ -1172,7 +1181,7 @@ impl IpfsTask {
                     }
                 }
                 self.swarm.behaviour_mut().want_block(cid, &peers)
-            },
+            }
             RepoEvent::UnwantBlock(cid) => self.swarm.behaviour_mut().bitswap().cancel_block(&cid),
             RepoEvent::NewBlock(cid, ret) => {
                 // TODO: consider if cancel is applicable in cases where we provide the

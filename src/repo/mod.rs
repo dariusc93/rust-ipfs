@@ -506,6 +506,11 @@ impl Repo {
         self.block_store.get(cid).await
     }
 
+    /// Check to determine if blockstore contain a block
+    pub async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
+        self.block_store.contains(cid).await
+    }
+
     /// Lists the blocks in the blockstore.
     pub async fn list_blocks(&self) -> Result<Vec<Cid>, Error> {
         self.block_store.list().await
