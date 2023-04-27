@@ -575,7 +575,7 @@ impl IpfsTask {
                 }
                 BitswapEvent::FindProviders { key, response, .. } => {
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
-                        println!("Looking for providers");
+                        info!("Looking for providers for {key}");
                         let key = key.hash().to_bytes();
                         let id = kad.get_providers(key.into());
                         self.bitswap_provider_stream.insert(id, response);
