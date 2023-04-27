@@ -3,16 +3,132 @@
 //! Adding files and directory structures is supported but not exposed via an API. See examples and
 //! `ipfs-http`.
 
+use std::{ops::Range, path::PathBuf};
+
+use anyhow::Error;
+use futures::{stream::BoxStream, Stream};
+use libp2p::PeerId;
 pub use rust_unixfs as ll;
 
 mod add;
-mod get;
 mod cat;
+mod get;
+mod ls;
 pub use add::{add, add_file, AddOption};
 pub use cat::{cat, StartingPoint, TraversalFailed};
 pub use get::get;
+pub use ls::{ls, NodeItem};
 
-use crate::IpfsPath;
+use crate::{Ipfs, IpfsPath};
+
+pub struct IpfsUnixfs {
+    ipfs: Ipfs,
+}
+
+pub enum AddOpt<'a> {
+    Path(PathBuf),
+    Stream(BoxStream<'a, std::io::Result<Vec<u8>>>),
+    StreamWithName(String, BoxStream<'a, std::io::Result<Vec<u8>>>),
+}
+
+impl<'a> From<&'a str> for AddOpt<'a> {
+    fn from(value: &'a str) -> Self {
+        AddOpt::Path(PathBuf::from(value))
+    }
+}
+
+impl From<String> for AddOpt<'_> {
+    fn from(value: String) -> Self {
+        AddOpt::Path(PathBuf::from(value))
+    }
+}
+
+impl<'a> From<&'a std::path::Path> for AddOpt<'_> {
+    fn from(path: &'a std::path::Path) -> Self {
+        AddOpt::Path(path.to_path_buf())
+    }
+}
+
+impl From<PathBuf> for AddOpt<'_> {
+    fn from(path: PathBuf) -> Self {
+        AddOpt::Path(path)
+    }
+}
+
+impl<'a> From<BoxStream<'a, std::io::Result<Vec<u8>>>> for AddOpt<'a> {
+    fn from(stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> Self {
+        AddOpt::Stream(stream)
+    }
+}
+
+impl<'a> From<(String, BoxStream<'a, std::io::Result<Vec<u8>>>)> for AddOpt<'a> {
+    fn from((name, stream): (String, BoxStream<'a, std::io::Result<Vec<u8>>>)) -> Self {
+        AddOpt::StreamWithName(name, stream)
+    }
+}
+
+impl IpfsUnixfs {
+    pub fn new(ipfs: Ipfs) -> Self {
+        Self { ipfs }
+    }
+
+    /// Creates a stream which will yield the bytes of an UnixFS file from the root Cid, with the
+    /// optional file byte range. If the range is specified and is outside of the file, the stream
+    /// will end without producing any bytes.
+    ///
+    /// To create an owned version of the stream, please use `ipfs::unixfs::cat` directly.
+    pub async fn cat<'a>(
+        &self,
+        starting_point: impl Into<StartingPoint>,
+        range: Option<Range<u64>>,
+        peers: &'a [PeerId],
+        local: bool,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed>
+    {
+        // convert early not to worry about the lifetime of parameter
+        let starting_point = starting_point.into();
+        cat(&self.ipfs, starting_point, range, peers, local).await
+    }
+
+    /// Add a file from either a file or stream
+    ///
+    /// To create an owned version of the stream, please use `ipfs::unixfs::add` or `ipfs::unixfs::add_file` directly.
+    pub async fn add<'a, I: Into<AddOpt<'a>>>(
+        &self,
+        item: I,
+        option: Option<AddOption>,
+    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
+        let item = item.into();
+        match item {
+            AddOpt::Path(path) => add_file(&self.ipfs, path, option).await,
+            AddOpt::Stream(stream) => add(&self.ipfs, None, None, stream, option).await,
+            AddOpt::StreamWithName(name, stream) => add(&self.ipfs, Some(name), None, stream, option).await,
+        }
+    }
+
+    /// Retreive a file and saving it to a local path.
+    ///
+    /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
+    pub async fn get<'a, P: AsRef<std::path::Path>>(
+        &self,
+        path: IpfsPath,
+        dest: P,
+        peers: &'a [PeerId],
+        local: bool,
+    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
+        get(&self.ipfs, path, dest, peers, local).await
+    }
+
+    /// List directory contents
+    pub async fn ls<'a>(
+        &self,
+        path: IpfsPath,
+        peers: &'a [PeerId],
+        local: bool,
+    ) -> Result<BoxStream<'a, NodeItem>, Error> {
+        ls(&self.ipfs, path, peers, local).await
+    }
+}
 
 #[derive(Debug)]
 pub enum UnixfsStatus {

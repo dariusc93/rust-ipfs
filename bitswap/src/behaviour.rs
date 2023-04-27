@@ -18,8 +18,8 @@ use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::handler::OneShotHandler;
 use libp2p::swarm::{
-    ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour,
-    NetworkBehaviourAction, NotifyHandler, PollParameters, THandler,
+    ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, NotifyHandler,
+    PollParameters, THandler, ToSwarm as NetworkBehaviourAction,
 };
 use std::task::{Context, Poll};
 use std::{
@@ -102,6 +102,9 @@ pub struct Bitswap {
     /// Blocks queued to be sent
     pub queued_blocks: UnboundedSender<(PeerId, Block)>,
     ready_blocks: UnboundedReceiver<(PeerId, Block)>,
+
+    pub dont_have_tx: UnboundedSender<(PeerId, Cid)>,
+    dont_have_rx: UnboundedReceiver<(PeerId, Cid)>,
     /// Statistics related to peers.
     pub stats: HashMap<PeerId, Arc<Stats>>,
 }
@@ -109,6 +112,7 @@ pub struct Bitswap {
 impl Default for Bitswap {
     fn default() -> Self {
         let (tx, rx) = unbounded();
+        let (dtx, drx) = unbounded();
 
         Bitswap {
             events: Default::default(),
@@ -116,6 +120,8 @@ impl Default for Bitswap {
             connected_peers: Default::default(),
             wanted_blocks: Default::default(),
             queued_blocks: tx,
+            dont_have_rx: drx,
+            dont_have_tx: dtx,
             ready_blocks: rx,
             stats: Default::default(),
         }
@@ -211,6 +217,22 @@ impl Bitswap {
             }
         }
         self.wanted_blocks.insert(cid, priority);
+    }
+
+    /// Remove wanted blocks from ledger that we dont have
+    pub fn dont_have(&mut self, cid: Cid) {
+        for (_peer_id, ledger) in self.connected_peers.iter_mut() {
+            ledger.received_want_list.remove(&cid);
+            //TODO: Implement dont have in ledger (for 1.2.0 spec), if we are to continue using this
+        }
+    }
+
+    pub fn dont_have_for_peer(&mut self, peer_id: PeerId, cid: Cid) {
+        if let Some(ledger) = self.connected_peers.get_mut(&peer_id) {
+            ledger.received_want_list.remove(&cid);
+            ledger.received_want_list.shrink_to_fit();
+            //TODO: Implement dont have in ledger (for 1.2.0 spec), if we are to continue using this
+        }
     }
 
     /// Removes the block from our want list and updates all peers.
@@ -347,6 +369,10 @@ impl NetworkBehaviour for Bitswap {
 
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
+        }
+
+        while let Poll::Ready(Some((peer_id, block))) = self.dont_have_rx.poll_next_unpin(ctx) {
+            self.dont_have_for_peer(peer_id, block);
         }
 
         while let Poll::Ready(Some((peer_id, block))) = self.ready_blocks.poll_next_unpin(ctx) {

@@ -12,9 +12,9 @@ async fn check_topology_line() {
 
     for (i, node) in nodes.iter().enumerate() {
         if i == 0 || i == N - 1 {
-            assert_eq!(node.peers().await.unwrap().len(), 1);
+            assert_eq!(node.connected().await.unwrap().len(), 1);
         } else {
-            assert_eq!(node.peers().await.unwrap().len(), 2);
+            assert_eq!(node.connected().await.unwrap().len(), 2);
         }
     }
 }
@@ -24,7 +24,7 @@ async fn check_topology_ring() {
     let nodes = spawn_nodes(N, Topology::Ring).await;
 
     for node in &nodes {
-        assert_eq!(node.peers().await.unwrap().len(), 2);
+        assert_eq!(node.connected().await.unwrap().len(), 2);
     }
 }
 
@@ -33,7 +33,7 @@ async fn check_topology_mesh() {
     let nodes = spawn_nodes(N, Topology::Mesh).await;
 
     for node in &nodes {
-        assert_eq!(node.peers().await.unwrap().len(), N - 1);
+        assert_eq!(node.connected().await.unwrap().len(), N - 1);
     }
 }
 
@@ -43,9 +43,9 @@ async fn check_topology_star() {
 
     for (i, node) in nodes.iter().enumerate() {
         if i == 0 {
-            assert_eq!(node.peers().await.unwrap().len(), N - 1);
+            assert_eq!(node.connected().await.unwrap().len(), N - 1);
         } else {
-            assert_eq!(node.peers().await.unwrap().len(), 1);
+            assert_eq!(node.connected().await.unwrap().len(), 1);
         }
     }
 }

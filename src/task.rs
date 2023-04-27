@@ -10,7 +10,10 @@ use futures::{
     StreamExt,
 };
 
-use crate::{p2p::PeerInfo, Channel};
+use crate::{
+    p2p::{addr::extract_peer_id_from_multiaddr, PeerInfo},
+    Channel,
+};
 use crate::{
     p2p::{ProviderStream, RecordStream},
     TSwarmEvent,
@@ -35,7 +38,7 @@ use crate::{
 pub use crate::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
+    p2p::{KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
@@ -702,16 +705,12 @@ impl IpfsTask {
                 let listeners = self.swarm.listeners().cloned().collect::<Vec<Multiaddr>>();
                 ret.send(Ok(listeners)).ok();
             }
-            IpfsEvent::Connections(ret) => {
-                let connections = self.swarm.behaviour_mut().connections();
-                ret.send(Ok(connections.collect())).ok();
-            }
             IpfsEvent::IsConnected(peer_id, ret) => {
                 let connected = self.swarm.is_connected(&peer_id);
                 ret.send(Ok(connected)).ok();
             }
             IpfsEvent::Connected(ret) => {
-                let connections = self.swarm.connected_peers().cloned();
+                let connections = self.swarm.connected_peers().copied();
                 ret.send(Ok(connections.collect())).ok();
             }
             IpfsEvent::Disconnect(peer, ret) => {
@@ -851,6 +850,7 @@ impl IpfsTask {
                     }
                 };
             }
+
             // IpfsEvent::GetBitswapPeers(ret) => {
             //     let peers = self
             //         .swarm
@@ -862,6 +862,7 @@ impl IpfsTask {
             //         .collect();
             //     let _ = ret.send(peers);
             // }
+
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
                 let locally_known = self.swarm.behaviour().peerbook.get_peer_info(peer_id);
 
@@ -885,15 +886,26 @@ impl IpfsTask {
                 let _ = ret.send(rx);
             }
             IpfsEvent::FindPeer(peer_id, local_only, ret) => {
-                let swarm_addrs = self.swarm.behaviour_mut().swarm.connections_to(&peer_id);
-                let locally_known_addrs = if !swarm_addrs.is_empty() {
-                    swarm_addrs
+                let listener_addrs = self
+                    .swarm
+                    .behaviour_mut()
+                    .peerbook
+                    .peer_connections(peer_id)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|addr| extract_peer_id_from_multiaddr(addr.clone()))
+                    .map(|(_, addr)| addr)
+                    .collect::<Vec<_>>();
+
+                let locally_known_addrs = if !listener_addrs.is_empty() {
+                    listener_addrs
                 } else {
                     self.swarm
                         .behaviour_mut()
                         .kademlia
                         .addresses_of_peer(&peer_id)
                 };
+
                 let addrs = if !locally_known_addrs.is_empty() || local_only {
                     Either::Left(locally_known_addrs)
                 } else {
@@ -1158,16 +1170,16 @@ impl IpfsTask {
                         }
                         block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
                             Ok(block) => {
-                                println!("Found block");
+                                info!("Found {cid}");
                                 let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
                                 let res = repo.put_block(block).await;
                                 if let Err(e) = res {
-                                    println!("Got block {} but failed to store it: {}", cid, e);
+                                    error!("Got block {} but failed to store it: {}", cid, e);
                                 }
 
                             }
                             Err(err) => {
-                                println!("Failed to get {}: {}", cid, err);
+                                error!("Failed to get {}: {}", cid, err);
                             }
                         },
                     }

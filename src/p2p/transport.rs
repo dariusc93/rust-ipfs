@@ -1,3 +1,4 @@
+use either::Either;
 use futures::future::Either as FutureEither;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::timeout::TransportTimeout;
@@ -17,7 +18,6 @@ use libp2p::{PeerId, Transport};
 use std::io;
 use std::time::Duration;
 use trust_dns_resolver::system_conf;
-use either::Either;
 
 /// Transport type.
 pub(crate) type TTransport = Boxed<(PeerId, StreamMuxerBox)>;
@@ -26,7 +26,7 @@ pub(crate) type TTransport = Boxed<(PeerId, StreamMuxerBox)>;
 pub struct TransportConfig {
     pub yamux_max_buffer_size: usize,
     pub yamux_receive_window_size: u32,
-    pub yamux_update_mode: u8,
+    pub yamux_update_mode: UpdateMode,
     pub multiplex_option: MultiPlexOption,
     pub mplex_max_buffer_size: usize,
     pub no_delay: bool,
@@ -52,7 +52,7 @@ impl Default for TransportConfig {
         Self {
             yamux_max_buffer_size: 16 * 1024 * 1024,
             yamux_receive_window_size: 16 * 1024 * 1024,
-            yamux_update_mode: 0,
+            yamux_update_mode: UpdateMode::default(),
             multiplex_option: MultiPlexOption::Yamux,
             mplex_max_buffer_size: 1024,
             no_delay: true,
@@ -94,6 +94,25 @@ impl From<DnsResolver> for (ResolverConfig, ResolverOpts) {
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum UpdateMode {
+    /// See [`WindowUpdateMode::on_receive`]
+    #[default]
+    Receive,
+
+    /// See [`WindowUpdateMode::on_read`]
+    Read,
+}
+
+impl From<UpdateMode> for WindowUpdateMode {
+    fn from(mode: UpdateMode) -> Self {
+        match mode {
+            UpdateMode::Read => WindowUpdateMode::on_read(),
+            UpdateMode::Receive => WindowUpdateMode::on_receive(),
+        }
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UpgradeVersion {
     /// See [`Version::V1`]
     #[default]
@@ -115,7 +134,7 @@ impl From<UpgradeVersion> for Version {
 /// Builds the transport that serves as a common ground for all connections.
 ///
 /// Set up an encrypted TCP transport over the Yamux and Mplex protocol.
-pub fn build_transport(
+pub(crate) fn build_transport(
     keypair: identity::Keypair,
     relay: Option<ClientTransport>,
     TransportConfig {
@@ -143,11 +162,7 @@ pub fn build_transport(
         let mut config = YamuxConfig::default();
         config.set_max_buffer_size(yamux_max_buffer_size);
         config.set_receive_window_size(yamux_receive_window_size);
-        config.set_window_update_mode(if yamux_update_mode == 0 {
-            WindowUpdateMode::on_receive()
-        } else {
-            WindowUpdateMode::on_read()
-        });
+        config.set_window_update_mode(yamux_update_mode.into());
         config
     };
 

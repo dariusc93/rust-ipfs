@@ -1,12 +1,13 @@
 [package]
 authors = ["Darius C", "Rust-IPFS contributors"]
+rust-version = "1.68"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.3.7"
+version = "0.3.15"
 
 [features]
 
@@ -32,7 +33,7 @@ futures = { default-features = false, version = "0.3", features = [
     "std",
 ] }
 hash_hasher = "2.0.3"
-rust-unixfs = { version = "=0.3.0", path = "unixfs" }
+rust-unixfs = { version = "=0.3.1", path = "unixfs" }
 libp2p = { default-features = false, features = [
     "gossipsub",
     "autonat",
@@ -56,7 +57,7 @@ libp2p = { default-features = false, features = [
     "ecdsa",
     "rsa",
     "serde",
-], version = "0.51" }
+], version = "0.51.3" }
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
@@ -90,6 +91,8 @@ rlimit = "0.9"
 
 wasm-timer = "0.2"
 
+rand = "0.8"
+
 [build-dependencies]
 prost-build = { default-features = false, version = "0.11" }
 
@@ -121,6 +124,9 @@ clap = { version = "4.1", features = ["derive"] }
 # [[bench]]
 # name = "hashed-map-cid"
 # harness = false
+
+[profile.dev.build-override]
+debug = true
 
 [workspace]
 members = ["bitswap", "unixfs"]

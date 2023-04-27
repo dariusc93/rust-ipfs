@@ -60,7 +60,6 @@ pub struct TreeOptions {
 impl Default for TreeOptions {
     fn default() -> Self {
         TreeOptions {
-            // this is just a guess; our bitswap message limit is a bit more
             block_size_limit: Some(512 * 1024),
             wrap_with_directory: false,
         }

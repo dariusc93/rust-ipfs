@@ -57,7 +57,7 @@ use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::UnixfsStatus;
+use unixfs::{IpfsUnixfs, NodeItem, UnixfsStatus};
 
 use std::{
     borrow::Borrow,
@@ -81,7 +81,7 @@ pub use self::p2p::gossipsub::SubscriptionStream;
 pub use self::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{Connection, KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
+    p2p::{KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
@@ -151,9 +151,6 @@ pub struct IpfsOptions {
     /// existing repository.
     pub ipfs_path: StoragePath,
 
-    /// The keypair used with libp2p, the identity of the node.
-    pub keypair: Keypair,
-
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
 
@@ -221,7 +218,6 @@ impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
             ipfs_path: StoragePath::Memory,
-            keypair: Keypair::generate_ed25519(),
             mdns: Default::default(),
             mdns_ipv6: Default::default(),
             dcutr: Default::default(),
@@ -257,7 +253,6 @@ impl fmt::Debug for IpfsOptions {
         fmt.debug_struct("IpfsOptions")
             .field("ipfs_path", &self.ipfs_path)
             .field("bootstrap", &self.bootstrap)
-            .field("keypair", &DebuggableKeypair(&self.keypair))
             .field("mdns", &self.mdns)
             .field("dcutr", &self.dcutr)
             .field("listening_addrs", &self.listening_addrs)
@@ -278,29 +273,6 @@ impl IpfsOptions {
     }
 }
 
-/// Workaround for libp2p::identity::Keypair missing a Debug impl, works with references and owned
-/// keypairs.
-#[derive(Clone)]
-struct DebuggableKeypair<I: Borrow<Keypair>>(I);
-
-//TODO: Maybe remove this in the future?
-impl<I: Borrow<Keypair>> fmt::Debug for DebuggableKeypair<I> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kind = match self.get_ref().clone().into_ed25519() {
-            Some(_) => "Ed25519",
-            _ => "Unknown",
-        };
-
-        write!(fmt, "Keypair::{kind}")
-    }
-}
-
-impl<I: Borrow<Keypair>> DebuggableKeypair<I> {
-    fn get_ref(&self) -> &Keypair {
-        self.0.borrow()
-    }
-}
-
 /// The facade for the Ipfs node.
 ///
 /// The facade has most of the functionality either directly as a method or the functionality can
@@ -308,25 +280,13 @@ impl<I: Borrow<Keypair>> DebuggableKeypair<I> {
 /// endpoint implementations in `ipfs-http`.
 ///
 /// The facade is created through [`UninitializedIpfs`] which is configured with [`IpfsOptions`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ipfs {
     span: Span,
     repo: Repo,
-    keys: DebuggableKeypair<Keypair>,
+    keys: Keypair,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
-}
-
-impl Clone for Ipfs {
-    fn clone(&self) -> Self {
-        Ipfs {
-            span: self.span.clone(),
-            repo: self.repo.clone(),
-            identify_conf: self.identify_conf.clone(),
-            keys: self.keys.clone(),
-            to_task: self.to_task.clone(),
-        }
-    }
 }
 
 type Channel<T> = OneshotSender<Result<T, Error>>;
@@ -344,8 +304,6 @@ enum IpfsEvent {
     Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     /// Local addresses
     Listeners(Channel<Vec<Multiaddr>>),
-    /// Connections
-    Connections(Channel<Vec<Connection>>),
     /// Connected peers
     Connected(Channel<Vec<PeerId>>),
     /// Is Connected
@@ -435,7 +393,7 @@ impl UninitializedIpfs {
     /// operations done in the background task as well as tasks spawned by the underlying
     /// `libp2p::Swarm`.
     pub fn with_opt(options: IpfsOptions) -> Self {
-        let keys = options.keypair.clone();
+        let keys = Keypair::generate_ed25519();
         let fdlimit = None;
         let delay = true;
         UninitializedIpfs {
@@ -452,6 +410,15 @@ impl UninitializedIpfs {
         if !self.options.listening_addrs.contains(&addr) {
             self.options.listening_addrs.push(addr)
         }
+        self
+    }
+
+    /// Adds a listening addresses
+    pub fn add_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
+        if !addrs.is_empty() {
+            self.options.listening_addrs = addrs;
+        }
+
         self
     }
 
@@ -639,7 +606,7 @@ impl UninitializedIpfs {
             span: facade_span,
             repo: repo.clone(),
             identify_conf: id_conf,
-            keys: DebuggableKeypair(keys),
+            keys: keys.clone(),
             to_task,
         };
 
@@ -650,6 +617,7 @@ impl UninitializedIpfs {
         let swarm_config = options.swarm_configuration.unwrap_or_default();
         let transport_config = options.transport_configuration.unwrap_or_default();
         let swarm = create_swarm(
+            &keys,
             swarm_options,
             swarm_config,
             transport_config,
@@ -716,6 +684,11 @@ impl Ipfs {
         &self.repo
     }
 
+    /// Returns an [`IpfsFiles`] for files operations
+    pub fn unixfs(&self) -> IpfsUnixfs {
+        IpfsUnixfs::new(self.clone())
+    }
+
     fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
@@ -737,7 +710,10 @@ impl Ipfs {
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
     pub async fn get_block(&self, cid: &Cid) -> Result<Block, Error> {
-        self.repo.get_block(cid, &[]).instrument(self.span.clone()).await
+        self.repo
+            .get_block(cid, &[], false)
+            .instrument(self.span.clone())
+            .await
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
@@ -774,32 +750,12 @@ impl Ipfs {
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
     pub async fn insert_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        use futures::stream::TryStreamExt;
         let span = debug_span!(parent: &self.span, "insert_pin", cid = %cid, recursive);
-        let refs_span = debug_span!(parent: &span, "insert_pin refs");
 
-        async move {
-            // this needs to download everything but /pin/ls does not
-            let block = self.repo.get_block(cid, &[]).await?;
-
-            if !recursive {
-                self.repo.insert_direct_pin(cid).await
-            } else {
-                let ipld = block.decode::<IpldCodec, Ipld>()?;
-
-                let st = crate::refs::IpldRefs::default()
-                    .with_only_unique()
-                    .refs_of_resolved(self, vec![(*cid, ipld.clone())].into_iter())
-                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
-                    .into_stream()
-                    .instrument(refs_span)
-                    .boxed();
-
-                self.repo.insert_recursive_pin(cid, st).await
-            }
-        }
-        .instrument(span)
-        .await
+        self.repo()
+            .insert_pin(cid, recursive, false)
+            .instrument(span)
+            .await
     }
 
     /// Unpins a given Cid recursively or only directly.
@@ -828,7 +784,7 @@ impl Ipfs {
                 let st = crate::refs::IpldRefs::default()
                     .with_only_unique()
                     .with_existing_blocks()
-                    .refs_of_resolved(self.to_owned(), vec![(*cid, ipld.clone())].into_iter())
+                    .refs_of_resolved(self.repo(), vec![(*cid, ipld.clone())].into_iter())
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()
                     .boxed();
@@ -905,7 +861,7 @@ impl Ipfs {
     /// See [`IpldDag::get`] for more information.
     pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
         self.dag()
-            .get(path, &[])
+            .get(path, &[], false)
             .instrument(self.span.clone())
             .await
             .map_err(Error::new)
@@ -951,9 +907,8 @@ impl Ipfs {
         impl Stream<Item = Result<Vec<u8>, unixfs::TraversalFailed>> + Send + '_,
         unixfs::TraversalFailed,
     > {
-        // convert early not to worry about the lifetime of parameter
-        let starting_point = starting_point.into();
-        unixfs::cat(self, starting_point, range, &[])
+        self.unixfs()
+            .cat(starting_point, range, &[], false)
             .instrument(self.span.clone())
             .await
     }
@@ -965,7 +920,9 @@ impl Ipfs {
         &self,
         path: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        unixfs::add_file(self, path, None)
+        let path = path.as_ref();
+        self.unixfs()
+            .add(path, None)
             .instrument(self.span.clone())
             .await
     }
@@ -977,7 +934,8 @@ impl Ipfs {
         &self,
         stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
     ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
-        unixfs::add(self, None, stream, None)
+        self.unixfs()
+            .add(stream, None)
             .instrument(self.span.clone())
             .await
     }
@@ -990,7 +948,16 @@ impl Ipfs {
         path: IpfsPath,
         dest: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        unixfs::get(self, path, dest, &[])
+        self.unixfs()
+            .get(path, dest, &[], false)
+            .instrument(self.span.clone())
+            .await
+    }
+
+    /// List directory contents
+    pub async fn ls_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'_, NodeItem>, Error> {
+        self.unixfs()
+            .ls(path, &[], false)
             .instrument(self.span.clone())
             .await
     }
@@ -999,7 +966,7 @@ impl Ipfs {
     pub async fn resolve_ipns(&self, path: &IpfsPath, recursive: bool) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
-            let mut resolved = ipns.resolve(path).await;
+            let mut resolved = ipns.resolve(p2p::DnsResolver::Cloudflare, path).await;
 
             if recursive {
                 let mut seen = HashSet::with_capacity(1);
@@ -1007,7 +974,7 @@ impl Ipfs {
                     if !seen.insert(res.clone()) {
                         break;
                     }
-                    resolved = ipns.resolve(res).await;
+                    resolved = ipns.resolve(p2p::DnsResolver::Cloudflare, res).await;
                 }
             }
             resolved
@@ -1080,20 +1047,6 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
             self.to_task.clone().send(IpfsEvent::Listeners(tx)).await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Returns the connected peers
-    pub async fn peers(&self) -> Result<Vec<Connection>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Connections(tx))
-                .await?;
             rx.await?
         }
         .instrument(self.span.clone())
@@ -1201,7 +1154,7 @@ impl Ipfs {
                     let mut addresses = rx.await?;
                     let protocols = self.protocols().await?;
 
-                    let public_key = self.keys.get_ref().public();
+                    let public_key = self.keys.public();
                     let peer_id = public_key.to_peer_id();
 
                     for addr in &mut addresses {
@@ -1623,7 +1576,7 @@ impl Ipfs {
     where
         Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
     {
-        refs::iplds_refs(self, iplds, max_depth, unique)
+        refs::iplds_refs(self.repo(), iplds, max_depth, unique)
     }
 
     /// Obtain the list of addresses of bootstrapper nodes that are currently used.
@@ -1762,6 +1715,10 @@ impl Ipfs {
 
     //     rx.await.map_err(|e| anyhow!(e))
     // }
+
+    pub fn keypair(&self) -> Result<&Keypair, Error> {
+        Ok(self.keys.borrow())
+    }
 
     /// Exit daemon.
     pub async fn exit_daemon(mut self) {
@@ -2800,13 +2757,14 @@ mod node {
 
         /// Returns a new `Node` based on `IpfsOptions`.
         pub async fn with_options(opts: IpfsOptions) -> Self {
-            let id = opts.keypair.public().to_peer_id();
-
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
             let ipfs: Ipfs = UninitializedIpfs::with_opt(opts).start().await.unwrap();
-
-            let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
+            let PeerInfo {
+                peer_id: id,
+                listen_addrs: addrs,
+                ..
+            } = ipfs.identity(None).await.unwrap();
 
             Node { ipfs, id, addrs }
         }

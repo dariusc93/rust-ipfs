@@ -1,5 +1,5 @@
-use super::{Column, DataStore, PinModeRequirement};
 use crate::error::Error;
+use crate::repo::{DataStore, PinModeRequirement};
 use crate::repo::{PinKind, PinMode, PinStore, References};
 use async_trait::async_trait;
 use futures::stream::{StreamExt, TryStreamExt};
@@ -28,15 +28,15 @@ use std::str::{self, FromStr};
 ///
 /// [`sled`]: https://github.com/spacejam/sled
 #[derive(Debug)]
-pub struct KvDataStore {
+pub struct SledDataStore {
     path: PathBuf,
     // it is a trick for not modifying the Data:init
     db: OnceCell<Db>,
 }
 
-impl KvDataStore {
-    pub fn new(root: PathBuf) -> KvDataStore {
-        KvDataStore {
+impl SledDataStore {
+    pub fn new(root: PathBuf) -> SledDataStore {
+        SledDataStore {
             path: root,
             db: Default::default(),
         }
@@ -48,7 +48,7 @@ impl KvDataStore {
 }
 
 #[async_trait]
-impl DataStore for KvDataStore {
+impl DataStore for SledDataStore {
     async fn init(&self) -> Result<(), Error> {
         let config = DbConfig::new();
 
@@ -68,35 +68,50 @@ impl DataStore for KvDataStore {
     }
 
     /// Checks if a key is present in the datastore.
-    async fn contains(&self, _col: Column, _key: &[u8]) -> Result<bool, Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || db.contains_key(key).map_err(anyhow::Error::from))
+            .await?
     }
 
     /// Returns the value associated with a key from the datastore.
-    async fn get(&self, _col: Column, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            db.get(key)
+                .map_err(Error::from)
+                .map(|item| item.map(|v| v.to_vec()))
+        })
+        .await?
     }
 
     /// Puts the value under the key in the datastore.
-    async fn put(&self, _col: Column, _key: &[u8], _value: &[u8]) -> Result<(), Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        let value = value.to_owned();
+        tokio::task::spawn_blocking(move || db.insert(key, value).map_err(Error::from).map(|_| ()))
+            .await?
     }
 
     /// Removes a key-value pair from the datastore.
-    async fn remove(&self, _col: Column, _key: &[u8]) -> Result<(), Error> {
-        Err(anyhow::anyhow!("not implemented"))
+    async fn remove(&self, key: &[u8]) -> Result<(), Error> {
+        let db = self.get_db().to_owned();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || db.remove(key).map_err(Error::from).map(|_| ())).await?
     }
 
     /// Wipes the datastore.
-    async fn wipe(&self) {
-    }
+    async fn wipe(&self) {}
 }
 
 // in the transactional parts of the [`Infallible`] is used to signal there is no additional
 // custom error, not that the transaction was infallible in itself.
 
 #[async_trait]
-impl PinStore for KvDataStore {
+impl PinStore for SledDataStore {
     async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
         let cid = cid.to_owned();
         let db = self.get_db().to_owned();
@@ -522,4 +537,43 @@ fn is_not_pinned_or_pinned_indirectly(
 }
 
 #[cfg(test)]
-crate::pinstore_interface_tests!(common_tests, crate::repo::kv::KvDataStore::new);
+crate::pinstore_interface_tests!(
+    common_tests,
+    crate::repo::datastore::sled::SledDataStore::new
+);
+
+#[cfg(test)]
+mod test {
+    use crate::repo::{datastore::sled::SledDataStore, DataStore};
+
+    #[tokio::test]
+    async fn test_kv_datastore() {
+        let tmp = std::env::temp_dir();
+        let store = SledDataStore::new(tmp.clone());
+        let key = [1, 2, 3, 4];
+        let value = [5, 6, 7, 8];
+
+        store.init().await.unwrap();
+        store.open().await.unwrap();
+
+        let contains = store.contains(&key);
+        assert!(!contains.await.unwrap());
+        let get = store.get(&key);
+        assert_eq!(get.await.unwrap(), None);
+        store.remove(&key).await.unwrap();
+
+        let put = store.put(&key, &value);
+        put.await.unwrap();
+        let contains = store.contains(&key);
+        assert!(contains.await.unwrap());
+        let get = store.get(&key);
+        assert_eq!(get.await.unwrap(), Some(value.to_vec()));
+
+        store.remove(&key).await.unwrap();
+        let contains = store.contains(&key);
+        assert!(!contains.await.unwrap());
+        let get = store.get(&key);
+        assert_eq!(get.await.unwrap(), None);
+        drop(store);
+    }
+}

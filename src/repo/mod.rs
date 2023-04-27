@@ -12,7 +12,9 @@ use futures::channel::{
     oneshot,
 };
 use futures::sink::SinkExt;
+use futures::{StreamExt, TryStreamExt};
 use libipld::cid::Cid;
+use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
 use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
@@ -21,24 +23,17 @@ use std::sync::Arc;
 use std::{error, fmt, io};
 use tracing::log;
 
-use self::mem::MemBlockStore;
-
 #[macro_use]
 #[cfg(test)]
 mod common_tests;
 
-pub mod fs;
-pub mod kv;
+pub mod blockstore;
+pub mod datastore;
+pub mod lock;
 pub mod mem;
 
-/// Consolidates `BlockStore` and `DataStore` into a representation of storage.
-pub trait RepoTypes: Debug + Send + Sync + 'static {
-    /// Describes a blockstore.
-    type TBlockStore: BlockStore;
-    /// Describes a datastore.
-    type TDataStore: DataStore;
-    type TLock: Lock;
-}
+/// Path mangling done for pins and blocks
+pub(crate) mod paths;
 
 /// Convenience for creating a new `Repo` from the `RepoOptions`.
 pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
@@ -113,7 +108,7 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;
     /// Wipes the blockstore.
-    async fn wipe(&self);
+    async fn wipe(&self) {}
 }
 
 #[async_trait]
@@ -122,15 +117,15 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn init(&self) -> Result<(), Error>;
     async fn open(&self) -> Result<(), Error>;
     /// Checks if a key is present in the datastore.
-    async fn contains(&self, col: Column, key: &[u8]) -> Result<bool, Error>;
+    async fn contains(&self, key: &[u8]) -> Result<bool, Error>;
     /// Returns the value associated with a key from the datastore.
-    async fn get(&self, col: Column, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
+    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
     /// Puts the value under the key in the datastore.
-    async fn put(&self, col: Column, key: &[u8], value: &[u8]) -> Result<(), Error>;
+    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error>;
     /// Removes a key-value pair from the datastore.
-    async fn remove(&self, col: Column, key: &[u8]) -> Result<(), Error>;
+    async fn remove(&self, key: &[u8]) -> Result<(), Error>;
     /// Wipes the datastore.
-    async fn wipe(&self);
+    async fn wipe(&self) {}
 }
 
 /// Errors variants describing the possible failures for `Lock::try_exclusive`.
@@ -220,11 +215,6 @@ pub trait PinStore: Debug + Send + Sync + Unpin + 'static {
         ids: Vec<Cid>,
         requirement: Option<PinMode>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error>;
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Column {
-    Ipns,
 }
 
 /// `PinMode` is the description of pin type for quering purposes.
@@ -405,19 +395,19 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Arc::new(fs::FsBlockStore::new(blockstore_path));
+        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(blockstore_path));
         #[cfg(not(feature = "sled_data_store"))]
-        let data_store = Arc::new(fs::FsDataStore::new(datastore_path));
+        let data_store = Arc::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
-        let data_store = Arc::new(kv::KvDataStore::new(datastore_path));
-        let lockfile = Arc::new(fs::FsLock::new(lockfile_path));
+        let data_store = Arc::new(datastore::SledDataStore::new(datastore_path));
+        let lockfile = Arc::new(lock::FsLock::new(lockfile_path));
         Self::new(block_store, data_store, lockfile)
     }
 
     pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
-        let block_store = Arc::new(MemBlockStore::new(Default::default()));
-        let data_store = Arc::new(mem::MemDataStore::new(Default::default()));
-        let lockfile = Arc::new(mem::MemLock::new(Default::default()));
+        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default()));
+        let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
+        let lockfile = Arc::new(lock::MemLock::default());
         Self::new(block_store, data_store, lockfile)
     }
 
@@ -461,26 +451,9 @@ impl Repo {
     pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
         let (cid, res) = self.block_store.put(block.clone()).await?;
 
-        // FIXME: this doesn't cause actual DHT providing yet, only some
-        // bitswap housekeeping; we might want to not ignore the channel
-        // errors when we actually start providing on the DHT
         if let BlockPut::NewBlock = res {
             self.subscriptions
-                .finish_subscription(cid.into(), Ok(block.clone()));
-
-            // sending only fails if no one is listening anymore
-            // and that is okay with us.
-            let (tx, rx) = oneshot::channel();
-
-            self.events
-                .clone()
-                .send(RepoEvent::NewBlock(block, tx))
-                .await
-                .ok();
-
-            if let Ok(Ok(kad_subscription)) = rx.await {
-                kad_subscription.await??;
-            }
+                .finish_subscription(cid.into(), Ok(block));
         }
 
         Ok((cid, res))
@@ -488,13 +461,23 @@ impl Repo {
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
-    pub async fn get_block(&self, cid: &Cid, peers: &[PeerId]) -> Result<Block, Error> {
+    pub async fn get_block(
+        &self,
+        cid: &Cid,
+        peers: &[PeerId],
+        local_only: bool,
+    ) -> Result<Block, Error> {
         // FIXME: here's a race: block_store might give Ok(None) and we get to create our
         // subscription after the put has completed. So maybe create the subscription first, then
         // cancel it?
+
         if let Some(block) = self.get_block_now(cid).await? {
             Ok(block)
         } else {
+            if local_only {
+                anyhow::bail!("Unable to locate block {cid}");
+            }
+
             let subscription = self
                 .subscriptions
                 .create_subscription((*cid).into(), Some(self.events.clone()));
@@ -512,6 +495,11 @@ impl Repo {
     /// Retrieves a block from the block store if it's available locally.
     pub async fn get_block_now(&self, cid: &Cid) -> Result<Option<Block>, Error> {
         self.block_store.get(cid).await
+    }
+
+    /// Check to determine if blockstore contain a block
+    pub async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
+        self.block_store.contains(cid).await
     }
 
     /// Lists the blocks in the blockstore.
@@ -554,7 +542,8 @@ impl Repo {
         let data_store = &self.data_store;
         let key = ipns.to_owned();
         // FIXME: needless vec<u8> creation
-        let bytes = data_store.get(Column::Ipns, &key.to_bytes()).await?;
+        let key = format!("ipns/{key}");
+        let bytes = data_store.get(key.as_bytes()).await?;
         match bytes {
             Some(ref bytes) => {
                 let string = String::from_utf8_lossy(bytes);
@@ -570,16 +559,43 @@ impl Repo {
         let string = path.to_string();
         let value = string.as_bytes();
         // FIXME: needless vec<u8> creation
-        self.data_store
-            .put(Column::Ipns, &ipns.to_bytes(), value)
-            .await
+        let key = format!("ipns/{ipns}");
+        self.data_store.put(key.as_bytes(), value).await
     }
 
     /// Remove an ipld path from the datastore.
     pub async fn remove_ipns(&self, ipns: &PeerId) -> Result<(), Error> {
         // FIXME: us needing to clone the peerid is wasteful to pass it as a reference only to be
         // cloned again
-        self.data_store.remove(Column::Ipns, &ipns.to_bytes()).await
+        let key = format!("ipns/{ipns}");
+        self.data_store.remove(key.as_bytes()).await
+    }
+
+    /// Pins a given Cid recursively or directly (non-recursively).
+    pub async fn insert_pin(
+        &self,
+        cid: &Cid,
+        recursive: bool,
+        local_only: bool,
+    ) -> Result<(), Error> {
+        // Can download if `local_only` is false
+        let block = self.get_block(cid, &[], local_only).await?;
+
+        if !recursive {
+            self.insert_direct_pin(cid).await?
+        } else {
+            let ipld = block.decode::<IpldCodec, Ipld>()?;
+
+            let st = crate::refs::IpldRefs::default()
+                .with_only_unique()
+                .refs_of_resolved(self, vec![(*cid, ipld.clone())].into_iter())
+                .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                .into_stream()
+                .boxed();
+
+            self.insert_recursive_pin(cid, st).await?
+        }
+        Ok(())
     }
 
     /// Inserts a direct pin for a `Cid`.
@@ -635,5 +651,11 @@ impl Repo {
         requirement: Option<PinMode>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
         self.data_store.query(cids, requirement).await
+    }
+}
+
+impl Repo {
+    pub fn data_store(&self) -> &dyn DataStore {
+        &*self.data_store
     }
 }

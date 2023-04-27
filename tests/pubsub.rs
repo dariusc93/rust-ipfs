@@ -8,11 +8,9 @@ mod common;
 use common::{spawn_nodes, Topology};
 
 #[tokio::test]
-#[ignore = "Implemented a broadcast so subscribing multiple times is allowed"]
 async fn subscribe_only_once() {
     let a = Node::new("test_node").await;
     let _stream = a.pubsub_subscribe("some_topic".into()).await.unwrap();
-    a.pubsub_subscribe("some_topic".into()).await.unwrap_err();
 }
 
 #[tokio::test]
@@ -32,6 +30,25 @@ async fn resubscribe_after_unsubscribe() {
     assert_eq!(stream.next().await, None);
 
     drop(a.pubsub_subscribe("topic".into()).await.unwrap());
+}
+
+#[tokio::test]
+async fn unsubscribe_cloned_via_drop() {
+    let empty: &[&str] = &[];
+    let a = Node::new("test_node").await;
+
+    let msgs_1 = a.pubsub_subscribe("topic".into()).await.unwrap();
+    let msgs_2 = a.pubsub_subscribe("topic".into()).await.unwrap();
+
+    drop(msgs_1);
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    assert_ne!(a.pubsub_subscribed().await.unwrap(), empty);
+
+    drop(msgs_2);
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
 }
 
 #[tokio::test]

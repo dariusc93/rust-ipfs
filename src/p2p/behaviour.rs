@@ -5,7 +5,6 @@ use super::peerbook::{self, ConnectionLimits};
 use either::Either;
 use serde::{Deserialize, Serialize};
 
-use super::swarm::{Connection, SwarmApi};
 use crate::error::Error;
 use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
 use crate::repo::Repo;
@@ -18,12 +17,14 @@ use libp2p::core::Multiaddr;
 use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::Event as GossipsubEvent;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
-use libp2p::identity::PeerId;
+use libp2p::identity::{Keypair, PeerId};
 use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
 };
-use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent};
+use libp2p::kad::{
+    Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent, KademliaStoreInserts,
+};
 use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent};
 use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
 use libp2p::relay::client::{self, Transport as ClientTransport};
@@ -53,7 +54,6 @@ pub struct Behaviour {
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
-    pub swarm: SwarmApi,
     pub peerbook: peerbook::Behaviour,
 }
 
@@ -180,10 +180,10 @@ impl Default for IdentifyConfiguration {
         Self {
             protocol_version: "/ipfs/0.1.0".into(),
             agent_version: "rust-ipfs".into(),
-            initial_delay: Duration::from_millis(500),
+            initial_delay: Duration::from_millis(200),
             interval: Duration::from_secs(5 * 60),
-            push_update: false,
-            cache: 0,
+            push_update: true,
+            cache: 100,
         }
     }
 }
@@ -287,6 +287,7 @@ pub struct KadConfig {
     pub publication_interval: Option<Duration>,
     pub provider_record_ttl: Option<Duration>,
     pub insert_method: KadInserts,
+    pub store_filter: KadStoreInserts,
 }
 
 #[derive(Clone, Debug, Default, Copy)]
@@ -294,6 +295,22 @@ pub enum KadInserts {
     #[default]
     Auto,
     Manual,
+}
+
+#[derive(Clone, Debug, Default, Copy)]
+pub enum KadStoreInserts {
+    #[default]
+    Unfiltered,
+    Filtered,
+}
+
+impl From<KadStoreInserts> for KademliaStoreInserts {
+    fn from(value: KadStoreInserts) -> Self {
+        match value {
+            KadStoreInserts::Filtered => KademliaStoreInserts::FilterBoth,
+            KadStoreInserts::Unfiltered => KademliaStoreInserts::Unfiltered,
+        }
+    }
 }
 
 impl From<KadInserts> for KademliaBucketInserts {
@@ -319,6 +336,7 @@ impl From<KadConfig> for KademliaConfig {
         kad_config.set_publication_interval(config.publication_interval);
         kad_config.set_provider_record_ttl(config.provider_record_ttl);
         kad_config.set_kbucket_inserts(config.insert_method.into());
+        kad_config.set_record_filtering(config.store_filter.into());
         kad_config
     }
 }
@@ -333,18 +351,19 @@ impl Default for KadConfig {
             provider_record_ttl: None,
             publication_interval: None,
             insert_method: Default::default(),
+            store_filter: Default::default(),
         }
     }
 }
 
 impl Behaviour {
-    /// Create a Kademlia behaviour with the IPFS bootstrap nodes.
     pub async fn new(
+        keypair: &Keypair,
         options: SwarmOptions,
         repo: Repo,
         limits: ConnectionLimits,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
-        let peer_id = options.peer_id;
+        let peer_id = keypair.public().to_peer_id();
 
         info!("net: starting with peer id {}", peer_id);
 
@@ -391,8 +410,9 @@ impl Behaviour {
             }
         }
 
-        let autonat = autonat::Behaviour::new(options.peer_id.to_owned(), Default::default());
+        let autonat = autonat::Behaviour::new(peer_id, Default::default());
         let bitswap = Bitswap::new(peer_id, repo, Default::default()).await;
+
         let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
 
         let ping = Ping::new(options.ping_config.unwrap_or_default());
@@ -401,7 +421,7 @@ impl Behaviour {
             options
                 .identify_config
                 .unwrap_or_default()
-                .into(options.keypair.public()),
+                .into(keypair.public()),
         );
 
         let pubsub = {
@@ -423,15 +443,13 @@ impl Behaviour {
             let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
 
             let gossipsub = libp2p::gossipsub::Behaviour::new(
-                libp2p::gossipsub::MessageAuthenticity::Signed(options.keypair),
+                libp2p::gossipsub::MessageAuthenticity::Signed(keypair.clone()),
                 config,
             )
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             GossipsubStream::from(gossipsub)
         };
-
-        let swarm = SwarmApi::default();
 
         // Maybe have this enable in conjunction with RelayClient?
         let dcutr = Toggle::from(options.dcutr.then_some(Dcutr::new(peer_id)));
@@ -473,7 +491,6 @@ impl Behaviour {
                 identify,
                 autonat,
                 pubsub,
-                swarm,
                 dcutr,
                 relay,
                 relay_client,
@@ -515,10 +532,6 @@ impl Behaviour {
         addrs
     }
 
-    pub fn connections(&self) -> impl Iterator<Item = Connection> + '_ {
-        self.swarm.connections()
-    }
-
     pub fn stop_providing_block(&mut self, cid: &Cid) {
         info!("Finished providing block {}", cid.to_string());
         let key = cid.hash().to_bytes();
@@ -558,9 +571,10 @@ impl Behaviour {
 
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
 pub async fn build_behaviour(
+    keypair: &Keypair,
     options: SwarmOptions,
     repo: Repo,
     limits: ConnectionLimits
 ) -> Result<(Behaviour, Option<ClientTransport>), Error> {
-    Behaviour::new(options, repo, limits).await
+    Behaviour::new(keypair, options, repo, limits).await
 }

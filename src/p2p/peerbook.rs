@@ -2,15 +2,16 @@
 use core::task::{Context, Poll};
 use futures::channel::oneshot;
 use futures::StreamExt;
-use libp2p::core::{Endpoint, Multiaddr};
+use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{
     self, dummy::ConnectionHandler as DummyConnectionHandler, NetworkBehaviour, PollParameters,
 };
+#[allow(deprecated)]
 use libp2p::swarm::{
     ConnectionClosed, ConnectionDenied, ConnectionId, ConnectionLimit, DialFailure, FromSwarm,
-    NetworkBehaviourAction, THandler, THandlerInEvent,
+    THandler, THandlerInEvent, ToSwarm as NetworkBehaviourAction,
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
@@ -122,7 +123,7 @@ pub struct Behaviour {
     limits: ConnectionLimits,
 
     events: VecDeque<
-        swarm::NetworkBehaviourAction<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>,
+        NetworkBehaviourAction<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>,
     >,
     cleanup_interval: Interval,
 
@@ -134,6 +135,7 @@ pub struct Behaviour {
 
     peer_info: HashMap<PeerId, PeerInfo>,
     peer_rtt: HashMap<PeerId, [Duration; 3]>,
+    peer_connections: HashMap<PeerId, Vec<(ConnectionId, Multiaddr)>>,
 
     whitelist: HashSet<PeerId>,
 
@@ -161,6 +163,7 @@ impl Default for Behaviour {
             pending_identify: Default::default(),
             peer_info: Default::default(),
             peer_rtt: Default::default(),
+            peer_connections: Default::default(),
             whitelist: Default::default(),
             protocols: Default::default(),
             pending_inbound_connections: Default::default(),
@@ -214,19 +217,17 @@ impl Behaviour {
     }
 
     pub fn peers(&self) -> impl Iterator<Item = &PeerId> {
-        self.peer_info.keys()
+        self.peer_connections.keys()
     }
 
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, rtt: Duration) {
-        if self.peer_info.contains_key(&peer_id) {
-            self.peer_rtt
-                .entry(peer_id)
-                .and_modify(|r| {
-                    r.rotate_left(1);
-                    r[2] = rtt;
-                })
-                .or_insert([Duration::from_millis(0), Duration::from_millis(0), rtt]);
-        }
+        self.peer_rtt
+            .entry(peer_id)
+            .and_modify(|r| {
+                r.rotate_left(1);
+                r[2] = rtt;
+            })
+            .or_insert([Duration::from_millis(0), Duration::from_millis(0), rtt]);
     }
 
     pub fn get_peet_rtt(&self, peer_id: PeerId) -> Option<[Duration; 3]> {
@@ -245,6 +246,13 @@ impl Behaviour {
         self.peer_info.remove(&peer_id);
     }
 
+    pub fn peer_connections(&self, peer_id: PeerId) -> Option<Vec<Multiaddr>> {
+        self.peer_connections
+            .get(&peer_id)
+            .map(|list| list.iter().map(|(_, addr)| addr).cloned().collect())
+    }
+
+    #[allow(deprecated)]
     fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
         let limit = limit.unwrap_or(u32::MAX);
         let current = current as u32;
@@ -390,6 +398,7 @@ impl NetworkBehaviour for Behaviour {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
                 connection_id,
+                endpoint,
                 ..
             }) => {
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
@@ -409,6 +418,15 @@ impl NetworkBehaviour for Behaviour {
                         let _ = ch.send(Ok(()));
                     }
                 }
+                let multiaddr = match endpoint {
+                    ConnectedPoint::Dialer { address, .. } => address.clone(),
+                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
+                };
+
+                self.peer_connections
+                    .entry(peer_id)
+                    .or_default()
+                    .push((connection_id, multiaddr));
             }
             FromSwarm::DialFailure(DialFailure {
                 error,
@@ -426,6 +444,15 @@ impl NetworkBehaviour for Behaviour {
             }) => {
                 self.established_inbound_connections.remove(&connection_id);
                 self.established_outbound_connections.remove(&connection_id);
+                if let Entry::Occupied(mut entry) = self.peer_connections.entry(peer_id) {
+                    let list = entry.get_mut();
+                    if let Some(index) = list.iter().position(|(id, _)| connection_id.eq(id)) {
+                        list.swap_remove(index);
+                    }
+                    if list.is_empty() {
+                        entry.remove();
+                    }
+                }
                 if let Entry::Occupied(mut entry) = self.established_per_peer.entry(peer_id) {
                     entry.get_mut().remove(&connection_id);
                     if entry.get().is_empty() {
@@ -444,7 +471,7 @@ impl NetworkBehaviour for Behaviour {
         &mut self,
         cx: &mut Context,
         params: &mut impl PollParameters,
-    ) -> Poll<swarm::NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
+    ) -> Poll<NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
         let supported_protocols = params.supported_protocols();
         if supported_protocols.len() != self.protocols.len() {
             self.protocols = supported_protocols.collect();
@@ -501,6 +528,8 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use super::Behaviour as PeerBook;
     use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
     use futures::StreamExt;
@@ -657,10 +686,12 @@ mod test {
 
         let behaviour = Behaviour {
             peerbook: PeerBook::default(),
-            identify: Toggle::from(identify.then_some(identify::Behaviour::new(Config::new(
-                "/peerbook/0.1".into(),
-                pubkey,
-            )))),
+            identify: Toggle::from(
+                identify.then_some(identify::Behaviour::new(
+                    Config::new("/peerbook/0.1".into(), pubkey)
+                        .with_initial_delay(Duration::from_secs(0)),
+                )),
+            ),
             keep_alive: keep_alive::Behaviour,
         };
 

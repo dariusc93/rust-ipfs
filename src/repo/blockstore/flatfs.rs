@@ -1,5 +1,5 @@
-use super::{block_path, filestem_to_block_cid};
-use super::{BlockRm, BlockRmError, RepoCid};
+use crate::repo::paths::{block_path, filestem_to_block_cid};
+use crate::repo::{BlockRm, BlockRmError, RepoCid};
 use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
@@ -185,7 +185,6 @@ impl BlockStore for FsBlockStore {
 
         let target_path = block_path(self.path.clone(), block.cid());
         let cid = *block.cid();
-        let block = block.clone();
 
         let inner_span = debug_span!(parent: &span, "blocking");
 
@@ -343,14 +342,14 @@ impl BlockStore for FsBlockStore {
         let span = trace_span!("remove block", cid = %cid);
 
         match self.write_completion(cid).instrument(span).await {
-            WriteCompletion::KnownBad => Ok(Err(BlockRmError::NotFound(cid.to_owned()))),
+            WriteCompletion::KnownBad => Ok(Err(BlockRmError::NotFound(*cid))),
             completion => {
                 trace!(cid = %cid, completion = ?completion, "removing block after synchronizing");
                 match fs::remove_file(path).await {
                     // FIXME: not sure if theres any point in taking cid ownership here?
-                    Ok(()) => Ok(Ok(BlockRm::Removed(cid.to_owned()))),
+                    Ok(()) => Ok(Ok(BlockRm::Removed(*cid))),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        Ok(Err(BlockRmError::NotFound(cid.to_owned())))
+                        Ok(Err(BlockRmError::NotFound(*cid)))
                     }
                     Err(e) => Err(e.into()),
                 }
@@ -416,9 +415,6 @@ impl BlockStore for FsBlockStore {
         list0(self.path.to_owned()).await
     }
 
-    async fn wipe(&self) {
-        unimplemented!("wipe")
-    }
 }
 
 fn write_through_tempfile(

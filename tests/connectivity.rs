@@ -103,18 +103,18 @@ async fn connect_two_nodes_with_two_connections_doesnt_panic() {
 
     // not too sure on this, since there'll be a single peer but two connections; the return
     // type is `Vec<Connection>` but it's peer with any connection.
-    let mut peers = node_a.peers().await.unwrap();
+    let mut peers = node_a.connected().await.unwrap();
     assert_eq!(peers.len(), 1);
 
     // sadly we are unable to currently verify that there exists two connections for the node_b
     // peer..
 
     node_a
-        .disconnect(peers.remove(0).addr.peer_id)
+        .disconnect(peers.remove(0))
         .await
         .expect("failed to disconnect peer_b at peer_a");
 
-    let peers = node_a.peers().await.unwrap();
+    let peers = node_a.connected().await.unwrap();
     assert!(
         peers.is_empty(),
         "node_b was still connected after disconnect: {peers:?}"
@@ -136,7 +136,7 @@ async fn connect_to_wrong_peer() {
     let connection_result = timeout(Duration::from_secs(1), a.connect(wrong_addr)).await;
 
     for &(node, name) in &[(&c, "c"), (&b, "b"), (&a, "a")] {
-        let peers = node.peers().await.unwrap();
+        let peers = node.connected().await.unwrap();
         assert!(
             peers.is_empty(),
             "{name} should have no connections, but had: {peers:?}"

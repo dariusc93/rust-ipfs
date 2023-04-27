@@ -60,7 +60,7 @@ async fn spawn_bootstrapped_nodes(n: usize) -> (Vec<Node>, Option<ForeignNode>) 
     // make sure that the nodes are not actively connected to each other
     // and that we are actually going to be testing the DHT here
     for node in &nodes {
-        assert!([1usize, 2].contains(&node.peers().await.unwrap().len()));
+        assert!([1usize, 2].contains(&node.connected().await.unwrap().len()));
     }
 
     (nodes, None)

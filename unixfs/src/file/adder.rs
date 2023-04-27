@@ -326,7 +326,7 @@ pub enum Chunker {
 }
 
 impl Default for Chunker {
-    /// Returns a default chunker which matches go-ipfs 0.6
+    /// Returns a default chunker
     fn default() -> Self {
         Chunker::Size(256 * 1024)
     }
