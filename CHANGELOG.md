@@ -1,4 +1,5 @@
 # 0.3.15 [unreleased]
+- fix: Remove item from want list [PR 64] 
 - chore: Impl sled datastore, split stores into own modules [PR 63]
 - feat: Added AddOption::wrap [PR 62]
 - chore: Update configuration and behaviour cleanup [PR 60]
@@ -8,6 +9,7 @@
 [PR 61]: https://github.com/dariusc93/rust-ipfs/pull/61
 [PR 62]: https://github.com/dariusc93/rust-ipfs/pull/62
 [PR 63]: https://github.com/dariusc93/rust-ipfs/pull/63
+[PR 64]: https://github.com/dariusc93/rust-ipfs/pull/64
 
 # 0.3.14
 - chore: Downgrade libp2p-gossipsub (temporarily)
