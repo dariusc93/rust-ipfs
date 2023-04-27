@@ -11,6 +11,7 @@ async fn main() -> anyhow::Result<()> {
         .enable_relay(true)
         .enable_relay_server(None)
         .enable_upnp()
+        .fd_limit(rust_ipfs::FDLimit::Max)
         .start()
         .await?;
 
