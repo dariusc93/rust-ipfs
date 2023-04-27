@@ -1,4 +1,4 @@
-# 0.3.15 [unreleased]
+# 0.3.15
 - fix: Remove item from want list [PR 64] 
 - chore: Impl sled datastore, split stores into own modules [PR 63]
 - feat: Added AddOption::wrap [PR 62]
