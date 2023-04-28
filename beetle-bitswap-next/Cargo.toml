@@ -1,0 +1,57 @@
+[package]
+name = "beetle-bitswap-next"
+authors = ["dignifiedquire <me@dignifiedquire.com>"]
+description = "Implementation of the bitswap protocol"
+version = "0.2.0"
+edition = "2021"
+license = "Apache-2.0/MIT"
+rust-version = "1.65"
+repository = "https://github.com/dariusc93/rust-ipfs"
+
+[build-dependencies]
+prost-build = "0.11.1"
+
+[dependencies]
+ahash = "0.8"
+anyhow = { version = "1", features = ["backtrace"] }
+async-broadcast = "0.4.1"
+async-channel = "1.7.1"
+async-stream = "0.3.3"
+async-trait = "0.1.57"
+asynchronous-codec = "0.6"
+
+bytes = "1.1"
+cid = "0.9"
+deadqueue = "0.2.3"
+derivative = "2.2"
+futures = "0.3.24"
+futures-util = "0.3.21"
+
+keyed_priority_queue = "0.4.1"
+libp2p = { version = "0.51", default-features = false, features = ["ping"] }
+multihash = "0.17"
+names = { version = "0.14.0", default-features = false }
+num_enum = "0.5.7"
+once_cell = "1.15"
+prost = "0.11"
+rand = "0.8.5"
+smallvec = "1.10"
+thiserror = "1"
+tokio = { version = "1", features = ["sync"] }
+tokio-context = "0.1.3"
+tokio-stream = "0.1.11"
+tracing = "0.1.34"
+unsigned-varint = { version = "0.7.1", features = ["asynchronous_codec"] }
+wasm-timer = "0.2.5"
+
+[dev-dependencies]
+criterion = "0.4"
+libp2p = { version = "0.51", default-features = false, features = ["yamux", "noise", "tcp", "tokio"] }
+tokio = { version = "1", features = ["macros", "net", "rt"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+tracing-subscriber = { version = "0.3.14", features = ["env-filter"] }
+
+
+[[bench]]
+name = "message"
+harness = false

@@ -10,7 +10,7 @@ use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
 use crate::repo::Repo;
 
 // use cid::Cid;
-use iroh_bitswap::{Bitswap, BitswapEvent};
+use beetle_bitswap_next::{Bitswap, BitswapEvent};
 use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::Multiaddr;
@@ -549,7 +549,7 @@ impl Behaviour {
         tokio::task::spawn(async move {
             let blocks = blocks
                 .iter()
-                .map(|block| iroh_bitswap::Block {
+                .map(|block| beetle_bitswap_next::Block {
                     cid: *block.cid(),
                     data: Bytes::copy_from_slice(block.data()),
                 })

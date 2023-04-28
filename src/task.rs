@@ -18,7 +18,7 @@ use crate::{
     p2p::{ProviderStream, RecordStream},
     TSwarmEvent,
 };
-use iroh_bitswap::BitswapEvent;
+use beetle_bitswap_next::BitswapEvent;
 use tokio::{sync::Notify, task::JoinHandle};
 
 use std::{
@@ -1244,7 +1244,7 @@ impl IpfsTask {
                 let client = self.swarm.behaviour_mut().bitswap().client().clone();
                 let server = self.swarm.behaviour_mut().bitswap().server().cloned();
                 tokio::task::spawn(async move {
-                    let block = iroh_bitswap::Block::new(
+                    let block = beetle_bitswap_next::Block::new(
                         bytes::Bytes::copy_from_slice(block.data()),
                         *block.cid(),
                     );

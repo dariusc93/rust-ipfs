@@ -318,25 +318,25 @@ pub struct Repo {
 }
 
 #[async_trait]
-impl iroh_bitswap::Store for Repo {
+impl beetle_bitswap_next::Store for Repo {
     async fn get_size(&self, cid: &Cid) -> anyhow::Result<usize> {
         self.get_block_now(cid)
             .await?
             .ok_or(anyhow::anyhow!("Block doesnt exist"))
             .map(|block| block.data().len())
     }
-    async fn get(&self, cid: &Cid) -> anyhow::Result<iroh_bitswap::Block> {
+    async fn get(&self, cid: &Cid) -> anyhow::Result<beetle_bitswap_next::Block> {
         let block = self
             .get_block_now(cid)
             .await?
             .ok_or(anyhow::anyhow!("Block doesnt exist"))?;
-        Ok(iroh_bitswap::Block {
+        Ok(beetle_bitswap_next::Block {
             cid: *block.cid(),
             data: bytes::Bytes::copy_from_slice(block.data()),
         })
     }
     async fn has(&self, cid: &Cid) -> anyhow::Result<bool> {
-        self.get_block_now(cid).await.map(|b| b.is_some())
+        self.contains(cid).await
     }
 }
 
