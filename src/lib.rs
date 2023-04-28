@@ -46,7 +46,7 @@ use futures::{
     },
     sink::SinkExt,
     stream::{BoxStream, Stream},
-    StreamExt,
+    StreamExt, future::BoxFuture,
 };
 
 use p2p::{
@@ -324,6 +324,8 @@ enum IpfsEvent {
         OneshotSender<Result<MessageId, PublishError>>,
     ),
     PubsubPeers(Option<String>, OneshotSender<Vec<PeerId>>),
+    GetBitswapPeers(OneshotSender<BoxFuture<'static, Vec<PeerId>>>),
+    WantList(Option<PeerId>, OneshotSender<BoxFuture<'static, Vec<Cid>>>),
     PubsubSubscribed(OneshotSender<Vec<String>>),
     AddListeningAddress(
         Multiaddr,
@@ -1265,23 +1267,23 @@ impl Ipfs {
     }
 
     /// Returns the known wantlist for the local node when the `peer` is `None` or the wantlist of the given `peer`
-    // pub async fn bitswap_wantlist(
-    //     &self,
-    //     peer: Option<PeerId>,
-    // ) -> Result<Vec<(Cid, ipfs_bitswap::Priority)>, Error> {
-    //     async move {
-    //         let (tx, rx) = oneshot_channel();
+    pub async fn bitswap_wantlist(
+        &self,
+        peer: Option<PeerId>,
+    ) -> Result<Vec<Cid>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
 
-    //         self.to_task
-    //             .clone()
-    //             .send(IpfsEvent::WantList(peer, tx))
-    //             .await?;
+            self.to_task
+                .clone()
+                .send(IpfsEvent::WantList(peer, tx))
+                .await?;
 
-    //         Ok(rx.await?)
-    //     }
-    //     .instrument(self.span.clone())
-    //     .await
-    // }
+            Ok(rx.await?.await)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
 
     /// Returns a list of local blocks
     ///
@@ -1705,16 +1707,16 @@ impl Ipfs {
     }
 
     /// Returns the Bitswap peers for the a `Node`.
-    // pub async fn get_bitswap_peers(&self) -> Result<Vec<PeerId>, Error> {
-    //     let (tx, rx) = oneshot_channel();
+    pub async fn get_bitswap_peers(&self) -> Result<Vec<PeerId>, Error> {
+        let (tx, rx) = oneshot_channel();
 
-    //     self.to_task
-    //         .clone()
-    //         .send(IpfsEvent::GetBitswapPeers(tx))
-    //         .await?;
+        self.to_task
+            .clone()
+            .send(IpfsEvent::GetBitswapPeers(tx))
+            .await?;
 
-    //     rx.await.map_err(|e| anyhow!(e))
-    // }
+        Ok(rx.await.map_err(|e| anyhow!(e))?.await)
+    }
 
     pub fn keypair(&self) -> Result<&Keypair, Error> {
         Ok(self.keys.borrow())

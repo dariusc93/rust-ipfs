@@ -284,6 +284,11 @@ impl<S: Store> Client<S> {
         self.peer_manager().current_want_haves().await
     }
 
+    /// Returns the current list of peers.
+    pub async fn get_peers(&self) -> Vec<PeerId> {
+        self.peer_manager().connected_peers().await
+    }
+
     fn peer_manager(&self) -> &PeerManager {
         self.session_manager.peer_manager()
     }

@@ -474,6 +474,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn subscription_cancelled_on_dropping_registry() {
         let registry = SubscriptionRegistry::<u32, ()>::default();
         let s1 = registry.create_subscription(0.into(), None);

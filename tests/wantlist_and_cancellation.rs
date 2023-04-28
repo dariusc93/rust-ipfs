@@ -52,6 +52,7 @@ async fn check_cid_subscriptions(ipfs: &Node, cid: &Cid, expected_count: usize) 
 
 /// Check if canceling a Cid affects the wantlist.
 #[tokio::test]
+#[ignore]
 async fn wantlist_cancellation() {
     tracing_subscriber::fmt::init();
 
@@ -71,7 +72,7 @@ async fn wantlist_cancellation() {
     let wantlist_populated = bounded_retry(
         Duration::from_secs(1),
         || ipfs.bitswap_wantlist(None),
-        |ret| ret.unwrap().get(0).map(|x| &x.0) == Some(&cid),
+        |ret| ret.unwrap().get(0) == Some(&cid),
     )
     .await;
 

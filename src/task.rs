@@ -7,7 +7,7 @@ use futures::{
     },
     sink::SinkExt,
     stream::Fuse,
-    StreamExt,
+    FutureExt, StreamExt,
 };
 
 use crate::{
@@ -904,18 +904,27 @@ impl IpfsTask {
                     }
                 };
             }
+            IpfsEvent::WantList(peer, ret) => {
+                let client = self.swarm.behaviour().bitswap.client().clone();
+                let server = self.swarm.behaviour().bitswap.server().cloned();
 
-            // IpfsEvent::GetBitswapPeers(ret) => {
-            //     let peers = self
-            //         .swarm
-            //         .behaviour_mut()
-            //         .bitswap()
-            //         .connected_peers
-            //         .keys()
-            //         .cloned()
-            //         .collect();
-            //     let _ = ret.send(peers);
-            // }
+                
+                let _ = ret.send(async move {
+                    if let Some(peer) = peer {
+                        if let Some(server) = server {
+                            server.wantlist_for_peer(&peer).await
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::from_iter(client.get_wantlist().await)
+                    }
+                }.boxed());
+            }
+            IpfsEvent::GetBitswapPeers(ret) => {
+                let client = self.swarm.behaviour().bitswap.client().clone();
+                let _ = ret.send(async move { client.get_peers().await }.boxed());
+            }
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
                 let locally_known = self.swarm.behaviour().peerbook.get_peer_info(peer_id);
 
