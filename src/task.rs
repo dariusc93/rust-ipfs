@@ -24,7 +24,7 @@ use tokio::{sync::Notify, task::JoinHandle};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     io,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     time::Duration,
 };
 
@@ -70,6 +70,8 @@ use libp2p::{
     swarm::SwarmEvent,
 };
 
+static BITSWAP_ID: AtomicU64 = AtomicU64::new(0);
+
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
@@ -97,6 +99,7 @@ impl IpfsTask {
     pub(crate) async fn run(&mut self, delay: bool, notify: Arc<Notify>) {
         let mut first_run = false;
         let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
+        let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
@@ -120,12 +123,63 @@ impl IpfsTask {
                 _ = connected_peer_timer.tick() => {
                     info!("Connected Peers: {}", self.swarm.connected_peers().count());
                 }
+                _ = session_cleanup.tick() => {
+                    let mut to_remove = Vec::new();
+                    for (id, tasks) in &mut self.bitswap_sessions {
+                        tasks.retain(|(_, task)| !task.is_finished());
+
+                        if tasks.is_empty() {
+                            to_remove.push(*id);
+                        }
+
+                        // Only do a small chunk of cleanup on each iteration
+                        // TODO(arqu): magic number
+                        if to_remove.len() >= 10 {
+                            break;
+                        }
+                    }
+
+                    for id in to_remove {
+                        let (tx, _rx) = oneshot::channel();
+                        self.destroy_bs_session(id, tx);
+                    }
+                }
             }
             if !first_run {
                 first_run = true;
                 notify.notify_one();
             }
         }
+    }
+
+    fn destroy_bs_session(&mut self, ctx: u64, ret: oneshot::Sender<anyhow::Result<()>>) {
+        // if let Some(bs) = self.swarm.behaviour().bitswap.as_ref() {
+        let client = self.swarm.behaviour().bitswap.client().clone();
+        let workers: Option<Vec<(oneshot::Sender<()>, JoinHandle<()>)>> =
+            self.bitswap_sessions.remove(&ctx);
+        tokio::task::spawn(async move {
+            debug!("stopping session {}", ctx);
+            if let Some(workers) = workers {
+                debug!("stopping workers {} for session {}", workers.len(), ctx);
+                // first shutdown workers
+                for (closer, worker) in workers {
+                    if closer.send(()).is_ok() {
+                        worker.await.ok();
+                    }
+                }
+                debug!("all workers stopped for session {}", ctx);
+            }
+            if let Err(err) = client.stop_session(ctx).await {
+                warn!("failed to stop session {}: {:?}", ctx, err);
+            }
+            if let Err(err) = ret.send(Ok(())) {
+                warn!("session {} failed to send stop response: {:?}", ctx, err);
+            }
+            debug!("session {} stopped", ctx);
+        });
+        // } else {
+        //     let _ = response_channel.send(Err(anyhow!("no bitswap available")));
+        // }
     }
 
     fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
@@ -862,7 +916,6 @@ impl IpfsTask {
             //         .collect();
             //     let _ = ret.send(peers);
             // }
-
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
                 let locally_known = self.swarm.behaviour().peerbook.get_peer_info(peer_id);
 
@@ -1159,7 +1212,7 @@ impl IpfsTask {
                 let client = self.swarm.behaviour_mut().bitswap().client().clone();
                 let repo = self.repo.clone();
                 let (closer_s, closer_r) = oneshot::channel();
-                let ctx = 0;
+                let ctx = BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let entry = self.bitswap_sessions.entry(ctx).or_default();
 
                 let worker = tokio::task::spawn(async move {
