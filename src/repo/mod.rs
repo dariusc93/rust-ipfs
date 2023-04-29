@@ -344,7 +344,7 @@ impl beetle_bitswap_next::Store for Repo {
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Cid, Vec<PeerId>),
+    WantBlock(Option<u64>, Cid, Vec<PeerId>),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
@@ -485,7 +485,7 @@ impl Repo {
             // and that is okay with us.
             self.events
                 .clone()
-                .send(RepoEvent::WantBlock(*cid, peers.to_vec()))
+                .send(RepoEvent::WantBlock(None, *cid, peers.to_vec()))
                 .await
                 .ok();
             Ok(subscription.await?)

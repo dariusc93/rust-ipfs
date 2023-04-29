@@ -70,6 +70,7 @@ use libp2p::{
     swarm::SwarmEvent,
 };
 
+#[allow(dead_code)]
 static BITSWAP_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
@@ -1217,11 +1218,12 @@ impl IpfsTask {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(cid, peers) => {
+            RepoEvent::WantBlock(session, cid, peers) => {
                 let client = self.swarm.behaviour_mut().bitswap().client().clone();
                 let repo = self.repo.clone();
                 let (closer_s, closer_r) = oneshot::channel();
-                let ctx = BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                //If there is no session context defined, we will use 0 as its root context
+                let ctx = session.unwrap_or(0);
                 let entry = self.bitswap_sessions.entry(ctx).or_default();
 
                 let worker = tokio::task::spawn(async move {
