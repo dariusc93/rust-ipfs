@@ -154,7 +154,6 @@ impl IpfsTask {
     }
 
     fn destroy_bs_session(&mut self, ctx: u64, ret: oneshot::Sender<anyhow::Result<()>>) {
-        // if let Some(bs) = self.swarm.behaviour().bitswap.as_ref() {
         let client = self.swarm.behaviour().bitswap.client().clone();
         let workers: Option<Vec<(oneshot::Sender<()>, JoinHandle<()>)>> =
             self.bitswap_sessions.remove(&ctx);
@@ -178,9 +177,6 @@ impl IpfsTask {
             }
             debug!("session {} stopped", ctx);
         });
-        // } else {
-        //     let _ = response_channel.send(Err(anyhow!("no bitswap available")));
-        // }
     }
 
     fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {

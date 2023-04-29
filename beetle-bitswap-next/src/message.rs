@@ -228,6 +228,9 @@ impl BitswapMessage {
                 }
                 Some(false) => {
                     // TODO: maybe blacklist peer?
+                    // TODO: Maybe start a counter so if the peer exceeds a specific range
+                    //       to blacklist the peer from sending anymore blocks for a specific
+                    //       duration (or during the lifetime of the node)
                     warn!("invalid block received");
                     false
                 }
