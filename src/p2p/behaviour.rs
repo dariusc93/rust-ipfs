@@ -509,6 +509,14 @@ impl Behaviour {
         }
         self.pubsub.add_explicit_peer(&peer);
         self.peerbook.add(peer);
+        let client = self.bitswap.client().clone();
+        let server = self.bitswap.server().cloned();
+        tokio::spawn(async move {
+            client.peer_connected(&peer).await;
+            if let Some(server) = server {
+                server.peer_connected(&peer).await;
+            }
+        });
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId, remove_from_whitelist: bool) {
