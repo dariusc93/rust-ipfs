@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use libp2p::core::{Endpoint, Multiaddr};
 use libp2p::identity::PeerId;
