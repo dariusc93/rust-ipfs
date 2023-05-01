@@ -6,16 +6,15 @@ use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, OrTransport};
 use libp2p::core::upgrade::SelectUpgrade;
 use libp2p::dns::{ResolverConfig, ResolverOpts, TokioDnsConfig};
-use libp2p::identity;
+use libp2p::{identity, noise};
 use libp2p::mplex::MplexConfig;
-use libp2p::noise::{self, NoiseConfig};
 use libp2p::quic::tokio::Transport as TokioQuicTransport;
 use libp2p::quic::Config as QuicConfig;
 use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
-use libp2p::yamux::{WindowUpdateMode, YamuxConfig};
+use libp2p::yamux::{Config as YamuxConfig, WindowUpdateMode};
 use libp2p::{PeerId, Transport};
-use std::io;
+use std::io::{self, ErrorKind};
 use std::time::Duration;
 use trust_dns_resolver::system_conf;
 
@@ -153,10 +152,8 @@ pub(crate) fn build_transport(
         ..
     }: TransportConfig,
 ) -> io::Result<TTransport> {
-    let xx_keypair = noise::Keypair::<noise::X25519Spec>::new()
-        .into_authentic(&keypair)
-        .unwrap();
-    let noise_config = NoiseConfig::xx(xx_keypair).into_authenticated();
+    let noise_config =
+        noise::Config::new(&keypair).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
     let yamux_config = {
         let mut config = YamuxConfig::default();

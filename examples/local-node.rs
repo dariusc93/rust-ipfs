@@ -27,10 +27,10 @@ async fn main() -> anyhow::Result<()> {
         ..
     } = ipfs.identity(None).await?;
 
-    if let Some(publickey) = key.clone().into_ed25519() {
+    if let Ok(publickey) = key.clone().try_into_ed25519() {
         println!(
             "Public Key: {}",
-            bs58::encode(publickey.encode()).into_string()
+            bs58::encode(publickey.to_bytes()).into_string()
         );
     }
 
