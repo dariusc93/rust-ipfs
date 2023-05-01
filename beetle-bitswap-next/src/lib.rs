@@ -641,9 +641,9 @@ mod tests {
     use libp2p::core::transport::upgrade::Version;
     use libp2p::core::transport::Boxed;
     use libp2p::identity::Keypair;
-    use libp2p::swarm::{SwarmEvent, SwarmBuilder};
+    use libp2p::swarm::{SwarmBuilder, SwarmEvent};
     use libp2p::tcp::{tokio::Transport as TcpTransport, Config as TcpConfig};
-    use libp2p::yamux::YamuxConfig;
+    use libp2p::yamux::Config as YamuxConfig;
     use libp2p::{noise, PeerId, Swarm, Transport};
     use tokio::sync::{mpsc, RwLock};
     use tracing::{info, trace};
@@ -679,13 +679,7 @@ mod tests {
     fn mk_transport() -> (PeerId, Boxed<(PeerId, StreamMuxerBox)>) {
         let local_key = Keypair::generate_ed25519();
 
-        let auth_config = {
-            let dh_keys = noise::Keypair::<noise::X25519Spec>::new()
-                .into_authentic(&local_key)
-                .expect("Noise key generation failed");
-
-            noise::NoiseConfig::xx(dh_keys).into_authenticated()
-        };
+        let auth_config = noise::Config::new(&local_key).expect("Noise key generation failed");
 
         let peer_id = local_key.public().to_peer_id();
         let transport = TcpTransport::new(TcpConfig::default().nodelay(true))
