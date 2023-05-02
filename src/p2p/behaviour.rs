@@ -43,7 +43,7 @@ use std::time::Duration;
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct Behaviour {
     pub mdns: Toggle<Mdns>,
-    pub bitswap: Bitswap<Repo>,
+    pub bitswap: Toggle<Bitswap<Repo>>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
     pub ping: Ping,
     pub identify: Identify,
@@ -411,7 +411,9 @@ impl Behaviour {
         }
 
         let autonat = autonat::Behaviour::new(peer_id, Default::default());
-        let bitswap = Bitswap::new(peer_id, repo, Default::default()).await;
+        let bitswap = (!options.disable_bitswap)
+            .then_some(Bitswap::new(peer_id, repo, Default::default()).await)
+            .into();
 
         let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
 
@@ -509,14 +511,16 @@ impl Behaviour {
         }
         self.pubsub.add_explicit_peer(&peer);
         self.peerbook.add(peer);
-        let client = self.bitswap.client().clone();
-        let server = self.bitswap.server().cloned();
-        tokio::spawn(async move {
-            client.peer_connected(&peer).await;
-            if let Some(server) = server {
-                server.peer_connected(&peer).await;
-            }
-        });
+        if let Some(bitswap) = self.bitswap.as_ref() {
+            let client = bitswap.client().clone();
+            let server = bitswap.server().cloned();
+            tokio::spawn(async move {
+                client.peer_connected(&peer).await;
+                if let Some(server) = server {
+                    server.peer_connected(&peer).await;
+                }
+            });
+        }
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId, remove_from_whitelist: bool) {
@@ -553,27 +557,29 @@ impl Behaviour {
     }
 
     pub fn notify_new_blocks(&self, blocks: Vec<crate::Block>) {
-        let client = self.bitswap.client().clone();
-        tokio::task::spawn(async move {
-            let blocks = blocks
-                .iter()
-                .map(|block| beetle_bitswap_next::Block {
-                    cid: *block.cid(),
-                    data: Bytes::copy_from_slice(block.data()),
-                })
-                .collect::<Vec<_>>();
-            if let Err(err) = client.notify_new_blocks(&blocks).await {
-                warn!("failed to notify bitswap about blocks: {:?}", err);
-            }
-        });
+        if let Some(bitswap) = self.bitswap.as_ref() {
+            let client = bitswap.client().clone();
+            tokio::task::spawn(async move {
+                let blocks = blocks
+                    .iter()
+                    .map(|block| beetle_bitswap_next::Block {
+                        cid: *block.cid(),
+                        data: Bytes::copy_from_slice(block.data()),
+                    })
+                    .collect::<Vec<_>>();
+                if let Err(err) = client.notify_new_blocks(&blocks).await {
+                    warn!("failed to notify bitswap about blocks: {:?}", err);
+                }
+            });
+        }
     }
 
     pub fn pubsub(&mut self) -> &mut GossipsubStream {
         &mut self.pubsub
     }
 
-    pub fn bitswap(&mut self) -> &mut Bitswap<Repo> {
-        &mut self.bitswap
+    pub fn bitswap(&mut self) -> Option<&mut Bitswap<Repo>> {
+        self.bitswap.as_mut()
     }
 }
 
@@ -582,7 +588,7 @@ pub async fn build_behaviour(
     keypair: &Keypair,
     options: SwarmOptions,
     repo: Repo,
-    limits: ConnectionLimits
+    limits: ConnectionLimits,
 ) -> Result<(Behaviour, Option<ClientTransport>), Error> {
     Behaviour::new(keypair, options, repo, limits).await
 }

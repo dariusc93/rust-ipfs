@@ -172,6 +172,9 @@ pub struct IpfsOptions {
     /// Disables kademlia protocol
     pub disable_kad: bool,
 
+    /// Disables bitswap protocol
+    pub disable_bitswap: bool,
+
     /// Enables relay server
     pub relay_server: bool,
 
@@ -224,6 +227,7 @@ impl Default for IpfsOptions {
             bootstrap: Default::default(),
             relay: Default::default(),
             disable_kad: Default::default(),
+            disable_bitswap: Default::default(),
             keep_alive: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
@@ -489,6 +493,12 @@ impl UninitializedIpfs {
     /// Disables kademlia
     pub fn disable_kad(mut self) -> Self {
         self.options.disable_kad = true;
+        self
+    }
+
+    /// Disable bitswap
+    pub fn disable_bitswap(mut self) -> Self {
+        self.options.disable_bitswap = true;
         self
     }
 

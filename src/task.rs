@@ -154,29 +154,31 @@ impl IpfsTask {
     }
 
     fn destroy_bs_session(&mut self, ctx: u64, ret: oneshot::Sender<anyhow::Result<()>>) {
-        let client = self.swarm.behaviour().bitswap.client().clone();
-        let workers: Option<Vec<(oneshot::Sender<()>, JoinHandle<()>)>> =
-            self.bitswap_sessions.remove(&ctx);
-        tokio::task::spawn(async move {
-            debug!("stopping session {}", ctx);
-            if let Some(workers) = workers {
-                debug!("stopping workers {} for session {}", workers.len(), ctx);
-                // first shutdown workers
-                for (closer, worker) in workers {
-                    if closer.send(()).is_ok() {
-                        worker.await.ok();
+        if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
+            let client = bitswap.client().clone();
+            let workers: Option<Vec<(oneshot::Sender<()>, JoinHandle<()>)>> =
+                self.bitswap_sessions.remove(&ctx);
+            tokio::task::spawn(async move {
+                debug!("stopping session {}", ctx);
+                if let Some(workers) = workers {
+                    debug!("stopping workers {} for session {}", workers.len(), ctx);
+                    // first shutdown workers
+                    for (closer, worker) in workers {
+                        if closer.send(()).is_ok() {
+                            worker.await.ok();
+                        }
                     }
+                    debug!("all workers stopped for session {}", ctx);
                 }
-                debug!("all workers stopped for session {}", ctx);
-            }
-            if let Err(err) = client.stop_session(ctx).await {
-                warn!("failed to stop session {}: {:?}", ctx, err);
-            }
-            if let Err(err) = ret.send(Ok(())) {
-                warn!("session {} failed to send stop response: {:?}", ctx, err);
-            }
-            debug!("session {} stopped", ctx);
-        });
+                if let Err(err) = client.stop_session(ctx).await {
+                    warn!("failed to stop session {}: {:?}", ctx, err);
+                }
+                if let Err(err) = ret.send(Ok(())) {
+                    warn!("session {} failed to send stop response: {:?}", ctx, err);
+                }
+                debug!("session {} stopped", ctx);
+            });
+        }
     }
 
     fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
@@ -694,10 +696,9 @@ impl IpfsTask {
                         ..
                     } = info;
 
-                    self.swarm
-                        .behaviour_mut()
-                        .bitswap
-                        .on_identify(&peer_id, &protocols);
+                    if let Some(bitswap) = self.swarm.behaviour_mut().bitswap() {
+                        bitswap.on_identify(&peer_id, &protocols)
+                    }
 
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
                         if protocols
@@ -902,25 +903,35 @@ impl IpfsTask {
                 };
             }
             IpfsEvent::WantList(peer, ret) => {
-                let client = self.swarm.behaviour().bitswap.client().clone();
-                let server = self.swarm.behaviour().bitswap.server().cloned();
+                if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
+                    let client = bitswap.client().clone();
+                    let server = bitswap.server().cloned();
 
-                
-                let _ = ret.send(async move {
-                    if let Some(peer) = peer {
-                        if let Some(server) = server {
-                            server.wantlist_for_peer(&peer).await
-                        } else {
-                            Vec::new()
+                    let _ = ret.send(
+                        async move {
+                            if let Some(peer) = peer {
+                                if let Some(server) = server {
+                                    server.wantlist_for_peer(&peer).await
+                                } else {
+                                    Vec::new()
+                                }
+                            } else {
+                                Vec::from_iter(client.get_wantlist().await)
+                            }
                         }
-                    } else {
-                        Vec::from_iter(client.get_wantlist().await)
-                    }
-                }.boxed());
+                        .boxed(),
+                    );
+                } else {
+                    let _ = ret.send(futures::future::ready(vec![]).boxed());
+                }
             }
             IpfsEvent::GetBitswapPeers(ret) => {
-                let client = self.swarm.behaviour().bitswap.client().clone();
-                let _ = ret.send(async move { client.get_peers().await }.boxed());
+                if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
+                    let client = bitswap.client().clone();
+                    let _ = ret.send(async move { client.get_peers().await }.boxed());
+                } else {
+                    let _ = ret.send(futures::future::ready(vec![]).boxed());
+                }
             }
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
                 let locally_known = self.swarm.behaviour().peerbook.get_peer_info(peer_id);
@@ -1215,55 +1226,59 @@ impl IpfsTask {
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
             RepoEvent::WantBlock(session, cid, peers) => {
-                let client = self.swarm.behaviour_mut().bitswap().client().clone();
-                let repo = self.repo.clone();
-                let (closer_s, closer_r) = oneshot::channel();
-                //If there is no session context defined, we will use 0 as its root context
-                let ctx = session.unwrap_or(0);
-                let entry = self.bitswap_sessions.entry(ctx).or_default();
+                if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
+                    let client = bitswap.client().clone();
+                    let repo = self.repo.clone();
+                    let (closer_s, closer_r) = oneshot::channel();
+                    //If there is no session context defined, we will use 0 as its root context
+                    let ctx = session.unwrap_or(0);
+                    let entry = self.bitswap_sessions.entry(ctx).or_default();
 
-                let worker = tokio::task::spawn(async move {
-                    tokio::select! {
-                        _ = closer_r => {
-                            // Explicit sesssion stop.
-                            debug!("session {}: stopped: closed", ctx);
-                        }
-                        block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
-                            Ok(block) => {
-                                info!("Found {cid}");
-                                let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
-                                let res = repo.put_block(block).await;
-                                if let Err(e) = res {
-                                    error!("Got block {} but failed to store it: {}", cid, e);
+                    let worker = tokio::task::spawn(async move {
+                        tokio::select! {
+                            _ = closer_r => {
+                                // Explicit sesssion stop.
+                                debug!("session {}: stopped: closed", ctx);
+                            }
+                            block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
+                                Ok(block) => {
+                                    info!("Found {cid}");
+                                    let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
+                                    let res = repo.put_block(block).await;
+                                    if let Err(e) = res {
+                                        error!("Got block {} but failed to store it: {}", cid, e);
+                                    }
+
                                 }
-
-                            }
-                            Err(err) => {
-                                error!("Failed to get {}: {}", cid, err);
-                            }
-                        },
-                    }
-                });
-                entry.push((closer_s, worker));
+                                Err(err) => {
+                                    error!("Failed to get {}: {}", cid, err);
+                                }
+                            },
+                        }
+                    });
+                    entry.push((closer_s, worker));
+                }
             }
             RepoEvent::UnwantBlock(_cid) => {}
             RepoEvent::NewBlock(block, ret) => {
-                let client = self.swarm.behaviour_mut().bitswap().client().clone();
-                let server = self.swarm.behaviour_mut().bitswap().server().cloned();
-                tokio::task::spawn(async move {
-                    let block = beetle_bitswap_next::Block::new(
-                        bytes::Bytes::copy_from_slice(block.data()),
-                        *block.cid(),
-                    );
-                    if let Err(err) = client.notify_new_blocks(&[block.clone()]).await {
-                        warn!("failed to notify bitswap about blocks: {:?}", err);
-                    }
-                    if let Some(server) = server {
-                        if let Err(err) = server.notify_new_blocks(&[block]).await {
+                if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
+                    let client = bitswap.client().clone();
+                    let server = bitswap.server().cloned();
+                    tokio::task::spawn(async move {
+                        let block = beetle_bitswap_next::Block::new(
+                            bytes::Bytes::copy_from_slice(block.data()),
+                            *block.cid(),
+                        );
+                        if let Err(err) = client.notify_new_blocks(&[block.clone()]).await {
                             warn!("failed to notify bitswap about blocks: {:?}", err);
                         }
-                    }
-                });
+                        if let Some(server) = server {
+                            if let Err(err) = server.notify_new_blocks(&[block]).await {
+                                warn!("failed to notify bitswap about blocks: {:?}", err);
+                            }
+                        }
+                    });
+                }
                 let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
             }
             RepoEvent::RemovedBlock(cid) => self.swarm.behaviour_mut().stop_providing_block(&cid),
