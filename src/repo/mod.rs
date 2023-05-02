@@ -30,7 +30,6 @@ mod common_tests;
 pub mod blockstore;
 pub mod datastore;
 pub mod lock;
-pub mod mem;
 
 /// Path mangling done for pins and blocks
 pub(crate) mod paths;
