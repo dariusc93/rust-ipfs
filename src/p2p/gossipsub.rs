@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use libp2p::core::{Endpoint, Multiaddr};
 use libp2p::identity::PeerId;
@@ -359,32 +359,24 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
-                    if self.subscribed_peers(&topic.to_string()).contains(&peer_id) {
-                        warn!("Peer is already subscribed to {}", topic);
-                        continue;
-                    }
-
-                    self.add_explicit_peer(&peer_id);
-                    continue;
+                    return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
+                        GossipsubEvent::Subscribed { peer_id, topic },
+                    ));
                 }
                 NetworkBehaviourAction::GenerateEvent(GossipsubEvent::Unsubscribed {
                     peer_id,
                     topic,
                 }) => {
-                    if !self.subscribed_peers(&topic.to_string()).contains(&peer_id) {
-                        warn!("Peer is not subscribed to {}", topic);
-                        continue;
-                    };
-
-                    self.remove_explicit_peer(&peer_id);
-
-                    continue;
+                    return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
+                        GossipsubEvent::Unsubscribed { peer_id, topic },
+                    ));
                 }
                 NetworkBehaviourAction::GenerateEvent(GossipsubEvent::GossipsubNotSupported {
                     peer_id,
                 }) => {
-                    warn!("Not supported for {}", peer_id);
-                    continue;
+                    return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
+                        GossipsubEvent::GossipsubNotSupported { peer_id },
+                    ));
                 }
                 action @ NetworkBehaviourAction::Dial { .. } => {
                     return Poll::Ready(action);
