@@ -1,3 +1,8 @@
+# 0.3.16 [unreleased]
+-  fix: Return events from gossipsub stream [PR 68]
+
+[PR 68]: https://github.com/dariusc93/rust-ipfs/pull/68
+
 # 0.3.15
 - fix: Remove item from want list [PR 64] 
 - chore: Impl sled datastore, split stores into own modules [PR 63]
