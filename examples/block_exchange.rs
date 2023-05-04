@@ -26,6 +26,8 @@ async fn main() -> anyhow::Result<()> {
 
     assert_eq!(block_b, block_a); 
 
+    println!("Block from node A: {block_b:?}");
+
     node_a.exit_daemon().await;
     node_b.exit_daemon().await;
     Ok(())
