@@ -1,6 +1,7 @@
 # 0.3.16 [unreleased]
--  fix: Return events from gossipsub stream [PR 68]
-
+- fix: Return events from gossipsub stream [PR 68]
+- chore: Update transport and configuration
+- 
 [PR 68]: https://github.com/dariusc93/rust-ipfs/pull/68
 
 # 0.3.15
