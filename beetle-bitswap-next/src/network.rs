@@ -10,7 +10,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use cid::Cid;
 use futures::Stream;
 
-use libp2p::{PeerId, swarm::ConnectionId};
+use libp2p::{swarm::ConnectionId, PeerId};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, trace};
 

@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     let block_b = node_b.get_dag(IpfsPath::from(cid)).await?;
 
-    assert_eq!(block_b, block_a); 
+    assert_eq!(block_b, block_a);
 
     println!("Block from node A: {block_b:?}");
 

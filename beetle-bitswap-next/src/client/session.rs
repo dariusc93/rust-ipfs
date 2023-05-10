@@ -204,7 +204,6 @@ impl Session {
             .map_err(|e| anyhow!("failed to stop worker: {:?}", e))?;
         inner.worker.await?;
 
-
         debug!("session stopped");
         Ok(())
     }

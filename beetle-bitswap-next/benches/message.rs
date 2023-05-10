@@ -1,9 +1,9 @@
-use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use beetle_bitswap_next::{
     create_block_v1 as create_test_block,
     message::{BitswapMessage, Priority, WantType},
 };
+use bytes::Bytes;
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     {

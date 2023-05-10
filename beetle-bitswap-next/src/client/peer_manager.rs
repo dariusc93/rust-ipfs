@@ -303,7 +303,6 @@ impl PeerManager {
 
 async fn run(mut actor: PeerManagerActor) {
     loop {
-
         tokio::select! {
             message = actor.receiver.recv() => {
                 match message {

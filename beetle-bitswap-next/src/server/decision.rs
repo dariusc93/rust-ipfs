@@ -27,7 +27,6 @@ use super::{
     task_merger::{TaskData, TaskMerger},
 };
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskInfo {
     peer: PeerId,
@@ -282,7 +281,6 @@ impl<S: Store> Engine<S> {
 
         if *counter % 100 == 0 {
             let _stats = self.peer_task_queue.stats().await;
-
         }
     }
 

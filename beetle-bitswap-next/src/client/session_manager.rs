@@ -123,7 +123,6 @@ impl SessionManager {
         provider_search_delay: Duration,
         rebroadcast_delay: Duration,
     ) -> Session {
-
         let session = Session::new(
             session_id,
             self.clone(),

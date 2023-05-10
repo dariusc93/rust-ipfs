@@ -44,9 +44,10 @@ use futures::{
         mpsc::{channel, Sender},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
+    future::BoxFuture,
     sink::SinkExt,
     stream::{BoxStream, Stream},
-    StreamExt, future::BoxFuture,
+    StreamExt,
 };
 
 use p2p::{
@@ -1283,10 +1284,7 @@ impl Ipfs {
     }
 
     /// Returns the known wantlist for the local node when the `peer` is `None` or the wantlist of the given `peer`
-    pub async fn bitswap_wantlist(
-        &self,
-        peer: Option<PeerId>,
-    ) -> Result<Vec<Cid>, Error> {
+    pub async fn bitswap_wantlist(&self, peer: Option<PeerId>) -> Result<Vec<Cid>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 

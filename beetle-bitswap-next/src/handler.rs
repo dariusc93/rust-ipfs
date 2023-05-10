@@ -235,7 +235,7 @@ impl ConnectionHandler for BitswapHandler {
                 warn!("Dial upgrade error {:?}", error);
                 self.upgrade_errors.push_back(error);
             }
-            ConnectionEvent::ListenUpgradeError(_) => {},
+            ConnectionEvent::ListenUpgradeError(_) => {}
         }
     }
 
@@ -247,7 +247,6 @@ impl ConnectionHandler for BitswapHandler {
         if !self.events.is_empty() {
             return Poll::Ready(self.events.remove(0));
         }
-
 
         // Handle any upgrade errors
         if let Some(error) = self.upgrade_errors.pop_front() {
