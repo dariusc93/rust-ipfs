@@ -1,5 +1,5 @@
-use rust_unixfs::dir::{resolve, LookupError, ResolveError};
 use libipld::Cid;
+use rust_unixfs::dir::{resolve, LookupError, ResolveError};
 use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Error as IoError, Read};
@@ -279,7 +279,7 @@ impl ShardedBlockStore {
         path.set_extension("data");
         path
     }
-    
+
     #[allow(clippy::result_large_err)]
     fn as_file(&self, key: &[u8]) -> Result<std::fs::File, Error> {
         let path = self.as_path(key);

@@ -586,7 +586,7 @@ impl IpfsTask {
 
                     tokio::task::spawn(async move {
                         if !repo.contains(&cid).await.unwrap_or_default() {
-                           let _ = dont_have_blocks.unbounded_send((peer_id, cid));
+                            let _ = dont_have_blocks.unbounded_send((peer_id, cid));
                         } else {
                             match repo.get_block_now(&cid).await {
                                 Ok(Some(block)) => {

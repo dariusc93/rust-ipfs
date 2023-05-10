@@ -1,8 +1,8 @@
 use crate::error::Error;
+use crate::p2p::DnsResolver;
 use crate::path::IpfsPath;
 use std::str::FromStr;
 use tracing_futures::Instrument;
-use crate::p2p::DnsResolver;
 
 pub async fn resolve(resolver: DnsResolver, domain: &str) -> Result<IpfsPath, Error> {
     use std::borrow::Cow;
@@ -81,13 +81,18 @@ mod tests {
     #[tokio::test]
     async fn resolve_ipfs_io() {
         tracing_subscriber::fmt::init();
-        let res = resolve(crate::p2p::DnsResolver::Google, "ipfs.io").await.unwrap().to_string();
+        let res = resolve(crate::p2p::DnsResolver::Google, "ipfs.io")
+            .await
+            .unwrap()
+            .to_string();
         assert_eq!(res, "/ipns/website.ipfs.io");
     }
 
     #[tokio::test]
     async fn resolve_website_ipfs_io() {
-        let res = resolve(crate::p2p::DnsResolver::Google, "website.ipfs.io").await.unwrap();
+        let res = resolve(crate::p2p::DnsResolver::Google, "website.ipfs.io")
+            .await
+            .unwrap();
 
         assert!(
             matches!(res.root(), crate::path::PathRoot::Ipld(_)),

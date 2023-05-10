@@ -1,9 +1,9 @@
 use super::{
     CustomFlatUnixFs, DirBuilder, Entry, Leaf, NamedLeaf, TreeConstructionFailed, TreeOptions,
 };
-use libipld::Cid;
-use libipld::multihash::{Multihash, Code};
 use core::fmt;
+use libipld::multihash::{Code, Multihash};
+use libipld::Cid;
 use std::collections::HashMap;
 
 /// Constructs the directory nodes required for a tree.
@@ -246,9 +246,9 @@ impl PostOrderIterator {
                         let parent_leaves = self.persisted_cids.get_mut(&parent_id);
 
                         match (parent_id, parent_leaves, index) {
-                            (pid, None, index) => panic!(
-                                "leaves not found for parent_id = {pid} and index = {index}"
-                            ),
+                            (pid, None, index) => {
+                                panic!("leaves not found for parent_id = {pid} and index = {index}")
+                            }
                             (_, Some(vec), index) => {
                                 let cell = &mut vec[index];
                                 // all

@@ -1,5 +1,5 @@
-use libipld::Cid;
 use libipld::multihash::{self, Multihash};
+use libipld::Cid;
 
 use crate::pb::{FlatUnixFs, PBLink, UnixFs, UnixFsType};
 use alloc::borrow::Cow;
@@ -643,9 +643,9 @@ mod tests {
 
     use super::{BalancedCollector, Chunker, FileAdder};
     use crate::test_support::FakeBlockstore;
-    use libipld::Cid;
     use core::convert::TryFrom;
     use hex_literal::hex;
+    use libipld::Cid;
 
     #[test]
     fn test_size_chunker() {

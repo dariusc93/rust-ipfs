@@ -598,11 +598,11 @@ mod tests {
         assert!(!contains.await.unwrap());
         let get = store.get(&key);
         assert_eq!(get.await.unwrap(), None);
-        store.remove( &key).await.unwrap();
+        store.remove(&key).await.unwrap();
 
         let put = store.put(&key, &value);
         put.await.unwrap();
-        let contains = store.contains( &key);
+        let contains = store.contains(&key);
         assert!(contains.await.unwrap());
         let get = store.get(&key);
         assert_eq!(get.await.unwrap(), Some(value.to_vec()));

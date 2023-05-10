@@ -90,7 +90,6 @@ impl BlockStore for MemBlockStore {
 
 // Used for in memory repos, currently not implementing any true locking.
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

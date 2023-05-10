@@ -300,16 +300,10 @@ mod tests {
     #[test]
     fn expanding_tree() {
         let res = Ending::TreeCoverage(100).check_is_suitable_next(10, &(0..102));
-        assert!(
-            matches!(res, Err(FileError::TreeExpandsOnLinks)),
-            "{res:?}"
-        );
+        assert!(matches!(res, Err(FileError::TreeExpandsOnLinks)), "{res:?}");
 
         let res = Ending::TreeCoverage(100).check_is_suitable_next(0, &(0..102));
-        assert!(
-            matches!(res, Err(FileError::TreeExpandsOnLinks)),
-            "{res:?}"
-        );
+        assert!(matches!(res, Err(FileError::TreeExpandsOnLinks)), "{res:?}");
     }
 
     #[test]

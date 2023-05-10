@@ -27,8 +27,8 @@ use tracing::log;
 #[cfg(test)]
 mod common_tests;
 
-pub mod datastore;
 pub mod blockstore;
+pub mod datastore;
 pub mod lock;
 
 /// Path mangling done for pins and blocks

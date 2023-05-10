@@ -50,8 +50,8 @@ use futures::{
 };
 
 use p2p::{
-    IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream, RecordStream,
-    RelayConfig, PubsubConfig,
+    IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream, PubsubConfig,
+    RecordStream, RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
@@ -482,7 +482,6 @@ impl UninitializedIpfs {
         self.options.pubsub_config = Some(config);
         self
     }
-
 
     /// Set keypair
     pub fn set_keypair(mut self, keypair: Keypair) -> Self {

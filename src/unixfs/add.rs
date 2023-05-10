@@ -157,11 +157,11 @@ pub async fn add<'a>(
                             }
                             let cid = cids.last().ok_or(anyhow::anyhow!("no cid available"))?;
                             let path = IpfsPath::from(*cid).sub_path(&name)?;
-                            
+
                             Ok::<_, anyhow::Error>(path)
                         }
                     };
-                    
+
                     path = match result.await {
                         Ok(path) => path,
                         Err(e) => {

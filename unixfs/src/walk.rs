@@ -863,7 +863,7 @@ mod tests {
         let blocks = FakeBlockstore::with_fixtures();
 
         let trickle_foobar =
-           libipld::Cid::try_from("QmWfQ48ChJUj4vWKFsUDe4646xCBmXgdmNfhjz9T7crywd").unwrap();
+            libipld::Cid::try_from("QmWfQ48ChJUj4vWKFsUDe4646xCBmXgdmNfhjz9T7crywd").unwrap();
         let mut walker = Walker::new(trickle_foobar, String::new());
 
         let mut counter = 0;
@@ -915,9 +915,7 @@ mod tests {
                     assert_eq!(oe.remove(), expected);
                 }
                 Vacant(_) => {
-                    panic!(
-                        "no such key {key:?} (expected {expected}) in {self:#?}"
-                    );
+                    panic!("no such key {key:?} (expected {expected}) in {self:#?}");
                 }
             }
         }

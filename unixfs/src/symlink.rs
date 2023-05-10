@@ -32,9 +32,9 @@ pub fn serialize_symlink_block(target_path: &str, block_buffer: &mut Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use super::serialize_symlink_block;
-    use libipld::Cid;
-    use libipld::multihash::{self, Multihash};
     use core::convert::TryFrom;
+    use libipld::multihash::{self, Multihash};
+    use libipld::Cid;
     use sha2::{Digest, Sha256};
 
     #[test]

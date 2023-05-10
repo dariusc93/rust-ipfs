@@ -1,6 +1,6 @@
 use futures::join;
-use rust_ipfs::{Ipfs, IpfsPath, UninitializedIpfs};
 use libipld::ipld;
+use rust_ipfs::{Ipfs, IpfsPath, UninitializedIpfs};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
