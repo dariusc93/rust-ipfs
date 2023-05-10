@@ -220,7 +220,12 @@ impl IpldDag {
     /// Resolves a `Cid`-rooted path to a document "node."
     ///
     /// Returns the resolved node as `Ipld`.
-    pub async fn get(&self, path: IpfsPath, providers: &[PeerId], local_only: bool) -> Result<Ipld, ResolveError> {
+    pub async fn get(
+        &self,
+        path: IpfsPath,
+        providers: &[PeerId],
+        local_only: bool,
+    ) -> Result<Ipld, ResolveError> {
         let resolved_path = self
             .ipfs
             .resolve_ipns(&path, true)
@@ -234,7 +239,10 @@ impl IpldDag {
 
         let mut iter = resolved_path.iter().peekable();
 
-        let (node, _) = match self.resolve0(cid, &mut iter, true, providers, local_only).await {
+        let (node, _) = match self
+            .resolve0(cid, &mut iter, true, providers, local_only)
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 drop(iter);
@@ -276,7 +284,10 @@ impl IpldDag {
 
         let (node, matched_segments) = {
             let mut iter = resolved_path.iter().peekable();
-            match self.resolve0(cid, &mut iter, follow_links, providers, local_only).await {
+            match self
+                .resolve0(cid, &mut iter, follow_links, providers, local_only)
+                .await
+            {
                 Ok(t) => t,
                 Err(e) => {
                     drop(iter);
@@ -310,7 +321,12 @@ impl IpldDag {
         let mut cache = None;
 
         loop {
-            let block = match self.ipfs.repo.get_block(&current, providers, local_only).await {
+            let block = match self
+                .ipfs
+                .repo
+                .get_block(&current, providers, local_only)
+                .await
+            {
                 Ok(block) => block,
                 Err(e) => return Err(RawResolveLocalError::Loading(current, e)),
             };
@@ -365,7 +381,11 @@ impl IpldDag {
         loop {
             let (next, _) = lookup.pending_links();
 
-            let block = self.ipfs.repo.get_block(next, providers, local_only).await?;
+            let block = self
+                .ipfs
+                .repo
+                .get_block(next, providers, local_only)
+                .await?;
 
             match lookup.continue_walk(block.data(), cache)? {
                 NeedToLoadMore(next) => lookup = next,
@@ -968,7 +988,11 @@ mod tests {
 
         let path = IpfsPath::from(cid).sub_path("anything-here").unwrap();
 
-        let e = ipfs.dag().resolve(path, true, &[], false).await.unwrap_err();
+        let e = ipfs
+            .dag()
+            .resolve(path, true, &[], false)
+            .await
+            .unwrap_err();
 
         assert_eq!(
             e.to_string(),
@@ -1021,7 +1045,11 @@ mod tests {
             .sub_path("something/second-best-file")
             .unwrap();
 
-        let e = ipfs.dag().resolve(path, true, &[], false).await.unwrap_err();
+        let e = ipfs
+            .dag()
+            .resolve(path, true, &[], false)
+            .await
+            .unwrap_err();
 
         assert_eq!(
             e.to_string(),

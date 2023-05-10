@@ -1,7 +1,7 @@
 //! Persistent filesystem backed pin store. See [`FsDataStore`] for more information.
-use crate::repo::paths::{filestem_to_pin_cid, pin_path};
 use crate::error::Error;
-use crate::repo::{PinKind, PinMode, PinModeRequirement, PinStore, References, DataStore};
+use crate::repo::paths::{filestem_to_pin_cid, pin_path};
+use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore, References};
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use futures::stream::TryStreamExt;
@@ -14,7 +14,6 @@ use tokio::fs;
 use tokio::sync::Semaphore;
 use tokio_stream::{empty, wrappers::ReadDirStream, StreamExt};
 use tokio_util::either::Either;
-
 
 /// FsDataStore which uses the filesystem as a lockable key-value store. Maintains a similar to
 /// [`FsBlockStore`] sharded two level storage. Direct have empty files, recursive pins record all of
@@ -78,7 +77,6 @@ impl DataStore for FsDataStore {
 
     async fn wipe(&self) {}
 }
-
 
 // PinStore is a trait from ipfs::repo implemented on FsDataStore defined at ipfs::repo::fs or
 // parent module.
@@ -627,4 +625,7 @@ fn sync_write_recursive_pin(
 }
 
 #[cfg(test)]
-crate::pinstore_interface_tests!(common_tests, crate::repo::datastore::flatfs::FsDataStore::new);
+crate::pinstore_interface_tests!(
+    common_tests,
+    crate::repo::datastore::flatfs::FsDataStore::new
+);

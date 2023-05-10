@@ -1,8 +1,8 @@
-use libipld::{Cid, multihash};
-use libipld::multihash::Multihash;
 use core::convert::TryFrom;
 use hash_hasher::HashedMap;
 use hex_literal::hex;
+use libipld::multihash::Multihash;
+use libipld::{multihash, Cid};
 
 #[derive(Default)]
 pub struct FakeBlockstore {

@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use futures::stream::BoxStream;
-use libp2p::{PeerId, kad::Record};
+use libp2p::{kad::Record, PeerId};
 
 pub struct ProviderStream(pub BoxStream<'static, PeerId>);
 

@@ -38,7 +38,6 @@ async fn main() -> anyhow::Result<()> {
     // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
     let ipfs: Ipfs = UninitializedIpfs::new().start().await?;
 
-
     if opt.default_bootstrappers {
         // applications wishing to find content on the global IPFS swarm should restore the latest
         // bootstrappers which are hopefully updated between releases

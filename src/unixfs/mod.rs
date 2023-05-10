@@ -102,7 +102,9 @@ impl IpfsUnixfs {
         match item {
             AddOpt::Path(path) => add_file(&self.ipfs, path, option).await,
             AddOpt::Stream(stream) => add(&self.ipfs, None, None, stream, option).await,
-            AddOpt::StreamWithName(name, stream) => add(&self.ipfs, Some(name), None, stream, option).await,
+            AddOpt::StreamWithName(name, stream) => {
+                add(&self.ipfs, Some(name), None, stream, option).await
+            }
         }
     }
 

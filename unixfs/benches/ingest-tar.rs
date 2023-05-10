@@ -53,7 +53,11 @@ fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
 
             let len = buffer.len();
 
-            let mh = Multihash::wrap(libipld::multihash::Code::Sha2_256.into(), &Sha256::digest(&buffer)).unwrap();
+            let mh = Multihash::wrap(
+                libipld::multihash::Code::Sha2_256.into(),
+                &Sha256::digest(&buffer),
+            )
+            .unwrap();
             let cid = Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0");
 
             tree.put_link(path, cid, len as u64).unwrap();

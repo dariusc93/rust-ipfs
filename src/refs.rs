@@ -318,9 +318,7 @@ fn dagpb_links(ipld: Ipld) -> Vec<(Option<String>, Cid)> {
 
                     Some((name, link))
                 }
-                x => panic!(
-                    "Expected dag-pb2ipld \"Links[{i}]\" to be a map, got: {x:?}"
-                ),
+                x => panic!("Expected dag-pb2ipld \"Links[{i}]\" to be a map, got: {x:?}"),
             }
         })
         .collect()
@@ -380,17 +378,18 @@ mod tests {
         let root_block = ipfs.get_block(&Cid::try_from(root).unwrap()).await.unwrap();
         let ipld = root_block.decode::<IpldCodec, Ipld>().unwrap();
 
-        let all_edges: Vec<_> = iplds_refs(ipfs.repo(), vec![(*root_block.cid(), ipld)], None, false)
-            .map_ok(
-                |Edge {
-                     source,
-                     destination,
-                     ..
-                 }| (source.to_string(), destination.to_string()),
-            )
-            .try_collect()
-            .await
-            .unwrap();
+        let all_edges: Vec<_> =
+            iplds_refs(ipfs.repo(), vec![(*root_block.cid(), ipld)], None, false)
+                .map_ok(
+                    |Edge {
+                         source,
+                         destination,
+                         ..
+                     }| (source.to_string(), destination.to_string()),
+                )
+                .try_collect()
+                .await
+                .unwrap();
 
         // not sure why go-ipfs outputs this order, this is more like dfs?
         let expected = [

@@ -1,7 +1,7 @@
-use crate::repo::paths::{block_path, filestem_to_block_cid};
-use crate::repo::{BlockRm, BlockRmError, RepoCid};
 use crate::error::Error;
+use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
+use crate::repo::{BlockRm, BlockRmError, RepoCid};
 use crate::Block;
 use async_trait::async_trait;
 use hash_hasher::{HashBuildHasher, HashedMap};
@@ -414,7 +414,6 @@ impl BlockStore for FsBlockStore {
         }
         list0(self.path.to_owned()).await
     }
-
 }
 
 fn write_through_tempfile(

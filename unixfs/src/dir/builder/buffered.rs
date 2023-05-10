@@ -274,9 +274,7 @@ mod tests {
         let mut opts = TreeOptions::default();
         opts.wrap_with_directory();
         let mut builder = BufferingTreeBuilder::new(opts);
-        builder
-            .put_link("a", five_block_foobar, 221)
-            .unwrap();
+        builder.put_link("a", five_block_foobar, 221).unwrap();
         builder.put_link("b", five_block_foobar, 221).unwrap();
 
         let actual = builder
