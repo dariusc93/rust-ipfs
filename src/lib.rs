@@ -713,17 +713,16 @@ impl UninitializedIpfs {
         for block in blocks {
             if let Some(kad) = fut.swarm.behaviour_mut().kademlia.as_mut() {
                 let key = Key::from(block.hash().to_bytes());
-                let id = match kad.start_providing(key) {
-                    Ok(id) => id,
-                    Err(e) => {
-                        match e {
-                            libp2p::kad::store::Error::MaxProvidedKeys => break,
-                            _ => unreachable!()
-                        }
+                match kad.start_providing(key) {
+                    Ok(id) => {
+                        let (tx, _rx) = oneshot_channel();
+                        fut.kad_subscriptions.insert(id, tx);
                     }
+                    Err(e) => match e {
+                        libp2p::kad::store::Error::MaxProvidedKeys => break,
+                        _ => unreachable!(),
+                    },
                 };
-                let (tx, _rx) = oneshot_channel();
-                fut.kad_subscriptions.insert(id, tx);
             }
         }
 
