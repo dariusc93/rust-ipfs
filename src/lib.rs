@@ -671,7 +671,11 @@ impl UninitializedIpfs {
                     .collect()
                     .await
             }
-            RepoProvider::Roots => vec![], //TODO
+            RepoProvider::Roots => {
+                //TODO: Scan blockstore for root unixfs blocks
+                warn!("RepoProvider::Roots is not implemented... ignoring...");
+                vec![]
+            }
         };
 
         let kad_subscriptions = Default::default();
