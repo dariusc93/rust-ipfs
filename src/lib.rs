@@ -206,12 +206,30 @@ pub struct IpfsOptions {
     /// Enables port mapping (aka UPnP)
     pub port_mapping: bool,
 
+    /// Repo Provider option
+    pub provider: RepoProvider,
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
     /// with this span or spans referring to this as their parent. Setting this other than `None`
     /// default is useful when running multiple nodes.
     pub span: Option<Span>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum RepoProvider {
+    /// Dont provide any blocks automatically
+    #[default]
+    None,
+
+    /// Provide all blocks stored automatically
+    All,
+
+    /// Provide pinned blocks
+    Pinned,
+
+    /// Provide root blocks only
+    Roots,
 }
 
 impl Default for IpfsOptions {
@@ -231,6 +249,7 @@ impl Default for IpfsOptions {
             kad_store_config: Default::default(),
             ping_configuration: Default::default(),
             identify_configuration: Default::default(),
+            provider: Default::default(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
                 "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
@@ -483,6 +502,11 @@ impl UninitializedIpfs {
         self
     }
 
+    pub fn set_provider(mut self, opt: RepoProvider) -> Self {
+        self.options.provider = opt;
+        self
+    }
+
     /// Set keypair
     pub fn set_keypair(mut self, keypair: Keypair) -> Self {
         self.keys = keypair;
@@ -637,6 +661,19 @@ impl UninitializedIpfs {
         .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
         .await?;
 
+        let blocks = match options.provider {
+            RepoProvider::None => vec![],
+            RepoProvider::All => repo.list_blocks().await.unwrap_or_default(),
+            RepoProvider::Pinned => {
+                repo.list_pins(None)
+                    .await
+                    .filter_map(|result| async move { result.map(|(cid, _)| cid).ok() })
+                    .collect()
+                    .await
+            }
+            RepoProvider::Roots => vec![], //TODO
+        };
+
         let kad_subscriptions = Default::default();
         let listener_subscriptions = Default::default();
         let listeners = Default::default();
@@ -667,6 +704,25 @@ impl UninitializedIpfs {
                 Ok(id) => fut.listeners.insert(id),
                 _ => continue,
             };
+        }
+
+        for block in blocks {
+            if let Some(kad) = fut.swarm.behaviour_mut().kademlia.as_mut() {
+                let key = Key::from(block.hash().to_bytes());
+                let id = match kad.start_providing(key) {
+                    Ok(id) => id,
+                    Err(_e) => {
+                        //TODO: Handle errors; possibly breaking loop or skipping entry
+                        continue;
+                    }
+                };
+                let (tx, rx) = oneshot_channel();
+                fut.kad_subscriptions.insert(id, tx);
+                //Task used so we dont drop the receiver right away
+                tokio::spawn(async move {
+                    let _awaiting = rx.await.expect("Sender dropped");
+                });
+            }
         }
 
         let notify = Arc::new(Notify::new());
