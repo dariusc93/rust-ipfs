@@ -715,17 +715,15 @@ impl UninitializedIpfs {
                 let key = Key::from(block.hash().to_bytes());
                 let id = match kad.start_providing(key) {
                     Ok(id) => id,
-                    Err(_e) => {
-                        //TODO: Handle errors; possibly breaking loop or skipping entry
-                        continue;
+                    Err(e) => {
+                        match e {
+                            libp2p::kad::store::Error::MaxProvidedKeys => break,
+                            _ => unreachable!()
+                        }
                     }
                 };
-                let (tx, rx) = oneshot_channel();
+                let (tx, _rx) = oneshot_channel();
                 fut.kad_subscriptions.insert(id, tx);
-                //Task used so we dont drop the receiver right away
-                tokio::spawn(async move {
-                    let _awaiting = rx.await.expect("Sender dropped");
-                });
             }
         }
 
