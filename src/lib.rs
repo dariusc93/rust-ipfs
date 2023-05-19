@@ -103,7 +103,11 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
-use libp2p::{kad::KademliaConfig, ping::Config as PingConfig, swarm::dial_opts::DialOpts};
+use libp2p::{
+    kad::{store::MemoryStoreConfig, KademliaConfig},
+    ping::Config as PingConfig,
+    swarm::dial_opts::DialOpts,
+};
 
 #[derive(Debug, Clone)]
 pub enum StoragePath {
@@ -198,7 +202,7 @@ pub struct IpfsOptions {
 
     /// Kad Store Config
     /// Note: Only supports MemoryStoreConfig at this time
-    pub kad_store_config: Option<KadStoreConfig>,
+    pub kad_store_config: KadStoreConfig,
 
     /// Ping Configuration
     pub ping_configuration: Option<PingConfig>,
@@ -480,11 +484,7 @@ impl UninitializedIpfs {
     }
 
     /// Set kad configuration
-    pub fn set_kad_configuration(
-        mut self,
-        config: KadConfig,
-        store: Option<KadStoreConfig>,
-    ) -> Self {
+    pub fn set_kad_configuration(mut self, config: KadConfig, store: KadStoreConfig) -> Self {
         self.options.kad_configuration = Some(Either::Left(config));
         self.options.kad_store_config = store;
         self
@@ -645,22 +645,9 @@ impl UninitializedIpfs {
             to_task,
         };
 
-        // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
-        // reordered for less error prone code.
-        let swarm_options = SwarmOptions::from(&options);
-
-        let swarm_config = options.swarm_configuration.unwrap_or_default();
-        let transport_config = options.transport_configuration.unwrap_or_default();
-        let swarm = create_swarm(
-            &keys,
-            swarm_options,
-            swarm_config,
-            transport_config,
-            exec_span,
-        )
-        .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
-        .await?;
-
+        //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
+        //      provider records by adding the amount of blocks to the config.
+        //TODO: Add persistent layer for kad store
         let blocks = match options.provider {
             RepoProvider::None => vec![],
             RepoProvider::All => repo.list_blocks().await.unwrap_or_default(),
@@ -677,6 +664,39 @@ impl UninitializedIpfs {
                 vec![]
             }
         };
+
+        let count = blocks.len();
+
+        let store_config = &mut options.kad_store_config;
+
+        match store_config.memory.as_mut() {
+            Some(memory_config) => {
+                memory_config.max_provided_keys += count;
+            }
+            None => {
+                store_config.memory = Some(MemoryStoreConfig {
+                    //Provide a buffer to the max amount of provided keys
+                    max_provided_keys: (50 * 1024) + count,
+                    ..Default::default()
+                })
+            }
+        }
+
+        // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
+        // reordered for less error prone code.
+        let swarm_options = SwarmOptions::from(&options);
+
+        let swarm_config = options.swarm_configuration.unwrap_or_default();
+        let transport_config = options.transport_configuration.unwrap_or_default();
+        let swarm = create_swarm(
+            &keys,
+            swarm_options,
+            swarm_config,
+            transport_config,
+            exec_span,
+        )
+        .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
+        .await?;
 
         let kad_subscriptions = Default::default();
         let listener_subscriptions = Default::default();

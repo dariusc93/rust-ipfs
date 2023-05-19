@@ -379,7 +379,6 @@ impl Behaviour {
             //TODO: Use persistent store for kad
             let config = options
                 .kad_store_config
-                .unwrap_or_default()
                 .memory
                 .unwrap_or_default();
 
