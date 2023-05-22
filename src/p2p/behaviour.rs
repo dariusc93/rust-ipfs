@@ -1,3 +1,4 @@
+use super::addressbook;
 use super::gossipsub::GossipsubStream;
 use super::peerbook::{self, ConnectionLimits};
 use either::Either;
@@ -51,6 +52,7 @@ pub struct Behaviour {
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
+    pub addressbook: addressbook::Behaviour,
     pub peerbook: peerbook::Behaviour,
 }
 
@@ -377,10 +379,7 @@ impl Behaviour {
         let store = {
             //TODO: Make customizable
             //TODO: Use persistent store for kad
-            let config = options
-                .kad_store_config
-                .memory
-                .unwrap_or_default();
+            let config = options.kad_store_config.memory.unwrap_or_default();
 
             MemoryStore::with_config(peer_id, config)
         };
@@ -475,6 +474,8 @@ impl Behaviour {
         let mut peerbook = peerbook::Behaviour::default();
         peerbook.set_connection_limit(limits);
 
+        let addressbook = addressbook::Behaviour::default();
+
         Ok((
             Behaviour {
                 mdns,
@@ -490,6 +491,7 @@ impl Behaviour {
                 relay_client,
                 upnp,
                 peerbook,
+                addressbook,
             },
             transport,
         ))
