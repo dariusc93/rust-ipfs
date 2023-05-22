@@ -129,7 +129,7 @@ pub struct SwarmOptions {
     pub identify_config: Option<IdentifyConfiguration>,
     /// Kad store config
     /// Note: Only supports MemoryStoreConfig at this time
-    pub kad_store_config: Option<KadStoreConfig>,
+    pub kad_store_config: KadStoreConfig,
     /// Pubsub configuration,
     pub pubsub_config: Option<PubsubConfig>,
     /// UPnP/PortMapping

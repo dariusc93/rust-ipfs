@@ -2,7 +2,7 @@ use clap::Parser;
 use futures::{channel::mpsc, pin_mut, FutureExt};
 use libipld::ipld;
 use libp2p::{futures::StreamExt, swarm::SwarmEvent};
-use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, UninitializedIpfs};
+use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, PubsubEvent, UninitializedIpfs};
 use rustyline_async::{Readline, ReadlineError};
 use std::{io::Write, sync::Arc};
 use tokio::sync::Notify;
@@ -134,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let stream = ipfs.pubsub_subscribe(topic.to_string()).await?;
+    let mut event_stream = ipfs.pubsub_events(topic.to_string()).await?;
     pin_mut!(stream);
 
     tokio::spawn(topic_discovery(ipfs.clone(), topic.clone()));
@@ -145,6 +146,12 @@ async fn main() -> anyhow::Result<()> {
             data = stream.next() => {
                 if let Some(msg) = data {
                     writeln!(stdout, "{}: {}", msg.source.expect("Message should contain a source peer_id"), String::from_utf8_lossy(&msg.data))?;
+                }
+            }
+            Some(event) = event_stream.next() => {
+                match event {
+                    PubsubEvent::Subscribe { peer_id } => writeln!(stdout, "{} subscribed", peer_id)?,
+                    PubsubEvent::Unsubscribe { peer_id } => writeln!(stdout, "{} unsubscribed", peer_id)?,
                 }
             }
             line = rl.readline().fuse() => match line {

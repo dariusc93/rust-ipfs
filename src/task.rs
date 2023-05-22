@@ -789,8 +789,7 @@ impl IpfsTask {
                 let _ = ret.send(addresses);
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
-                let pubsub = self.swarm.behaviour_mut().pubsub().subscribe(topic).ok();
-                let _ = ret.send(pubsub);
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribe(topic).ok());
             }
             IpfsEvent::PubsubUnsubscribe(topic, ret) => {
                 let _ = ret.send(self.swarm.behaviour_mut().pubsub().unsubscribe(topic));
@@ -825,6 +824,10 @@ impl IpfsTask {
             //     let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
             //     let _ = ret.send((stats, peers, wantlist).into());
             // }
+            IpfsEvent::PubsubEventStream(topic, ret) => {
+                let receiver = self.swarm.behaviour().pubsub.event_stream(topic);
+                let _ = ret.send(receiver);
+            }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
                 Ok(id) => {
                     self.listeners.insert(id);
