@@ -317,6 +317,10 @@ enum IpfsEvent {
     /// Request background task to return the listened and external addresses
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
+    PubsubEventStream(
+        String,
+        OneshotSender<Option<async_broadcast::Receiver<PubsubEvent>>>,
+    ),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
     PubsubPublish(
         String,
@@ -360,6 +364,15 @@ enum IpfsEvent {
     ClearBootstrappers(OneshotSender<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
     Exit,
+}
+
+#[derive(Debug, Clone)]
+pub enum PubsubEvent {
+    /// Subscription event to a given topic
+    Subscribe { peer_id: PeerId },
+
+    /// Unsubscribing event to a given topic
+    Unsubscribe { peer_id: PeerId },
 }
 
 type TSwarmEvent = <TSwarm as Stream>::Item;
@@ -1201,6 +1214,39 @@ impl Ipfs {
 
             rx.await?
                 .ok_or_else(|| format_err!("already subscribed to {:?}", topic))
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Stream that returns [`PubsubEvent`] for a given topic
+    pub async fn pubsub_events(
+        &self,
+        topic: String,
+    ) -> Result<BoxStream<'static, PubsubEvent>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::PubsubEventStream(topic.clone(), tx))
+                .await?;
+
+            let mut receiver = rx
+                .await?
+                .ok_or_else(|| format_err!("not subscribed to {:?}", topic))?;
+
+            let stream = async_stream::stream! {
+                loop {
+                    match receiver.recv().await {
+                        Ok(event) => yield event,
+                        Err(async_broadcast::RecvError::Closed) => break,
+                        Err(_) => {}
+                    }
+                }
+            };
+
+            Ok(stream.boxed())
         }
         .instrument(self.span.clone())
         .await

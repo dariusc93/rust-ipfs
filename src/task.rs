@@ -756,8 +756,7 @@ impl IpfsTask {
                 let _ = ret.send(addresses);
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
-                let pubsub = self.swarm.behaviour_mut().pubsub().subscribe(topic).ok();
-                let _ = ret.send(pubsub);
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribe(topic).ok());
             }
             IpfsEvent::PubsubUnsubscribe(topic, ret) => {
                 let _ = ret.send(self.swarm.behaviour_mut().pubsub().unsubscribe(topic));
@@ -773,6 +772,10 @@ impl IpfsTask {
             }
             IpfsEvent::PubsubSubscribed(ret) => {
                 let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_topics());
+            }
+            IpfsEvent::PubsubEventStream(topic, ret) => {
+                let receiver = self.swarm.behaviour().pubsub.event_stream(topic);
+                let _ = ret.send(receiver);
             }
             IpfsEvent::WantList(peer, ret) => {
                 let list = if let Some(peer) = peer {

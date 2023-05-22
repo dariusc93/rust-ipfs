@@ -1,3 +1,8 @@
+# 0.3.17 [unreleased]
+- feat: Added Ipfs::pubsub_events to receive subscribe and unsubscribe events to a subscribed topic [PR 70]
+
+[PR 70]: https://github.com/dariusc93/rust-ipfs/pull/70
+
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
 - chore: Update transport and configuration
