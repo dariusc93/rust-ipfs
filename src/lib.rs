@@ -515,6 +515,7 @@ impl UninitializedIpfs {
         self
     }
 
+    /// Set RepoProvider option to provide blocks automatically 
     pub fn set_provider(mut self, opt: RepoProvider) -> Self {
         self.options.provider = opt;
         self
