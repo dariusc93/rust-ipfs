@@ -1,7 +1,7 @@
 # 0.3.17 [unreleased]
 - feat: Implement RepoProvider [PR 69]
 
-[PR XX]: https://github.com/dariusc93/rust-ipfs/pull/69
+[PR 69]: https://github.com/dariusc93/rust-ipfs/pull/69
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
