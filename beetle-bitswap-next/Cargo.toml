@@ -1,6 +1,6 @@
 [package]
 name = "beetle-bitswap-next"
-authors = ["dignifiedquire <me@dignifiedquire.com>"]
+authors = ["Darius C", "dignifiedquire <me@dignifiedquire.com>"]
 description = "Implementation of the bitswap protocol"
 version = "0.2.0"
 edition = "2021"
@@ -46,7 +46,12 @@ wasm-timer = "0.2.5"
 
 [dev-dependencies]
 criterion = "0.4"
-libp2p = { version = "0.51", default-features = false, features = ["yamux", "noise", "tcp", "tokio"] }
+libp2p = { version = "0.51", default-features = false, features = [
+    "yamux",
+    "noise",
+    "tcp",
+    "tokio",
+] }
 tokio = { version = "1", features = ["macros", "net", "rt"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 tracing-subscriber = { version = "0.3.14", features = ["env-filter"] }
