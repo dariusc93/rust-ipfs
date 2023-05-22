@@ -12,7 +12,7 @@ use futures::{
 
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, PeerInfo},
-    Channel, PubsubEvent,
+    Channel,
 };
 use crate::{
     p2p::{ProviderStream, RecordStream},
@@ -59,7 +59,6 @@ pub use libp2p::{
 
 use libp2p::{
     autonat,
-    gossipsub::{self, TopicHash},
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
@@ -84,7 +83,6 @@ pub(crate) struct IpfsTask {
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
-    pub(crate) pubsub_events: HashMap<TopicHash, async_broadcast::Sender<PubsubEvent>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
     pub(crate) listener_subscriptions:
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
@@ -551,35 +549,6 @@ impl IpfsTask {
                     }
                 }
             }
-            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed {
-                peer_id,
-                topic,
-            })) => {
-                if let Some(sender) = self.pubsub_events.get(&topic).cloned() {
-                    if sender.receiver_count() > 0 {
-                        tokio::spawn({
-                            async move {
-                                let _ = sender.broadcast(PubsubEvent::Subscribe { peer_id }).await;
-                            }
-                        });
-                    }
-                }
-            }
-            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Unsubscribed {
-                peer_id,
-                topic,
-            })) => {
-                if let Some(sender) = self.pubsub_events.get(&topic).cloned() {
-                    if sender.receiver_count() > 0 {
-                        tokio::spawn({
-                            async move {
-                                let _ =
-                                    sender.broadcast(PubsubEvent::Unsubscribe { peer_id }).await;
-                            }
-                        });
-                    }
-                }
-            }
             SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
                 BitswapEvent::ReceivedBlock(peer_id, block) => {
                     let repo = self.repo.clone();
@@ -787,20 +756,9 @@ impl IpfsTask {
                 let _ = ret.send(addresses);
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
-                if let Ok((stream, tx)) =
-                    self.swarm.behaviour_mut().pubsub().subscribe(topic.clone())
-                {
-                    if let Entry::Vacant(e) = self.pubsub_events.entry(TopicHash::from_raw(topic)) {
-                        e.insert(tx);
-                    }
-                    let _ = ret.send(Some(stream));
-                } else {
-                    let _ = ret.send(None);
-                }
+                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribe(topic).ok());
             }
             IpfsEvent::PubsubUnsubscribe(topic, ret) => {
-                self.pubsub_events
-                    .remove(&TopicHash::from_raw(topic.clone()));
                 let _ = ret.send(self.swarm.behaviour_mut().pubsub().unsubscribe(topic));
             }
             IpfsEvent::PubsubPublish(topic, data, ret) => {
@@ -816,11 +774,7 @@ impl IpfsTask {
                 let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_topics());
             }
             IpfsEvent::PubsubEventStream(topic, ret) => {
-                let topic = TopicHash::from_raw(topic);
-                let receiver = self
-                    .pubsub_events
-                    .get(&topic)
-                    .map(|sender| sender.new_receiver());
+                let receiver = self.swarm.behaviour().pubsub.event_stream(topic);
                 let _ = ret.send(receiver);
             }
             IpfsEvent::WantList(peer, ret) => {

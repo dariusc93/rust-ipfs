@@ -161,10 +161,7 @@ impl GossipsubStream {
     /// Subscribes to a currently unsubscribed topic.
     /// Returns a receiver for messages sent to the topic or `None` if subscription existed
     /// already.
-    pub fn subscribe(
-        &mut self,
-        topic: impl Into<String>,
-    ) -> anyhow::Result<(SubscriptionStream, async_broadcast::Sender<PubsubEvent>)> {
+    pub fn subscribe(&mut self, topic: impl Into<String>) -> anyhow::Result<SubscriptionStream> {
         use std::collections::hash_map::Entry;
         let topic = Topic::new(topic);
 
@@ -178,18 +175,15 @@ impl GossipsubStream {
                         let (tx, rx) = async_broadcast::broadcast(15000);
                         let (event_tx, event_rx) = async_broadcast::broadcast(1500);
                         self.event_streams
-                            .insert(topic.hash(), (event_tx.clone(), event_rx));
+                            .insert(topic.hash(), (event_tx, event_rx));
                         let key = ve.key().clone();
                         ve.insert(tx);
-                        Ok((
-                            SubscriptionStream {
-                                on_drop: Some(self.unsubscriptions.0.clone()),
-                                topic: Some(key),
-                                inner: rx,
-                                counter,
-                            },
-                            event_tx,
-                        ))
+                        Ok(SubscriptionStream {
+                            on_drop: Some(self.unsubscriptions.0.clone()),
+                            topic: Some(key),
+                            inner: rx,
+                            counter,
+                        })
                     }
                     Ok(false) => anyhow::bail!("Already subscribed to topic; shouldnt reach this"),
                     Err(e) => {
@@ -206,21 +200,13 @@ impl GossipsubStream {
                     .get(&key)
                     .cloned()
                     .ok_or(anyhow::anyhow!("No active stream"))?;
-                let event_tx = self
-                    .event_streams
-                    .get(&key)
-                    .map(|(tx, _)| tx.clone())
-                    .ok_or(anyhow::anyhow!("No active stream"))?;
                 counter.fetch_add(1, Ordering::SeqCst);
-                Ok((
-                    SubscriptionStream {
-                        on_drop: Some(self.unsubscriptions.0.clone()),
-                        topic: Some(key),
-                        inner: rx,
-                        counter,
-                    },
-                    event_tx,
-                ))
+                Ok(SubscriptionStream {
+                    on_drop: Some(self.unsubscriptions.0.clone()),
+                    topic: Some(key),
+                    inner: rx,
+                    counter,
+                })
             }
         }
     }
@@ -264,6 +250,14 @@ impl GossipsubStream {
             .filter(|(_, list)| list.contains(&&topic.hash()))
             .map(|(peer_id, _)| *peer_id)
             .collect()
+    }
+
+    pub fn event_stream(
+        &self,
+        topic: impl Into<String>,
+    ) -> Option<async_broadcast::Receiver<PubsubEvent>> {
+        let topic = Topic::new(topic).hash();
+        self.event_streams.get(&topic).map(|(_, rx)| rx.clone())
     }
 
     /// Returns the list of currently subscribed topics. This can contain topics for which stream
@@ -396,6 +390,11 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
+                    if let Some(sender) = self.event_streams.get(&topic).map(|(tx, _)| tx.clone()) {
+                        if sender.receiver_count() > 0 {
+                            let _ = sender.try_broadcast(PubsubEvent::Subscribe { peer_id });
+                        }
+                    }
                     return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
                         GossipsubEvent::Subscribed { peer_id, topic },
                     ));
@@ -404,6 +403,11 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
+                    if let Some(sender) = self.event_streams.get(&topic).map(|(tx, _)| tx.clone()) {
+                        if sender.receiver_count() > 0 {
+                            let _ = sender.try_broadcast(PubsubEvent::Unsubscribe { peer_id });
+                        }
+                    }
                     return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
                         GossipsubEvent::Unsubscribed { peer_id, topic },
                     ));

@@ -668,7 +668,6 @@ impl UninitializedIpfs {
             provider_stream: HashMap::new(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
-            pubsub_events: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
