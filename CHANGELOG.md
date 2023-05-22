@@ -1,3 +1,8 @@
+# 0.3.17 [unreleased]
+- refactor: Switch bitswap implementation [PR 66]
+
+[PR 66]: https://github.com/dariusc93/rust-ipfs/pull/66
+
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
 - chore: Update transport and configuration
