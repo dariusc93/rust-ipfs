@@ -103,7 +103,11 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
-use libp2p::{kad::KademliaConfig, ping::Config as PingConfig, swarm::dial_opts::DialOpts};
+use libp2p::{
+    kad::{store::MemoryStoreConfig, KademliaConfig},
+    ping::Config as PingConfig,
+    swarm::dial_opts::DialOpts,
+};
 
 #[derive(Debug, Clone)]
 pub enum StoragePath {
@@ -198,7 +202,7 @@ pub struct IpfsOptions {
 
     /// Kad Store Config
     /// Note: Only supports MemoryStoreConfig at this time
-    pub kad_store_config: Option<KadStoreConfig>,
+    pub kad_store_config: KadStoreConfig,
 
     /// Ping Configuration
     pub ping_configuration: Option<PingConfig>,
@@ -206,12 +210,30 @@ pub struct IpfsOptions {
     /// Enables port mapping (aka UPnP)
     pub port_mapping: bool,
 
+    /// Repo Provider option
+    pub provider: RepoProvider,
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
     /// with this span or spans referring to this as their parent. Setting this other than `None`
     /// default is useful when running multiple nodes.
     pub span: Option<Span>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum RepoProvider {
+    /// Dont provide any blocks automatically
+    #[default]
+    None,
+
+    /// Provide all blocks stored automatically
+    All,
+
+    /// Provide pinned blocks
+    Pinned,
+
+    /// Provide root blocks only
+    Roots,
 }
 
 impl Default for IpfsOptions {
@@ -231,6 +253,7 @@ impl Default for IpfsOptions {
             kad_store_config: Default::default(),
             ping_configuration: Default::default(),
             identify_configuration: Default::default(),
+            provider: Default::default(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
                 "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
@@ -474,11 +497,7 @@ impl UninitializedIpfs {
     }
 
     /// Set kad configuration
-    pub fn set_kad_configuration(
-        mut self,
-        config: KadConfig,
-        store: Option<KadStoreConfig>,
-    ) -> Self {
+    pub fn set_kad_configuration(mut self, config: KadConfig, store: KadStoreConfig) -> Self {
         self.options.kad_configuration = Some(Either::Left(config));
         self.options.kad_store_config = store;
         self
@@ -493,6 +512,12 @@ impl UninitializedIpfs {
     /// Set pubsub configuration
     pub fn set_pubsub_configuration(mut self, config: PubsubConfig) -> Self {
         self.options.pubsub_config = Some(config);
+        self
+    }
+
+    /// Set RepoProvider option to provide blocks automatically 
+    pub fn set_provider(mut self, opt: RepoProvider) -> Self {
+        self.options.provider = opt;
         self
     }
 
@@ -634,6 +659,43 @@ impl UninitializedIpfs {
             to_task,
         };
 
+        //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
+        //      provider records by adding the amount of blocks to the config.
+        //TODO: Add persistent layer for kad store
+        let blocks = match options.provider {
+            RepoProvider::None => vec![],
+            RepoProvider::All => repo.list_blocks().await.unwrap_or_default(),
+            RepoProvider::Pinned => {
+                repo.list_pins(None)
+                    .await
+                    .filter_map(|result| async move { result.map(|(cid, _)| cid).ok() })
+                    .collect()
+                    .await
+            }
+            RepoProvider::Roots => {
+                //TODO: Scan blockstore for root unixfs blocks
+                warn!("RepoProvider::Roots is not implemented... ignoring...");
+                vec![]
+            }
+        };
+
+        let count = blocks.len();
+
+        let store_config = &mut options.kad_store_config;
+
+        match store_config.memory.as_mut() {
+            Some(memory_config) => {
+                memory_config.max_provided_keys += count;
+            }
+            None => {
+                store_config.memory = Some(MemoryStoreConfig {
+                    //Provide a buffer to the max amount of provided keys
+                    max_provided_keys: (50 * 1024) + count,
+                    ..Default::default()
+                })
+            }
+        }
+
         // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
         // reordered for less error prone code.
         let swarm_options = SwarmOptions::from(&options);
@@ -680,6 +742,22 @@ impl UninitializedIpfs {
                 Ok(id) => fut.listeners.insert(id),
                 _ => continue,
             };
+        }
+
+        for block in blocks {
+            if let Some(kad) = fut.swarm.behaviour_mut().kademlia.as_mut() {
+                let key = Key::from(block.hash().to_bytes());
+                match kad.start_providing(key) {
+                    Ok(id) => {
+                        let (tx, _rx) = oneshot_channel();
+                        fut.kad_subscriptions.insert(id, tx);
+                    }
+                    Err(e) => match e {
+                        libp2p::kad::store::Error::MaxProvidedKeys => break,
+                        _ => unreachable!(),
+                    },
+                };
+            }
         }
 
         let notify = Arc::new(Notify::new());
