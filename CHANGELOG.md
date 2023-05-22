@@ -1,5 +1,5 @@
 # 0.3.17 [unreleased]
-- feat: Implement RepoProvider [PR XX]
+- feat: Implement RepoProvider [PR 69]
 
 [PR XX]: https://github.com/dariusc93/rust-ipfs/pull/XX
 
