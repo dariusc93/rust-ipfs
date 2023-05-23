@@ -175,7 +175,7 @@ impl IpfsTask {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
                         trace!("mdns: Discovered peer {}", peer.to_base58());
-                        self.swarm.behaviour_mut().add_peer(peer, Some(addr));
+                        self.swarm.behaviour_mut().add_peer(peer, addr);
                     }
                 }
                 MdnsEvent::Expired(list) => {
@@ -183,7 +183,7 @@ impl IpfsTask {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().remove_peer(&peer, false);
+                                self.swarm.behaviour_mut().remove_peer(&peer);
                             }
                         }
                     }
@@ -633,7 +633,7 @@ impl IpfsTask {
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                 } => {
                     trace!("ping: timeout to {}", peer);
-                    self.swarm.behaviour_mut().remove_peer(&peer, false);
+                    self.swarm.behaviour_mut().remove_peer(&peer);
                 }
                 libp2p::ping::Event {
                     peer,

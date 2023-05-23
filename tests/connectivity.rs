@@ -1,4 +1,4 @@
-use libp2p::{multiaddr::Protocol, Multiaddr};
+use libp2p::multiaddr::Protocol;
 use rust_ipfs::Node;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -44,22 +44,17 @@ async fn dont_connect_without_p2p() {
 }
 
 // Make sure two instances of ipfs can be connected by `PeerId`.
-#[ignore = "connecting just by PeerId is not currently supported"]
 #[tokio::test]
 async fn connect_two_nodes_by_peer_id() {
     let node_a = Node::new("a").await;
     let node_b = Node::new("b").await;
 
     node_a
-        .add_peer(node_b.id, Some(node_b.addrs[0].clone()))
+        .add_peer(node_b.id, node_b.addrs[0].clone())
         .await
         .unwrap();
-    let b_id_multiaddr: Multiaddr = format!("/p2p/{}", &node_b.id).parse().unwrap();
 
-    timeout(TIMEOUT, node_a.connect(b_id_multiaddr))
-        .await
-        .expect("timeout")
-        .expect("should have connected");
+    node_a.connect(node_b.id).await.unwrap()
 }
 
 // Ensure that duplicate connection attempts don't cause hangs.

@@ -36,17 +36,17 @@ pub struct Behaviour {
 }
 
 impl Behaviour {
-    pub fn add_address(&mut self, peer_id: PeerId, addr: Multiaddr) -> Result<(), anyhow::Error> {
+    pub fn add_address(&mut self, peer_id: PeerId, addr: Multiaddr) -> bool {
         //TODO: Instead of giving an error, we could extract/ignore the peer id.
         if let Some(Protocol::P2p(_)) = addr.iter().last() {
-            anyhow::bail!("Address contains peer id")
+            return false;
         }
 
         match self.peer_addresses.entry(peer_id) {
             Entry::Occupied(mut e) => {
                 let entry = e.get_mut();
                 if entry.contains(&addr) {
-                    anyhow::bail!("Address already exist");
+                    return false;
                 }
 
                 entry.push(addr);
@@ -55,23 +55,32 @@ impl Behaviour {
                 e.insert(vec![addr]);
             }
         }
-        Ok(())
+        true
     }
 
-    pub fn remove_address(
-        &mut self,
-        peer_id: PeerId,
-        addr: Multiaddr,
-    ) -> Result<(), anyhow::Error> {
-        if let Entry::Occupied(mut e) = self.peer_addresses.entry(peer_id) {
+    pub fn remove_address(&mut self, peer_id: &PeerId, addr: &Multiaddr) -> bool {
+        if let Entry::Occupied(mut e) = self.peer_addresses.entry(*peer_id) {
             let entry = e.get_mut();
+            if !entry.contains(addr) {
+                return false;
+            }
             entry.retain(|item| addr.ne(item));
         }
-        Ok(())
+        true
     }
 
-    pub fn get_peer_addresses(&self, peer_id: PeerId) -> Option<&Vec<Multiaddr>> {
-        self.peer_addresses.get(&peer_id)
+    pub fn remove_peer(&mut self, peer_id: &PeerId) -> bool {
+        self.peer_addresses.remove(peer_id).is_some()
+    }
+
+    pub fn contains(&self, peer_id: &PeerId, addr: &Multiaddr) -> bool {
+        self.get_peer_addresses(peer_id)
+            .map(|list| !list.is_empty() && list.contains(addr))
+            .unwrap_or_default()
+    }
+
+    pub fn get_peer_addresses(&self, peer_id: &PeerId) -> Option<&Vec<Multiaddr>> {
+        self.peer_addresses.get(peer_id)
     }
 }
 
@@ -222,8 +231,9 @@ mod test {
     use futures::StreamExt;
     use libp2p::{
         identity::Keypair,
+        multiaddr::Protocol,
         swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmBuilder, SwarmEvent},
-        Multiaddr, PeerId, Swarm, multiaddr::Protocol,
+        Multiaddr, PeerId, Swarm,
     };
 
     #[derive(NetworkBehaviour)]
@@ -239,7 +249,7 @@ mod test {
         swarm1
             .behaviour_mut()
             .address_book
-            .add_address(peer2, addr2)?;
+            .add_address(peer2, addr2);
 
         swarm1.dial(peer2)?;
 
@@ -262,7 +272,9 @@ mod test {
         let (_, _, mut swarm1) = build_swarm().await;
         let (peer2, addr2, mut swarm2) = build_swarm().await;
 
-        let opt = DialOpts::peer_id(peer2).addresses(vec![addr2.clone()]).build();
+        let opt = DialOpts::peer_id(peer2)
+            .addresses(vec![addr2.clone()])
+            .build();
 
         swarm1.dial(opt)?;
 
@@ -278,7 +290,12 @@ mod test {
             }
         }
 
-        let addrs = swarm1.behaviour().address_book.get_peer_addresses(peer2).cloned().expect("Exist");
+        let addrs = swarm1
+            .behaviour()
+            .address_book
+            .get_peer_addresses(&peer2)
+            .cloned()
+            .expect("Exist");
         let addr2 = addr2.with(Protocol::P2p(peer2.into()));
         for addr in addrs {
             assert_eq!(addr, addr2);

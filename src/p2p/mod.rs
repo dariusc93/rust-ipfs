@@ -18,8 +18,8 @@ use libp2p::{Multiaddr, PeerId};
 use tracing::Span;
 
 pub(crate) mod addr;
-pub(crate) mod peerbook;
 pub(crate) mod addressbook;
+pub(crate) mod peerbook;
 
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;

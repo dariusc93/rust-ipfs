@@ -366,7 +366,7 @@ enum IpfsEvent {
         OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
-    AddPeer(PeerId, Option<Multiaddr>),
+    AddPeer(PeerId, Multiaddr),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
     FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
@@ -515,7 +515,7 @@ impl UninitializedIpfs {
         self
     }
 
-    /// Set RepoProvider option to provide blocks automatically 
+    /// Set RepoProvider option to provide blocks automatically
     pub fn set_provider(mut self, opt: RepoProvider) -> Self {
         self.options.provider = opt;
         self
@@ -1816,16 +1816,10 @@ impl Ipfs {
     /// Add a known listen address of a peer participating in the DHT to the routing table.
     /// This is mandatory in order for the peer to be discoverable by other members of the
     /// DHT.
-    pub async fn add_peer(
-        &self,
-        peer_id: PeerId,
-        mut addr: Option<Multiaddr>,
-    ) -> Result<(), Error> {
+    pub async fn add_peer(&self, peer_id: PeerId, mut addr: Multiaddr) -> Result<(), Error> {
         // Kademlia::add_address requires the address to not contain the PeerId
-        if let Some(addr) = addr.as_mut() {
-            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-                addr.pop();
-            }
+        if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+            addr.pop();
         }
 
         self.to_task
@@ -1930,8 +1924,9 @@ pub use node::Node;
 mod node {
     use futures::TryFutureExt;
 
+    use crate::p2p::{TransportConfig, UpgradeVersion};
+
     use super::*;
-    use std::convert::TryFrom;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
     /// easier.
@@ -1953,16 +1948,17 @@ mod node {
         pub async fn new<T: AsRef<str>>(name: T) -> Self {
             let mut opts = IpfsOptions::inmemory_with_generated_keys();
             opts.span = Some(trace_span!("ipfs", node = name.as_ref()));
+            opts.transport_configuration = Some(TransportConfig {
+                enable_quic: false,
+                version: Some(UpgradeVersion::Lazy),
+                ..Default::default()
+            });
             Self::with_options(opts).await
         }
 
         /// Connects to a peer at the given address.
-        pub async fn connect(&self, addr: Multiaddr) -> Result<(), Error> {
-            let addr = MultiaddrWithPeerId::try_from(addr).unwrap();
-            if self.ipfs.is_connected(addr.peer_id).await? {
-                return Ok(());
-            }
-            self.ipfs.connect(addr).await
+        pub async fn connect<D: Into<DialOpts>>(&self, opt: D) -> Result<(), Error> {
+            self.ipfs.connect(opt).await
         }
 
         /// Returns a new `Node` based on `IpfsOptions`.
