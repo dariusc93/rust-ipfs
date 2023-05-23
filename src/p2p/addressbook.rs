@@ -17,6 +17,7 @@ use libp2p::{
 
 #[derive(Debug)]
 pub struct Config {
+    /// Store peer address on an established connection
     pub store_on_connection: bool,
 }
 
@@ -36,9 +37,9 @@ pub struct Behaviour {
 }
 
 impl Behaviour {
-    pub fn add_address(&mut self, peer_id: PeerId, addr: Multiaddr) -> bool {
-        if let Some(Protocol::P2p(_)) = addr.iter().last() {
-            return false;
+    pub fn add_address(&mut self, peer_id: PeerId, mut addr: Multiaddr) -> bool {
+        if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+            addr.pop();
         }
 
         match self.peer_addresses.entry(peer_id) {
@@ -129,15 +130,19 @@ impl NetworkBehaviour for Behaviour {
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         if self.config.store_on_connection {
+            let mut addr = addr.clone();
+            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                addr.pop();
+            }
             match self.peer_addresses.entry(peer_id) {
                 Entry::Occupied(mut e) => {
                     let entry = e.get_mut();
-                    if !entry.contains(addr) {
-                        entry.push(addr.clone());
+                    if !entry.contains(&addr) {
+                        entry.push(addr);
                     }
                 }
                 Entry::Vacant(e) => {
-                    e.insert(vec![addr.clone()]);
+                    e.insert(vec![addr]);
                 }
             }
         }
@@ -161,10 +166,14 @@ impl NetworkBehaviour for Behaviour {
                 ..
             }) => {
                 if self.config.store_on_connection {
-                    let multiaddr = match endpoint {
+                    let mut multiaddr = match endpoint {
                         ConnectedPoint::Dialer { address, .. } => address.clone(),
                         ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
                     };
+
+                    if matches!(multiaddr.iter().last(), Some(Protocol::P2p(_))) {
+                        multiaddr.pop();
+                    }
 
                     match self.peer_addresses.entry(peer_id) {
                         Entry::Occupied(mut e) => {
@@ -186,15 +195,23 @@ impl NetworkBehaviour for Behaviour {
             FromSwarm::AddressChange(AddressChange {
                 peer_id, old, new, ..
             }) => {
-                let old = match old {
+                let mut old = match old {
                     ConnectedPoint::Dialer { address, .. } => address.clone(),
                     ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
                 };
 
-                let new = match new {
+                if matches!(old.iter().last(), Some(Protocol::P2p(_))) {
+                    old.pop();
+                }
+
+                let mut new = match new {
                     ConnectedPoint::Dialer { address, .. } => address.clone(),
                     ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
                 };
+
+                if matches!(new.iter().last(), Some(Protocol::P2p(_))) {
+                    new.pop();
+                }
 
                 if let Entry::Occupied(mut e) = self.peer_addresses.entry(peer_id) {
                     let entry = e.get_mut();
@@ -230,7 +247,6 @@ mod test {
     use futures::StreamExt;
     use libp2p::{
         identity::Keypair,
-        multiaddr::Protocol,
         swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmBuilder, SwarmEvent},
         Multiaddr, PeerId, Swarm,
     };
@@ -295,7 +311,7 @@ mod test {
             .get_peer_addresses(&peer2)
             .cloned()
             .expect("Exist");
-        let addr2 = addr2.with(Protocol::P2p(peer2.into()));
+
         for addr in addrs {
             assert_eq!(addr, addr2);
         }
