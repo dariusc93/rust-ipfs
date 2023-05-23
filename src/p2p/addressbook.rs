@@ -37,7 +37,6 @@ pub struct Behaviour {
 
 impl Behaviour {
     pub fn add_address(&mut self, peer_id: PeerId, addr: Multiaddr) -> bool {
-        //TODO: Instead of giving an error, we could extract/ignore the peer id.
         if let Some(Protocol::P2p(_)) = addr.iter().last() {
             return false;
         }
