@@ -23,7 +23,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            store_on_connection: true
+            store_on_connection: true,
         }
     }
 }
@@ -213,5 +213,97 @@ impl NetworkBehaviour for Behaviour {
             return Poll::Ready(event);
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::p2p::transport::build_transport;
+    use futures::StreamExt;
+    use libp2p::{
+        identity::Keypair,
+        swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmBuilder, SwarmEvent},
+        Multiaddr, PeerId, Swarm, multiaddr::Protocol,
+    };
+
+    #[derive(NetworkBehaviour)]
+    struct Behaviour {
+        address_book: super::Behaviour,
+    }
+
+    #[tokio::test]
+    async fn dial_with_peer_id() -> anyhow::Result<()> {
+        let (_, _, mut swarm1) = build_swarm().await;
+        let (peer2, addr2, mut swarm2) = build_swarm().await;
+
+        swarm1
+            .behaviour_mut()
+            .address_book
+            .add_address(peer2, addr2)?;
+
+        swarm1.dial(peer2)?;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn store_address() -> anyhow::Result<()> {
+        let (_, _, mut swarm1) = build_swarm().await;
+        let (peer2, addr2, mut swarm2) = build_swarm().await;
+
+        let opt = DialOpts::peer_id(peer2).addresses(vec![addr2.clone()]).build();
+
+        swarm1.dial(opt)?;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+
+        let addrs = swarm1.behaviour().address_book.get_peer_addresses(peer2).cloned().expect("Exist");
+        let addr2 = addr2.with(Protocol::P2p(peer2.into()));
+        for addr in addrs {
+            assert_eq!(addr, addr2);
+        }
+        Ok(())
+    }
+
+    async fn build_swarm() -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
+        let key = Keypair::generate_ed25519();
+        let pubkey = key.public();
+        let peer_id = pubkey.to_peer_id();
+        let transport = build_transport(key, None, Default::default()).unwrap();
+
+        let behaviour = Behaviour {
+            address_book: super::Behaviour::default(),
+        };
+
+        let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build();
+
+        Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
+
+        if let Some(SwarmEvent::NewListenAddr { address, .. }) = swarm.next().await {
+            return (peer_id, address, swarm);
+        }
+
+        panic!("no new addrs")
     }
 }
