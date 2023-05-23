@@ -1924,8 +1924,6 @@ pub use node::Node;
 mod node {
     use futures::TryFutureExt;
 
-    use crate::p2p::{TransportConfig, UpgradeVersion};
-
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
@@ -1948,11 +1946,6 @@ mod node {
         pub async fn new<T: AsRef<str>>(name: T) -> Self {
             let mut opts = IpfsOptions::inmemory_with_generated_keys();
             opts.span = Some(trace_span!("ipfs", node = name.as_ref()));
-            opts.transport_configuration = Some(TransportConfig {
-                enable_quic: false,
-                version: Some(UpgradeVersion::Lazy),
-                ..Default::default()
-            });
             Self::with_options(opts).await
         }
 
