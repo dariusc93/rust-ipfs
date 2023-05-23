@@ -366,7 +366,7 @@ enum IpfsEvent {
         OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
-    AddPeer(PeerId, Multiaddr),
+    AddPeer(PeerId, Multiaddr, Channel<()>),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
     FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
@@ -1813,19 +1813,20 @@ impl Ipfs {
         Ok(bootstrap_task)
     }
 
-    /// Add a known listen address of a peer participating in the DHT to the routing table.
-    /// This is mandatory in order for the peer to be discoverable by other members of the
-    /// DHT.
+    /// Add address of a peer to the address book
     pub async fn add_peer(&self, peer_id: PeerId, mut addr: Multiaddr) -> Result<(), Error> {
-        // Kademlia::add_address requires the address to not contain the PeerId
         if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
             addr.pop();
         }
 
+        let (tx, rx) = oneshot::channel();
+
         self.to_task
             .clone()
-            .send(IpfsEvent::AddPeer(peer_id, addr))
+            .send(IpfsEvent::AddPeer(peer_id, addr, tx))
             .await?;
+
+        rx.await??;
 
         Ok(())
     }
@@ -1842,6 +1843,8 @@ impl Ipfs {
         rx.await.map_err(|e| anyhow!(e))
     }
 
+    /// Returns the keypair to the node
+    /// Note: This will get replaced with a keystore in the near future
     pub fn keypair(&self) -> Result<&Keypair, Error> {
         Ok(self.keys.borrow())
     }

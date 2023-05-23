@@ -850,8 +850,18 @@ impl IpfsTask {
                 };
                 let _ = ret.send(future);
             }
-            IpfsEvent::AddPeer(peer_id, addr) => {
-                self.swarm.behaviour_mut().add_peer(peer_id, addr);
+            IpfsEvent::AddPeer(peer_id, addr, ret) => {
+                let result = match self
+                    .swarm
+                    .behaviour_mut()
+                    .addressbook
+                    .add_address(peer_id, addr.clone())
+                {
+                    true => Ok(()),
+                    false => Err(anyhow::anyhow!("Unable to add {addr}. It either contains a `PeerId` or already exist.")),
+                };
+
+                let _ = ret.send(result);
             }
             IpfsEvent::GetClosestPeers(peer_id, ret) => {
                 let id = self
