@@ -53,7 +53,11 @@ async fn spawn_bootstrapped_nodes(n: usize) -> (Vec<Node>, Option<ForeignNode>) 
             (nodes[n - 2].id, nodes[n - 2].addrs[0].clone())
         };
 
-        nodes[i].add_peer(next_id, next_addr).await.unwrap();
+        let addr = next_addr.with(Protocol::P2p(next_id.into()));
+        nodes[i]
+            .add_bootstrap(addr.try_into().unwrap())
+            .await
+            .unwrap();
         nodes[i].bootstrap().await.unwrap();
     }
 
