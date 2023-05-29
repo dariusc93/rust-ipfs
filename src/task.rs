@@ -635,7 +635,7 @@ impl IpfsTask {
                     }
                 }
                 BitswapEvent::Ping { peer, response } => {
-                    let duration = self.swarm.behaviour().peerbook.get_peet_latest_rtt(peer);
+                    let duration = self.swarm.behaviour().peerbook.get_peer_latest_rtt(peer);
                     let _ = response.send(duration).ok();
                 }
             },
