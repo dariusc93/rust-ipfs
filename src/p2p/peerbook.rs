@@ -230,12 +230,12 @@ impl Behaviour {
             .or_insert([Duration::from_millis(0), Duration::from_millis(0), rtt]);
     }
 
-    pub fn get_peet_rtt(&self, peer_id: PeerId) -> Option<[Duration; 3]> {
+    pub fn get_peer_rtt(&self, peer_id: PeerId) -> Option<[Duration; 3]> {
         self.peer_rtt.get(&peer_id).copied()
     }
 
-    pub fn get_peet_latest_rtt(&self, peer_id: PeerId) -> Option<Duration> {
-        self.get_peet_rtt(peer_id).map(|rtt| rtt[2])
+    pub fn get_peer_latest_rtt(&self, peer_id: PeerId) -> Option<Duration> {
+        self.get_peer_rtt(peer_id).map(|rtt| rtt[2])
     }
 
     pub fn get_peer_info(&self, peer_id: PeerId) -> Option<&PeerInfo> {
