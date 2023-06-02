@@ -10,7 +10,7 @@ use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
 use crate::repo::Repo;
 
 // use cid::Cid;
-use beetle_bitswap_next::{Bitswap, BitswapEvent};
+use beetle_bitswap_next::{Bitswap, BitswapEvent, ProtocolId};
 use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::Multiaddr;
@@ -356,6 +356,62 @@ impl Default for KadConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitswapConfig {
+    protocol: Vec<BitswapProtocol>,
+    max_buf_size: Option<usize>,
+    server: bool,
+}
+
+impl Default for BitswapConfig {
+    fn default() -> Self {
+        Self {
+            protocol: vec![
+                BitswapProtocol::ProtocolLegacy,
+                BitswapProtocol::Protocol100,
+                BitswapProtocol::Protocol110,
+                BitswapProtocol::Protocol120,
+            ],
+            max_buf_size: None,
+            server: true,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
+pub enum BitswapProtocol {
+    ProtocolLegacy,
+    Protocol100,
+    Protocol110,
+    #[default]
+    Protocol120,
+}
+
+impl From<BitswapProtocol> for ProtocolId {
+    fn from(value: BitswapProtocol) -> Self {
+        match value {
+            BitswapProtocol::ProtocolLegacy => ProtocolId::Legacy,
+            BitswapProtocol::Protocol100 => ProtocolId::Bitswap100,
+            BitswapProtocol::Protocol110 => ProtocolId::Bitswap110,
+            BitswapProtocol::Protocol120 => ProtocolId::Bitswap120,
+        }
+    }
+}
+
+impl From<BitswapConfig> for beetle_bitswap_next::Config {
+    fn from(value: BitswapConfig) -> Self {
+        beetle_bitswap_next::Config {
+            client: Default::default(),
+            server: value.server.then_some(Default::default()),
+            protocol: beetle_bitswap_next::ProtocolConfig {
+                protocol_ids: value.protocol.iter().map(|proto| (*proto).into()).collect(),
+                max_transmit_size: value.max_buf_size.unwrap_or(1024 * 1024 * 2),
+            },
+            ..Default::default()
+        }
+    }
+}
+
 impl Behaviour {
     pub async fn new(
         keypair: &Keypair,
@@ -381,10 +437,7 @@ impl Behaviour {
         let store = {
             //TODO: Make customizable
             //TODO: Use persistent store for kad
-            let config = options
-                .kad_store_config
-                .memory
-                .unwrap_or_default();
+            let config = options.kad_store_config.memory.unwrap_or_default();
 
             MemoryStore::with_config(peer_id, config)
         };

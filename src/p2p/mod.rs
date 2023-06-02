@@ -24,6 +24,7 @@ pub(crate) mod peerbook;
 mod behaviour;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
+pub use self::behaviour::{BitswapConfig, BitswapProtocol};
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
@@ -125,6 +126,8 @@ pub struct SwarmOptions {
     pub kad_config: Option<Either<KadConfig, KademliaConfig>>,
     /// Ping Configuration
     pub ping_config: Option<PingConfig>,
+    /// bitswap config
+    pub bitswap_config: Option<BitswapConfig>,
     /// identify configuration
     pub identify_config: Option<IdentifyConfiguration>,
     /// Kad store config
@@ -156,6 +159,7 @@ impl From<&IpfsOptions> for SwarmOptions {
         let kad_store_config = options.kad_store_config.clone();
         let disable_kad = options.disable_kad;
         let disable_bitswap = options.disable_bitswap;
+        let bitswap_config = options.bitswap_config.clone();
 
         let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
@@ -167,6 +171,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             mdns,
             disable_kad,
             disable_bitswap,
+            bitswap_config,
             mdns_ipv6,
             relay_server,
             relay_server_config,

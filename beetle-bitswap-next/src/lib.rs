@@ -31,8 +31,8 @@ use self::client::{Client, Config as ClientConfig};
 use self::message::BitswapMessage;
 use self::network::Network;
 use self::network::OutEvent;
-use self::protocol::ProtocolConfig;
-use self::server::{Config as ServerConfig, Server};
+pub use self::protocol::ProtocolConfig;
+pub use self::server::{Config as ServerConfig, Server};
 
 mod block;
 mod client;

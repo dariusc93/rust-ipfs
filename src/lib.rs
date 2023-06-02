@@ -51,8 +51,8 @@ use futures::{
 };
 
 use p2p::{
-    IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream, PubsubConfig,
-    RecordStream, RelayConfig,
+    BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream,
+    PubsubConfig, RecordStream, RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
@@ -180,6 +180,9 @@ pub struct IpfsOptions {
     /// Disables bitswap protocol
     pub disable_bitswap: bool,
 
+    /// Bitswap configuration
+    pub bitswap_config: Option<BitswapConfig>,
+
     /// Enables relay server
     pub relay_server: bool,
 
@@ -251,6 +254,7 @@ impl Default for IpfsOptions {
             relay: Default::default(),
             disable_kad: Default::default(),
             disable_bitswap: Default::default(),
+            bitswap_config: Default::default(),
             keep_alive: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
@@ -517,7 +521,7 @@ impl UninitializedIpfs {
         self
     }
 
-    /// Set RepoProvider option to provide blocks automatically 
+    /// Set RepoProvider option to provide blocks automatically
     pub fn set_provider(mut self, opt: RepoProvider) -> Self {
         self.options.provider = opt;
         self
@@ -544,6 +548,12 @@ impl UninitializedIpfs {
     /// Disable bitswap
     pub fn disable_bitswap(mut self) -> Self {
         self.options.disable_bitswap = true;
+        self
+    }
+
+    /// Set Bitswap configuration
+    pub fn set_bitswap_configuration(mut self, config: BitswapConfig) -> Self {
+        self.options.bitswap_config = Some(config);
         self
     }
 
