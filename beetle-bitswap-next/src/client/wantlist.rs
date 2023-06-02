@@ -24,7 +24,10 @@ impl Wantlist {
 
     pub fn clear(&mut self) {
         self.set.clear();
+        self.set.shrink_to_fit();
+
         self.cached.clear();
+        self.cached.shrink_to_fit();
     }
 
     /// Adds an entry to thew wantlist, if not already present.
@@ -32,6 +35,7 @@ impl Wantlist {
         match self.set.entry(cid) {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 self.cached.clear();
+                self.cached.shrink_to_fit();
                 entry.insert(Entry::new(cid, priority, want_type));
                 true
             }
@@ -42,6 +46,7 @@ impl Wantlist {
                 }
                 *entry.get_mut() = Entry::new(cid, priority, want_type);
                 self.cached.clear();
+                self.cached.shrink_to_fit();
                 true
             }
         }
@@ -50,6 +55,7 @@ impl Wantlist {
     /// Removes the given Cid from the wantlist.
     pub fn remove(&mut self, cid: &Cid) -> Option<Entry> {
         self.cached.clear();
+        self.cached.shrink_to_fit();
         self.set.remove(cid)
     }
 
@@ -71,6 +77,7 @@ impl Wantlist {
                     return None;
                 }
                 self.cached.clear();
+                self.cached.shrink_to_fit();
                 Some(entry.remove())
             }
         }
@@ -92,6 +99,7 @@ impl Wantlist {
     /// Merges the second wantlist into this one.
     pub fn extend(&mut self, other: Self) {
         self.cached.clear();
+        self.cached.shrink_to_fit();
 
         for (cid, entry) in other.set.into_iter() {
             match self.set.entry(cid) {
