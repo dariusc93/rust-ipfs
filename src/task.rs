@@ -1055,7 +1055,7 @@ impl IpfsTask {
                 let _ = ret.send(list);
             }
             IpfsEvent::AddBootstrapper(mut addr, ret) => {
-                let ret_addr = addr.clone().into();
+                let ret_addr = addr.clone();
                 if !self.swarm.behaviour().kademlia.is_enabled() {
                     let _ = ret.send(Err(anyhow::anyhow!("kad protocol is disabled")));
                 } else {
@@ -1075,7 +1075,7 @@ impl IpfsTask {
                 }
             }
             IpfsEvent::RemoveBootstrapper(mut addr, ret) => {
-                let result = addr.clone().into();
+                let result = addr.clone();
                 if !self.swarm.behaviour().kademlia.is_enabled() {
                     let _ = ret.send(Err(anyhow::anyhow!("kad protocol is disabled")));
                 } else {
