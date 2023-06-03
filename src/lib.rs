@@ -81,7 +81,7 @@ pub use self::p2p::gossipsub::SubscriptionStream;
 pub use self::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
+    p2p::KadResult,
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
@@ -382,8 +382,8 @@ enum IpfsEvent {
     DhtGet(Key, OneshotSender<RecordStream>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
-    AddBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
-    RemoveBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
+    AddBootstrapper(Multiaddr, Channel<Multiaddr>),
+    RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(OneshotSender<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
     Exit,
@@ -515,7 +515,7 @@ impl UninitializedIpfs {
         self
     }
 
-    /// Set RepoProvider option to provide blocks automatically 
+    /// Set RepoProvider option to provide blocks automatically
     pub fn set_provider(mut self, opt: RepoProvider) -> Self {
         self.options.provider = opt;
         self
@@ -1730,7 +1730,7 @@ impl Ipfs {
     /// Extend the list of used bootstrapper nodes with an additional address.
     /// Return value cannot be used to determine if the `addr` was a new bootstrapper, subject to
     /// change.
-    pub async fn add_bootstrap(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
+    pub async fn add_bootstrap(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1748,7 +1748,7 @@ impl Ipfs {
     /// Remove an address from the currently used list of bootstrapper nodes.
     /// Return value cannot be used to determine if the `addr` was an actual bootstrapper, subject to
     /// change.
-    pub async fn remove_bootstrap(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
+    pub async fn remove_bootstrap(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1930,8 +1930,9 @@ pub use node::Node;
 mod node {
     use futures::TryFutureExt;
 
+    use crate::p2p::MultiaddrExt;
+
     use super::*;
-    use std::convert::TryFrom;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
     /// easier.
@@ -1958,9 +1959,10 @@ mod node {
 
         /// Connects to a peer at the given address.
         pub async fn connect(&self, addr: Multiaddr) -> Result<(), Error> {
-            let addr = MultiaddrWithPeerId::try_from(addr).unwrap();
-            if self.ipfs.is_connected(addr.peer_id).await? {
-                return Ok(());
+            if let Some(peer_id) = addr.peer_id() {
+                if self.ipfs.is_connected(peer_id).await? {
+                    return Ok(());
+                }
             }
             self.ipfs.connect(addr).await
         }

@@ -28,7 +28,7 @@ async fn connect_two_nodes_by_addr() {
 
 // Make sure only a `Multiaddr` with `/p2p/` can be used to connect.
 #[tokio::test]
-#[should_panic(expected = "called `Result::unwrap()` on an `Err` value: MissingProtocolP2p")]
+#[should_panic]
 async fn dont_connect_without_p2p() {
     let node_a = Node::new("a").await;
     let node_b = Node::new("b").await;

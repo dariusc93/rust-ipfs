@@ -81,7 +81,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_ipfs_io() {
         tracing_subscriber::fmt::init();
-        let res = resolve(crate::p2p::DnsResolver::Google, "ipfs.io")
+        let res = resolve(crate::p2p::DnsResolver::Cloudflare, "ipfs.io")
             .await
             .unwrap()
             .to_string();
@@ -90,7 +90,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_website_ipfs_io() {
-        let res = resolve(crate::p2p::DnsResolver::Google, "website.ipfs.io")
+        let res = resolve(crate::p2p::DnsResolver::Cloudflare, "website.ipfs.io")
             .await
             .unwrap();
 

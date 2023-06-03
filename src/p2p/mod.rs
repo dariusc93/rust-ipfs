@@ -34,7 +34,7 @@ pub use self::transport::{
 pub(crate) mod gossipsub;
 mod transport;
 
-pub use addr::{MultiaddrWithPeerId, MultiaddrWithoutPeerId};
+pub use addr::MultiaddrExt;
 pub use behaviour::KadResult;
 
 /// Type alias for [`libp2p::Swarm`] running the [`behaviour::Behaviour`] with the given [`IpfsTypes`].

@@ -4,17 +4,17 @@ use libipld::{
     Cid, IpldCodec,
 };
 use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
-use rust_ipfs::{p2p::MultiaddrWithPeerId, Block, Node};
+use rust_ipfs::{p2p::MultiaddrExt, Block, Node};
 use tokio::time::timeout;
 
-use std::{convert::TryInto, time::Duration};
+use std::time::Duration;
 
 mod common;
 use common::{interop::ForeignNode, spawn_nodes, Topology};
 
-fn strip_peer_id(addr: Multiaddr) -> Multiaddr {
-    let MultiaddrWithPeerId { multiaddr, .. } = addr.try_into().unwrap();
-    multiaddr.into()
+fn strip_peer_id(mut addr: Multiaddr) -> Multiaddr {
+    addr.extract_peer_id().expect("Peer id exist");
+    addr
 }
 
 /// Check if `Ipfs::find_peer` works without DHT involvement.
