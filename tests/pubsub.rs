@@ -69,7 +69,7 @@ async fn unsubscribe_via_drop() {
 async fn publish_between_two_nodes_single_topic() {
     use futures::stream::StreamExt;
 
-    let nodes = spawn_nodes(2, Topology::Line).await;
+    let nodes = spawn_nodes::<2>(Topology::Line).await;
 
     let topic = "shared".to_owned();
 
@@ -185,7 +185,7 @@ async fn publish_between_two_nodes_single_topic() {
 async fn publish_between_two_nodes_different_topics() {
     use futures::stream::StreamExt;
 
-    let nodes = spawn_nodes(2, Topology::Line).await;
+    let nodes = spawn_nodes::<2>(Topology::Line).await;
     let node_a = &nodes[0];
     let node_b = &nodes[1];
 
