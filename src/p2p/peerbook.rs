@@ -6,7 +6,8 @@ use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{
-    self, dummy::ConnectionHandler as DummyConnectionHandler, NetworkBehaviour, PollParameters,
+    self, dummy::ConnectionHandler as DummyConnectionHandler, CloseConnection, NetworkBehaviour,
+    PollParameters,
 };
 #[allow(deprecated)]
 use libp2p::swarm::{
@@ -128,6 +129,7 @@ pub struct Behaviour {
     cleanup_interval: Interval,
 
     pending_connections: HashMap<ConnectionId, oneshot::Sender<anyhow::Result<()>>>,
+    pending_disconnection: HashMap<PeerId, oneshot::Sender<anyhow::Result<()>>>,
 
     pending_identify_timer: HashMap<PeerId, (Interval, Instant)>,
 
@@ -159,6 +161,7 @@ impl Default for Behaviour {
                 Duration::from_secs(60),
             ),
             pending_connections: Default::default(),
+            pending_disconnection: Default::default(),
             pending_identify_timer: Default::default(),
             pending_identify: Default::default(),
             peer_info: Default::default(),
@@ -182,6 +185,29 @@ impl Behaviour {
         let id = opts.connection_id();
         self.events.push_back(NetworkBehaviourAction::Dial { opts });
         self.pending_connections.insert(id, tx);
+        rx
+    }
+
+    pub fn disconnect(&mut self, peer_id: PeerId) -> oneshot::Receiver<anyhow::Result<()>> {
+        let (tx, rx) = oneshot::channel();
+
+        if !self.peer_connections.contains_key(&peer_id) {
+            let _ = tx.send(Err(anyhow::anyhow!("Peer is not connected")));
+            return rx;
+        }
+
+        if self.pending_disconnection.contains_key(&peer_id) {
+            let _ = tx.send(Err(anyhow::anyhow!("Disconnection is pending")));
+            return rx;
+        }
+        self.events
+            .push_back(NetworkBehaviourAction::CloseConnection {
+                peer_id,
+                connection: CloseConnection::All,
+            });
+
+        self.pending_disconnection.insert(peer_id, tx);
+
         rx
     }
 
@@ -462,6 +488,9 @@ impl NetworkBehaviour for Behaviour {
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
                     let _ = ch.send(Ok(()));
                 }
+                if let Some(ch) = self.pending_disconnection.remove(&peer_id) {
+                    let _ = ch.send(Ok(()));
+                }
             }
             _ => {}
         }
@@ -640,6 +669,58 @@ mod test {
         let list = swarm1.connected_peers().copied().collect::<Vec<_>>();
 
         assert!(list.contains(&peer2));
+    }
+
+    #[tokio::test]
+    async fn disconnect() {
+        let (peer1, addr1, mut swarm1) = build_swarm(false).await;
+        let (_, _, mut swarm2) = build_swarm(false).await;
+
+        let mut oneshot = swarm2.behaviour_mut().peerbook.connect(addr1.clone());
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = swarm1.next() => {},
+                _ = swarm2.next() => {},
+                conn_res = (&mut oneshot) => {
+                    conn_res.unwrap().unwrap();
+                    break;
+                }
+            }
+        }
+
+        let list = swarm2.connected_peers().copied().collect::<Vec<_>>();
+        assert!(list.contains(&peer1));
+
+        let oneshot = swarm2.behaviour_mut().peerbook.disconnect(peer1);
+
+        let mut p1_disconnect = false;
+        let mut p2_disconnect = false;
+
+        loop {
+            tokio::select! {
+                biased;
+                e1 = swarm1.select_next_some() => {
+                    if matches!(e1, SwarmEvent::ConnectionClosed { .. }) {
+                        p2_disconnect = true;
+                    }
+                },
+                e2 = swarm2.select_next_some() => {
+                    if matches!(e2, SwarmEvent::ConnectionClosed { .. }) {
+                        p1_disconnect = true;
+                    }
+                },
+            }
+            if p1_disconnect && p2_disconnect {
+                break;
+            }
+        }
+
+        oneshot.await.unwrap().unwrap();
+
+        let list = swarm2.connected_peers().copied().collect::<Vec<_>>();
+        assert!(list.is_empty());
     }
 
     #[tokio::test]

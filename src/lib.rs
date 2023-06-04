@@ -332,7 +332,7 @@ enum IpfsEvent {
     /// Is Connected
     IsConnected(PeerId, Channel<bool>),
     /// Disconnect
-    Disconnect(PeerId, Channel<()>),
+    Disconnect(PeerId, OneshotSender<ReceiverChannel<()>>),
     /// Ban Peer
     Ban(PeerId, Channel<()>),
     /// Unban peer
@@ -1185,7 +1185,7 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::Disconnect(target, tx))
                 .await?;
-            rx.await?
+            rx.await?.await.map_err(anyhow::Error::from)?
         }
         .instrument(self.span.clone())
         .await

@@ -733,11 +733,7 @@ impl IpfsTask {
                 ret.send(Ok(connections.collect())).ok();
             }
             IpfsEvent::Disconnect(peer, ret) => {
-                let _ = ret.send(
-                    self.swarm
-                        .disconnect_peer_id(peer)
-                        .map_err(|_| anyhow::anyhow!("Peer was not connected")),
-                );
+                let _ = ret.send(self.swarm.behaviour_mut().peerbook.disconnect(peer));
             }
             IpfsEvent::Ban(peer, ret) => {
                 self.swarm.ban_peer_id(peer);
@@ -858,7 +854,9 @@ impl IpfsTask {
                     .add_address(peer_id, addr.clone())
                 {
                     true => Ok(()),
-                    false => Err(anyhow::anyhow!("Unable to add {addr}. It either contains a `PeerId` or already exist.")),
+                    false => Err(anyhow::anyhow!(
+                        "Unable to add {addr}. It either contains a `PeerId` or already exist."
+                    )),
                 };
 
                 let _ = ret.send(result);
