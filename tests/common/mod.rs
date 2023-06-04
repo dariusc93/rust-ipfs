@@ -19,31 +19,31 @@ pub enum Topology {
 }
 
 #[allow(dead_code)]
-pub async fn spawn_nodes(count: usize, topology: Topology) -> Vec<Node> {
-    let mut nodes = Vec::with_capacity(count);
+pub async fn spawn_nodes<const N: usize>(topology: Topology) -> Vec<Node> {
+    let mut nodes = Vec::with_capacity(N);
 
-    for i in 0..count {
+    for i in 0..N {
         let node = Node::new(i.to_string()).await;
         nodes.push(node);
     }
 
     match topology {
         Topology::Line | Topology::Ring => {
-            for i in 0..(count - 1) {
+            for i in 0..(N - 1) {
                 nodes[i]
                     .connect(nodes[i + 1].addrs[0].clone())
                     .await
                     .unwrap();
             }
             if topology == Topology::Ring {
-                nodes[count - 1]
+                nodes[N - 1]
                     .connect(nodes[0].addrs[0].clone())
                     .await
                     .unwrap();
             }
         }
         Topology::Mesh => {
-            for i in 0..count {
+            for i in 0..N {
                 for (j, peer) in nodes.iter().enumerate() {
                     if i != j {
                         nodes[i].connect(peer.addrs[0].clone()).await.unwrap();

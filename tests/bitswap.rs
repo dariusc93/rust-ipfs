@@ -9,7 +9,7 @@ use common::{spawn_nodes, Topology};
 #[tokio::test]
 async fn check_bitswap_cleanups() {
     // create a few nodes and connect the first one to others
-    let mut nodes = spawn_nodes(3, Topology::Star).await;
+    let mut nodes = spawn_nodes::<3>(Topology::Star).await;
 
     let bitswap_peers = nodes[0].get_bitswap_peers().await.unwrap();
     assert_eq!(bitswap_peers.len(), 2);
@@ -51,7 +51,7 @@ async fn bitswap_stress_test() {
     let data = b"hello block\n".to_vec();
     let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
 
-    let nodes = spawn_nodes(5, Topology::Mesh).await;
+    let nodes = spawn_nodes::<5>(Topology::Mesh).await;
 
     for (i, node) in nodes.iter().enumerate() {
         if filter(i) {

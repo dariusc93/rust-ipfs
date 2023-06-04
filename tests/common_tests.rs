@@ -8,7 +8,7 @@ const N: usize = 5;
 
 #[tokio::test]
 async fn check_topology_line() {
-    let nodes = spawn_nodes(N, Topology::Line).await;
+    let nodes = spawn_nodes::<N>(Topology::Line).await;
 
     for (i, node) in nodes.iter().enumerate() {
         if i == 0 || i == N - 1 {
@@ -21,7 +21,7 @@ async fn check_topology_line() {
 
 #[tokio::test]
 async fn check_topology_ring() {
-    let nodes = spawn_nodes(N, Topology::Ring).await;
+    let nodes = spawn_nodes::<N>(Topology::Ring).await;
 
     for node in &nodes {
         assert_eq!(node.connected().await.unwrap().len(), 2);
@@ -30,7 +30,7 @@ async fn check_topology_ring() {
 
 #[tokio::test]
 async fn check_topology_mesh() {
-    let nodes = spawn_nodes(N, Topology::Mesh).await;
+    let nodes = spawn_nodes::<N>(Topology::Mesh).await;
 
     for node in &nodes {
         assert_eq!(node.connected().await.unwrap().len(), N - 1);
@@ -39,7 +39,7 @@ async fn check_topology_mesh() {
 
 #[tokio::test]
 async fn check_topology_star() {
-    let nodes = spawn_nodes(N, Topology::Star).await;
+    let nodes = spawn_nodes::<N>(Topology::Star).await;
 
     for (i, node) in nodes.iter().enumerate() {
         if i == 0 {
