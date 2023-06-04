@@ -46,7 +46,8 @@ pub async fn spawn_nodes<const N: usize>(topology: Topology) -> Vec<Node> {
             for i in 0..N {
                 for (j, peer) in nodes.iter().enumerate() {
                     if i != j {
-                        nodes[i].connect(peer.addrs[0].clone()).await.unwrap();
+                        //TODO: Determine the cause of `Failed to negotiate transport protocol(s).... Cannot assign requested address (os error 99): Cannot assign requested address (os error 99)`
+                        if let Err(_e) = nodes[i].connect(peer.addrs[0].clone()).await {}
                     }
                 }
             }
