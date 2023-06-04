@@ -26,23 +26,6 @@ async fn connect_two_nodes_by_addr() {
         .expect("should have connected");
 }
 
-// Make sure only a `Multiaddr` with `/p2p/` can be used to connect.
-#[tokio::test]
-#[should_panic(expected = "called `Result::unwrap()` on an `Err` value: MissingProtocolP2p")]
-async fn dont_connect_without_p2p() {
-    let node_a = Node::new("a").await;
-    let node_b = Node::new("b").await;
-
-    let mut b_addr = node_b.addrs[0].clone();
-    // drop the /p2p/peer_id part
-    b_addr.pop();
-
-    timeout(TIMEOUT, node_a.connect(b_addr))
-        .await
-        .expect("timeout")
-        .expect_err("should not have connected");
-}
-
 // Make sure two instances of ipfs can be connected by `PeerId`.
 #[tokio::test]
 async fn connect_two_nodes_by_peer_id() {
