@@ -243,8 +243,10 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
+    use crate::p2p::peerbook;
     use crate::p2p::transport::build_transport;
     use futures::StreamExt;
+    use libp2p::swarm::behaviour::toggle::Toggle;
     use libp2p::{
         identity::Keypair,
         swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmBuilder, SwarmEvent},
@@ -253,13 +255,14 @@ mod test {
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
+        peer_book: Toggle<peerbook::Behaviour>,
         address_book: super::Behaviour,
     }
 
     #[tokio::test]
     async fn dial_with_peer_id() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm().await;
-        let (peer2, addr2, mut swarm2) = build_swarm().await;
+        let (_, _, mut swarm1) = build_swarm(false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
 
         swarm1
             .behaviour_mut()
@@ -283,9 +286,39 @@ mod test {
     }
 
     #[tokio::test]
+    async fn dial_with_peer_id_from_peerbook() -> anyhow::Result<()> {
+        let (_, _, mut swarm1) = build_swarm(true).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(true).await;
+
+        swarm1
+            .behaviour_mut()
+            .address_book
+            .add_address(peer2, addr2);
+
+        let mut connection = swarm1
+            .behaviour_mut()
+            .peer_book
+            .as_mut()
+            .map(|pb| pb.connect(peer2))
+            .expect("peerbook enabled");
+
+        loop {
+            futures::select! {
+                _ = swarm1.next() => {}
+                _ = swarm2.next() => {}
+                res = &mut connection => {
+                    res.unwrap().unwrap();
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn store_address() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm().await;
-        let (peer2, addr2, mut swarm2) = build_swarm().await;
+        let (_, _, mut swarm1) = build_swarm(false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
 
         let opt = DialOpts::peer_id(peer2)
             .addresses(vec![addr2.clone()])
@@ -318,13 +351,14 @@ mod test {
         Ok(())
     }
 
-    async fn build_swarm() -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
+    async fn build_swarm(peerbook: bool) -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
         let key = Keypair::generate_ed25519();
         let pubkey = key.public();
         let peer_id = pubkey.to_peer_id();
         let transport = build_transport(key, None, Default::default()).unwrap();
 
         let behaviour = Behaviour {
+            peer_book: peerbook.then_some(peerbook::Behaviour::default()).into(),
             address_book: super::Behaviour::default(),
         };
 
