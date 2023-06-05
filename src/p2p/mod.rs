@@ -5,6 +5,7 @@ use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
 
 use crate::error::Error;
+use crate::repo::Repo;
 use crate::IpfsOptions;
 
 use either::Either;
@@ -25,6 +26,7 @@ mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
+pub use self::behaviour::{BitswapConfig, BitswapProtocol};
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
@@ -116,6 +118,8 @@ pub struct SwarmOptions {
     pub mdns_ipv6: bool,
     /// disable kad
     pub disable_kad: bool,
+    /// disable bitswap
+    pub disable_bitswap: bool,
     /// Relay Server
     pub relay_server: bool,
     /// Relay Server Configuration
@@ -124,6 +128,8 @@ pub struct SwarmOptions {
     pub kad_config: Option<Either<KadConfig, KademliaConfig>>,
     /// Ping Configuration
     pub ping_config: Option<PingConfig>,
+    /// bitswap config
+    pub bitswap_config: Option<BitswapConfig>,
     /// identify configuration
     pub identify_config: Option<IdentifyConfiguration>,
     /// Kad store config
@@ -156,6 +162,8 @@ impl From<&IpfsOptions> for SwarmOptions {
         let ping_config = options.ping_configuration.clone();
         let kad_store_config = options.kad_store_config.clone();
         let disable_kad = options.disable_kad;
+        let disable_bitswap = options.disable_bitswap;
+        let bitswap_config = options.bitswap_config.clone();
 
         let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
@@ -167,6 +175,8 @@ impl From<&IpfsOptions> for SwarmOptions {
             bootstrap,
             mdns,
             disable_kad,
+            disable_bitswap,
+            bitswap_config,
             mdns_ipv6,
             relay_server,
             relay_server_config,
@@ -263,14 +273,14 @@ pub async fn create_swarm(
     options: SwarmOptions,
     swarm_config: SwarmConfig,
     transport_config: TransportConfig,
+    repo: Repo,
     span: Span,
 ) -> Result<TSwarm, Error> {
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
 
-    // Create a Kademlia behaviour
     let (behaviour, relay_transport) =
-        behaviour::build_behaviour(&keypair, options, swarm_config.connection).await?;
+        behaviour::build_behaviour(&keypair, options, repo, swarm_config.connection).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = transport::build_transport(keypair, relay_transport, transport_config)?;

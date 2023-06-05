@@ -306,6 +306,7 @@ impl<C: Borrow<Cid>> PinKind<C> {
 /// Describes a repo.
 ///
 /// Consolidates a blockstore, a datastore and a subscription registry.
+
 #[derive(Debug, Clone)]
 pub struct Repo {
     block_store: Arc<dyn BlockStore>,
@@ -315,16 +316,39 @@ pub struct Repo {
     lockfile: Arc<dyn Lock>,
 }
 
+#[async_trait]
+impl beetle_bitswap_next::Store for Repo {
+    async fn get_size(&self, cid: &Cid) -> anyhow::Result<usize> {
+        self.get_block_now(cid)
+            .await?
+            .ok_or(anyhow::anyhow!("Block doesnt exist"))
+            .map(|block| block.data().len())
+    }
+    async fn get(&self, cid: &Cid) -> anyhow::Result<beetle_bitswap_next::Block> {
+        let block = self
+            .get_block_now(cid)
+            .await?
+            .ok_or(anyhow::anyhow!("Block doesnt exist"))?;
+        Ok(beetle_bitswap_next::Block {
+            cid: *block.cid(),
+            data: bytes::Bytes::copy_from_slice(block.data()),
+        })
+    }
+    async fn has(&self, cid: &Cid) -> anyhow::Result<bool> {
+        self.contains(cid).await
+    }
+}
+
 /// Events used to communicate to the swarm on repo changes.
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Cid, Vec<PeerId>),
+    WantBlock(Option<u64>, Cid, Vec<PeerId>),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
     NewBlock(
-        Cid,
+        Block,
         oneshot::Sender<Result<ReceiverChannel<KadResult>, anyhow::Error>>,
     ),
     /// Signals the removal of a block.
@@ -424,46 +448,11 @@ impl Repo {
 
     /// Puts a block into the block store.
     pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
-        let cid = *block.cid();
-        let (_cid, res) = self.block_store.put(block.clone()).await?;
+        let (cid, res) = self.block_store.put(block.clone()).await?;
 
         if let BlockPut::NewBlock = res {
             self.subscriptions
                 .finish_subscription(cid.into(), Ok(block));
-        }
-
-        Ok((cid, res))
-    }
-
-    /// Puts a block into the block store with bitswap cancellation
-    // TODO: after changing bitswap implementation
-    pub(crate) async fn put_block_with_cancellation(
-        &self,
-        block: Block,
-    ) -> Result<(Cid, BlockPut), Error> {
-        let cid = *block.cid();
-        let (_cid, res) = self.block_store.put(block.clone()).await?;
-
-        // FIXME: this doesn't cause actual DHT providing yet, only some
-        // bitswap housekeeping; we might want to not ignore the channel
-        // errors when we actually start providing on the DHT
-        if let BlockPut::NewBlock = res {
-            self.subscriptions
-                .finish_subscription(cid.into(), Ok(block));
-
-            // sending only fails if no one is listening anymore
-            // and that is okay with us.
-            let (tx, rx) = oneshot::channel();
-
-            self.events
-                .clone()
-                .send(RepoEvent::NewBlock(cid, tx))
-                .await
-                .ok();
-
-            if let Ok(Ok(kad_subscription)) = rx.await {
-                kad_subscription.await??;
-            }
         }
 
         Ok((cid, res))
@@ -495,7 +484,7 @@ impl Repo {
             // and that is okay with us.
             self.events
                 .clone()
-                .send(RepoEvent::WantBlock(*cid, peers.to_vec()))
+                .send(RepoEvent::WantBlock(None, *cid, peers.to_vec()))
                 .await
                 .ok();
             Ok(subscription.await?)

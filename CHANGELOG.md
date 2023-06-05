@@ -3,7 +3,9 @@
 - feat: Basic AddressBook implementation [PR 71]
 - feat: Added Ipfs::pubsub_events to receive subscribe and unsubscribe events to a subscribed topic [PR 70]
 - feat: Implement RepoProvider [PR 69]
+- refactor: Switch bitswap implementation [PR 66]
 
+[PR 66]: https://github.com/dariusc93/rust-ipfs/pull/66
 [PR 69]: https://github.com/dariusc93/rust-ipfs/pull/69
 [PR 70]: https://github.com/dariusc93/rust-ipfs/pull/70
 [PR 71]: https://github.com/dariusc93/rust-ipfs/pull/71

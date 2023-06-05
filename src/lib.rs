@@ -44,14 +44,15 @@ use futures::{
         mpsc::{channel, Sender},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
+    future::BoxFuture,
     sink::SinkExt,
     stream::{BoxStream, Stream},
     StreamExt,
 };
 
 use p2p::{
-    IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream, PubsubConfig,
-    RecordStream, RelayConfig,
+    BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream,
+    PubsubConfig, RecordStream, RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
 use tokio::{sync::Notify, task::JoinHandle};
@@ -65,7 +66,7 @@ use std::{
     fmt, io,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
-    sync::{atomic::Ordering, Arc},
+    sync::Arc,
     time::Duration,
 };
 
@@ -176,6 +177,12 @@ pub struct IpfsOptions {
     /// Disables kademlia protocol
     pub disable_kad: bool,
 
+    /// Disables bitswap protocol
+    pub disable_bitswap: bool,
+
+    /// Bitswap configuration
+    pub bitswap_config: Option<BitswapConfig>,
+
     /// Enables relay server
     pub relay_server: bool,
 
@@ -249,6 +256,8 @@ impl Default for IpfsOptions {
             bootstrap: Default::default(),
             relay: Default::default(),
             disable_kad: Default::default(),
+            disable_bitswap: Default::default(),
+            bitswap_config: Default::default(),
             keep_alive: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
@@ -355,12 +364,9 @@ enum IpfsEvent {
         OneshotSender<Result<MessageId, PublishError>>,
     ),
     PubsubPeers(Option<String>, OneshotSender<Vec<PeerId>>),
+    GetBitswapPeers(OneshotSender<BoxFuture<'static, Vec<PeerId>>>),
+    WantList(Option<PeerId>, OneshotSender<BoxFuture<'static, Vec<Cid>>>),
     PubsubSubscribed(OneshotSender<Vec<String>>),
-    WantList(
-        Option<PeerId>,
-        OneshotSender<Vec<(Cid, ipfs_bitswap::Priority)>>,
-    ),
-    BitswapStats(OneshotSender<BitswapStats>),
     AddListeningAddress(
         Multiaddr,
         OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
@@ -372,7 +378,6 @@ enum IpfsEvent {
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Multiaddr, Channel<()>),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
-    GetBitswapPeers(OneshotSender<Vec<PeerId>>),
     FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
     FindPeer(
         PeerId,
@@ -412,6 +417,7 @@ pub enum FDLimit {
 }
 
 /// Configured Ipfs which can only be started.
+
 pub struct UninitializedIpfs {
     keys: Keypair,
     options: IpfsOptions,
@@ -546,6 +552,18 @@ impl UninitializedIpfs {
     /// Disables kademlia
     pub fn disable_kad(mut self) -> Self {
         self.options.disable_kad = true;
+        self
+    }
+
+    /// Disable bitswap
+    pub fn disable_bitswap(mut self) -> Self {
+        self.options.disable_bitswap = true;
+        self
+    }
+
+    /// Set Bitswap configuration
+    pub fn set_bitswap_configuration(mut self, config: BitswapConfig) -> Self {
+        self.options.bitswap_config = Some(config);
         self
     }
 
@@ -717,6 +735,7 @@ impl UninitializedIpfs {
             swarm_options,
             swarm_config,
             transport_config,
+            repo.clone(),
             exec_span,
         )
         .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
@@ -738,8 +757,10 @@ impl UninitializedIpfs {
             listening_addresses: HashMap::with_capacity(listening_addrs.len()),
             listeners,
             provider_stream: HashMap::new(),
+            bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
+            bitswap_sessions: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
@@ -1407,10 +1428,7 @@ impl Ipfs {
     }
 
     /// Returns the known wantlist for the local node when the `peer` is `None` or the wantlist of the given `peer`
-    pub async fn bitswap_wantlist(
-        &self,
-        peer: Option<PeerId>,
-    ) -> Result<Vec<(Cid, ipfs_bitswap::Priority)>, Error> {
+    pub async fn bitswap_wantlist(&self, peer: Option<PeerId>) -> Result<Vec<Cid>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1419,7 +1437,7 @@ impl Ipfs {
                 .send(IpfsEvent::WantList(peer, tx))
                 .await?;
 
-            Ok(rx.await?)
+            Ok(rx.await?.await)
         }
         .instrument(self.span.clone())
         .await
@@ -1434,20 +1452,20 @@ impl Ipfs {
     }
 
     /// Returns the accumulated bitswap stats
-    pub async fn bitswap_stats(&self) -> Result<BitswapStats, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
+    // pub async fn bitswap_stats(&self) -> Result<BitswapStats, Error> {
+    //     async move {
+    //         let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::BitswapStats(tx))
-                .await?;
+    //         self.to_task
+    //             .clone()
+    //             .send(IpfsEvent::BitswapStats(tx))
+    //             .await?;
 
-            Ok(rx.await?)
-        }
-        .instrument(self.span.clone())
-        .await
-    }
+    //         Ok(rx.await?)
+    //     }
+    //     .instrument(self.span.clone())
+    //     .await
+    // }
 
     /// Add a given multiaddr as a listening address. Will fail if the address is unsupported, or
     /// if it is already being listened on. Currently will invoke `Swarm::listen_on` internally,
@@ -1850,7 +1868,7 @@ impl Ipfs {
             .send(IpfsEvent::GetBitswapPeers(tx))
             .await?;
 
-        rx.await.map_err(|e| anyhow!(e))
+        Ok(rx.await.map_err(|e| anyhow!(e))?.await)
     }
 
     /// Returns the keypair to the node
@@ -1880,54 +1898,6 @@ pub(crate) fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> 
         _ => anyhow::bail!("Invalid PeerId"),
     };
     Ok(peer_id)
-}
-
-/// Bitswap statistics
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BitswapStats {
-    /// The number of IPFS blocks sent to other peers
-    pub blocks_sent: u64,
-    /// The number of bytes sent in IPFS blocks to other peers
-    pub data_sent: u64,
-    /// The number of IPFS blocks received from other peers
-    pub blocks_received: u64,
-    /// The number of bytes received in IPFS blocks from other peers
-    pub data_received: u64,
-    /// Duplicate blocks received (the block had already been received previously)
-    pub dup_blks_received: u64,
-    /// The number of bytes in duplicate blocks received
-    pub dup_data_received: u64,
-    /// The current peers
-    pub peers: Vec<PeerId>,
-    /// The wantlist of the local node
-    pub wantlist: Vec<(Cid, ipfs_bitswap::Priority)>,
-}
-
-impl
-    From<(
-        ipfs_bitswap::Stats,
-        Vec<PeerId>,
-        Vec<(Cid, ipfs_bitswap::Priority)>,
-    )> for BitswapStats
-{
-    fn from(
-        (stats, peers, wantlist): (
-            ipfs_bitswap::Stats,
-            Vec<PeerId>,
-            Vec<(Cid, ipfs_bitswap::Priority)>,
-        ),
-    ) -> Self {
-        BitswapStats {
-            blocks_sent: stats.sent_blocks.load(Ordering::Relaxed),
-            data_sent: stats.sent_data.load(Ordering::Relaxed),
-            blocks_received: stats.received_blocks.load(Ordering::Relaxed),
-            data_received: stats.received_data.load(Ordering::Relaxed),
-            dup_blks_received: stats.duplicate_blocks.load(Ordering::Relaxed),
-            dup_data_received: stats.duplicate_data.load(Ordering::Relaxed),
-            peers,
-            wantlist,
-        }
-    }
 }
 
 use crate::p2p::AddressBookConfig;

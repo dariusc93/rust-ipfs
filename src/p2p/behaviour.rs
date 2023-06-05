@@ -1,14 +1,18 @@
 use super::addressbook;
 use super::gossipsub::GossipsubStream;
+use bytes::Bytes;
+
 use super::peerbook::{self, ConnectionLimits};
 use either::Either;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
+
 use crate::p2p::{MultiaddrExt, SwarmOptions};
+use crate::repo::Repo;
 
 // use cid::Cid;
-use ipfs_bitswap::{Bitswap, BitswapEvent};
+use beetle_bitswap_next::{Bitswap, BitswapEvent, ProtocolId};
 use libipld::Cid;
 use libp2p::autonat;
 use libp2p::core::Multiaddr;
@@ -40,8 +44,8 @@ use std::time::Duration;
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct Behaviour {
     pub mdns: Toggle<Mdns>,
+    pub bitswap: Toggle<Bitswap<Repo>>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
-    pub bitswap: Bitswap,
     pub ping: Ping,
     pub identify: Identify,
     pub keepalive: Toggle<KeepAliveBehaviour>,
@@ -354,10 +358,67 @@ impl Default for KadConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitswapConfig {
+    protocol: Vec<BitswapProtocol>,
+    max_buf_size: Option<usize>,
+    server: bool,
+}
+
+impl Default for BitswapConfig {
+    fn default() -> Self {
+        Self {
+            protocol: vec![
+                BitswapProtocol::ProtocolLegacy,
+                BitswapProtocol::Protocol100,
+                BitswapProtocol::Protocol110,
+                BitswapProtocol::Protocol120,
+            ],
+            max_buf_size: None,
+            server: true,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
+pub enum BitswapProtocol {
+    ProtocolLegacy,
+    Protocol100,
+    Protocol110,
+    #[default]
+    Protocol120,
+}
+
+impl From<BitswapProtocol> for ProtocolId {
+    fn from(value: BitswapProtocol) -> Self {
+        match value {
+            BitswapProtocol::ProtocolLegacy => ProtocolId::Legacy,
+            BitswapProtocol::Protocol100 => ProtocolId::Bitswap100,
+            BitswapProtocol::Protocol110 => ProtocolId::Bitswap110,
+            BitswapProtocol::Protocol120 => ProtocolId::Bitswap120,
+        }
+    }
+}
+
+impl From<BitswapConfig> for beetle_bitswap_next::Config {
+    fn from(value: BitswapConfig) -> Self {
+        beetle_bitswap_next::Config {
+            client: Default::default(),
+            server: value.server.then_some(Default::default()),
+            protocol: beetle_bitswap_next::ProtocolConfig {
+                protocol_ids: value.protocol.iter().map(|proto| (*proto).into()).collect(),
+                max_transmit_size: value.max_buf_size.unwrap_or(1024 * 1024 * 2),
+            },
+            ..Default::default()
+        }
+    }
+}
+
 impl Behaviour {
     pub async fn new(
         keypair: &Keypair,
         options: SwarmOptions,
+        repo: Repo,
         limits: ConnectionLimits,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let peer_id = keypair.public().to_peer_id();
@@ -406,7 +467,10 @@ impl Behaviour {
         }
 
         let autonat = autonat::Behaviour::new(peer_id, Default::default());
-        let bitswap = Bitswap::default();
+        let bitswap = (!options.disable_bitswap)
+            .then_some(Bitswap::new(peer_id, repo, Default::default()).await)
+            .into();
+
         let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
 
         let ping = Ping::new(options.ping_config.unwrap_or_default());
@@ -504,16 +568,20 @@ impl Behaviour {
             self.addressbook.add_address(peer, addr);
         }
 
-        // self.pubsub.add_explicit_peer(&peer);
-        // self.bitswap.connect(peer);
+        // if let Some(bitswap) = self.bitswap.as_ref() {
+        //     let client = bitswap.client().clone();
+        //     let server = bitswap.server().cloned();
+        //     tokio::spawn(async move {
+        //         client.peer_connected(&peer).await;
+        //         if let Some(server) = server {
+        //             server.peer_connected(&peer).await;
+        //         }
+        //     });
+        // }
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId) {
         self.addressbook.remove_peer(peer);
-        self.pubsub.remove_explicit_peer(peer);
-        if let Some(kad) = self.kademlia.as_mut() {
-            kad.remove_peer(peer);
-        }
     }
 
     #[allow(deprecated)]
@@ -525,22 +593,6 @@ impl Behaviour {
             addrs.push((peer_id, peer_addrs));
         }
         addrs
-    }
-
-    // FIXME: it would be best if get_providers is called only in case the already connected
-    // peers don't have it
-    pub fn want_block(&mut self, cid: Cid, providers: &[PeerId]) {
-        // TODO: Restructure this to utilize provider propertly
-
-        if providers.is_empty() {
-            let key = cid.hash().to_bytes();
-            self.kademlia
-                .as_mut()
-                .map(|kad| kad.get_providers(key.into()));
-            self.bitswap.want_block(cid, 1);
-        } else {
-            self.bitswap.want_block_from_peers(cid, 1, providers);
-        }
     }
 
     pub fn stop_providing_block(&mut self, cid: &Cid) {
@@ -555,12 +607,30 @@ impl Behaviour {
         self.peerbook.protocols().collect::<Vec<_>>()
     }
 
+    pub fn notify_new_blocks(&self, blocks: Vec<crate::Block>) {
+        if let Some(bitswap) = self.bitswap.as_ref() {
+            let client = bitswap.client().clone();
+            tokio::task::spawn(async move {
+                let blocks = blocks
+                    .iter()
+                    .map(|block| beetle_bitswap_next::Block {
+                        cid: *block.cid(),
+                        data: Bytes::copy_from_slice(block.data()),
+                    })
+                    .collect::<Vec<_>>();
+                if let Err(err) = client.notify_new_blocks(&blocks).await {
+                    warn!("failed to notify bitswap about blocks: {:?}", err);
+                }
+            });
+        }
+    }
+
     pub fn pubsub(&mut self) -> &mut GossipsubStream {
         &mut self.pubsub
     }
 
-    pub fn bitswap(&mut self) -> &mut Bitswap {
-        &mut self.bitswap
+    pub fn bitswap(&mut self) -> Option<&mut Bitswap<Repo>> {
+        self.bitswap.as_mut()
     }
 }
 
@@ -568,7 +638,8 @@ impl Behaviour {
 pub async fn build_behaviour(
     keypair: &Keypair,
     options: SwarmOptions,
+    repo: Repo,
     limits: ConnectionLimits,
 ) -> Result<(Behaviour, Option<ClientTransport>), Error> {
-    Behaviour::new(keypair, options, limits).await
+    Behaviour::new(keypair, options, repo, limits).await
 }
