@@ -474,7 +474,8 @@ impl Behaviour {
         let mut peerbook = peerbook::Behaviour::default();
         peerbook.set_connection_limit(limits);
 
-        let addressbook = addressbook::Behaviour::default();
+        let addressbook =
+            addressbook::Behaviour::with_config(options.addrbook_config.unwrap_or_default());
 
         Ok((
             Behaviour {

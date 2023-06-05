@@ -210,6 +210,9 @@ pub struct IpfsOptions {
     /// Enables port mapping (aka UPnP)
     pub port_mapping: bool,
 
+    /// Address book configuration
+    pub addr_config: Option<AddressBookConfig>,
+
     /// Repo Provider option
     pub provider: RepoProvider,
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
@@ -253,6 +256,7 @@ impl Default for IpfsOptions {
             kad_store_config: Default::default(),
             ping_configuration: Default::default(),
             identify_configuration: Default::default(),
+            addr_config: Default::default(),
             provider: Default::default(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
@@ -506,6 +510,12 @@ impl UninitializedIpfs {
     /// Set ping configuration
     pub fn set_ping_configuration(mut self, config: PingConfig) -> Self {
         self.options.ping_configuration = Some(config);
+        self
+    }
+
+    /// Set address book configuration
+    pub fn set_addrbook_configuration(mut self, config: AddressBookConfig) -> Self {
+        self.options.addr_config = Some(config);
         self
     }
 
@@ -1920,6 +1930,7 @@ impl
     }
 }
 
+use crate::p2p::AddressBookConfig;
 #[doc(hidden)]
 pub use node::Node;
 

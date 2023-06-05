@@ -14,7 +14,7 @@ use libp2p::{
     Multiaddr, PeerId,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Config {
     /// Store peer address on an established connection
     pub store_on_connection: bool,
@@ -23,7 +23,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            store_on_connection: true,
+            store_on_connection: false,
         }
     }
 }
@@ -249,8 +249,8 @@ mod test {
 
     #[tokio::test]
     async fn dial_with_peer_id() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm(false).await;
-        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
+        let (_, _, mut swarm1) = build_swarm(false, false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false, false).await;
 
         swarm1
             .behaviour_mut()
@@ -275,8 +275,8 @@ mod test {
 
     #[tokio::test]
     async fn dial_with_peer_id_from_peerbook() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm(true).await;
-        let (peer2, addr2, mut swarm2) = build_swarm(true).await;
+        let (_, _, mut swarm1) = build_swarm(true, false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(true, false).await;
 
         swarm1
             .behaviour_mut()
@@ -305,8 +305,8 @@ mod test {
 
     #[tokio::test]
     async fn store_address() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm(false).await;
-        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
+        let (_, _, mut swarm1) = build_swarm(false, true).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false, true).await;
 
         let opt = DialOpts::peer_id(peer2)
             .addresses(vec![addr2.clone()])
@@ -339,7 +339,10 @@ mod test {
         Ok(())
     }
 
-    async fn build_swarm(peerbook: bool) -> (PeerId, Multiaddr, Swarm<Behaviour>) {
+    async fn build_swarm(
+        peerbook: bool,
+        store_on_connection: bool,
+    ) -> (PeerId, Multiaddr, Swarm<Behaviour>) {
         let key = Keypair::generate_ed25519();
         let pubkey = key.public();
         let peer_id = pubkey.to_peer_id();
@@ -347,7 +350,9 @@ mod test {
 
         let behaviour = Behaviour {
             peer_book: peerbook.then_some(peerbook::Behaviour::default()).into(),
-            address_book: super::Behaviour::default(),
+            address_book: super::Behaviour::with_config(super::Config {
+                store_on_connection,
+            }),
         };
 
         let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build();
