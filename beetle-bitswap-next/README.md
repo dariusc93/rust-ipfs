@@ -3,8 +3,7 @@
 [![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/iroh-bitswap?style=flat-square)](./LICENSE-MIT)
 
 
-This contains an implementation of the [IPFS bitswap
-protocol](https://docs.ipfs.tech/concepts/bitswap/) forked from [beetle (previously Iroh)](https://github.com/n0-computer/beetle). It sends blocks of data to
+This contains an implementation of the [IPFS bitswap protocol](https://docs.ipfs.tech/concepts/bitswap/) forked from [beetle (previously Iroh)](https://github.com/n0-computer/beetle). It sends blocks of data to
 other peers in the IPFS network who want them, and receives blocks requested by
 the client from the network.
 
