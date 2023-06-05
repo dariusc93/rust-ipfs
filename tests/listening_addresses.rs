@@ -1,3 +1,5 @@
+use rust_ipfs::p2p::MultiaddrExt;
+
 #[tokio::test]
 async fn multiple_consecutive_ephemeral_listening_addresses() {
     let node = rust_ipfs::Node::new("test_node").await;
@@ -116,8 +118,7 @@ fn remove_listening_address_before_completing() {
 #[tokio::test]
 async fn pre_configured_listening_addrs() {
     use libp2p::Multiaddr;
-    use rust_ipfs::{IpfsOptions, MultiaddrWithPeerId, MultiaddrWithoutPeerId, Node};
-    use std::convert::TryFrom;
+    use rust_ipfs::{IpfsOptions, Node};
 
     let mut opts = IpfsOptions::inmemory_with_generated_keys();
     let addr: Multiaddr = "/ip4/127.0.0.1/tcp/4001".parse().unwrap();
@@ -125,11 +126,13 @@ async fn pre_configured_listening_addrs() {
     let ipfs = Node::with_options(opts).await;
 
     let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
-    let addrs: Vec<MultiaddrWithoutPeerId> = addrs
+    let addrs: Vec<Multiaddr> = addrs
         .into_iter()
-        .map(|addr| MultiaddrWithPeerId::try_from(addr).unwrap().multiaddr)
+        .map(|mut addr| {
+            addr.extract_peer_id().expect("Peer id");
+            addr
+        })
         .collect();
-    let addr = MultiaddrWithoutPeerId::try_from(addr).unwrap();
 
     assert!(
         addrs.contains(&addr),

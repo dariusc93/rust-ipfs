@@ -8,13 +8,13 @@ pub const BOOTSTRAP_NODES: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use crate::p2p::MultiaddrWithPeerId;
+    use libp2p::Multiaddr;
 
     #[test]
     fn bootstrap_nodes_are_multiaddr_with_peerid() {
         super::BOOTSTRAP_NODES
             .iter()
-            .try_for_each(|s| s.parse::<MultiaddrWithPeerId>().map(|_| ()))
+            .try_for_each(|s| s.parse::<Multiaddr>().map(|_| ()))
             .unwrap();
     }
 }

@@ -11,7 +11,7 @@ use futures::{
 };
 
 use crate::{
-    p2p::{addr::extract_peer_id_from_multiaddr, PeerInfo},
+    p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt, PeerInfo},
     Channel,
 };
 use crate::{
@@ -38,7 +38,7 @@ use crate::{
 pub use crate::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
+    p2p::KadResult,
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
@@ -91,7 +91,7 @@ pub(crate) struct IpfsTask {
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
     pub(crate) listener_subscriptions:
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
-    pub(crate) bootstraps: HashSet<MultiaddrWithPeerId>,
+    pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
 }
@@ -231,7 +231,7 @@ impl IpfsTask {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
                         trace!("mdns: Discovered peer {}", peer.to_base58());
-                        self.swarm.behaviour_mut().add_peer(peer, Some(addr));
+                        self.swarm.behaviour_mut().add_peer(peer, addr);
                     }
                 }
                 MdnsEvent::Expired(list) => {
@@ -239,7 +239,7 @@ impl IpfsTask {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().remove_peer(&peer, false);
+                                self.swarm.behaviour_mut().remove_peer(&peer);
                             }
                         }
                     }
@@ -662,7 +662,7 @@ impl IpfsTask {
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                 } => {
                     trace!("ping: timeout to {}", peer);
-                    self.swarm.behaviour_mut().remove_peer(&peer, false);
+                    self.swarm.behaviour_mut().remove_peer(&peer);
                 }
                 libp2p::ping::Event {
                     peer,
@@ -766,11 +766,7 @@ impl IpfsTask {
                 ret.send(Ok(connections.collect())).ok();
             }
             IpfsEvent::Disconnect(peer, ret) => {
-                let _ = ret.send(
-                    self.swarm
-                        .disconnect_peer_id(peer)
-                        .map_err(|_| anyhow::anyhow!("Peer was not connected")),
-                );
+                let _ = ret.send(self.swarm.behaviour_mut().peerbook.disconnect(peer));
             }
             IpfsEvent::Ban(peer, ret) => {
                 self.swarm.ban_peer_id(peer);
@@ -883,8 +879,20 @@ impl IpfsTask {
                 };
                 let _ = ret.send(future);
             }
-            IpfsEvent::AddPeer(peer_id, addr) => {
-                self.swarm.behaviour_mut().add_peer(peer_id, addr);
+            IpfsEvent::AddPeer(peer_id, addr, ret) => {
+                let result = match self
+                    .swarm
+                    .behaviour_mut()
+                    .addressbook
+                    .add_address(peer_id, addr.clone())
+                {
+                    true => Ok(()),
+                    false => Err(anyhow::anyhow!(
+                        "Unable to add {addr}. It either contains a `PeerId` or already exist."
+                    )),
+                };
+
+                let _ = ret.send(result);
             }
             IpfsEvent::GetClosestPeers(peer_id, ret) => {
                 let id = self
@@ -1104,58 +1112,51 @@ impl IpfsTask {
                 let _ = ret.send(future);
             }
             IpfsEvent::GetBootstrappers(ret) => {
-                let list = self
-                    .bootstraps
-                    .iter()
-                    .map(MultiaddrWithPeerId::clone)
-                    .map(Multiaddr::from)
-                    .collect::<Vec<_>>();
+                let list = Vec::from_iter(self.bootstraps.iter().cloned());
                 let _ = ret.send(list);
             }
-            IpfsEvent::AddBootstrapper(addr, ret) => {
-                let ret_addr = addr.clone().into();
+            IpfsEvent::AddBootstrapper(mut addr, ret) => {
+                let ret_addr = addr.clone();
                 if !self.swarm.behaviour().kademlia.is_enabled() {
                     let _ = ret.send(Err(anyhow::anyhow!("kad protocol is disabled")));
                 } else {
                     if self.bootstraps.insert(addr.clone()) {
-                        let MultiaddrWithPeerId {
-                            multiaddr: ma,
-                            peer_id,
-                        } = addr;
-
-                        self.swarm
-                            .behaviour_mut()
-                            .kademlia
-                            .as_mut()
-                            .map(|kad| kad.add_address(&peer_id, ma.into()));
-                        self.swarm.behaviour_mut().peerbook.add(peer_id);
-                        // the return value of add_address doesn't implement Debug
-                        trace!(peer_id=%peer_id, "tried to add a bootstrapper");
+                        if let Some(peer_id) = addr.extract_peer_id() {
+                            self.swarm
+                                .behaviour_mut()
+                                .kademlia
+                                .as_mut()
+                                .map(|kad| kad.add_address(&peer_id, addr));
+                            self.swarm.behaviour_mut().peerbook.add(peer_id);
+                            // the return value of add_address doesn't implement Debug
+                            trace!(peer_id=%peer_id, "tried to add a bootstrapper");
+                        }
                     }
                     let _ = ret.send(Ok(ret_addr));
                 }
             }
-            IpfsEvent::RemoveBootstrapper(addr, ret) => {
-                let result = addr.clone().into();
+            IpfsEvent::RemoveBootstrapper(mut addr, ret) => {
+                let result = addr.clone();
                 if !self.swarm.behaviour().kademlia.is_enabled() {
                     let _ = ret.send(Err(anyhow::anyhow!("kad protocol is disabled")));
                 } else {
                     if self.bootstraps.remove(&addr) {
-                        let peer_id = addr.peer_id;
-                        let prefix: Multiaddr = addr.multiaddr.into();
+                        if let Some(peer_id) = addr.extract_peer_id() {
+                            let prefix: Multiaddr = addr;
 
-                        if let Some(Some(e)) = self
-                            .swarm
-                            .behaviour_mut()
-                            .kademlia
-                            .as_mut()
-                            .map(|kad| kad.remove_address(&peer_id, &prefix))
-                        {
-                            info!(peer_id=%peer_id, status=?e.status, "removed bootstrapper");
-                        } else {
-                            warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
+                            if let Some(Some(e)) = self
+                                .swarm
+                                .behaviour_mut()
+                                .kademlia
+                                .as_mut()
+                                .map(|kad| kad.remove_address(&peer_id, &prefix))
+                            {
+                                info!(peer_id=%peer_id, status=?e.status, "removed bootstrapper");
+                            } else {
+                                warn!(peer_id=%peer_id, "attempted to remove an unknown bootstrapper");
+                            }
+                            self.swarm.behaviour_mut().peerbook.remove(peer_id);
                         }
-                        self.swarm.behaviour_mut().peerbook.remove(peer_id);
                     }
                     let _ = ret.send(Ok(result));
                 }
@@ -1164,9 +1165,12 @@ impl IpfsTask {
                 let removed = self.bootstraps.drain().collect::<Vec<_>>();
                 let mut list = Vec::with_capacity(removed.len());
                 if self.swarm.behaviour().kademlia.is_enabled() {
-                    for addr_with_peer_id in removed {
-                        let peer_id = addr_with_peer_id.peer_id;
-                        let prefix: Multiaddr = addr_with_peer_id.multiaddr.clone().into();
+                    for mut addr_with_peer_id in removed {
+                        let priginal = addr_with_peer_id.clone();
+                        let Some(peer_id) = addr_with_peer_id.extract_peer_id() else {
+                            continue;
+                        };
+                        let prefix: Multiaddr = addr_with_peer_id;
 
                         if let Some(Some(e)) = self
                             .swarm
@@ -1176,7 +1180,7 @@ impl IpfsTask {
                             .map(|kad| kad.remove_address(&peer_id, &prefix))
                         {
                             info!(peer_id=%peer_id, status=?e.status, "cleared bootstrapper");
-                            list.push(addr_with_peer_id.into());
+                            list.push(priginal);
                         } else {
                             error!(peer_id=%peer_id, "attempted to clear an unknown bootstrapper");
                         }
@@ -1189,31 +1193,24 @@ impl IpfsTask {
                 let mut rets = Vec::new();
                 if self.swarm.behaviour().kademlia.is_enabled() {
                     for addr in BOOTSTRAP_NODES {
-                        let addr = addr
-                            .parse::<MultiaddrWithPeerId>()
+                        let mut addr = addr
+                            .parse::<Multiaddr>()
                             .expect("see test bootstrap_nodes_are_multiaddr_with_peerid");
+                        let original: Multiaddr = addr.clone();
                         if self.bootstraps.insert(addr.clone()) {
-                            let MultiaddrWithPeerId {
-                                multiaddr: ma,
-                                peer_id,
-                            } = addr.clone();
+                            let Some(peer_id) = addr.extract_peer_id() else {
+                                continue;
+                            };
 
-                            // this is intentionally the multiaddr without peerid turned into plain multiaddr:
-                            // libp2p cannot dial addresses which include peerids.
-                            let ma: Multiaddr = ma.into();
-
-                            // same as with add_bootstrapper: the return value from kademlia.add_address
-                            // doesn't implement Debug
                             self.swarm
                                 .behaviour_mut()
                                 .kademlia
                                 .as_mut()
-                                .map(|kad| kad.add_address(&peer_id, ma.clone()));
+                                .map(|kad| kad.add_address(&peer_id, addr.clone()));
                             trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
                             self.swarm.behaviour_mut().peerbook.add(peer_id);
                             // report with the peerid
-                            let reported: Multiaddr = addr.into();
-                            rets.push(reported);
+                            rets.push(original);
                         }
                     }
                 }

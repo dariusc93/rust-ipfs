@@ -3,7 +3,7 @@
 //! that contains them. `SubscriptionFuture` is the `Future` bound to pending `Subscription`s and
 //! sharing the same unique numeric identifier, the `SubscriptionId`.
 
-use crate::{p2p::MultiaddrWithPeerId, RepoEvent};
+use crate::RepoEvent;
 use core::fmt::Debug;
 use core::hash::Hash;
 use core::pin::Pin;
@@ -12,6 +12,7 @@ use futures::future::Future;
 use libipld::Cid;
 use libp2p::kad::QueryId;
 use libp2p::swarm::derive_prelude::ListenerId;
+use libp2p::Multiaddr;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -31,7 +32,7 @@ static GLOBAL_REQ_COUNT: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum RequestKind {
     /// A request to connect to the given `Multiaddr`+`PeerId` pair.
-    Connect(MultiaddrWithPeerId),
+    Connect(Multiaddr),
     /// Listener
     ListenerId(ListenerId),
     /// A request to obtain a `Block` with a specific `Cid`.
@@ -42,8 +43,8 @@ pub enum RequestKind {
     Num(u32),
 }
 
-impl From<MultiaddrWithPeerId> for RequestKind {
-    fn from(addr: MultiaddrWithPeerId) -> Self {
+impl From<Multiaddr> for RequestKind {
+    fn from(addr: Multiaddr) -> Self {
         Self::Connect(addr)
     }
 }

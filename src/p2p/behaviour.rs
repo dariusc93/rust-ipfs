@@ -1,3 +1,4 @@
+use super::addressbook;
 use super::gossipsub::GossipsubStream;
 use bytes::Bytes;
 
@@ -6,7 +7,8 @@ use either::Either;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
-use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
+
+use crate::p2p::{MultiaddrExt, SwarmOptions};
 use crate::repo::Repo;
 
 // use cid::Cid;
@@ -34,7 +36,6 @@ use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
 use std::borrow::Cow;
-use std::convert::TryFrom;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
 
@@ -54,6 +55,7 @@ pub struct Behaviour {
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
+    pub addressbook: addressbook::Behaviour,
     pub peerbook: peerbook::Behaviour,
 }
 
@@ -456,9 +458,11 @@ impl Behaviour {
         );
 
         if let Some(kad) = kademlia.as_mut() {
-            for addr in &options.bootstrap {
-                let addr = MultiaddrWithPeerId::try_from(addr.clone())?;
-                kad.add_address(&addr.peer_id, addr.multiaddr.as_ref().clone());
+            for mut addr in options.bootstrap.clone() {
+                let Some(peer_id) = addr.extract_peer_id() else {
+                    continue;
+                };
+                kad.add_address(&peer_id, addr);
             }
         }
 
@@ -535,6 +539,9 @@ impl Behaviour {
         let mut peerbook = peerbook::Behaviour::default();
         peerbook.set_connection_limit(limits);
 
+        let addressbook =
+            addressbook::Behaviour::with_config(options.addrbook_config.unwrap_or_default());
+
         Ok((
             Behaviour {
                 mdns,
@@ -550,39 +557,31 @@ impl Behaviour {
                 relay_client,
                 upnp,
                 peerbook,
+                addressbook,
             },
             transport,
         ))
     }
 
-    pub fn add_peer(&mut self, peer: PeerId, addr: Option<Multiaddr>) {
-        if let Some(kad) = self.kademlia.as_mut() {
-            if let Some(addr) = addr {
-                kad.add_address(&peer, addr);
-            }
+    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
+        if !self.addressbook.contains(&peer, &addr) {
+            self.addressbook.add_address(peer, addr);
         }
-        self.pubsub.add_explicit_peer(&peer);
-        self.peerbook.add(peer);
-        if let Some(bitswap) = self.bitswap.as_ref() {
-            let client = bitswap.client().clone();
-            let server = bitswap.server().cloned();
-            tokio::spawn(async move {
-                client.peer_connected(&peer).await;
-                if let Some(server) = server {
-                    server.peer_connected(&peer).await;
-                }
-            });
-        }
+
+        // if let Some(bitswap) = self.bitswap.as_ref() {
+        //     let client = bitswap.client().clone();
+        //     let server = bitswap.server().cloned();
+        //     tokio::spawn(async move {
+        //         client.peer_connected(&peer).await;
+        //         if let Some(server) = server {
+        //             server.peer_connected(&peer).await;
+        //         }
+        //     });
+        // }
     }
 
-    pub fn remove_peer(&mut self, peer: &PeerId, remove_from_whitelist: bool) {
-        self.pubsub.remove_explicit_peer(peer);
-        if let Some(kad) = self.kademlia.as_mut() {
-            kad.remove_peer(peer);
-        }
-        if remove_from_whitelist {
-            self.peerbook.remove(*peer);
-        }
+    pub fn remove_peer(&mut self, peer: &PeerId) {
+        self.addressbook.remove_peer(peer);
     }
 
     #[allow(deprecated)]
