@@ -210,6 +210,9 @@ pub struct IpfsOptions {
     /// Enables port mapping (aka UPnP)
     pub port_mapping: bool,
 
+    /// Address book configuration
+    pub addr_config: Option<AddressBookConfig>,
+
     /// Repo Provider option
     pub provider: RepoProvider,
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
@@ -253,6 +256,7 @@ impl Default for IpfsOptions {
             kad_store_config: Default::default(),
             ping_configuration: Default::default(),
             identify_configuration: Default::default(),
+            addr_config: Default::default(),
             provider: Default::default(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
@@ -332,7 +336,7 @@ enum IpfsEvent {
     /// Is Connected
     IsConnected(PeerId, Channel<bool>),
     /// Disconnect
-    Disconnect(PeerId, Channel<()>),
+    Disconnect(PeerId, OneshotSender<ReceiverChannel<()>>),
     /// Ban Peer
     Ban(PeerId, Channel<()>),
     /// Unban peer
@@ -366,7 +370,7 @@ enum IpfsEvent {
         OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
     ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
-    AddPeer(PeerId, Option<Multiaddr>),
+    AddPeer(PeerId, Multiaddr, Channel<()>),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
     GetBitswapPeers(OneshotSender<Vec<PeerId>>),
     FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
@@ -509,13 +513,19 @@ impl UninitializedIpfs {
         self
     }
 
+    /// Set address book configuration
+    pub fn set_addrbook_configuration(mut self, config: AddressBookConfig) -> Self {
+        self.options.addr_config = Some(config);
+        self
+    }
+
     /// Set pubsub configuration
     pub fn set_pubsub_configuration(mut self, config: PubsubConfig) -> Self {
         self.options.pubsub_config = Some(config);
         self
     }
 
-    /// Set RepoProvider option to provide blocks automatically 
+    /// Set RepoProvider option to provide blocks automatically
     pub fn set_provider(mut self, opt: RepoProvider) -> Self {
         self.options.provider = opt;
         self
@@ -1185,7 +1195,7 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::Disconnect(target, tx))
                 .await?;
-            rx.await?
+            rx.await?.await.map_err(anyhow::Error::from)?
         }
         .instrument(self.span.clone())
         .await
@@ -1813,25 +1823,20 @@ impl Ipfs {
         Ok(bootstrap_task)
     }
 
-    /// Add a known listen address of a peer participating in the DHT to the routing table.
-    /// This is mandatory in order for the peer to be discoverable by other members of the
-    /// DHT.
-    pub async fn add_peer(
-        &self,
-        peer_id: PeerId,
-        mut addr: Option<Multiaddr>,
-    ) -> Result<(), Error> {
-        // Kademlia::add_address requires the address to not contain the PeerId
-        if let Some(addr) = addr.as_mut() {
-            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-                addr.pop();
-            }
+    /// Add address of a peer to the address book
+    pub async fn add_peer(&self, peer_id: PeerId, mut addr: Multiaddr) -> Result<(), Error> {
+        if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+            addr.pop();
         }
+
+        let (tx, rx) = oneshot::channel();
 
         self.to_task
             .clone()
-            .send(IpfsEvent::AddPeer(peer_id, addr))
+            .send(IpfsEvent::AddPeer(peer_id, addr, tx))
             .await?;
+
+        rx.await??;
 
         Ok(())
     }
@@ -1848,6 +1853,8 @@ impl Ipfs {
         rx.await.map_err(|e| anyhow!(e))
     }
 
+    /// Returns the keypair to the node
+    /// Note: This will get replaced with a keystore in the near future
     pub fn keypair(&self) -> Result<&Keypair, Error> {
         Ok(self.keys.borrow())
     }
@@ -1923,6 +1930,7 @@ impl
     }
 }
 
+use crate::p2p::AddressBookConfig;
 #[doc(hidden)]
 pub use node::Node;
 
@@ -1931,7 +1939,6 @@ mod node {
     use futures::TryFutureExt;
 
     use super::*;
-    use std::convert::TryFrom;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
     /// easier.
@@ -1957,12 +1964,8 @@ mod node {
         }
 
         /// Connects to a peer at the given address.
-        pub async fn connect(&self, addr: Multiaddr) -> Result<(), Error> {
-            let addr = MultiaddrWithPeerId::try_from(addr).unwrap();
-            if self.ipfs.is_connected(addr.peer_id).await? {
-                return Ok(());
-            }
-            self.ipfs.connect(addr).await
+        pub async fn connect<D: Into<DialOpts>>(&self, opt: D) -> Result<(), Error> {
+            self.ipfs.connect(opt).await
         }
 
         /// Returns a new `Node` based on `IpfsOptions`.

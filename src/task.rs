@@ -175,7 +175,7 @@ impl IpfsTask {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
                         trace!("mdns: Discovered peer {}", peer.to_base58());
-                        self.swarm.behaviour_mut().add_peer(peer, Some(addr));
+                        self.swarm.behaviour_mut().add_peer(peer, addr);
                     }
                 }
                 MdnsEvent::Expired(list) => {
@@ -183,7 +183,7 @@ impl IpfsTask {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().remove_peer(&peer, false);
+                                self.swarm.behaviour_mut().remove_peer(&peer);
                             }
                         }
                     }
@@ -633,7 +633,7 @@ impl IpfsTask {
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                 } => {
                     trace!("ping: timeout to {}", peer);
-                    self.swarm.behaviour_mut().remove_peer(&peer, false);
+                    self.swarm.behaviour_mut().remove_peer(&peer);
                 }
                 libp2p::ping::Event {
                     peer,
@@ -733,11 +733,7 @@ impl IpfsTask {
                 ret.send(Ok(connections.collect())).ok();
             }
             IpfsEvent::Disconnect(peer, ret) => {
-                let _ = ret.send(
-                    self.swarm
-                        .disconnect_peer_id(peer)
-                        .map_err(|_| anyhow::anyhow!("Peer was not connected")),
-                );
+                let _ = ret.send(self.swarm.behaviour_mut().peerbook.disconnect(peer));
             }
             IpfsEvent::Ban(peer, ret) => {
                 self.swarm.ban_peer_id(peer);
@@ -850,8 +846,20 @@ impl IpfsTask {
                 };
                 let _ = ret.send(future);
             }
-            IpfsEvent::AddPeer(peer_id, addr) => {
-                self.swarm.behaviour_mut().add_peer(peer_id, addr);
+            IpfsEvent::AddPeer(peer_id, addr, ret) => {
+                let result = match self
+                    .swarm
+                    .behaviour_mut()
+                    .addressbook
+                    .add_address(peer_id, addr.clone())
+                {
+                    true => Ok(()),
+                    false => Err(anyhow::anyhow!(
+                        "Unable to add {addr}. It either contains a `PeerId` or already exist."
+                    )),
+                };
+
+                let _ = ret.send(result);
             }
             IpfsEvent::GetClosestPeers(peer_id, ret) => {
                 let id = self
