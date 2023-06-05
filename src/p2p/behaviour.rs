@@ -1,3 +1,4 @@
+use super::addressbook;
 use super::gossipsub::GossipsubStream;
 use super::peerbook::{self, ConnectionLimits};
 use either::Either;
@@ -50,6 +51,7 @@ pub struct Behaviour {
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
+    pub addressbook: addressbook::Behaviour,
     pub peerbook: peerbook::Behaviour,
 }
 
@@ -473,6 +475,9 @@ impl Behaviour {
         let mut peerbook = peerbook::Behaviour::default();
         peerbook.set_connection_limit(limits);
 
+        let addressbook =
+            addressbook::Behaviour::with_config(options.addrbook_config.unwrap_or_default());
+
         Ok((
             Behaviour {
                 mdns,
@@ -488,29 +493,26 @@ impl Behaviour {
                 relay_client,
                 upnp,
                 peerbook,
+                addressbook,
             },
             transport,
         ))
     }
 
-    pub fn add_peer(&mut self, peer: PeerId, addr: Option<Multiaddr>) {
-        if let Some(kad) = self.kademlia.as_mut() {
-            if let Some(addr) = addr {
-                kad.add_address(&peer, addr);
-            }
+    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
+        if !self.addressbook.contains(&peer, &addr) {
+            self.addressbook.add_address(peer, addr);
         }
-        self.pubsub.add_explicit_peer(&peer);
-        self.bitswap.connect(peer);
-        self.peerbook.add(peer);
+
+        // self.pubsub.add_explicit_peer(&peer);
+        // self.bitswap.connect(peer);
     }
 
-    pub fn remove_peer(&mut self, peer: &PeerId, remove_from_whitelist: bool) {
+    pub fn remove_peer(&mut self, peer: &PeerId) {
+        self.addressbook.remove_peer(peer);
         self.pubsub.remove_explicit_peer(peer);
         if let Some(kad) = self.kademlia.as_mut() {
             kad.remove_peer(peer);
-        }
-        if remove_from_whitelist {
-            self.peerbook.remove(*peer);
         }
     }
 

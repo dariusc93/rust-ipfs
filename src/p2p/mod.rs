@@ -18,9 +18,11 @@ use libp2p::{Multiaddr, PeerId};
 use tracing::Span;
 
 pub(crate) mod addr;
+pub(crate) mod addressbook;
 pub(crate) mod peerbook;
 
 mod behaviour;
+pub use self::addressbook::Config as AddressBookConfig;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
@@ -129,6 +131,8 @@ pub struct SwarmOptions {
     pub kad_store_config: KadStoreConfig,
     /// Pubsub configuration,
     pub pubsub_config: Option<PubsubConfig>,
+    /// addressbook config
+    pub addrbook_config: Option<AddressBookConfig>,
     /// UPnP/PortMapping
     pub portmapping: bool,
     /// Keep alive
@@ -157,6 +161,7 @@ impl From<&IpfsOptions> for SwarmOptions {
         let identify_config = options.identify_configuration.clone();
         let portmapping = options.port_mapping;
         let pubsub_config = options.pubsub_config.clone();
+        let addrbook_config = options.addr_config;
 
         SwarmOptions {
             bootstrap,
@@ -173,6 +178,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             keep_alive,
             identify_config,
             portmapping,
+            addrbook_config,
             pubsub_config,
         }
     }

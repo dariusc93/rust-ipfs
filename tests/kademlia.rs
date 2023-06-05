@@ -20,7 +20,7 @@ fn strip_peer_id(mut addr: Multiaddr) -> Multiaddr {
 /// Check if `Ipfs::find_peer` works without DHT involvement.
 #[tokio::test]
 async fn find_peer_local() {
-    let nodes = spawn_nodes(2, Topology::None).await;
+    let nodes = spawn_nodes::<2>(Topology::None).await;
     nodes[0].connect(nodes[1].addrs[0].clone()).await.unwrap();
 
     // while nodes[0] is connected to nodes[1], they know each
@@ -35,25 +35,29 @@ async fn find_peer_local() {
 
 // starts the specified number of rust IPFS nodes connected in a chain.
 #[cfg(all(not(feature = "test_go_interop"), not(feature = "test_js_interop")))]
-async fn spawn_bootstrapped_nodes(n: usize) -> (Vec<Node>, Option<ForeignNode>) {
+async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<ForeignNode>) {
     // fire up `n` nodes
-    let nodes = spawn_nodes(n, Topology::None).await;
+    let nodes = spawn_nodes::<N>(Topology::None).await;
 
     // register the nodes' addresses so they can bootstrap against
     // one another in a chain; node 0 is only aware of the existence
     // of node 1 and so on; bootstrap them eagerly/quickly, so that
     // they don't have a chance to form the full picture in the DHT
-    for i in 0..n {
-        let (next_id, next_addr) = if i < n - 1 {
+    for i in 0..N {
+        let (next_id, next_addr) = if i < N - 1 {
             (nodes[i + 1].id, nodes[i + 1].addrs[0].clone())
         } else {
             // the last node in the chain also needs to know some address
             // in order to bootstrap, so give it its neighbour's information
             // and then bootstrap it as well
-            (nodes[n - 2].id, nodes[n - 2].addrs[0].clone())
+            (nodes[N - 2].id, nodes[N - 2].addrs[0].clone())
         };
 
-        nodes[i].add_peer(next_id, Some(next_addr)).await.unwrap();
+        let addr = next_addr.with(Protocol::P2p(next_id.into()));
+        nodes[i]
+            .add_bootstrap(addr.try_into().unwrap())
+            .await
+            .unwrap();
         nodes[i].bootstrap().await.unwrap();
     }
 
@@ -72,12 +76,13 @@ async fn spawn_bootstrapped_nodes(n: usize) -> (Vec<Node>, Option<ForeignNode>) 
 // learns about the previous peer, the foreign node being the first one; a visualization:
 // r[0] > r[1] > .. > foreign < .. < r[n - 3] < r[n - 2]
 #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
-async fn spawn_bootstrapped_nodes(n: usize) -> (Vec<Node>, Option<ForeignNode>) {
+async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<ForeignNode>) {
     // start a foreign IPFS node
     let foreign_node = ForeignNode::new();
 
     // exclude one node to make room for the intermediary foreign node
-    let nodes = spawn_nodes(n - 1, Topology::None).await;
+    const N: usize = n - 1;
+    let nodes = spawn_nodes::<N>(Topology::None).await;
 
     // skip the last index again, as there is a foreign node without one bound to it
     for i in 0..(n - 1) {
@@ -109,7 +114,7 @@ async fn dht_find_peer() {
     // works for numbers >=2, though 2 would essentially just
     // be the same as find_peer_local, so it should be higher
     const CHAIN_LEN: usize = 10;
-    let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
+    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
     let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
 
     // node 0 now tries to find the address of the very last node in the
@@ -124,7 +129,7 @@ async fn dht_find_peer() {
 #[tokio::test]
 async fn dht_get_closest_peers() {
     const CHAIN_LEN: usize = 10;
-    let (nodes, _foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
+    let (nodes, _foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
 
     assert_eq!(
         nodes[0].get_closest_peers(nodes[0].id).await.unwrap().len(),
@@ -153,7 +158,7 @@ async fn dht_popular_content_discovery() {
 #[tokio::test]
 async fn dht_providing() {
     const CHAIN_LEN: usize = 10;
-    let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
+    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
     let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
 
     // the last node puts a block in order to have something to provide
@@ -182,7 +187,7 @@ async fn dht_providing() {
 #[tokio::test]
 async fn dht_get_put() {
     const CHAIN_LEN: usize = 10;
-    let (nodes, foreign_node) = spawn_bootstrapped_nodes(CHAIN_LEN).await;
+    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
     let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
 
     let (key, value) = (b"key".to_vec(), b"value".to_vec());
