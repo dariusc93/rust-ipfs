@@ -131,3 +131,5 @@ debug = true
 [workspace]
 members = ["beetle-bitswap-next", "unixfs"]
 exclude = ["archived", "bitswap"]
+
+resolver = "2"
