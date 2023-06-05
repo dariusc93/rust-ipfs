@@ -485,6 +485,7 @@ impl NetworkBehaviour for Behaviour {
                         entry.remove();
                     }
                 }
+                //Note: This is in case we receive a connection close before it was ever established
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
                     let _ = ch.send(Ok(()));
                 }
