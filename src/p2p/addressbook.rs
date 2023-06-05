@@ -37,6 +37,12 @@ pub struct Behaviour {
 }
 
 impl Behaviour {
+    pub fn with_config(config: Config) -> Self {
+        Self {
+            config,
+            ..Default::default()
+        }
+    }
     pub fn add_address(&mut self, peer_id: PeerId, mut addr: Multiaddr) -> bool {
         if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
             addr.pop();
