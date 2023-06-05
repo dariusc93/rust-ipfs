@@ -7,10 +7,9 @@ use libp2p::{
     core::{ConnectedPoint, Endpoint},
     multiaddr::Protocol,
     swarm::{
-        self, derive_prelude::ConnectionEstablished,
-        dummy::ConnectionHandler as DummyConnectionHandler, AddressChange, ConnectionDenied,
-        ConnectionId, DialFailure, FromSwarm, NetworkBehaviour, PollParameters, THandler,
-        THandlerInEvent, ToSwarm,
+        self, dummy::ConnectionHandler as DummyConnectionHandler, AddressChange, ConnectionDenied,
+        ConnectionId, FromSwarm, NetworkBehaviour, PollParameters, THandler, THandlerInEvent,
+        ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -121,10 +120,27 @@ impl NetworkBehaviour for Behaviour {
     fn handle_established_inbound_connection(
         &mut self,
         _: ConnectionId,
-        _: PeerId,
+        peer_id: PeerId,
         _: &Multiaddr,
-        _: &Multiaddr,
+        remote: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
+        if self.config.store_on_connection {
+            let mut addr = remote.clone();
+            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                addr.pop();
+            }
+            match self.peer_addresses.entry(peer_id) {
+                Entry::Occupied(mut e) => {
+                    let entry = e.get_mut();
+                    if !entry.contains(&addr) {
+                        entry.push(addr);
+                    }
+                }
+                Entry::Vacant(e) => {
+                    e.insert(vec![addr]);
+                }
+            }
+        }
         Ok(DummyConnectionHandler)
     }
 
@@ -157,47 +173,14 @@ impl NetworkBehaviour for Behaviour {
 
     fn on_connection_handler_event(
         &mut self,
-        _: libp2p::PeerId,
-        _: swarm::ConnectionId,
+        _: PeerId,
+        _: ConnectionId,
         _: swarm::THandlerOutEvent<Self>,
     ) {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
         match event {
-            FromSwarm::ConnectionEstablished(ConnectionEstablished {
-                peer_id,
-                endpoint,
-                failed_addresses,
-                ..
-            }) => {
-                if self.config.store_on_connection {
-                    let mut multiaddr = match endpoint {
-                        ConnectedPoint::Dialer { address, .. } => address.clone(),
-                        ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
-                    };
-
-                    if matches!(multiaddr.iter().last(), Some(Protocol::P2p(_))) {
-                        multiaddr.pop();
-                    }
-
-                    match self.peer_addresses.entry(peer_id) {
-                        Entry::Occupied(mut e) => {
-                            let entry = e.get_mut();
-                            if !entry.contains(&multiaddr) {
-                                entry.push(multiaddr);
-                            }
-
-                            for failed in failed_addresses {
-                                entry.retain(|addr| addr != failed);
-                            }
-                        }
-                        Entry::Vacant(e) => {
-                            e.insert(vec![multiaddr]);
-                        }
-                    }
-                }
-            }
             FromSwarm::AddressChange(AddressChange {
                 peer_id, old, new, ..
             }) => {
@@ -230,7 +213,6 @@ impl NetworkBehaviour for Behaviour {
                     }
                 }
             }
-            FromSwarm::DialFailure(DialFailure { peer_id: _, .. }) => {}
             _ => {}
         }
     }
@@ -357,7 +339,7 @@ mod test {
         Ok(())
     }
 
-    async fn build_swarm(peerbook: bool) -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
+    async fn build_swarm(peerbook: bool) -> (PeerId, Multiaddr, Swarm<Behaviour>) {
         let key = Keypair::generate_ed25519();
         let pubkey = key.public();
         let peer_id = pubkey.to_peer_id();
