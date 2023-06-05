@@ -81,7 +81,7 @@ pub use self::p2p::gossipsub::SubscriptionStream;
 pub use self::{
     error::Error,
     p2p::BehaviourEvent,
-    p2p::{KadResult, MultiaddrWithPeerId, MultiaddrWithoutPeerId},
+    p2p::KadResult,
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
@@ -386,8 +386,8 @@ enum IpfsEvent {
     DhtGet(Key, OneshotSender<RecordStream>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
-    AddBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
-    RemoveBootstrapper(MultiaddrWithPeerId, Channel<Multiaddr>),
+    AddBootstrapper(Multiaddr, Channel<Multiaddr>),
+    RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(OneshotSender<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
     Exit,
@@ -1740,7 +1740,7 @@ impl Ipfs {
     /// Extend the list of used bootstrapper nodes with an additional address.
     /// Return value cannot be used to determine if the `addr` was a new bootstrapper, subject to
     /// change.
-    pub async fn add_bootstrap(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
+    pub async fn add_bootstrap(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1758,7 +1758,7 @@ impl Ipfs {
     /// Remove an address from the currently used list of bootstrapper nodes.
     /// Return value cannot be used to determine if the `addr` was an actual bootstrapper, subject to
     /// change.
-    pub async fn remove_bootstrap(&self, addr: MultiaddrWithPeerId) -> Result<Multiaddr, Error> {
+    pub async fn remove_bootstrap(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1965,7 +1965,13 @@ mod node {
 
         /// Connects to a peer at the given address.
         pub async fn connect<D: Into<DialOpts>>(&self, opt: D) -> Result<(), Error> {
-            self.ipfs.connect(opt).await
+            let opts = opt.into();
+            if let Some(peer_id) = opts.get_peer_id() {
+                if self.ipfs.is_connected(peer_id).await? {
+                    return Ok(());
+                }
+            }
+            self.ipfs.connect(opts).await
         }
 
         /// Returns a new `Node` based on `IpfsOptions`.

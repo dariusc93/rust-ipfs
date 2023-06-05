@@ -5,7 +5,7 @@ use either::Either;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
-use crate::p2p::{MultiaddrWithPeerId, SwarmOptions};
+use crate::p2p::{MultiaddrExt, SwarmOptions};
 
 // use cid::Cid;
 use ipfs_bitswap::{Bitswap, BitswapEvent};
@@ -32,7 +32,6 @@ use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
 use std::borrow::Cow;
-use std::convert::TryFrom;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
 
@@ -398,9 +397,11 @@ impl Behaviour {
         );
 
         if let Some(kad) = kademlia.as_mut() {
-            for addr in &options.bootstrap {
-                let addr = MultiaddrWithPeerId::try_from(addr.clone())?;
-                kad.add_address(&addr.peer_id, addr.multiaddr.as_ref().clone());
+            for mut addr in options.bootstrap.clone() {
+                let Some(peer_id) = addr.extract_peer_id() else {
+                    continue;
+                };
+                kad.add_address(&peer_id, addr);
             }
         }
 
