@@ -14,18 +14,10 @@ use libp2p::{
     Multiaddr, PeerId,
 };
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone)]
 pub struct Config {
     /// Store peer address on an established connection
     pub store_on_connection: bool,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            store_on_connection: false,
-        }
-    }
 }
 
 #[derive(Default, Debug)]
