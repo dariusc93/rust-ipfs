@@ -724,6 +724,35 @@ mod test {
     }
 
     #[tokio::test]
+    async fn cannot_disconnect() {
+        let (peer1, _, mut swarm1) = build_swarm(false).await;
+        let (_, _, mut swarm2) = build_swarm(false).await;
+
+        let mut oneshot = swarm2.behaviour_mut().peerbook.disconnect(peer1);
+
+        loop {
+            tokio::select! {
+                biased;
+                e1 = swarm1.select_next_some() => {
+                    if matches!(e1, SwarmEvent::ConnectionClosed { .. }) {
+                        panic!("Cannot disconnect if not connected")
+                    }
+                },
+                e2 = swarm2.select_next_some() => {
+                    if matches!(e2, SwarmEvent::ConnectionClosed { .. }) {
+                        panic!("Cannot disconnect if not connected")
+                    }
+                },
+                res = &mut oneshot => {
+                    let result = res.unwrap();
+                    assert!(result.is_err());
+                    break;
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn connect_with_identify() {
         let (_, addr1, mut swarm1) = build_swarm(true).await;
         let (peer2, _, mut swarm2) = build_swarm(true).await;
