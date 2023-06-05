@@ -4204,23 +4204,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-ipfs-bitswap"
-version = "0.3.3"
-dependencies = [
- "fnv",
- "futures",
- "hash_hasher",
- "libipld",
- "libp2p",
- "prost",
- "prost-build",
- "thiserror",
- "tokio",
- "tracing",
- "unsigned-varint",
-]
-
-[[package]]
 name = "rust-unixfs"
 version = "0.3.1"
 dependencies = [
