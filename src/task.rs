@@ -781,7 +781,6 @@ impl IpfsTask {
                 let mut addresses = Vec::new();
                 addresses.extend(self.swarm.listeners().map(|a| a.to_owned()));
                 addresses.extend(self.swarm.external_addresses().map(|ar| ar.addr.to_owned()));
-                // ignore error, perhaps caller went away already
                 let _ = ret.send(addresses);
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
