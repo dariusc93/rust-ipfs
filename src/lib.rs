@@ -377,6 +377,7 @@ enum IpfsEvent {
     ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Multiaddr, Channel<()>),
+    RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
     FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
     FindPeer(
@@ -1857,6 +1858,34 @@ impl Ipfs {
         rx.await??;
 
         Ok(())
+    }
+
+    /// Remove peer from the address book
+    pub async fn remove_peer(&self, peer_id: PeerId) -> Result<bool, Error> {
+        let (tx, rx) = oneshot::channel();
+
+        self.to_task
+            .clone()
+            .send(IpfsEvent::RemovePeer(peer_id, None, tx))
+            .await?;
+
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    /// Remove peer address from the address book
+    pub async fn remove_peer_address(
+        &self,
+        peer_id: PeerId,
+        addr: Multiaddr,
+    ) -> Result<bool, Error> {
+        let (tx, rx) = oneshot::channel();
+
+        self.to_task
+            .clone()
+            .send(IpfsEvent::RemovePeer(peer_id, Some(addr), tx))
+            .await?;
+
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     /// Returns the Bitswap peers for the a `Node`.

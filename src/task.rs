@@ -893,6 +893,18 @@ impl IpfsTask {
 
                 let _ = ret.send(result);
             }
+            IpfsEvent::RemovePeer(peer_id, addr, ret) => {
+                let result = match addr {
+                    Some(addr) => Ok(self
+                        .swarm
+                        .behaviour_mut()
+                        .addressbook
+                        .remove_address(&peer_id, &addr)),
+                    None => Ok(self.swarm.behaviour_mut().addressbook.remove_peer(&peer_id)),
+                };
+
+                let _ = ret.send(result);
+            }
             IpfsEvent::GetClosestPeers(peer_id, ret) => {
                 let id = self
                     .swarm
