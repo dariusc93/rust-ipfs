@@ -1,4 +1,5 @@
 # 0.3.17 [unreleased]
+- feat: Implement Keystore [PR XX]
 - feat: Implements MultiaddrExt and remove wrapper [PR 72]
 - feat: Basic AddressBook implementation [PR 71]
 - feat: Added Ipfs::pubsub_events to receive subscribe and unsubscribe events to a subscribed topic [PR 70]
@@ -10,6 +11,7 @@
 [PR 70]: https://github.com/dariusc93/rust-ipfs/pull/70
 [PR 71]: https://github.com/dariusc93/rust-ipfs/pull/71
 [PR 72]: https://github.com/dariusc93/rust-ipfs/pull/72
+[PR XX]: https://github.com/dariusc93/rust-ipfs/pull/XX
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
