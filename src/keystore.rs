@@ -4,10 +4,12 @@ use std::{
 };
 
 use anyhow::Error;
+use futures::{stream::BoxStream, StreamExt};
 use libp2p::identity::{Keypair, PublicKey};
 use tokio::sync::Mutex;
 use zeroize::Zeroize;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KeyType {
     Ed25519,
     Ecdsa,
@@ -55,14 +57,18 @@ impl std::fmt::Debug for Keystore {
 }
 
 impl Keystore {
+    /// Create a new keystore
     pub fn new(storage: Arc<dyn KeyStorage>) -> Self {
         Self { storage }
     }
 
+    /// Create an in-memory keystore
     pub fn in_memory() -> Self {
         Self::new(Arc::new(MemoryKeyStorage::default()))
     }
 
+    /// Import a [`Keypair`] into the keystore
+    /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
     pub async fn import_key(
         &self,
         keypair: &Keypair,
@@ -86,18 +92,26 @@ impl Keystore {
         Ok(public_key)
     }
 
+    /// Generate a Ed25519 Keypair
+    /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
     pub async fn generate_ed25519(&self, name: Option<&str>) -> Result<PublicKey, Error> {
         self.generate_key(name, KeyType::Ed25519).await
     }
 
+    /// Generate a Ecdsa Keypair
+    /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
     pub async fn generate_ecdsa(&self, name: Option<&str>) -> Result<PublicKey, Error> {
         self.generate_key(name, KeyType::Ecdsa).await
     }
 
+    /// Generate a Secp256k1 Keypair
+    /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
     pub async fn generate_secp256k1(&self, name: Option<&str>) -> Result<PublicKey, Error> {
         self.generate_key(name, KeyType::Secp256k1).await
     }
 
+    /// Generate a [`Keypair`] based on the [`KeyType`] supplied
+    /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
     pub async fn generate_key(
         &self,
         name: Option<&str>,
@@ -125,22 +139,21 @@ impl Keystore {
         Ok(public_key)
     }
 
+    /// Get a [`Keypair`] from the [`Keystore`]
     pub async fn get_keypair(&self, name: &str) -> Result<Keypair, Error> {
         let key = self.storage.get(name).await?;
         let keypair = Keypair::from_protobuf_encoding(key.as_ref())?;
         Ok(keypair)
     }
 
+    /// Rename a key stored in [`Keystore`]
     pub async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {
         self.storage.rename(name, new_name).await
     }
 
+    /// Check to determine if a the [`Keystore`] contains a key
     pub async fn contains(&self, name: &str) -> Result<bool, Error> {
         self.storage.contains(name).await
-    }
-
-    pub async fn get_key_type(&self, _: &str) -> Result<KeyType, Error> {
-        anyhow::bail!("unimplemented")
     }
 }
 
@@ -151,6 +164,11 @@ pub trait KeyStorage: Sync + Send + 'static {
     async fn contains(&self, name: &str) -> Result<bool, Error>;
     async fn remove(&self, name: &str) -> Result<(), Error>;
     async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error>;
+    async fn list(&self) -> Result<BoxStream<'static, Key>, Error>;
+    async fn len(&self) -> Result<usize, Error> {
+        let amount = self.list().await?.count().await;
+        Ok(amount)
+    }
 }
 
 #[derive(Default)]
@@ -200,11 +218,26 @@ impl KeyStorage for MemoryKeyStorage {
 
     async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
+        if inner.contains_key(new_name) {
+            anyhow::bail!("{new_name} exist");
+        }
+
         let key = inner
             .remove(name)
             .ok_or(anyhow::anyhow!("Key doesnt exist"))?;
         inner.insert(new_name.into(), key);
         Ok(())
+    }
+
+    async fn list(&self) -> Result<BoxStream<'static, Key>, Error> {
+        let inner = self.inner.lock().await.clone();
+        let stream = async_stream::stream! {
+            for (_, key) in inner {
+                yield Key::from(key);
+            }
+        };
+
+        Ok(stream.boxed())
     }
 }
 
