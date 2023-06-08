@@ -324,6 +324,7 @@ impl IpfsOptions {
 pub struct Ipfs {
     span: Span,
     repo: Repo,
+    key: Keypair,
     keystore: Keystore,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
@@ -700,6 +701,7 @@ impl UninitializedIpfs {
             span: facade_span,
             repo: repo.clone(),
             identify_conf: id_conf,
+            key: keys.clone(),
             keystore,
             to_task,
         };
@@ -1888,12 +1890,12 @@ impl Ipfs {
     }
 
     /// Returns the keypair to the node
-    pub async fn keypair(&self) -> Result<Keypair, Error> {
-        self.keystore.get_keypair("swarm").await
+    pub fn keypair(&self) -> Result<&Keypair, Error> {
+        Ok(&self.key)
     }
 
     /// Returns the keystore
-    pub async fn keystore(&self) -> &Keystore {
+    pub fn keystore(&self) -> &Keystore {
         &self.keystore
     }
 
