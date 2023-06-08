@@ -323,6 +323,7 @@ pub struct Ipfs {
     keys: Keypair,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
+    rx_event: async_broadcast::Receiver<Libp2pEvent>,
 }
 
 type Channel<T> = OneshotSender<Result<T, Error>>;
@@ -330,7 +331,7 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 /// Events used internally to communicate with the swarm, which is executed in the the background
 /// task.
 #[derive(Debug)]
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, dead_code)]
 enum IpfsEvent {
     /// Connect
     Connect(DialOpts, OneshotSender<ReceiverChannel<()>>),
@@ -353,10 +354,7 @@ enum IpfsEvent {
     /// Request background task to return the listened and external addresses
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
-    PubsubEventStream(
-        String,
-        OneshotSender<Option<async_broadcast::Receiver<PubsubEvent>>>,
-    ),
+    EventStream(OneshotSender<async_broadcast::Receiver<Libp2pEvent>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
     PubsubPublish(
         String,
@@ -399,12 +397,13 @@ enum IpfsEvent {
 }
 
 #[derive(Debug, Clone)]
-pub enum PubsubEvent {
-    /// Subscription event to a given topic
-    Subscribe { peer_id: PeerId },
+pub enum Libp2pEvent {
+    /// Peer
+    /// Subscription event to a given pubsub topic
+    PubsubSubscribe { peer_id: PeerId },
 
-    /// Unsubscribing event to a given topic
-    Unsubscribe { peer_id: PeerId },
+    /// Unsubscribing event to a given pubsub topic
+    PubsubUnsubscribe { peer_id: PeerId },
 }
 
 type TSwarmEvent = <TSwarm as Stream>::Item;
@@ -679,12 +678,16 @@ impl UninitializedIpfs {
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone().unwrap_or_default();
+
+        let (tx_event, rx_event) = async_broadcast::broadcast(256);
+
         let ipfs = Ipfs {
             span: facade_span,
             repo: repo.clone(),
             identify_conf: id_conf,
             keys: keys.clone(),
             to_task,
+            rx_event,
         };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
@@ -766,6 +769,7 @@ impl UninitializedIpfs {
             repo,
             bootstraps,
             swarm_event,
+            event_channel: tx_event,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -1329,36 +1333,20 @@ impl Ipfs {
     }
 
     /// Stream that returns [`PubsubEvent`] for a given topic
-    pub async fn pubsub_events(
-        &self,
-        topic: String,
-    ) -> Result<BoxStream<'static, PubsubEvent>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
+    pub async fn swarm_events(&self) -> Result<BoxStream<'static, Libp2pEvent>, Error> {
+        let mut receiver = self.rx_event.clone();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PubsubEventStream(topic.clone(), tx))
-                .await?;
-
-            let mut receiver = rx
-                .await?
-                .ok_or_else(|| format_err!("not subscribed to {:?}", topic))?;
-
-            let stream = async_stream::stream! {
-                loop {
-                    match receiver.recv().await {
-                        Ok(event) => yield event,
-                        Err(async_broadcast::RecvError::Closed) => break,
-                        Err(_) => {}
-                    }
+        let stream = async_stream::stream! {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => yield event,
+                    Err(async_broadcast::RecvError::Closed) => break,
+                    Err(_) => {}
                 }
-            };
+            }
+        };
 
-            Ok(stream.boxed())
-        }
-        .instrument(self.span.clone())
-        .await
+        Ok(stream.boxed())
     }
 
     /// Publishes to the topic which may have been subscribed to earlier

@@ -12,7 +12,7 @@ use futures::{
 
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt, PeerInfo},
-    Channel,
+    Channel, Libp2pEvent,
 };
 use crate::{
     p2p::{ProviderStream, RecordStream},
@@ -94,6 +94,7 @@ pub(crate) struct IpfsTask {
     pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
+    pub(crate) event_channel: async_broadcast::Sender<Libp2pEvent>,
 }
 
 impl IpfsTask {
@@ -725,6 +726,24 @@ impl IpfsTask {
                 }
                 event => trace!("identify: {:?}", event),
             },
+            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+                libp2p::gossipsub::Event::Subscribed { peer_id, topic },
+            )) => {
+                if self.swarm.behaviour().pubsub.is_subscribed(topic) {
+                    let _ = self
+                        .event_channel
+                        .try_broadcast(Libp2pEvent::PubsubSubscribe { peer_id });
+                }
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+                libp2p::gossipsub::Event::Unsubscribed { peer_id, topic },
+            )) => {
+                if self.swarm.behaviour().pubsub.is_subscribed(topic) {
+                    let _ = self
+                        .event_channel
+                        .try_broadcast(Libp2pEvent::PubsubSubscribe { peer_id });
+                }
+            }
             SwarmEvent::Behaviour(BehaviourEvent::Autonat(autonat::Event::StatusChanged {
                 old,
                 new,
@@ -819,8 +838,8 @@ impl IpfsTask {
             //     let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
             //     let _ = ret.send((stats, peers, wantlist).into());
             // }
-            IpfsEvent::PubsubEventStream(topic, ret) => {
-                let receiver = self.swarm.behaviour().pubsub.event_stream(topic);
+            IpfsEvent::EventStream(ret) => {
+                let receiver = self.event_channel.new_receiver();
                 let _ = ret.send(receiver);
             }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
