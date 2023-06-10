@@ -1299,7 +1299,7 @@ impl Ipfs {
 
                     let mut addresses = rx.await?;
                     let protocols = self.protocols().await?;
-                    let public_key = { self.keystore.get_keypair("swarm").await?.public() };
+                    let public_key = self.key.public();
                     let peer_id = public_key.to_peer_id();
 
                     for addr in &mut addresses {
