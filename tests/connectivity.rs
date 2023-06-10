@@ -91,6 +91,7 @@ async fn connect_two_nodes_with_two_connections_doesnt_panic() {
         .disconnect(peers.remove(0))
         .await
         .expect("failed to disconnect peer_b at peer_a");
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let peers = node_a.connected().await.unwrap();
     assert!(
