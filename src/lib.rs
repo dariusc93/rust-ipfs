@@ -350,7 +350,7 @@ enum IpfsEvent {
     /// Is Connected
     IsConnected(PeerId, Channel<bool>),
     /// Disconnect
-    Disconnect(PeerId, OneshotSender<ReceiverChannel<()>>),
+    Disconnect(PeerId, OneshotSender<(ReceiverChannel<()>, ReceiverChannel<()>)>),
     /// Ban Peer
     Ban(PeerId, Channel<()>),
     /// Unban peer
@@ -777,6 +777,7 @@ impl UninitializedIpfs {
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
             bitswap_sessions: Default::default(),
+            disconnect_confirmation: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
@@ -1232,7 +1233,11 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::Disconnect(target, tx))
                 .await?;
-            rx.await?.await.map_err(anyhow::Error::from)?
+            let (rx_nb, rx_swarm) = rx.await?;
+            let (result_nb, result_swarm) = futures::join!(rx_nb, rx_swarm);
+
+            result_nb??;
+            result_swarm?
         }
         .instrument(self.span.clone())
         .await
