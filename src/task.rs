@@ -230,8 +230,12 @@ impl IpfsTask {
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
-                        trace!("mdns: Discovered peer {}", peer.to_base58());
-                        self.swarm.behaviour_mut().add_peer(peer, addr);
+                        self.swarm.behaviour_mut().add_peer(peer, addr.clone());
+                        if !self.swarm.is_connected(&peer) {
+                            if let Err(e) = self.swarm.dial(peer) {
+                                warn!("Unable to dial {peer}: {e}");
+                            }
+                        }
                     }
                 }
                 MdnsEvent::Expired(list) => {
@@ -239,7 +243,6 @@ impl IpfsTask {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
-                                self.swarm.behaviour_mut().remove_peer(&peer);
                             }
                         }
                     }
@@ -889,6 +892,18 @@ impl IpfsTask {
                     false => Err(anyhow::anyhow!(
                         "Unable to add {addr}. It either contains a `PeerId` or already exist."
                     )),
+                };
+
+                let _ = ret.send(result);
+            }
+            IpfsEvent::RemovePeer(peer_id, addr, ret) => {
+                let result = match addr {
+                    Some(addr) => Ok(self
+                        .swarm
+                        .behaviour_mut()
+                        .addressbook
+                        .remove_address(&peer_id, &addr)),
+                    None => Ok(self.swarm.behaviour_mut().addressbook.remove_peer(&peer_id)),
                 };
 
                 let _ = ret.send(result);

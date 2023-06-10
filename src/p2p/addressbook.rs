@@ -276,6 +276,51 @@ mod test {
     }
 
     #[tokio::test]
+    async fn remove_peer_address() -> anyhow::Result<()> {
+        let (_, _, mut swarm1) = build_swarm(false, false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false, false).await;
+
+        swarm1
+            .behaviour_mut()
+            .address_book
+            .add_address(peer2, addr2);
+
+        swarm1.dial(peer2)?;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+
+        swarm1.disconnect_peer_id(peer2).expect("Shouldnt fail");
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionClosed { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+
+        swarm1.behaviour_mut().address_book.remove_peer(&peer2);
+
+        assert!(swarm1.dial(peer2).is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn dial_with_peer_id_from_peerbook() -> anyhow::Result<()> {
         let (_, _, mut swarm1) = build_swarm(true, false).await;
         let (peer2, addr2, mut swarm2) = build_swarm(true, false).await;
