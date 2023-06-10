@@ -694,10 +694,6 @@ impl UninitializedIpfs {
 
         let keystore = options.keystore.clone();
 
-        if let Ok(false) = keystore.contains("swarm").await {
-            keystore.import_key(&keys, Some("swarm")).await?;
-        }
-
         let ipfs = Ipfs {
             span: facade_span,
             repo: repo.clone(),
