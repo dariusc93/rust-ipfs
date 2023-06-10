@@ -94,6 +94,7 @@ pub(crate) struct IpfsTask {
     pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
+    pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
 }
 
 impl IpfsTask {
@@ -195,6 +196,15 @@ impl IpfsTask {
 
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     let _ = ret.send(Either::Left(address));
+                }
+            }
+            SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
+                    tokio::spawn(async move {
+                        for ch in ch {
+                            let _ = ch.send(Ok(()));
+                        }
+                    });
                 }
             }
             SwarmEvent::ExpiredListenAddr {
@@ -665,7 +675,6 @@ impl IpfsTask {
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                 } => {
                     trace!("ping: timeout to {}", peer);
-                    self.swarm.behaviour_mut().remove_peer(&peer);
                 }
                 libp2p::ping::Event {
                     peer,
@@ -769,7 +778,17 @@ impl IpfsTask {
                 ret.send(Ok(connections.collect())).ok();
             }
             IpfsEvent::Disconnect(peer, ret) => {
-                let _ = ret.send(self.swarm.behaviour_mut().peerbook.disconnect(peer));
+                let recv = self.swarm.behaviour_mut().peerbook.disconnect(peer);
+                let (tx, rx) = oneshot::channel();
+                if !self.swarm.is_connected(&peer) {
+                    let _ = tx.send(Err(anyhow::anyhow!("Peer not connected")));
+                } else {
+                    self.disconnect_confirmation
+                        .entry(peer)
+                        .or_default()
+                        .push(tx);
+                }
+                let _ = ret.send((recv, rx));
             }
             IpfsEvent::Ban(peer, ret) => {
                 self.swarm.ban_peer_id(peer);
