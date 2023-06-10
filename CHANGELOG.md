@@ -1,5 +1,5 @@
 # 0.3.17 [unreleased]
-- refactor: Confirm event from swarm when disconnecting from peer [PR XX]
+- refactor: Confirm event from swarm when disconnecting from peer [PR 75]
 - feat: Implement Keystore [PR 74]
 - feat: Added Ipfs::remove_peer and Ipfs::remove_peer_address [PR 73]
 - feat: Implements MultiaddrExt and remove wrapper [PR 72]
@@ -15,7 +15,7 @@
 [PR 72]: https://github.com/dariusc93/rust-ipfs/pull/72
 [PR 73]: https://github.com/dariusc93/rust-ipfs/pull/73
 [PR 74]: https://github.com/dariusc93/rust-ipfs/pull/74
-[PR XX]: https://github.com/dariusc93/rust-ipfs/pull/XX
+[PR 75]: https://github.com/dariusc93/rust-ipfs/pull/75
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
