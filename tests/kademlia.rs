@@ -54,10 +54,7 @@ async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<Foreig
         };
 
         let addr = next_addr.with(Protocol::P2p(next_id.into()));
-        nodes[i]
-            .add_bootstrap(addr)
-            .await
-            .unwrap();
+        nodes[i].add_bootstrap(addr).await.unwrap();
         nodes[i].bootstrap().await.unwrap();
     }
 

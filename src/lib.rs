@@ -26,6 +26,7 @@ pub mod config;
 pub mod dag;
 pub mod error;
 pub mod ipns;
+mod keystore;
 pub mod p2p;
 pub mod path;
 pub mod refs;
@@ -50,6 +51,7 @@ use futures::{
     StreamExt,
 };
 
+use keystore::Keystore;
 use p2p::{
     BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream,
     PubsubConfig, RecordStream, RelayConfig,
@@ -61,7 +63,6 @@ use tracing_futures::Instrument;
 use unixfs::{IpfsUnixfs, NodeItem, UnixfsStatus};
 
 use std::{
-    borrow::Borrow,
     collections::{HashMap, HashSet},
     fmt, io,
     ops::{Deref, DerefMut, Range},
@@ -220,6 +221,8 @@ pub struct IpfsOptions {
     /// Address book configuration
     pub addr_config: Option<AddressBookConfig>,
 
+    pub keystore: Keystore,
+
     /// Repo Provider option
     pub provider: RepoProvider,
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
@@ -267,6 +270,7 @@ impl Default for IpfsOptions {
             identify_configuration: Default::default(),
             addr_config: Default::default(),
             provider: Default::default(),
+            keystore: Keystore::in_memory(),
             listening_addrs: vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
                 "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
@@ -320,7 +324,8 @@ impl IpfsOptions {
 pub struct Ipfs {
     span: Span,
     repo: Repo,
-    keys: Keypair,
+    key: Keypair,
+    keystore: Keystore,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
 }
@@ -568,6 +573,12 @@ impl UninitializedIpfs {
         self
     }
 
+    /// Set a keystore
+    pub fn set_keystore(mut self, keystore: Keystore) -> Self {
+        self.options.keystore = keystore;
+        self
+    }
+
     /// Enable mdns
     pub fn enable_mdns(mut self) -> Self {
         self.options.mdns = true;
@@ -680,11 +691,15 @@ impl UninitializedIpfs {
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone().unwrap_or_default();
+
+        let keystore = options.keystore.clone();
+
         let ipfs = Ipfs {
             span: facade_span,
             repo: repo.clone(),
             identify_conf: id_conf,
-            keys: keys.clone(),
+            key: keys.clone(),
+            keystore,
             to_task,
         };
 
@@ -1284,8 +1299,7 @@ impl Ipfs {
 
                     let mut addresses = rx.await?;
                     let protocols = self.protocols().await?;
-
-                    let public_key = self.keys.public();
+                    let public_key = { self.keystore.get_keypair("swarm").await?.public() };
                     let peer_id = public_key.to_peer_id();
 
                     for addr in &mut addresses {
@@ -1901,9 +1915,13 @@ impl Ipfs {
     }
 
     /// Returns the keypair to the node
-    /// Note: This will get replaced with a keystore in the near future
     pub fn keypair(&self) -> Result<&Keypair, Error> {
-        Ok(self.keys.borrow())
+        Ok(&self.key)
+    }
+
+    /// Returns the keystore
+    pub fn keystore(&self) -> &Keystore {
+        &self.keystore
     }
 
     /// Exit daemon.
