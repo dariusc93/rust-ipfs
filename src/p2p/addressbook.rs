@@ -79,6 +79,10 @@ impl Behaviour {
     pub fn get_peer_addresses(&self, peer_id: &PeerId) -> Option<&Vec<Multiaddr>> {
         self.peer_addresses.get(peer_id)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&PeerId, &Vec<Multiaddr>)> {
+        self.peer_addresses.iter()
+    }
 }
 
 impl NetworkBehaviour for Behaviour {

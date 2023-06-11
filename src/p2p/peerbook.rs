@@ -253,6 +253,17 @@ impl Behaviour {
         self.peer_connections.keys()
     }
 
+    pub fn connected_peers_addrs(&self) -> impl Iterator<Item = (PeerId, Vec<Multiaddr>)> + '_ {
+        self.peer_connections.iter().map(|(peer_id, list)| {
+            let list = list
+                .iter()
+                .map(|(_, addr)| addr)
+                .cloned()
+                .collect::<Vec<_>>();
+            (*peer_id, list)
+        })
+    }
+
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, rtt: Duration) {
         self.peer_rtt
             .entry(peer_id)
@@ -291,7 +302,10 @@ impl Behaviour {
         let current = current as u32;
 
         if current >= limit {
-            return Err(ConnectionDenied::new(ConnectionLimitError { limit, current }));
+            return Err(ConnectionDenied::new(ConnectionLimitError {
+                limit,
+                current,
+            }));
         }
 
         Ok(())

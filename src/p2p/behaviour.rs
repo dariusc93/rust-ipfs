@@ -586,16 +586,8 @@ impl Behaviour {
         self.addressbook.remove_peer(peer);
     }
 
-    #[allow(deprecated)]
-    pub fn addrs(&mut self) -> Vec<(PeerId, Vec<Multiaddr>)> {
-        // let addrs = Vec::new();
-        //TODO:
-        // let list = self.peerbook.peers().copied().collect::<Vec<_>>();
-        // for peer_id in list {
-        //     let peer_addrs = self.addresses_of_peer(&peer_id);
-        //     addrs.push((peer_id, peer_addrs));
-        // }
-        vec![]
+    pub fn addrs(&self) -> Vec<(PeerId, Vec<Multiaddr>)> {
+        self.peerbook.connected_peers_addrs().collect()
     }
 
     pub fn stop_providing_block(&mut self, cid: &Cid) {
