@@ -743,8 +743,6 @@ impl IpfsTask {
         }
     }
 
-    #[allow(deprecated)]
-    //TODO: Replace addresses_of_peer
     fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {
@@ -1005,16 +1003,7 @@ impl IpfsTask {
                     .map(|(_, addr)| addr)
                     .collect::<Vec<_>>();
 
-                let locally_known_addrs = if !listener_addrs.is_empty() {
-                    listener_addrs
-                } else {
-                    //TODO:
-                    // self.swarm
-                    //     .behaviour_mut()
-                    //     .kademlia
-                    //     .addresses_of_peer(&peer_id)
-                    vec![]
-                };
+                let locally_known_addrs = listener_addrs;
 
                 let addrs = if !locally_known_addrs.is_empty() || local_only {
                     Either::Left(locally_known_addrs)
