@@ -525,7 +525,7 @@ impl Behaviour {
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
-        let upnp = Toggle::from(options.portmapping.then_some(libp2p_nat::Behaviour::new()?));
+        let upnp = Toggle::from(options.portmapping.then_some(libp2p_nat::Behaviour::new().await?));
 
         let (transport, relay_client) = match options.relay {
             true => {

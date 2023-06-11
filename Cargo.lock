@@ -2298,7 +2298,7 @@ dependencies = [
 [[package]]
 name = "libp2p-nat"
 version = "0.3.0"
-source = "git+https://github.com/dariusc93/libp2p-nat?rev=52fc186bd921294aa30c1854daab419647e2b06c#52fc186bd921294aa30c1854daab419647e2b06c"
+source = "git+https://github.com/dariusc93/libp2p-nat?rev=f8fb19cf472800754d5fc55e16a524a85a668973#f8fb19cf472800754d5fc55e16a524a85a668973"
 dependencies = [
  "anyhow",
  "futures",
