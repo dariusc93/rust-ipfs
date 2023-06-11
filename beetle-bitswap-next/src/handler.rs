@@ -15,7 +15,7 @@ use libp2p::swarm::{
     ConnectionHandler, ConnectionHandlerEvent, KeepAlive, StreamUpgradeError, SubstreamProtocol,
 };
 use libp2p::{
-    core::{muxing::SubstreamBox, upgrade::NegotiationError, Negotiated},
+    core::upgrade::NegotiationError,
     swarm::handler::{
         ConnectionEvent, DialUpgradeError, FullyNegotiatedInbound, FullyNegotiatedOutbound,
     },
