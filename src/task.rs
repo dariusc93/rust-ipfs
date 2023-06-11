@@ -66,7 +66,6 @@ use libp2p::{
         KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
-    ping::Success as PingSuccess,
     swarm::SwarmEvent,
 };
 
@@ -655,7 +654,8 @@ impl IpfsTask {
             SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
                 libp2p::ping::Event {
                     peer,
-                    result: Result::Ok(PingSuccess::Ping { rtt }),
+                    result: Result::Ok(rtt),
+                    ..
                 } => {
                     trace!(
                         "ping: rtt to {} is {} ms",
@@ -666,25 +666,22 @@ impl IpfsTask {
                 }
                 libp2p::ping::Event {
                     peer,
-                    result: Result::Ok(PingSuccess::Pong),
-                } => {
-                    trace!("ping: pong from {}", peer);
-                }
-                libp2p::ping::Event {
-                    peer,
                     result: Result::Err(libp2p::ping::Failure::Timeout),
+                    ..
                 } => {
                     trace!("ping: timeout to {}", peer);
                 }
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Other { error }),
+                    ..
                 } => {
                     error!("ping: failure with {}: {}", peer.to_base58(), error);
                 }
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Unsupported),
+                    ..
                 } => {
                     error!("ping: failure with {}: unsupported", peer.to_base58());
                 }
@@ -713,10 +710,7 @@ impl IpfsTask {
                     }
 
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
-                        if protocols
-                            .iter()
-                            .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
-                        {
+                        if protocols.iter().any(|p| libp2p::kad::PROTOCOL_NAME.eq(p)) {
                             for addr in &listen_addrs {
                                 kad.add_address(&peer_id, addr.clone());
                             }
@@ -725,7 +719,7 @@ impl IpfsTask {
 
                     if protocols
                         .iter()
-                        .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
+                        .any(|p| libp2p::autonat::DEFAULT_PROTOCOL_NAME.eq(p))
                     {
                         for addr in listen_addrs {
                             self.swarm
@@ -791,18 +785,18 @@ impl IpfsTask {
                 let _ = ret.send((recv, rx));
             }
             IpfsEvent::Ban(peer, ret) => {
-                self.swarm.ban_peer_id(peer);
+                self.swarm.behaviour_mut().block_list.block_peer(peer);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::Unban(peer, ret) => {
-                self.swarm.unban_peer_id(peer);
+                self.swarm.behaviour_mut().block_list.unblock_peer(peer);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::GetAddresses(ret) => {
                 // perhaps this could be moved under `IpfsEvent` or free functions?
                 let mut addresses = Vec::new();
                 addresses.extend(self.swarm.listeners().map(|a| a.to_owned()));
-                addresses.extend(self.swarm.external_addresses().map(|ar| ar.addr.to_owned()));
+                addresses.extend(self.swarm.external_addresses().map(|ar| ar.to_owned()));
                 let _ = ret.send(addresses);
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
@@ -1014,10 +1008,12 @@ impl IpfsTask {
                 let locally_known_addrs = if !listener_addrs.is_empty() {
                     listener_addrs
                 } else {
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .addresses_of_peer(&peer_id)
+                    //TODO:
+                    // self.swarm
+                    //     .behaviour_mut()
+                    //     .kademlia
+                    //     .addresses_of_peer(&peer_id)
+                    vec![]
                 };
 
                 let addrs = if !locally_known_addrs.is_empty() || local_only {

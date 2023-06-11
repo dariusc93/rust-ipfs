@@ -109,6 +109,7 @@ use libp2p::{
     kad::{store::MemoryStoreConfig, KademliaConfig},
     ping::Config as PingConfig,
     swarm::dial_opts::DialOpts,
+    StreamProtocol,
 };
 
 #[derive(Debug, Clone)]
@@ -350,7 +351,10 @@ enum IpfsEvent {
     /// Is Connected
     IsConnected(PeerId, Channel<bool>),
     /// Disconnect
-    Disconnect(PeerId, OneshotSender<(ReceiverChannel<()>, ReceiverChannel<()>)>),
+    Disconnect(
+        PeerId,
+        OneshotSender<(ReceiverChannel<()>, ReceiverChannel<()>)>,
+    ),
     /// Ban Peer
     Ban(PeerId, Channel<()>),
     /// Unban peer
@@ -1303,7 +1307,11 @@ impl Ipfs {
                         .await?;
 
                     let mut addresses = rx.await?;
-                    let protocols = self.protocols().await?;
+                    let protocols = self.protocols().await.map(|s| {
+                        s.iter()
+                            .filter_map(|s| StreamProtocol::try_from_owned(s.clone()).ok())
+                            .collect()
+                    })?;
                     let public_key = self.key.public();
                     let peer_id = public_key.to_peer_id();
 
@@ -1944,9 +1952,7 @@ impl Ipfs {
 pub(crate) fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> {
     let mut addr = addr.clone();
     let peer_id = match addr.pop() {
-        Some(Protocol::P2p(hash)) => {
-            PeerId::from_multihash(hash).map_err(|_| anyhow::anyhow!("Multihash is not valid"))?
-        }
+        Some(Protocol::P2p(peer_id)) => peer_id,
         _ => anyhow::bail!("Invalid PeerId"),
     };
     Ok(peer_id)

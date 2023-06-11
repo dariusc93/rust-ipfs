@@ -11,8 +11,8 @@ use libp2p::swarm::{
 };
 #[allow(deprecated)]
 use libp2p::swarm::{
-    ConnectionClosed, ConnectionDenied, ConnectionId, ConnectionLimit, DialFailure, FromSwarm,
-    THandler, THandlerInEvent, ToSwarm as NetworkBehaviourAction,
+    ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, FromSwarm, THandler,
+    THandlerInEvent, ToSwarm as NetworkBehaviourAction,
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
@@ -124,7 +124,7 @@ pub struct Behaviour {
     limits: ConnectionLimits,
 
     events: VecDeque<
-        NetworkBehaviourAction<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>,
+        NetworkBehaviourAction<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>,
     >,
     cleanup_interval: Interval,
 
@@ -284,7 +284,8 @@ impl Behaviour {
         let current = current as u32;
 
         if current >= limit {
-            return Err(ConnectionDenied::new(ConnectionLimit { limit, current }));
+            //TODO:
+            // return Err(ConnectionDenied::new(ConnectionLimit { limit, current }));
         }
 
         Ok(())
@@ -293,7 +294,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = DummyConnectionHandler;
-    type OutEvent = void::Void;
+    type ToSwarm = void::Void;
 
     fn handle_pending_inbound_connection(
         &mut self,
@@ -497,11 +498,13 @@ impl NetworkBehaviour for Behaviour {
         }
     }
 
+    #[allow(deprecated)]
     fn poll(
         &mut self,
         cx: &mut Context,
         params: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
+    ) -> Poll<NetworkBehaviourAction<Self::ToSwarm, THandlerInEvent<Self>>> {
+        //TODO: Replace
         let supported_protocols = params.supported_protocols();
         if supported_protocols.len() != self.protocols.len() {
             self.protocols = supported_protocols.collect();
@@ -558,8 +561,6 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
-
     use super::Behaviour as PeerBook;
     use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
     use futures::StreamExt;
@@ -797,12 +798,10 @@ mod test {
 
         let behaviour = Behaviour {
             peerbook: PeerBook::default(),
-            identify: Toggle::from(
-                identify.then_some(identify::Behaviour::new(
-                    Config::new("/peerbook/0.1".into(), pubkey)
-                        .with_initial_delay(Duration::from_secs(0)),
-                )),
-            ),
+            identify: Toggle::from(identify.then_some(identify::Behaviour::new(Config::new(
+                "/peerbook/0.1".into(),
+                pubkey,
+            )))),
             keep_alive: keep_alive::Behaviour,
         };
 

@@ -14,8 +14,8 @@ use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
 use libp2p::ping::Config as PingConfig;
-use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
+use libp2p::{StreamProtocol, Swarm};
 use tracing::Span;
 
 pub(crate) mod addr;
@@ -65,7 +65,7 @@ pub struct PeerInfo {
     pub listen_addrs: Vec<Multiaddr>,
 
     /// The list of protocols supported by the peer, e.g. `/ipfs/ping/1.0.0`.
-    pub protocols: Vec<String>,
+    pub protocols: Vec<StreamProtocol>,
 
     /// Address observed by or for the remote.
     pub observed_addr: Option<Multiaddr>,

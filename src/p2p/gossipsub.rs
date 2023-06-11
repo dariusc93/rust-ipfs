@@ -269,7 +269,7 @@ impl GossipsubStream {
 
 impl NetworkBehaviour for GossipsubStream {
     type ConnectionHandler = <Gossipsub as NetworkBehaviour>::ConnectionHandler;
-    type OutEvent = GossipsubEvent;
+    type ToSwarm = GossipsubEvent;
 
     fn handle_pending_outbound_connection(
         &mut self,
@@ -433,12 +433,6 @@ impl NetworkBehaviour for GossipsubStream {
                         handler,
                     });
                 }
-                NetworkBehaviourAction::ReportObservedAddr { address, score } => {
-                    return Poll::Ready(NetworkBehaviourAction::ReportObservedAddr {
-                        address,
-                        score,
-                    });
-                }
                 NetworkBehaviourAction::CloseConnection {
                     peer_id,
                     connection,
@@ -448,6 +442,15 @@ impl NetworkBehaviour for GossipsubStream {
                         connection,
                     });
                 }
+                NetworkBehaviourAction::ListenOn { opts } => {
+                    return Poll::Ready(NetworkBehaviourAction::ListenOn { opts });
+                }
+                NetworkBehaviourAction::RemoveListener { id } => {
+                    return Poll::Ready(NetworkBehaviourAction::RemoveListener { id })
+                }
+                NetworkBehaviourAction::NewExternalAddrCandidate(_) => todo!(),
+                NetworkBehaviourAction::ExternalAddrConfirmed(_) => todo!(),
+                NetworkBehaviourAction::ExternalAddrExpired(_) => todo!(),
             }
         }
     }

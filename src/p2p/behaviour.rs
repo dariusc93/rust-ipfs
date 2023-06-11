@@ -1,6 +1,7 @@
 use super::addressbook;
 use super::gossipsub::GossipsubStream;
 use bytes::Bytes;
+use libp2p_allow_block_list::BlockedPeers;
 
 use super::peerbook::{self, ConnectionLimits};
 use either::Either;
@@ -14,7 +15,6 @@ use crate::repo::Repo;
 // use cid::Cid;
 use beetle_bitswap_next::{Bitswap, BitswapEvent, ProtocolId};
 use libipld::Cid;
-use libp2p::autonat;
 use libp2p::core::Multiaddr;
 use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
 use libp2p::gossipsub::Event as GossipsubEvent;
@@ -35,13 +35,14 @@ use libp2p::relay::{Behaviour as Relay, Event as RelayEvent};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
+use libp2p::{autonat, StreamProtocol};
 use std::borrow::Cow;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
 
 /// Behaviour type.
 #[derive(NetworkBehaviour)]
-#[behaviour(out_event = "BehaviourEvent", event_process = false)]
+#[behaviour(to_swarm = "BehaviourEvent")]
 pub struct Behaviour {
     pub mdns: Toggle<Mdns>,
     pub bitswap: Toggle<Bitswap<Repo>>,
@@ -52,6 +53,7 @@ pub struct Behaviour {
     pub pubsub: GossipsubStream,
     pub autonat: autonat::Behaviour,
     pub upnp: Toggle<libp2p_nat::Behaviour>,
+    pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
@@ -171,7 +173,6 @@ pub struct RelayConfig {
 pub struct IdentifyConfiguration {
     pub protocol_version: String,
     pub agent_version: String,
-    pub initial_delay: Duration,
     pub interval: Duration,
     pub push_update: bool,
     pub cache: usize,
@@ -182,7 +183,6 @@ impl Default for IdentifyConfiguration {
         Self {
             protocol_version: "/ipfs/0.1.0".into(),
             agent_version: "rust-ipfs".into(),
-            initial_delay: Duration::from_millis(200),
             interval: Duration::from_secs(5 * 60),
             push_update: true,
             cache: 100,
@@ -194,7 +194,6 @@ impl IdentifyConfiguration {
     pub fn into(self, publuc_key: libp2p::identity::PublicKey) -> IdentifyConfig {
         IdentifyConfig::new(self.protocol_version, publuc_key)
             .with_agent_version(self.agent_version)
-            .with_initial_delay(self.initial_delay)
             .with_interval(self.interval)
             .with_push_listen_addr_updates(self.push_update)
             .with_cache_size(self.cache)
@@ -282,7 +281,7 @@ pub struct KadStoreConfig {
 }
 #[derive(Clone, Debug)]
 pub struct KadConfig {
-    pub protocol: Option<Vec<Cow<'static, [u8]>>>,
+    pub protocol: Option<Vec<Cow<'static, str>>>,
     pub disjoint_query_paths: bool,
     pub query_timeout: Duration,
     pub parallelism: Option<NonZeroUsize>,
@@ -327,7 +326,11 @@ impl From<KadInserts> for KademliaBucketInserts {
 impl From<KadConfig> for KademliaConfig {
     fn from(config: KadConfig) -> Self {
         let mut kad_config = KademliaConfig::default();
-        if let Some(protocol) = config.protocol {
+        if let Some(protocol) = config.protocol.map(|list| {
+            list.iter()
+                .filter_map(|p| StreamProtocol::try_from_owned(p.to_string()).ok())
+                .collect()
+        }) {
             kad_config.set_protocol_names(protocol);
         }
         kad_config.disjoint_query_paths(config.disjoint_query_paths);
@@ -522,11 +525,7 @@ impl Behaviour {
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
-        let upnp = Toggle::from(
-            options
-                .portmapping
-                .then_some(libp2p_nat::Behaviour::new().await?),
-        );
+        let upnp = Toggle::from(options.portmapping.then_some(libp2p_nat::Behaviour::new()?));
 
         let (transport, relay_client) = match options.relay {
             true => {
@@ -542,6 +541,8 @@ impl Behaviour {
         let addressbook =
             addressbook::Behaviour::with_config(options.addrbook_config.unwrap_or_default());
 
+        let block_list = libp2p_allow_block_list::Behaviour::default();
+
         Ok((
             Behaviour {
                 mdns,
@@ -555,6 +556,7 @@ impl Behaviour {
                 dcutr,
                 relay,
                 relay_client,
+                block_list,
                 upnp,
                 peerbook,
                 addressbook,
@@ -586,13 +588,14 @@ impl Behaviour {
 
     #[allow(deprecated)]
     pub fn addrs(&mut self) -> Vec<(PeerId, Vec<Multiaddr>)> {
-        let mut addrs = Vec::new();
-        let list = self.peerbook.peers().copied().collect::<Vec<_>>();
-        for peer_id in list {
-            let peer_addrs = self.addresses_of_peer(&peer_id);
-            addrs.push((peer_id, peer_addrs));
-        }
-        addrs
+        // let addrs = Vec::new();
+        //TODO:
+        // let list = self.peerbook.peers().copied().collect::<Vec<_>>();
+        // for peer_id in list {
+        //     let peer_addrs = self.addresses_of_peer(&peer_id);
+        //     addrs.push((peer_id, peer_addrs));
+        // }
+        vec![]
     }
 
     pub fn stop_providing_block(&mut self, cid: &Cid) {

@@ -22,7 +22,7 @@ pub struct Config {
 
 #[derive(Default, Debug)]
 pub struct Behaviour {
-    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>>,
+    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     peer_addresses: HashMap<PeerId, Vec<Multiaddr>>,
     config: Config,
 }
@@ -83,7 +83,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = DummyConnectionHandler;
-    type OutEvent = void::Void;
+    type ToSwarm = void::Void;
 
     fn handle_pending_inbound_connection(
         &mut self,
@@ -214,8 +214,9 @@ impl NetworkBehaviour for Behaviour {
             | FromSwarm::ExpiredListenAddr(_)
             | FromSwarm::ListenerError(_)
             | FromSwarm::ListenerClosed(_)
-            | FromSwarm::NewExternalAddr(_)
-            | FromSwarm::ExpiredExternalAddr(_) => {}
+            | FromSwarm::ExternalAddrConfirmed(_)
+            | FromSwarm::ExternalAddrExpired(_)
+            | FromSwarm::NewExternalAddrCandidate(_) => {}
         }
     }
 
@@ -223,7 +224,7 @@ impl NetworkBehaviour for Behaviour {
         &mut self,
         _: &mut Context,
         _: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::OutEvent, THandlerInEvent<Self>>> {
+    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }

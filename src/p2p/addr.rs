@@ -21,8 +21,8 @@ pub trait MultiaddrExt {
 
 impl MultiaddrExt for Multiaddr {
     fn peer_id(&self) -> Option<PeerId> {
-        if let Some(Protocol::P2p(hash)) = self.iter().last() {
-            return PeerId::from_multihash(hash).ok();
+        if let Some(Protocol::P2p(peer)) = self.iter().last() {
+            return Some(peer);
         }
 
         None
@@ -30,7 +30,7 @@ impl MultiaddrExt for Multiaddr {
 
     fn extract_peer_id(&mut self) -> Option<PeerId> {
         match self.pop() {
-            Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).ok(),
+            Some(Protocol::P2p(peer)) => Some(peer),
             _ => None,
         }
     }
@@ -42,8 +42,8 @@ impl MultiaddrExt for Multiaddr {
 
         while let Some(protocol) = self.iter().next() {
             //Find the first peer id and return it
-            if let Protocol::P2p(hash) = protocol {
-                return PeerId::from_multihash(hash).ok();
+            if let Protocol::P2p(peer) = protocol {
+                return Some(peer);
             }
         }
 
@@ -99,10 +99,7 @@ pub(crate) fn peer_id_from_multiaddr(addr: Multiaddr) -> Option<PeerId> {
 pub(crate) fn extract_peer_id_from_multiaddr(mut addr: Multiaddr) -> (Option<PeerId>, Multiaddr) {
     let old_addr = addr.clone();
     match addr.pop() {
-        Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
-            Ok(id) => (Some(id), addr),
-            _ => (None, addr),
-        },
+        Some(Protocol::P2p(peer)) => (Some(peer), old_addr),
         _ => (None, old_addr),
     }
 }
