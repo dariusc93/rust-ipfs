@@ -209,9 +209,8 @@ impl ConnectionHandler for BitswapHandler {
                 }
 
                 trace!("New inbound substream request: {:?}", protocol_id);
-                //TODO:
-                // self.inbound_substreams
-                //     .push(Box::pin(inbound_substream(protocol)));
+                self.inbound_substreams
+                    .push(Box::pin(inbound_substream(protocol)));
             }
             ConnectionEvent::FullyNegotiatedOutbound(FullyNegotiatedOutbound {
                 protocol,
@@ -223,9 +222,8 @@ impl ConnectionHandler for BitswapHandler {
                 }
 
                 trace!("New outbound substream: {:?}", protocol_id);
-                //TODO:
-                // self.outbound_substreams
-                //     .push(Box::pin(outbound_substream(protocol, info)));
+                self.outbound_substreams
+                    .push(Box::pin(outbound_substream(protocol, info)));
             }
             ConnectionEvent::AddressChange(_) => todo!(),
             ConnectionEvent::DialUpgradeError(DialUpgradeError { error, .. }) => {
@@ -288,7 +286,7 @@ impl ConnectionHandler for BitswapHandler {
 }
 
 fn inbound_substream(
-    mut substream: Framed<Negotiated<SubstreamBox>, BitswapCodec>,
+    mut substream: Framed<libp2p::Stream, BitswapCodec>,
 ) -> impl Stream<Item = BitswapConnectionHandlerEvent> {
     async_stream::stream! {
         while let Some(message) = substream.next().await {
@@ -324,7 +322,7 @@ fn inbound_substream(
 }
 
 fn outbound_substream(
-    mut substream: Framed<Negotiated<SubstreamBox>, BitswapCodec>,
+    mut substream: Framed<libp2p::Stream, BitswapCodec>,
     (message, response): (BitswapMessage, BitswapMessageResponse),
 ) -> impl Stream<Item = BitswapConnectionHandlerEvent> {
     async_stream::stream! {
