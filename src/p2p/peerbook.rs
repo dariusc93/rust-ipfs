@@ -118,6 +118,13 @@ impl ConnectionLimits {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Limit: {limit}, Current: {current}")]
+pub struct ConnectionLimitError {
+    limit: u32,
+    current: u32,
+}
+
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct Behaviour {
@@ -284,8 +291,7 @@ impl Behaviour {
         let current = current as u32;
 
         if current >= limit {
-            //TODO:
-            // return Err(ConnectionDenied::new(ConnectionLimit { limit, current }));
+            return Err(ConnectionDenied::new(ConnectionLimitError { limit, current }));
         }
 
         Ok(())

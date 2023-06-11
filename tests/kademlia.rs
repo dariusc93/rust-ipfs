@@ -28,7 +28,7 @@ async fn find_peer_local() {
     let mut found_addrs = nodes[0].find_peer(nodes[1].id).await.unwrap();
 
     for addr in &mut found_addrs {
-        addr.push(Protocol::P2p(nodes[1].id.into()));
+        addr.push(Protocol::P2p(nodes[1].id));
         assert!(nodes[1].addrs.contains(addr));
     }
 }
@@ -53,7 +53,7 @@ async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<Foreig
             (nodes[N - 2].id, nodes[N - 2].addrs[0].clone())
         };
 
-        let addr = next_addr.with(Protocol::P2p(next_id.into()));
+        let addr = next_addr.with(Protocol::P2p(next_id));
         nodes[i].add_bootstrap(addr).await.unwrap();
         nodes[i].bootstrap().await.unwrap();
     }
