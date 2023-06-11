@@ -49,10 +49,10 @@ impl ProtocolId {
 impl AsRef<str> for ProtocolId {
     fn as_ref(&self) -> &str {
         match *self {
-            ProtocolId::Legacy => todo!(),
-            ProtocolId::Bitswap100 => todo!(),
-            ProtocolId::Bitswap110 => todo!(),
-            ProtocolId::Bitswap120 => todo!(),
+            ProtocolId::Legacy => "/ipfs/bitswap",
+            ProtocolId::Bitswap100 => "/ipfs/bitswap/1.0.0",
+            ProtocolId::Bitswap110 => "/ipfs/bitswap/1.1.0",
+            ProtocolId::Bitswap120 => "/ipfs/bitswap/1.2.0",
         }
     }
 }
