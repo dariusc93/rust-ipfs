@@ -99,7 +99,7 @@ pub(crate) fn peer_id_from_multiaddr(addr: Multiaddr) -> Option<PeerId> {
 pub(crate) fn extract_peer_id_from_multiaddr(mut addr: Multiaddr) -> (Option<PeerId>, Multiaddr) {
     let old_addr = addr.clone();
     match addr.pop() {
-        Some(Protocol::P2p(peer)) => (Some(peer), old_addr),
+        Some(Protocol::P2p(peer)) => (Some(peer), addr),
         _ => (None, old_addr),
     }
 }
