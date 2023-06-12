@@ -1003,7 +1003,16 @@ impl IpfsTask {
                     .map(|(_, addr)| addr)
                     .collect::<Vec<_>>();
 
-                let locally_known_addrs = listener_addrs;
+                let locally_known_addrs = if !listener_addrs.is_empty() {
+                    listener_addrs
+                } else {
+                    self.swarm
+                        .behaviour()
+                        .addressbook
+                        .get_peer_addresses(&peer_id)
+                        .cloned()
+                        .unwrap_or_default()
+                };
 
                 let addrs = if !locally_known_addrs.is_empty() || local_only {
                     Either::Left(locally_known_addrs)
