@@ -2298,7 +2298,7 @@ dependencies = [
 [[package]]
 name = "libp2p-nat"
 version = "0.3.0"
-source = "git+https://github.com/dariusc93/libp2p-nat?rev=f8fb19cf472800754d5fc55e16a524a85a668973#f8fb19cf472800754d5fc55e16a524a85a668973"
+source = "git+https://github.com/dariusc93/libp2p-nat?rev=09bb2e747798b71066dc9b2e518fb2817f338ecb#09bb2e747798b71066dc9b2e518fb2817f338ecb"
 dependencies = [
  "anyhow",
  "futures",
@@ -2306,6 +2306,7 @@ dependencies = [
  "libp2p",
  "log",
  "natpmp",
+ "thiserror",
  "tokio",
  "void",
  "wasm-timer",

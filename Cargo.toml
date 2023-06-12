@@ -37,7 +37,7 @@ futures = { default-features = false, version = "0.3", features = [
 ] }
 hash_hasher = "2.0.3"
 rust-unixfs = { version = "=0.3.1", path = "unixfs" }
-libp2p = { default-features = false, features = [
+libp2p = { features = [
     "gossipsub",
     "autonat",
     "relay",
@@ -146,4 +146,4 @@ resolver = "2"
 
 [patch.crates-io]
 libp2p = { version = "0.52", git = "https://github.com/libp2p/rust-libp2p", rev = "2910c985e8ab75b52d36701b9c7717ebf0fd8585" }
-libp2p-nat = { version = "0.3", git = "https://github.com/dariusc93/libp2p-nat", rev = "f8fb19cf472800754d5fc55e16a524a85a668973" }
+libp2p-nat = { version = "0.3", git = "https://github.com/dariusc93/libp2p-nat", rev = "09bb2e747798b71066dc9b2e518fb2817f338ecb" }
