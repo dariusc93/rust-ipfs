@@ -1316,7 +1316,9 @@ impl Ipfs {
                     let peer_id = public_key.to_peer_id();
 
                     for addr in &mut addresses {
-                        addr.push(Protocol::P2p(peer_id.into()))
+                        if !matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                            addr.push(Protocol::P2p(peer_id))
+                        }
                     }
 
                     let info = PeerInfo {
