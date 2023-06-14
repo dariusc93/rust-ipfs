@@ -10,7 +10,7 @@ pub trait MultiaddrExt {
     fn relay_peer_id(&self) -> Option<PeerId>;
 
     /// Address that only doesnt include peer protocols
-    fn address(&self) -> Option<Multiaddr>;
+    fn address(&self) -> Multiaddr;
 
     /// Determine if the address is a relay circuit
     fn is_relay(&self) -> bool;
@@ -50,9 +50,10 @@ impl MultiaddrExt for Multiaddr {
         None
     }
 
-    fn address(&self) -> Option<Multiaddr> {
-        let mut addr = self.clone();
-        while let Some(proto) = addr.pop() {
+    fn address(&self) -> Multiaddr {
+        let mut addr = Multiaddr::empty();
+
+        for proto in self.iter() {
             if matches!(
                 proto,
                 Protocol::Ip4(_)
@@ -63,11 +64,11 @@ impl MultiaddrExt for Multiaddr {
                     | Protocol::QuicV1
                     | Protocol::Dnsaddr(_)
             ) {
-                return Some(addr);
+                addr.push(proto);
             }
         }
 
-        None
+        addr
     }
 
     fn is_relay(&self) -> bool {
