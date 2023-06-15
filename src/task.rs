@@ -241,11 +241,7 @@ impl IpfsTask {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
                         self.swarm.behaviour_mut().add_peer(peer, addr.clone());
-                        if !self.swarm.is_connected(&peer) {
-                            if let Err(e) = self.swarm.dial(peer) {
-                                warn!("Unable to dial {peer}: {e}");
-                            }
-                        }
+                        self.swarm.behaviour_mut().pubsub().add_explicit_peer(&peer);
                     }
                 }
                 MdnsEvent::Expired(list) => {
@@ -253,6 +249,10 @@ impl IpfsTask {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
                             if !mdns.has_node(&peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
+                                self.swarm
+                                    .behaviour_mut()
+                                    .pubsub()
+                                    .remove_explicit_peer(&peer);
                             }
                         }
                     }
@@ -841,8 +841,8 @@ impl IpfsTask {
             //     let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
             //     let _ = ret.send((stats, peers, wantlist).into());
             // }
-            IpfsEvent::PubsubEventStream(topic, ret) => {
-                let receiver = self.swarm.behaviour().pubsub.event_stream(topic);
+            IpfsEvent::PubsubEventStream(ret) => {
+                let receiver = self.swarm.behaviour().pubsub.event_stream();
                 let _ = ret.send(receiver);
             }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
