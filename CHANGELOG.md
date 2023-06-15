@@ -1,5 +1,5 @@
 # 0.3.17 [unreleased]
-- fix: Properly emit pubsub event of a given topic [PR XX]
+- fix: Properly emit pubsub event of a given topic [PR 77]
 - refactor: Confirm event from swarm when disconnecting from peer [PR 75]
 - feat: Implement Keystore [PR 74]
 - feat: Added Ipfs::remove_peer and Ipfs::remove_peer_address [PR 73]
@@ -17,7 +17,7 @@
 [PR 73]: https://github.com/dariusc93/rust-ipfs/pull/73
 [PR 74]: https://github.com/dariusc93/rust-ipfs/pull/74
 [PR 75]: https://github.com/dariusc93/rust-ipfs/pull/75
-[PR XX]: https://github.com/dariusc93/rust-ipfs/pull/XX
+[PR 77]: https://github.com/dariusc93/rust-ipfs/pull/77
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
