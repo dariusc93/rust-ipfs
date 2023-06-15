@@ -361,7 +361,7 @@ enum IpfsEvent {
     /// Request background task to return the listened and external addresses
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
-    PubsubEventStream(OneshotSender<async_broadcast::Receiver<InnerPubsubEvent>>),
+    PubsubEventStream(OneshotSender<futures::channel::mpsc::Receiver<InnerPubsubEvent>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
     PubsubPublish(
         String,
@@ -1385,16 +1385,10 @@ impl Ipfs {
             let defined_topic = topic.to_string();
 
             let stream = async_stream::stream! {
-                loop {
-                    match receiver.recv().await {
-                        Ok(event) => {
-                            match &event {
-                                InnerPubsubEvent::Subscribe { topic, .. } | InnerPubsubEvent::Unsubscribe { topic, .. } if topic.eq(&defined_topic) => yield event.into(),
-                                _ => {}
-                            }
-                        },
-                        Err(async_broadcast::RecvError::Closed) => break,
-                        Err(_) => {}
+                while let Some(event) = receiver.next().await {
+                    match &event {
+                        InnerPubsubEvent::Subscribe { topic, .. } | InnerPubsubEvent::Unsubscribe { topic, .. } if topic.eq(&defined_topic) => yield event.into(),
+                        _ => {}
                     }
                 }
             };

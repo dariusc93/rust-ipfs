@@ -842,7 +842,7 @@ impl IpfsTask {
             //     let _ = ret.send((stats, peers, wantlist).into());
             // }
             IpfsEvent::PubsubEventStream(ret) => {
-                let receiver = self.swarm.behaviour().pubsub.event_stream();
+                let receiver = self.swarm.behaviour_mut().pubsub.event_stream();
                 let _ = ret.send(receiver);
             }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
