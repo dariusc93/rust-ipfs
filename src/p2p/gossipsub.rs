@@ -1,7 +1,6 @@
 use async_broadcast::TrySendError;
-use futures::channel::mpsc::{self as channel, channel};
+use futures::channel::mpsc::{self as channel};
 use futures::stream::{FusedStream, Stream};
-use futures::SinkExt;
 use libp2p::gossipsub::PublishError;
 use std::collections::HashMap;
 use std::fmt;
@@ -9,7 +8,6 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 use tracing::debug;
 
 use libp2p::core::{Endpoint, Multiaddr};
@@ -24,18 +22,12 @@ use libp2p::swarm::{
     ToSwarm as NetworkBehaviourAction,
 };
 
-use crate::InnerPubsubEvent;
-
 /// Currently a thin wrapper around Gossipsub.
 /// Allows single subscription to a topic with only unbounded senders. Tracks the peers subscribed
 /// to different topics.
 pub struct GossipsubStream {
     // Tracks the topic subscriptions.
     streams: HashMap<TopicHash, async_broadcast::Sender<GossipsubMessage>>,
-
-    event_stream: Vec<futures::channel::mpsc::Sender<InnerPubsubEvent>>,
-
-    cleanup: wasm_timer::Interval,
 
     active_streams: HashMap<TopicHash, Arc<AtomicUsize>>,
 
@@ -145,14 +137,10 @@ impl FusedStream for SubscriptionStream {
 impl From<Gossipsub> for GossipsubStream {
     fn from(gossipsub: Gossipsub) -> Self {
         let (tx, rx) = channel::unbounded();
-        let event_stream = Default::default();
-        let cleanup = wasm_timer::Interval::new(Duration::from_secs(120));
         GossipsubStream {
             streams: HashMap::new(),
             gossipsub,
             unsubscriptions: (tx, rx),
-            event_stream,
-            cleanup,
             active_streams: Default::default(),
         }
     }
@@ -247,26 +235,10 @@ impl GossipsubStream {
             .collect()
     }
 
-    pub(crate) fn event_stream(&mut self) -> futures::channel::mpsc::Receiver<InnerPubsubEvent> {
-        let (tx, rx) = channel(512);
-        self.event_stream.push(tx);
-        rx
-    }
-
     /// Returns the list of currently subscribed topics. This can contain topics for which stream
     /// has been dropped but no messages have yet been received on the topics after the drop.
     pub fn subscribed_topics(&self) -> Vec<String> {
         self.streams.keys().map(|t| t.to_string()).collect()
-    }
-
-    fn emit_event(&self, event: InnerPubsubEvent) {
-        for ch in &self.event_stream {
-            let mut ch = ch.clone();
-            let event = event.clone();
-            tokio::spawn(async move {
-                let _ = ch.send(event).await;
-            });
-        }
     }
 }
 
@@ -341,19 +313,6 @@ impl NetworkBehaviour for GossipsubStream {
         use futures::stream::StreamExt;
         use std::collections::hash_map::Entry;
 
-        while let Poll::Ready(Some(_)) = self.cleanup.poll_next_unpin(ctx) {
-            let mut closed_ch_index = vec![];
-            for (index, ch) in self.event_stream.iter().enumerate() {
-                if ch.is_closed() {
-                    closed_ch_index.push(index);
-                }
-            }
-
-            for index in closed_ch_index {
-                self.event_stream.remove(index);
-            }
-        }
-
         loop {
             match self.unsubscriptions.1.poll_next_unpin(ctx) {
                 Poll::Ready(Some(dropped)) => {
@@ -400,10 +359,6 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
-                    self.emit_event(InnerPubsubEvent::Subscribe {
-                        topic: topic.to_string(),
-                        peer_id,
-                    });
                     return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
                         GossipsubEvent::Subscribed { peer_id, topic },
                     ));
@@ -412,10 +367,6 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
-                    self.emit_event(InnerPubsubEvent::Unsubscribe {
-                        topic: topic.to_string(),
-                        peer_id,
-                    });
                     return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
                         GossipsubEvent::Unsubscribed { peer_id, topic },
                     ));

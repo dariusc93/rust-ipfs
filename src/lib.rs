@@ -42,7 +42,7 @@ use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{channel, Sender},
+        mpsc::{channel, Sender, UnboundedReceiver},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
     future::BoxFuture,
@@ -361,7 +361,7 @@ enum IpfsEvent {
     /// Request background task to return the listened and external addresses
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
-    PubsubEventStream(OneshotSender<futures::channel::mpsc::Receiver<InnerPubsubEvent>>),
+    PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
     PubsubPublish(
         String,
@@ -796,6 +796,7 @@ impl UninitializedIpfs {
             dht_peer_lookup: Default::default(),
             bitswap_sessions: Default::default(),
             disconnect_confirmation: Default::default(),
+            pubsub_event_stream: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
