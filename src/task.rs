@@ -66,7 +66,7 @@ use libp2p::{
         KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
-    swarm::SwarmEvent,
+    swarm::{ConnectionId, SwarmEvent},
 };
 
 #[allow(dead_code)]
@@ -94,6 +94,7 @@ pub(crate) struct IpfsTask {
     pub(crate) swarm_event: Option<TSwarmEventFn>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
+    pub(crate) failed_ping: HashMap<ConnectionId, usize>,
 }
 
 impl IpfsTask {
@@ -655,7 +656,7 @@ impl IpfsTask {
                 libp2p::ping::Event {
                     peer,
                     result: Result::Ok(rtt),
-                    ..
+                    connection,
                 } => {
                     trace!(
                         "ping: rtt to {} is {} ms",
@@ -663,27 +664,64 @@ impl IpfsTask {
                         rtt.as_millis()
                     );
                     self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
+                    self.failed_ping.remove(&connection);
                 }
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Timeout),
-                    ..
+                    connection,
                 } => {
                     trace!("ping: timeout to {}", peer);
+                    match self.failed_ping.entry(connection) {
+                        Entry::Occupied(mut entry) => {
+                            if *entry.get() > 1 {
+                                self.swarm.close_connection(connection);
+                            }
+
+                            *entry.get_mut() += 1;
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
+                    }
                 }
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Other { error }),
-                    ..
+                    connection,
                 } => {
                     error!("ping: failure with {}: {}", peer.to_base58(), error);
+                    match self.failed_ping.entry(connection) {
+                        Entry::Occupied(mut entry) => {
+                            if *entry.get() > 1 {
+                                self.swarm.close_connection(connection);
+                            }
+
+                            *entry.get_mut() += 1;
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
+                    }
                 }
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Unsupported),
-                    ..
+                    connection,
                 } => {
                     error!("ping: failure with {}: unsupported", peer.to_base58());
+                    match self.failed_ping.entry(connection) {
+                        Entry::Occupied(mut entry) => {
+                            if *entry.get() > 1 {
+                                self.swarm.close_connection(connection);
+                            }
+
+                            *entry.get_mut() += 1;
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
+                    }
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {

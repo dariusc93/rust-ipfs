@@ -782,6 +782,7 @@ impl UninitializedIpfs {
             dht_peer_lookup: Default::default(),
             bitswap_sessions: Default::default(),
             disconnect_confirmation: Default::default(),
+            failed_ping: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
