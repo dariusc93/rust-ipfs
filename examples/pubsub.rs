@@ -133,8 +133,10 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    let mut event_stream = ipfs.pubsub_events(&topic).await?;
+
     let stream = ipfs.pubsub_subscribe(topic.to_string()).await?;
-    let mut event_stream = ipfs.pubsub_events(topic.to_string()).await?;
+
     pin_mut!(stream);
 
     tokio::spawn(topic_discovery(ipfs.clone(), topic.clone()));

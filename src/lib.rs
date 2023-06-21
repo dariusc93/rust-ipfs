@@ -42,7 +42,7 @@ use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{channel, Sender},
+        mpsc::{channel, Sender, UnboundedReceiver},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
     future::BoxFuture,
@@ -362,10 +362,7 @@ enum IpfsEvent {
     /// Request background task to return the listened and external addresses
     GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
-    PubsubEventStream(
-        String,
-        OneshotSender<Option<async_broadcast::Receiver<PubsubEvent>>>,
-    ),
+    PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
     PubsubPublish(
         String,
@@ -415,6 +412,24 @@ pub enum PubsubEvent {
 
     /// Unsubscribing event to a given topic
     Unsubscribe { peer_id: PeerId },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum InnerPubsubEvent {
+    /// Subscription event to a given topic
+    Subscribe { topic: String, peer_id: PeerId },
+
+    /// Unsubscribing event to a given topic
+    Unsubscribe { topic: String, peer_id: PeerId },
+}
+
+impl From<InnerPubsubEvent> for PubsubEvent {
+    fn from(event: InnerPubsubEvent) -> Self {
+        match event {
+            InnerPubsubEvent::Subscribe { peer_id, .. } => PubsubEvent::Subscribe { peer_id },
+            InnerPubsubEvent::Unsubscribe { peer_id, .. } => PubsubEvent::Unsubscribe { peer_id },
+        }
+    }
 }
 
 type TSwarmEvent = <TSwarm as Stream>::Item;
@@ -783,6 +798,7 @@ impl UninitializedIpfs {
             bitswap_sessions: Default::default(),
             disconnect_confirmation: Default::default(),
             failed_ping: Default::default(),
+            pubsub_event_stream: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
@@ -1362,26 +1378,26 @@ impl Ipfs {
     /// Stream that returns [`PubsubEvent`] for a given topic
     pub async fn pubsub_events(
         &self,
-        topic: String,
+        topic: &str,
     ) -> Result<BoxStream<'static, PubsubEvent>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::PubsubEventStream(topic.clone(), tx))
+                .send(IpfsEvent::PubsubEventStream(tx))
                 .await?;
 
             let mut receiver = rx
-                .await?
-                .ok_or_else(|| format_err!("not subscribed to {:?}", topic))?;
+                .await?;
+
+            let defined_topic = topic.to_string();
 
             let stream = async_stream::stream! {
-                loop {
-                    match receiver.recv().await {
-                        Ok(event) => yield event,
-                        Err(async_broadcast::RecvError::Closed) => break,
-                        Err(_) => {}
+                while let Some(event) = receiver.next().await {
+                    match &event {
+                        InnerPubsubEvent::Subscribe { topic, .. } | InnerPubsubEvent::Unsubscribe { topic, .. } if topic.eq(&defined_topic) => yield event.into(),
+                        _ => {}
                     }
                 }
             };
