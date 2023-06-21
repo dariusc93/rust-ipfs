@@ -21,6 +21,7 @@ use tracing::Span;
 pub(crate) mod addr;
 pub(crate) mod addressbook;
 pub(crate) mod peerbook;
+pub mod protocol;
 
 mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;

@@ -1,5 +1,5 @@
-use super::addressbook;
 use super::gossipsub::GossipsubStream;
+use super::{addressbook, protocol};
 use bytes::Bytes;
 use libp2p_allow_block_list::BlockedPeers;
 
@@ -59,6 +59,7 @@ pub struct Behaviour {
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
     pub peerbook: peerbook::Behaviour,
+    pub protocol: protocol::Behaviour,
 }
 
 #[derive(Debug)]
@@ -525,7 +526,11 @@ impl Behaviour {
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
-        let upnp = Toggle::from(options.portmapping.then_some(libp2p_nat::Behaviour::new().await?));
+        let upnp = Toggle::from(
+            options
+                .portmapping
+                .then_some(libp2p_nat::Behaviour::new().await?),
+        );
 
         let (transport, relay_client) = match options.relay {
             true => {
@@ -542,6 +547,7 @@ impl Behaviour {
             addressbook::Behaviour::with_config(options.addrbook_config.unwrap_or_default());
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
+        let protocol = protocol::Behaviour::default();
 
         Ok((
             Behaviour {
@@ -560,6 +566,7 @@ impl Behaviour {
                 upnp,
                 peerbook,
                 addressbook,
+                protocol,
             },
             transport,
         ))
@@ -599,7 +606,7 @@ impl Behaviour {
     }
 
     pub fn supported_protocols(&self) -> Vec<String> {
-        self.peerbook.protocols().collect::<Vec<_>>()
+        self.protocol.iter().collect::<Vec<_>>()
     }
 
     pub fn notify_new_blocks(&self, blocks: Vec<crate::Block>) {
