@@ -2,7 +2,7 @@ use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{Receiver, UnboundedSender},
+        mpsc::{unbounded, Receiver, UnboundedSender},
         oneshot,
     },
     sink::SinkExt,
@@ -12,7 +12,7 @@ use futures::{
 
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt, PeerInfo},
-    Channel,
+    Channel, InnerPubsubEvent,
 };
 use crate::{
     p2p::{ProviderStream, RecordStream},
@@ -95,6 +95,7 @@ pub(crate) struct IpfsTask {
     pub(crate) swarm_event: Option<TSwarmEventFn>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
+    pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
 }
 
 impl IpfsTask {
@@ -102,6 +103,7 @@ impl IpfsTask {
         let mut first_run = false;
         let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
+        let mut event_cleanup = tokio::time::interval(Duration::from_secs(5));
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
@@ -122,6 +124,18 @@ impl IpfsTask {
                 Some(repo) = self.repo_events.next() => {
                     self.handle_repo_event(repo);
                 },
+                _ = event_cleanup.tick() => {
+                    let mut closed_ch_index = vec![];
+                    for (index, ch) in self.pubsub_event_stream.iter().enumerate() {
+                        if ch.is_closed() {
+                            closed_ch_index.push(index);
+                        }
+                    }
+
+                    for index in closed_ch_index {
+                        self.pubsub_event_stream.remove(index);
+                    }
+                }
                 _ = connected_peer_timer.tick() => {
                     info!("Connected Peers: {}", self.swarm.connected_peers().count());
                 }
@@ -178,6 +192,16 @@ impl IpfsTask {
                     warn!("session {} failed to send stop response: {:?}", ctx, err);
                 }
                 debug!("session {} stopped", ctx);
+            });
+        }
+    }
+
+    fn emit_pubsub_event(&self, event: InnerPubsubEvent) {
+        for ch in &self.pubsub_event_stream {
+            let ch = ch.clone();
+            let event = event.clone();
+            tokio::spawn(async move {
+                let _ = ch.unbounded_send(event);
             });
         }
     }
@@ -241,11 +265,6 @@ impl IpfsTask {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
                         self.swarm.behaviour_mut().add_peer(peer, addr.clone());
-                        if !self.swarm.is_connected(&peer) {
-                            if let Err(e) = self.swarm.dial(peer) {
-                                warn!("Unable to dial {peer}: {e}");
-                            }
-                        }
                     }
                 }
                 MdnsEvent::Expired(list) => {
@@ -652,6 +671,18 @@ impl IpfsTask {
                     let _ = response.send(duration).ok();
                 }
             },
+            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+                libp2p::gossipsub::Event::Subscribed { peer_id, topic },
+            )) => self.emit_pubsub_event(InnerPubsubEvent::Subscribe {
+                topic: topic.to_string(),
+                peer_id,
+            }),
+            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+                libp2p::gossipsub::Event::Unsubscribed { peer_id, topic },
+            )) => self.emit_pubsub_event(InnerPubsubEvent::Unsubscribe {
+                topic: topic.to_string(),
+                peer_id,
+            }),
             SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
                 libp2p::ping::Event {
                     peer,
@@ -841,9 +872,10 @@ impl IpfsTask {
             //     let wantlist = self.swarm.behaviour_mut().bitswap().local_wantlist();
             //     let _ = ret.send((stats, peers, wantlist).into());
             // }
-            IpfsEvent::PubsubEventStream(topic, ret) => {
-                let receiver = self.swarm.behaviour().pubsub.event_stream(topic);
-                let _ = ret.send(receiver);
+            IpfsEvent::PubsubEventStream(ret) => {
+                let (tx, rx) = unbounded();
+                self.pubsub_event_stream.push(tx);
+                let _ = ret.send(rx);
             }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
                 Ok(id) => {
