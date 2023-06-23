@@ -19,12 +19,12 @@ use crate::{
     TSwarmEvent,
 };
 use beetle_bitswap_next::BitswapEvent;
-use tokio::{sync::Notify, task::JoinHandle};
+use tokio::task::JoinHandle;
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     io,
-    sync::{atomic::AtomicU64, Arc},
+    sync::atomic::AtomicU64,
     time::Duration,
 };
 
@@ -96,14 +96,17 @@ pub(crate) struct IpfsTask {
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
+    pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
+    pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
 }
 
 impl IpfsTask {
-    pub(crate) async fn run(&mut self, delay: bool, notify: Arc<Notify>) {
-        let mut first_run = false;
+    pub(crate) async fn run(&mut self, delay: bool) {
         let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
         let mut event_cleanup = tokio::time::interval(Duration::from_secs(5));
+        let mut external_check = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(1), Duration::from_secs(1));
+        let mut local_check = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(1), Duration::from_secs(1));
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
@@ -117,7 +120,7 @@ impl IpfsTask {
                         break;
                     }
                     if delay {
-                        tokio::time::sleep(Duration::from_nanos(10)).await;
+                        // tokio::time::sleep(Duration::from_nanos(10)).await;
                     }
                     self.handle_event(event);
                 },
@@ -160,10 +163,32 @@ impl IpfsTask {
                         self.destroy_bs_session(id, tx);
                     }
                 }
-            }
-            if !first_run {
-                first_run = true;
-                notify.notify_one();
+                _ = external_check.tick() => {
+                    let addrs = self.swarm.external_addresses().cloned().map(|a| a.addr).collect::<Vec<_>>();
+                    if !addrs.is_empty() {
+                        for ch in self.external_listener.drain(..) {
+                            tokio::spawn({
+                                let addrs = addrs.clone();
+                                async move {
+                                    let _ = ch.send(addrs);
+                                }
+                            });
+                        }
+                    }
+                }
+                _ = local_check.tick() => {
+                    let addrs = self.swarm.listeners().cloned().collect::<Vec<_>>();
+                    if !addrs.is_empty() {
+                        for ch in self.local_listener.drain(..) {
+                            tokio::spawn({
+                                let addrs = addrs.clone();
+                                async move {
+                                    let _ = ch.send(addrs);
+                                }
+                            });
+                        }
+                    }
+                }
             }
         }
     }
@@ -217,6 +242,15 @@ impl IpfsTask {
             } => {
                 self.listening_addresses
                     .insert(address.clone(), listener_id);
+
+                for ch in self.local_listener.drain(..) {
+                    tokio::spawn({
+                        let addr = address.clone();
+                        async move {
+                            let _ = ch.send(vec![addr]);
+                        }
+                    });
+                }
 
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     let _ = ret.send(Either::Left(address));
@@ -798,7 +832,33 @@ impl IpfsTask {
             }
             IpfsEvent::Listeners(ret) => {
                 let listeners = self.swarm.listeners().cloned().collect::<Vec<Multiaddr>>();
-                ret.send(Ok(listeners)).ok();
+                let res = match listeners.is_empty() {
+                    true => {
+                        let (tx, rx) = oneshot::channel();
+                        self.local_listener.push(tx);
+                        Either::Right(async move { rx.await.unwrap_or_default() }.boxed())
+                    }
+                    false => Either::Left(listeners),
+                };
+                ret.send(Ok(res)).ok();
+            }
+            IpfsEvent::ExternalAddresses(ret) => {
+                let external = self
+                    .swarm
+                    .external_addresses()
+                    .cloned()
+                    .map(|a| a.addr)
+                    .collect::<Vec<Multiaddr>>();
+
+                let res = match external.is_empty() {
+                    true => {
+                        let (tx, rx) = oneshot::channel();
+                        self.external_listener.push(tx);
+                        Either::Right(async move { rx.await.unwrap_or_default() }.boxed())
+                    }
+                    false => Either::Left(external),
+                };
+                ret.send(Ok(res)).ok();
             }
             IpfsEvent::IsConnected(peer_id, ret) => {
                 let connected = self.swarm.is_connected(&peer_id);
@@ -828,13 +888,6 @@ impl IpfsTask {
             IpfsEvent::Unban(peer, ret) => {
                 self.swarm.unban_peer_id(peer);
                 let _ = ret.send(Ok(()));
-            }
-            IpfsEvent::GetAddresses(ret) => {
-                // perhaps this could be moved under `IpfsEvent` or free functions?
-                let mut addresses = Vec::new();
-                addresses.extend(self.swarm.listeners().map(|a| a.to_owned()));
-                addresses.extend(self.swarm.external_addresses().map(|ar| ar.addr.to_owned()));
-                let _ = ret.send(addresses);
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
                 let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribe(topic).ok());

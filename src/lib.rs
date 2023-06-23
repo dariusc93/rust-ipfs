@@ -57,7 +57,7 @@ use p2p::{
     PubsubConfig, RecordStream, RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
-use tokio::{sync::Notify, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::{IpfsUnixfs, NodeItem, UnixfsStatus};
@@ -344,7 +344,9 @@ enum IpfsEvent {
     /// Addresses
     Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     /// Local addresses
-    Listeners(Channel<Vec<Multiaddr>>),
+    Listeners(Channel<Either<Vec<Multiaddr>, BoxFuture<'static, Vec<Multiaddr>>>>),
+    /// Local addresses
+    ExternalAddresses(Channel<Either<Vec<Multiaddr>, BoxFuture<'static, Vec<Multiaddr>>>>),
     /// Connected peers
     Connected(Channel<Vec<PeerId>>),
     /// Is Connected
@@ -358,8 +360,6 @@ enum IpfsEvent {
     Ban(PeerId, Channel<()>),
     /// Unban peer
     Unban(PeerId, Channel<()>),
-    /// Request background task to return the listened and external addresses
-    GetAddresses(OneshotSender<Vec<Multiaddr>>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
     PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
@@ -802,6 +802,8 @@ impl UninitializedIpfs {
             repo,
             bootstraps,
             swarm_event,
+            external_listener: Default::default(),
+            local_listener: Default::default(),
         };
 
         for addr in listening_addrs.into_iter() {
@@ -827,14 +829,11 @@ impl UninitializedIpfs {
             }
         }
 
-        let notify = Arc::new(Notify::new());
         tokio::spawn({
-            let notify = notify.clone();
             async move {
-                fut.run(delay, notify).instrument(swarm_span).await;
+                fut.run(delay).instrument(swarm_span).await;
             }
         });
-        notify.notified().await;
         Ok(ipfs)
     }
 }
@@ -1208,17 +1207,6 @@ impl Ipfs {
         .await
     }
 
-    /// Returns local listening addresses
-    pub async fn addrs_local(&self) -> Result<Vec<Multiaddr>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task.clone().send(IpfsEvent::Listeners(tx)).await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
     /// Checks whether there is an established connection to a peer.
     pub async fn is_connected(&self, peer_id: PeerId) -> Result<bool, Error> {
         async move {
@@ -1315,19 +1303,31 @@ impl Ipfs {
                     rx.await?.await?
                 }
                 None => {
-                    let (tx, rx) = oneshot_channel();
-                    self.to_task
-                        .clone()
-                        .send(IpfsEvent::GetAddresses(tx))
-                        .await?;
+                    let (local_result, external_result) =
+                        futures::join!(self.listening_addresses(), self.external_addresses());
 
-                    let mut addresses = rx.await?;
+                    let external = external_result.unwrap_or_default();
+                    let local = local_result.unwrap_or_default();
+
+                    let mut addresses = local
+                        .iter()
+                        .chain(external.iter())
+                        .cloned()
+                        .collect::<Vec<_>>();
+
                     let protocols = self.protocols().await?;
                     let public_key = self.key.public();
                     let peer_id = public_key.to_peer_id();
 
                     for addr in &mut addresses {
-                        addr.push(Protocol::P2p(peer_id.into()))
+                        if !addr
+                            .iter()
+                            .last()
+                            .map(|proto| matches!(proto, Protocol::P2p(_)))
+                            .unwrap_or_default()
+                        {
+                            addr.push(Protocol::P2p(peer_id.into()))
+                        }
                     }
 
                     let info = PeerInfo {
@@ -1490,21 +1490,45 @@ impl Ipfs {
         self.repo.list_blocks().instrument(self.span.clone()).await
     }
 
-    /// Returns the accumulated bitswap stats
-    // pub async fn bitswap_stats(&self) -> Result<BitswapStats, Error> {
-    //     async move {
-    //         let (tx, rx) = oneshot_channel();
+    /// Returns local listening addresses
+    pub async fn listening_addresses(&self) -> Result<Vec<Multiaddr>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
 
-    //         self.to_task
-    //             .clone()
-    //             .send(IpfsEvent::BitswapStats(tx))
-    //             .await?;
+            self.to_task.clone().send(IpfsEvent::Listeners(tx)).await?;
 
-    //         Ok(rx.await?)
-    //     }
-    //     .instrument(self.span.clone())
-    //     .await
-    // }
+            match rx.await?? {
+                Either::Left(list) => Ok(list),
+                Either::Right(fut) => {
+                    let list = tokio::time::timeout(Duration::from_secs(30), fut).await?;
+                    Ok(list)
+                }
+            }
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn external_addresses(&self) -> Result<Vec<Multiaddr>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::ExternalAddresses(tx))
+                .await?;
+
+            match rx.await?? {
+                Either::Left(list) => Ok(list),
+                Either::Right(fut) => {
+                    let list = tokio::time::timeout(Duration::from_secs(30), fut).await?;
+                    Ok(list)
+                }
+            }
+        }
+        .instrument(self.span.clone())
+        .await
+    }
 
     /// Add a given multiaddr as a listening address. Will fail if the address is unsupported, or
     /// if it is already being listened on. Currently will invoke `Swarm::listen_on` internally,
