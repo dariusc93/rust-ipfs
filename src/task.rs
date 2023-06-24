@@ -120,7 +120,7 @@ impl IpfsTask {
                         break;
                     }
                     if delay {
-                        // tokio::time::sleep(Duration::from_nanos(10)).await;
+                        tokio::time::sleep(Duration::from_nanos(10)).await;
                     }
                     self.handle_event(event);
                 },
@@ -128,16 +128,7 @@ impl IpfsTask {
                     self.handle_repo_event(repo);
                 },
                 _ = event_cleanup.tick() => {
-                    let mut closed_ch_index = vec![];
-                    for (index, ch) in self.pubsub_event_stream.iter().enumerate() {
-                        if ch.is_closed() {
-                            closed_ch_index.push(index);
-                        }
-                    }
-
-                    for index in closed_ch_index {
-                        self.pubsub_event_stream.remove(index);
-                    }
+                    self.pubsub_event_stream.retain(|ch| !ch.is_closed());
                 }
                 _ = connected_peer_timer.tick() => {
                     info!("Connected Peers: {}", self.swarm.connected_peers().count());
