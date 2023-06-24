@@ -1,5 +1,4 @@
 use rust_ipfs::{p2p::PeerInfo, Ipfs, UninitializedIpfs};
-use tokio::sync::Notify;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -17,9 +16,6 @@ async fn main() -> anyhow::Result<()> {
 
     ipfs.default_bootstrap().await?;
     ipfs.bootstrap().await?;
-
-    // Used to give more time after bootstrapping
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     let PeerInfo {
         public_key: key,
@@ -41,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Used to wait until the process is terminated instead of creating a loop
-    Notify::new().notified().await;
+    tokio::signal::ctrl_c().await?;
 
     ipfs.exit_daemon().await;
     Ok(())
