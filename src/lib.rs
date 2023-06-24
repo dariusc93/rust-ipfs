@@ -1500,7 +1500,7 @@ impl Ipfs {
             match rx.await?? {
                 Either::Left(list) => Ok(list),
                 Either::Right(fut) => {
-                    let list = tokio::time::timeout(Duration::from_secs(30), fut).await?;
+                    let list = tokio::time::timeout(Duration::from_secs(5), fut).await?;
                     Ok(list)
                 }
             }
@@ -1509,6 +1509,7 @@ impl Ipfs {
         .await
     }
 
+    /// Returns external addresses
     pub async fn external_addresses(&self) -> Result<Vec<Multiaddr>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -1521,7 +1522,7 @@ impl Ipfs {
             match rx.await?? {
                 Either::Left(list) => Ok(list),
                 Either::Right(fut) => {
-                    let list = tokio::time::timeout(Duration::from_secs(30), fut).await?;
+                    let list = tokio::time::timeout(Duration::from_secs(5), fut).await?;
                     Ok(list)
                 }
             }
@@ -2043,12 +2044,17 @@ mod node {
         pub async fn with_options(opts: IpfsOptions) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts).start().await.unwrap();
-            let PeerInfo {
-                peer_id: id,
-                listen_addrs: addrs,
-                ..
-            } = ipfs.identity(None).await.unwrap();
+            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts).disable_delay().start().await.unwrap();
+            let id = ipfs.keypair().map(|kp| kp.public().to_peer_id()).unwrap();
+            let mut addrs = ipfs.listening_addresses().await.unwrap();
+
+            for addr in &mut addrs {
+                if let Some(proto) = addr.iter().last() {
+                    if !matches!(proto, Protocol::P2p(_)) {
+                        addr.push(Protocol::P2p(id.into()));
+                    }
+                }
+            }
 
             Node { ipfs, id, addrs }
         }
