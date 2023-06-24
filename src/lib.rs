@@ -2055,7 +2055,7 @@ mod node {
             for addr in &mut addrs {
                 if let Some(proto) = addr.iter().last() {
                     if !matches!(proto, Protocol::P2p(_)) {
-                        addr.push(Protocol::P2p(id.into()));
+                        addr.push(Protocol::P2p(id));
                     }
                 }
             }
