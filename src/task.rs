@@ -732,40 +732,36 @@ impl IpfsTask {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Timeout),
                     connection,
-                } => {
-                    trace!("ping: timeout to {}", peer);
-                    match self.failed_ping.entry(connection) {
-                        Entry::Occupied(mut entry) => {
-                            if *entry.get() > 1 {
-                                self.swarm.close_connection(connection);
-                            }
+                } => match self.failed_ping.entry(connection) {
+                    Entry::Occupied(mut entry) => {
+                        if *entry.get() > 1 {
+                            self.swarm.close_connection(connection);
+                            trace!("ping: timeout to {}", peer);
+                        }
 
-                            *entry.get_mut() += 1;
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(1);
-                        }
+                        *entry.get_mut() += 1;
                     }
-                }
+                    Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                },
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Other { error }),
                     connection,
-                } => {
-                    error!("ping: failure with {}: {}", peer.to_base58(), error);
-                    match self.failed_ping.entry(connection) {
-                        Entry::Occupied(mut entry) => {
-                            if *entry.get() > 1 {
-                                self.swarm.close_connection(connection);
-                            }
+                } => match self.failed_ping.entry(connection) {
+                    Entry::Occupied(mut entry) => {
+                        if *entry.get() > 1 {
+                            self.swarm.close_connection(connection);
+                            error!("ping: failure with {}: {}", peer.to_base58(), error);
+                        }
 
-                            *entry.get_mut() += 1;
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(1);
-                        }
+                        *entry.get_mut() += 1;
                     }
-                }
+                    Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                },
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Unsupported),
