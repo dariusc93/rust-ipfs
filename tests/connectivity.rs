@@ -67,7 +67,7 @@ async fn connect_two_nodes_with_two_connections_doesnt_panic() {
         .await
         .unwrap();
 
-    let addresses = node_a.addrs_local().await.unwrap();
+    let addresses = node_a.listening_addresses().await.unwrap();
     assert_eq!(addresses.len(), 2);
 
     for mut addr in addresses.into_iter() {

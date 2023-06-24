@@ -1,5 +1,4 @@
 use libipld::ipld;
-use libp2p::swarm::dial_opts::DialOpts;
 use rust_ipfs::{IpfsPath, UninitializedIpfs};
 
 #[tokio::main]
@@ -7,13 +6,15 @@ async fn main() -> anyhow::Result<()> {
     let node_a = UninitializedIpfs::new().start().await?;
     let node_b = UninitializedIpfs::new().start().await?;
 
-    let (peer_id, addrs) = node_a
-        .identity(None)
-        .await
-        .map(|i| (i.peer_id, i.listen_addrs))?;
+    let peer_id = node_a.keypair().map(|kp| kp.public().to_peer_id())?;
 
-    let opts = DialOpts::peer_id(peer_id).addresses(addrs).build();
-    node_b.connect(opts).await?;
+    let addrs = node_a.listening_addresses().await?;
+
+    for addr in addrs {
+        node_b.add_peer(peer_id, addr).await?;
+    }
+
+    node_b.connect(peer_id).await?;
 
     let block_a = ipld!({
         "name": "alice",
