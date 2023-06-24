@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use libp2p::swarm::SwarmEvent;
 use rust_ipfs::{Ipfs, IpfsOptions, UninitializedIpfs};
 
@@ -15,6 +17,8 @@ async fn main() -> anyhow::Result<()> {
         })
         .start()
         .await?;
+    
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // Exit
     ipfs.exit_daemon().await;
