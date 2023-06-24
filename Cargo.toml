@@ -59,12 +59,10 @@ libp2p = { features = [
     "rsa",
     "serde",
 ], workspace = true }
-libp2p-quic = { git = "https://github.com/libp2p/rust-libp2p", rev = "2c6c058bb7b0d373e05835fead3f8e63e3240583", features = [
-    "tokio",
-] }
 
-libp2p-mplex = { git = "https://github.com/libp2p/rust-libp2p", rev = "2c6c058bb7b0d373e05835fead3f8e63e3240583" }
-libp2p-allow-block-list = { git = "https://github.com/libp2p/rust-libp2p", rev = "2c6c058bb7b0d373e05835fead3f8e63e3240583" }
+libp2p-quic = { version = "0.8.0-alpha", features = ["tokio"]}
+libp2p-mplex = "0.40"
+libp2p-allow-block-list = "0.2"
 
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
@@ -145,5 +143,4 @@ exclude = ["archived", "bitswap"]
 resolver = "2"
 
 [patch.crates-io]
-libp2p = { version = "0.52", git = "https://github.com/libp2p/rust-libp2p", rev = "2c6c058bb7b0d373e05835fead3f8e63e3240583" }
-libp2p-nat = { version = "0.3", git = "https://github.com/dariusc93/libp2p-nat", rev = "8abc52cebe2a3e09d1a2b2547926a4247e253893" }
+libp2p-nat = { version = "0.3", git = "https://github.com/dariusc93/libp2p-nat", rev = "fa94f65f1eeb8b251a387b4b5a36c906365b0b3d" }
