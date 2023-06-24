@@ -28,7 +28,7 @@ futures = "0.3.28"
 futures-util = "0.3.28"
 
 keyed_priority_queue = "0.4.1"
-libp2p = { workspace = true, default-features = false, features = ["ping"] }
+libp2p = { workspace = true, features = ["ping"] }
 multihash = "0.17"
 names = { version = "0.14.0", default-features = false }
 num_enum = "0.6.1"
@@ -46,7 +46,7 @@ wasm-timer = "0.2.5"
 
 [dev-dependencies]
 criterion = "0.4"
-libp2p = { workspace = true, default-features = false, features = [
+libp2p = { workspace = true, features = [
     "yamux",
     "noise",
     "tcp",
