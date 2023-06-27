@@ -17,6 +17,12 @@ pub trait MultiaddrExt {
 
     /// Determine if the address is being relayed to a peer
     fn is_relayed(&self) -> bool;
+
+    /// Determine if address is loopback or local address
+    fn is_loopback(&self) -> bool;
+
+    /// Determine if address is private address
+    fn is_private(&self) -> bool;
 }
 
 impl MultiaddrExt for Multiaddr {
@@ -86,6 +92,24 @@ impl MultiaddrExt for Multiaddr {
         }
 
         true
+    }
+
+    fn is_loopback(&self) -> bool {
+        self.iter().any(|proto| match proto {
+            Protocol::Ip4(ip) => ip.is_loopback(),
+            Protocol::Ip6(ip) => ip.is_loopback(),
+            _ => false,
+        })
+    }
+
+    fn is_private(&self) -> bool {
+        self.iter().any(|proto| match proto {
+            Protocol::Ip4(ip) => ip.is_private(),
+            Protocol::Ip6(ip) => {
+                (ip.segments()[0] & 0xffc0) != 0xfe80 && (ip.segments()[0] & 0xfe00) != 0xfc00
+            }
+            _ => false,
+        })
     }
 }
 
