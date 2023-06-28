@@ -12,7 +12,7 @@ use futures::{
 
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt, PeerInfo},
-    Channel, InnerPubsubEvent,
+    Channel, InnerConnectionEvent, InnerPubsubEvent,
 };
 use crate::{
     p2p::{ProviderStream, RecordStream},
@@ -96,17 +96,23 @@ pub(crate) struct IpfsTask {
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
+    pub(crate) connection_event_stream: Vec<UnboundedSender<InnerConnectionEvent>>,
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
 }
 
 impl IpfsTask {
     pub(crate) async fn run(&mut self, delay: bool) {
-        let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
-        let mut event_cleanup = tokio::time::interval(Duration::from_secs(5));
-        let mut external_check = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(1), Duration::from_secs(1));
-        let mut local_check = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(1), Duration::from_secs(1));
+        let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
+        let mut external_check = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+        let mut local_check = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
@@ -129,9 +135,7 @@ impl IpfsTask {
                 },
                 _ = event_cleanup.tick() => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
-                }
-                _ = connected_peer_timer.tick() => {
-                    info!("Connected Peers: {}", self.swarm.connected_peers().count());
+                    self.connection_event_stream.retain(|ch| !ch.is_closed());
                 }
                 _ = session_cleanup.tick() => {
                     let mut to_remove = Vec::new();
@@ -222,6 +226,16 @@ impl IpfsTask {
         }
     }
 
+    fn emit_connection_event(&self, event: InnerConnectionEvent) {
+        for ch in &self.connection_event_stream {
+            let ch = ch.clone();
+            let event = event.clone();
+            tokio::spawn(async move {
+                let _ = ch.unbounded_send(event);
+            });
+        }
+    }
+
     fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
         if let Some(handler) = self.swarm_event.clone() {
             handler(&mut self.swarm, &swarm_event)
@@ -247,7 +261,30 @@ impl IpfsTask {
                     let _ = ret.send(Either::Left(address));
                 }
             }
-            SwarmEvent::ConnectionClosed { peer_id, .. } => {
+            SwarmEvent::ConnectionEstablished {
+                peer_id, endpoint, ..
+            } => {
+                let address = match endpoint {
+                    libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
+                    libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
+                };
+                self.emit_connection_event(InnerConnectionEvent::ConnectionEstablished {
+                    peer_id,
+                    address,
+                })
+            }
+            SwarmEvent::ConnectionClosed {
+                peer_id, endpoint, ..
+            } => {
+                let address = match endpoint {
+                    libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
+                    libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
+                };
+                self.emit_connection_event(InnerConnectionEvent::ConnectionClosed {
+                    peer_id,
+                    address,
+                });
+
                 if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
                     tokio::spawn(async move {
                         for ch in ch {
@@ -919,6 +956,11 @@ impl IpfsTask {
             IpfsEvent::PubsubEventStream(ret) => {
                 let (tx, rx) = unbounded();
                 self.pubsub_event_stream.push(tx);
+                let _ = ret.send(rx);
+            }
+            IpfsEvent::ConnectionEventStream(ret) => {
+                let (tx, rx) = unbounded();
+                self.connection_event_stream.push(tx);
                 let _ = ret.send(rx);
             }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
