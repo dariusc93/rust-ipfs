@@ -1,4 +1,5 @@
 # 0.3.17 [unreleased]
+- feat: Implement Ipfs::connection_events [PR XX]
 - chore: Remove the initial notify and add Ipfs::listener_addresses and Ipfs::external_addresses [PR 79]
 - fix: Properly emit pubsub event of a given topic [PR 77]
 - refactor: Confirm event from swarm when disconnecting from peer [PR 75]
@@ -20,6 +21,7 @@
 [PR 75]: https://github.com/dariusc93/rust-ipfs/pull/75
 [PR 77]: https://github.com/dariusc93/rust-ipfs/pull/77
 [PR 79]: https://github.com/dariusc93/rust-ipfs/pull/79
+[PR XX]: https://github.com/dariusc93/rust-ipfs/pull/XX
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
