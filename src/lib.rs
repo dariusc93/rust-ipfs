@@ -2147,6 +2147,14 @@ mod node {
                 .await?
         }
 
+        pub async fn add_node(&self, node: &Self) -> Result<(), Error> {
+            for addr in &node.addrs {
+                self.add_peer(node.id, addr.to_owned()).await?;
+            }
+
+            Ok(())
+        }
+
         /// Shuts down the `Node`.
         pub async fn shutdown(self) {
             self.ipfs.exit_daemon().await;

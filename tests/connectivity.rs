@@ -1,5 +1,6 @@
+use futures::StreamExt;
 use libp2p::multiaddr::Protocol;
-use rust_ipfs::Node;
+use rust_ipfs::{ConnectionEvent, Node};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -24,6 +25,45 @@ async fn connect_two_nodes_by_addr() {
         .await
         .expect("timeout")
         .expect("should have connected");
+}
+
+#[tokio::test]
+async fn connection_event_stream() {
+    let node_a = Node::new("a").await;
+    let node_b = Node::new("b").await;
+
+    let mut event_a = node_a.connection_events(node_b.id).await.unwrap();
+    let mut event_b = node_b.connection_events(node_a.id).await.unwrap();
+
+    node_a.add_node(&node_b).await.unwrap();
+
+    node_a.connect(node_b.id).await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut connected_a = false;
+        let mut connected_b = false;
+
+        loop {
+            tokio::select! {
+                Some(event) = event_a.next() => {
+                    if let ConnectionEvent::ConnectionEstablished { .. } = event {
+                        connected_b = true
+                    }
+                },
+                Some(event) = event_b.next() => {
+                    if let ConnectionEvent::ConnectionEstablished { .. } = event {
+                        connected_a = true
+                    }
+                }
+            }
+
+            if connected_a && connected_b {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("timeout")
 }
 
 // Make sure two instances of ipfs can be connected by `PeerId`.
