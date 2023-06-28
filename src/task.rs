@@ -103,9 +103,8 @@ pub(crate) struct IpfsTask {
 
 impl IpfsTask {
     pub(crate) async fn run(&mut self, delay: bool) {
-        let mut connected_peer_timer = tokio::time::interval(Duration::from_secs(60));
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
-        let mut event_cleanup = tokio::time::interval(Duration::from_secs(5));
+        let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
         let mut external_check = tokio::time::interval_at(
             tokio::time::Instant::now() + Duration::from_secs(1),
             Duration::from_secs(1),
@@ -136,9 +135,7 @@ impl IpfsTask {
                 },
                 _ = event_cleanup.tick() => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
-                }
-                _ = connected_peer_timer.tick() => {
-                    info!("Connected Peers: {}", self.swarm.connected_peers().count());
+                    self.connection_event_stream.retain(|ch| !ch.is_closed());
                 }
                 _ = session_cleanup.tick() => {
                     let mut to_remove = Vec::new();
