@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .start()
         .await?;
-    
+
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     // Exit

@@ -362,7 +362,6 @@ enum IpfsEvent {
     /// Unban peer
     Unban(PeerId, Channel<()>),
     PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
-    PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
     PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
     PubsubPublish(
         String,
@@ -402,6 +401,11 @@ enum IpfsEvent {
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(OneshotSender<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
+
+    //event streams
+    PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
+    ConnectionEventStream(OneshotSender<UnboundedReceiver<InnerConnectionEvent>>),
+
     Exit,
 }
 
@@ -415,6 +419,13 @@ pub enum PubsubEvent {
 }
 
 #[derive(Debug, Clone)]
+pub enum ConnectionEvent {
+    ConnectionEstablished { address: Multiaddr },
+
+    ConnectionClosed { address: Multiaddr },
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum InnerPubsubEvent {
     /// Subscription event to a given topic
     Subscribe { topic: String, peer_id: PeerId },
@@ -423,11 +434,31 @@ pub(crate) enum InnerPubsubEvent {
     Unsubscribe { topic: String, peer_id: PeerId },
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum InnerConnectionEvent {
+    ConnectionEstablished { peer_id: PeerId, address: Multiaddr },
+
+    ConnectionClosed { peer_id: PeerId, address: Multiaddr },
+}
+
 impl From<InnerPubsubEvent> for PubsubEvent {
     fn from(event: InnerPubsubEvent) -> Self {
         match event {
             InnerPubsubEvent::Subscribe { peer_id, .. } => PubsubEvent::Subscribe { peer_id },
             InnerPubsubEvent::Unsubscribe { peer_id, .. } => PubsubEvent::Unsubscribe { peer_id },
+        }
+    }
+}
+
+impl From<InnerConnectionEvent> for ConnectionEvent {
+    fn from(event: InnerConnectionEvent) -> Self {
+        match event {
+            InnerConnectionEvent::ConnectionClosed { address, .. } => {
+                ConnectionEvent::ConnectionClosed { address }
+            }
+            InnerConnectionEvent::ConnectionEstablished { address, .. } => {
+                ConnectionEvent::ConnectionEstablished { address }
+            }
         }
     }
 }
@@ -799,6 +830,7 @@ impl UninitializedIpfs {
             disconnect_confirmation: Default::default(),
             failed_ping: Default::default(),
             pubsub_event_stream: Default::default(),
+            connection_event_stream: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
@@ -1596,6 +1628,39 @@ impl Ipfs {
         .await
     }
 
+    /// Return a [`ConnectionEvent`] regarding a peer
+    pub async fn connection_events(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<BoxStream<'static, ConnectionEvent>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::ConnectionEventStream(tx))
+                .await?;
+
+            let mut receiver = rx
+                .await?;
+
+            let peer_id_defined = peer_id;
+
+            let stream = async_stream::stream! {
+                while let Some(event) = receiver.next().await {
+                    match &event {
+                        InnerConnectionEvent::ConnectionEstablished { peer_id, .. } | InnerConnectionEvent::ConnectionClosed { peer_id, .. } if peer_id.eq(&peer_id_defined) => yield event.into(),
+                        _ => {}
+                    }
+                }
+            };
+
+            Ok(stream.boxed())
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
     /// Obtain the addresses associated with the given `PeerId`; they are first searched for locally
     /// and the DHT is used as a fallback: a `Kademlia::get_closest_peers(peer_id)` query is run and
     /// when it's finished, the newly added DHT records are checked for the existence of the desired
@@ -2080,6 +2145,14 @@ mod node {
                 .bootstrap()
                 .and_then(|fut| async { fut.await.map_err(anyhow::Error::from) })
                 .await?
+        }
+
+        pub async fn add_node(&self, node: &Self) -> Result<(), Error> {
+            for addr in &node.addrs {
+                self.add_peer(node.id, addr.to_owned()).await?;
+            }
+
+            Ok(())
         }
 
         /// Shuts down the `Node`.
