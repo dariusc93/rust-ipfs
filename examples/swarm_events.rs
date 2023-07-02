@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use libp2p::swarm::SwarmEvent;
-use rust_ipfs::{Ipfs, IpfsOptions, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsOptions};
+
+use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
+type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

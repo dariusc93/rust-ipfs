@@ -2,7 +2,11 @@ use clap::Parser;
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use rust_ipfs::p2p::PeerInfo;
-use rust_ipfs::{Ipfs, IpfsPath, Multiaddr, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsPath, Multiaddr};
+
+use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
+type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
+
 use std::process::exit;
 use tokio::io::AsyncWriteExt;
 

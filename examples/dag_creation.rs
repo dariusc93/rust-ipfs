@@ -1,6 +1,9 @@
 use futures::join;
 use libipld::ipld;
-use rust_ipfs::{Ipfs, IpfsPath, UninitializedIpfs};
+use rust_ipfs::{Ipfs, IpfsPath};
+
+use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
+type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

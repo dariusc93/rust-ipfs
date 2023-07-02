@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use clap::Parser;
 use futures::StreamExt;
 
-use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr, UninitializedIpfs};
+use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr};
+
+use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
+type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-get")]

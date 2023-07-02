@@ -1,4 +1,7 @@
-use rust_ipfs::{p2p::PeerInfo, Ipfs, UninitializedIpfs};
+use rust_ipfs::{p2p::PeerInfo, Ipfs};
+
+use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
+type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
