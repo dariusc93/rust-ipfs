@@ -1243,6 +1243,17 @@ impl IpfsTask {
                 };
                 let _ = ret.send(future);
             }
+            IpfsEvent::DhtMode(mode, ret) => {
+                let res = match self.swarm.behaviour_mut().kademlia.as_mut() {
+                    Some(kad) => {
+                        kad.set_mode(mode.into());
+                        Ok(())
+                    }
+                    None => Err(anyhow!("kad protocol is disabled")),
+                };
+
+                let _ = ret.send(res);
+            }
             IpfsEvent::DhtGet(key, ret) => {
                 let id = self
                     .swarm

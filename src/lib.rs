@@ -106,7 +106,7 @@ pub use libp2p::{
 };
 
 use libp2p::{
-    kad::{store::MemoryStoreConfig, KademliaConfig},
+    kad::{store::MemoryStoreConfig, KademliaConfig, Mode},
     ping::Config as PingConfig,
     swarm::dial_opts::DialOpts,
     StreamProtocol,
@@ -394,6 +394,7 @@ enum IpfsEvent {
     RemoveWhitelistPeer(PeerId, Channel<()>),
     GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
+    DhtMode(DhtMode, Channel<()>),
     DhtGet(Key, OneshotSender<RecordStream>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
@@ -407,6 +408,23 @@ enum IpfsEvent {
     ConnectionEventStream(OneshotSender<UnboundedReceiver<InnerConnectionEvent>>),
 
     Exit,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum DhtMode {
+    Auto,
+    Client,
+    Server,
+}
+
+impl From<DhtMode> for Option<Mode> {
+    fn from(mode: DhtMode) -> Self {
+        match mode {
+            DhtMode::Auto => None,
+            DhtMode::Client => Some(Mode::Client),
+            DhtMode::Server => Some(Mode::Server),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1776,6 +1794,23 @@ impl Ipfs {
             Err(e) => Err(anyhow!(e)),
         }
     }
+
+    /// Change the DHT mode
+    pub async fn dht_mode(&self, mode: DhtMode) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::DhtMode(mode, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
 
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.
