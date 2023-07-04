@@ -529,7 +529,7 @@ impl Behaviour {
         let upnp = Toggle::from(
             options
                 .portmapping
-                .then_some(libp2p_nat::Behaviour::new().await?),
+                .then_some(libp2p_nat::Behaviour::default()),
         );
 
         let (transport, relay_client) = match options.relay {
