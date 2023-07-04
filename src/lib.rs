@@ -2077,7 +2077,6 @@ pub use node::Node;
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
     use futures::TryFutureExt;
-    use libp2p::swarm::dummy;
 
     use super::*;
 
@@ -2119,7 +2118,7 @@ mod node {
         pub async fn with_options(opts: IpfsOptions) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs = UninitializedIpfs::<dummy::Behaviour>::with_opt(opts)
+            let ipfs: Ipfs = UninitializedIpfsNoop::with_opt(opts)
                 .disable_delay()
                 .start()
                 .await
