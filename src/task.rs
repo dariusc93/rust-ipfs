@@ -92,7 +92,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<OutEvent = void::Void>> {
     pub(crate) listener_subscriptions:
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
-    // pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
+    pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
@@ -237,9 +237,9 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
     }
 
     fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent<C>) {
-        // if let Some(handler) = self.swarm_event.clone() {
-        //     handler(&mut self.swarm, &swarm_event)
-        // }
+        if let Some(handler) = self.swarm_event.clone() {
+            handler(&mut self.swarm, &swarm_event)
+        }
         match swarm_event {
             SwarmEvent::NewListenAddr {
                 listener_id,

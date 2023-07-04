@@ -705,9 +705,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
 
         let (repo, repo_events) = create_repo(options.ipfs_path.clone());
 
-        let root_span = options
-            .span
-            .take()
+        let root_span = Option::take(&mut options.span)
             // not sure what would be the best practice with tracing and spans
             .unwrap_or_else(|| tracing::trace_span!(parent: &Span::current(), "ipfs"));
 
@@ -844,7 +842,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             listener_subscriptions,
             repo,
             bootstraps,
-            // swarm_event,
+            swarm_event,
             external_listener: Default::default(),
             local_listener: Default::default(),
         };
