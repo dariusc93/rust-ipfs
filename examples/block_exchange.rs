@@ -1,8 +1,7 @@
 use libipld::ipld;
 use rust_ipfs::IpfsPath;
 
-use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
-type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

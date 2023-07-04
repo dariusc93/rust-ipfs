@@ -4,8 +4,7 @@ use libipld::ipld;
 use libp2p::{futures::StreamExt, swarm::SwarmEvent};
 use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, PubsubEvent};
 
-use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
-type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 use rustyline_async::{Readline, ReadlineError};
 use std::{io::Write, sync::Arc};

@@ -1,7 +1,6 @@
 use rust_ipfs::Ipfs;
 
-use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
-type UninitializedIpfs = UninitializeIpfs<ext_behaviour::Behaviour>;
+use rust_ipfs::UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

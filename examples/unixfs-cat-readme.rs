@@ -3,9 +3,7 @@ use std::str::FromStr;
 use futures::StreamExt;
 use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::io::AsyncWriteExt;
-
-use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
-type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

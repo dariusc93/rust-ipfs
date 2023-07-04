@@ -482,6 +482,8 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> 
     custom_behaviour: Option<C>,
 }
 
+pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
+
 impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> Default for UninitializedIpfs<C> {
     fn default() -> Self {
         Self::with_opt(Default::default())

@@ -4,9 +4,7 @@ use clap::Parser;
 use futures::StreamExt;
 
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr};
-
-use rust_ipfs::UninitializedIpfs as UninitializeIpfs;
-type UninitializedIpfs = UninitializeIpfs<libp2p::swarm::dummy::Behaviour>;
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-get")]
