@@ -2,8 +2,9 @@
 use crate::error::Error;
 use crate::p2p::KadResult;
 use crate::path::IpfsPath;
-use crate::subscription::{RequestKind, SubscriptionRegistry};
+use crate::subscription::RequestKind;
 use crate::{Block, ReceiverChannel, StoragePath};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use core::fmt::Debug;
@@ -16,7 +17,9 @@ use futures::{StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
+use parking_lot::Mutex;
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -312,7 +315,8 @@ pub struct Repo {
     block_store: Arc<dyn BlockStore>,
     data_store: Arc<dyn DataStore>,
     events: Sender<RepoEvent>,
-    pub(crate) subscriptions: Arc<SubscriptionRegistry<Block, String>>,
+    pub(crate) subscriptions:
+        Arc<Mutex<HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>>>,
     lockfile: Arc<dyn Lock>,
 }
 
@@ -413,7 +417,9 @@ impl Repo {
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
     /// refactoring, see notes on [`crate::Ipfs::exit_daemon`].
     pub fn shutdown(&self) {
-        self.subscriptions.shutdown();
+        let mut map = self.subscriptions.lock();
+        map.clear();
+        drop(map);
     }
 
     pub async fn init(&self) -> Result<(), Error> {
@@ -451,8 +457,15 @@ impl Repo {
         let (cid, res) = self.block_store.put(block.clone()).await?;
 
         if let BlockPut::NewBlock = res {
-            self.subscriptions
-                .finish_subscription(cid.into(), Ok(block));
+            let list = self.subscriptions.lock().remove(&cid);
+            if let Some(mut list) = list {
+                for ch in list.drain(..) {
+                    let block = block.clone();
+                    tokio::spawn(async move {
+                        let _ = ch.send(Ok(block));
+                    });
+                }
+            }
         }
 
         Ok((cid, res))
@@ -477,9 +490,14 @@ impl Repo {
                 anyhow::bail!("Unable to locate block {cid}");
             }
 
-            let subscription = self
-                .subscriptions
-                .create_subscription((*cid).into(), Some(self.events.clone()));
+            let (tx, rx) = futures::channel::oneshot::channel();
+
+            self.subscriptions.lock().entry(*cid).or_default().push(tx);
+
+            // let subscription = self
+            //     .subscriptions
+            //     .create_subscription((*cid).into(), Some(self.events.clone()));
+
             // sending only fails if no one is listening anymore
             // and that is okay with us.
             self.events
@@ -487,7 +505,8 @@ impl Repo {
                 .send(RepoEvent::WantBlock(None, *cid, peers.to_vec()))
                 .await
                 .ok();
-            Ok(subscription.await?)
+
+            rx.await?.map_err(|e| anyhow!("{e}"))
         }
     }
 

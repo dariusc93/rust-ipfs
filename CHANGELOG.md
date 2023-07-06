@@ -1,4 +1,5 @@
 # 0.3.17 [unreleased]
+- refactor: Use channels instead of Subscription [PR 82]
 - feat: Ability to add custom behaviour [PR 81]
 - feat: Implement Ipfs::connection_events [PR 80]
 - chore: Remove the initial notify and add Ipfs::listener_addresses and Ipfs::external_addresses [PR 79]
@@ -24,6 +25,7 @@
 [PR 79]: https://github.com/dariusc93/rust-ipfs/pull/79
 [PR 80]: https://github.com/dariusc93/rust-ipfs/pull/80
 [PR 81]: https://github.com/dariusc93/rust-ipfs/pull/81
+[PR 82]: https://github.com/dariusc93/rust-ipfs/pull/82
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]
