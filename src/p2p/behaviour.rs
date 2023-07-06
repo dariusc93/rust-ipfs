@@ -425,7 +425,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> Behaviour<C> {
         options: SwarmOptions,
         repo: Repo,
         limits: ConnectionLimits,
-        custom: Option<C>
+        custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let peer_id = keypair.public().to_peer_id();
 
@@ -646,7 +646,7 @@ pub async fn build_behaviour<C: NetworkBehaviour<ToSwarm = void::Void>>(
     options: SwarmOptions,
     repo: Repo,
     limits: ConnectionLimits,
-    custom: Option<C>
+    custom: Option<C>,
 ) -> Result<(Behaviour<C>, Option<ClientTransport>), Error> {
     Behaviour::new(keypair, options, repo, limits, custom).await
 }

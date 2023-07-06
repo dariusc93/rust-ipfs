@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use clap::Parser;
 use futures::StreamExt;
 
-use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr};
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-get")]
