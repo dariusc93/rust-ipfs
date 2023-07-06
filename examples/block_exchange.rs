@@ -1,5 +1,7 @@
 use libipld::ipld;
-use rust_ipfs::{IpfsPath, UninitializedIpfs};
+use rust_ipfs::IpfsPath;
+
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

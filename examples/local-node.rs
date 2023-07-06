@@ -1,4 +1,6 @@
-use rust_ipfs::{p2p::PeerInfo, Ipfs, UninitializedIpfs};
+use rust_ipfs::{p2p::PeerInfo, Ipfs};
+
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

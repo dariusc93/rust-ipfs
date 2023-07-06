@@ -462,8 +462,8 @@ impl From<InnerConnectionEvent> for ConnectionEvent {
     }
 }
 
-type TSwarmEvent = <TSwarm as Stream>::Item;
-type TSwarmEventFn = Arc<dyn Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send>;
+type TSwarmEvent<C> = <TSwarm<C> as Stream>::Item;
+type TSwarmEventFn<C> = Arc<dyn Fn(&mut TSwarm<C>, &TSwarmEvent<C>) + Sync + Send>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum FDLimit {
@@ -473,21 +473,24 @@ pub enum FDLimit {
 
 /// Configured Ipfs which can only be started.
 
-pub struct UninitializedIpfs {
+pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> {
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     delay: bool,
-    swarm_event: Option<TSwarmEventFn>,
+    swarm_event: Option<TSwarmEventFn<C>>,
+    custom_behaviour: Option<C>,
 }
 
-impl Default for UninitializedIpfs {
+pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
+
+impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> Default for UninitializedIpfs<C> {
     fn default() -> Self {
         Self::with_opt(Default::default())
     }
 }
 
-impl UninitializedIpfs {
+impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -508,6 +511,7 @@ impl UninitializedIpfs {
             fdlimit,
             delay,
             swarm_event: None,
+            custom_behaviour: None,
         }
     }
 
@@ -654,6 +658,11 @@ impl UninitializedIpfs {
         self
     }
 
+    pub fn set_custom_behaviour(mut self, behaviour: C) -> Self {
+        self.custom_behaviour = Some(behaviour);
+        self
+    }
+
     /// Set file desc limit
     pub fn fd_limit(mut self, limit: FDLimit) -> Self {
         self.fdlimit = Some(limit);
@@ -670,7 +679,7 @@ impl UninitializedIpfs {
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
     where
-        F: Fn(&mut TSwarm, &TSwarmEvent) + Sync + Send + 'static,
+        F: Fn(&mut TSwarm<C>, &TSwarmEvent<C>) + Sync + Send + 'static,
     {
         self.swarm_event = Some(Arc::new(func));
         self
@@ -684,6 +693,7 @@ impl UninitializedIpfs {
             delay,
             mut options,
             swarm_event,
+            custom_behaviour,
             ..
         } = self;
 
@@ -695,9 +705,7 @@ impl UninitializedIpfs {
 
         let (repo, repo_events) = create_repo(options.ipfs_path.clone());
 
-        let root_span = options
-            .span
-            .take()
+        let root_span = Option::take(&mut options.span)
             // not sure what would be the best practice with tracing and spans
             .unwrap_or_else(|| tracing::trace_span!(parent: &Span::current(), "ipfs"));
 
@@ -802,6 +810,7 @@ impl UninitializedIpfs {
             transport_config,
             repo.clone(),
             exec_span,
+            custom_behaviour,
         )
         .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
         .await?;
@@ -2109,7 +2118,7 @@ mod node {
         pub async fn with_options(opts: IpfsOptions) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs = UninitializedIpfs::with_opt(opts)
+            let ipfs: Ipfs = UninitializedIpfsNoop::with_opt(opts)
                 .disable_delay()
                 .start()
                 .await

@@ -14,6 +14,7 @@ use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
 use libp2p::ping::Config as PingConfig;
+use libp2p::swarm::NetworkBehaviour;
 use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
 use tracing::Span;
@@ -42,7 +43,7 @@ pub use addr::MultiaddrExt;
 pub use behaviour::KadResult;
 
 /// Type alias for [`libp2p::Swarm`] running the [`behaviour::Behaviour`] with the given [`IpfsTypes`].
-pub type TSwarm = Swarm<behaviour::Behaviour>;
+pub type TSwarm<C> = Swarm<behaviour::Behaviour<C>>;
 
 /// Abstraction of IdentifyInfo but includes PeerId
 #[derive(Clone, Debug, Eq)]
@@ -268,19 +269,21 @@ impl Default for SwarmConfig {
 }
 
 /// Creates a new IPFS swarm.
-pub async fn create_swarm(
+pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
     keypair: &Keypair,
     options: SwarmOptions,
     swarm_config: SwarmConfig,
     transport_config: TransportConfig,
     repo: Repo,
     span: Span,
-) -> Result<TSwarm, Error> {
+    custom: Option<C>,
+) -> Result<TSwarm<C>, Error> {
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
 
     let (behaviour, relay_transport) =
-        behaviour::build_behaviour(&keypair, options, repo, swarm_config.connection).await?;
+        behaviour::build_behaviour(&keypair, options, repo, swarm_config.connection, custom)
+            .await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = transport::build_transport(keypair, relay_transport, transport_config)?;

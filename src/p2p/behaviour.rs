@@ -42,7 +42,7 @@ use std::time::Duration;
 /// Behaviour type.
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
-pub struct Behaviour {
+pub struct Behaviour<C: NetworkBehaviour<OutEvent = void::Void>> {
     pub mdns: Toggle<Mdns>,
     pub bitswap: Toggle<Bitswap<Repo>>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
@@ -57,6 +57,7 @@ pub struct Behaviour {
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
     pub peerbook: peerbook::Behaviour,
+    pub custom: Toggle<C>,
 }
 
 #[derive(Debug)]
@@ -414,12 +415,13 @@ impl From<BitswapConfig> for beetle_bitswap_next::Config {
     }
 }
 
-impl Behaviour {
+impl<C: NetworkBehaviour<OutEvent = void::Void>> Behaviour<C> {
     pub async fn new(
         keypair: &Keypair,
         options: SwarmOptions,
         repo: Repo,
         limits: ConnectionLimits,
+        custom: Option<C>
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let peer_id = keypair.public().to_peer_id();
 
@@ -542,6 +544,8 @@ impl Behaviour {
         let addressbook =
             addressbook::Behaviour::with_config(options.addrbook_config.unwrap_or_default());
 
+        let custom = Toggle::from(custom);
+
         Ok((
             Behaviour {
                 mdns,
@@ -558,6 +562,7 @@ impl Behaviour {
                 upnp,
                 peerbook,
                 addressbook,
+                custom,
             },
             transport,
         ))
@@ -635,11 +640,12 @@ impl Behaviour {
 }
 
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
-pub async fn build_behaviour(
+pub async fn build_behaviour<C: NetworkBehaviour<OutEvent = void::Void>>(
     keypair: &Keypair,
     options: SwarmOptions,
     repo: Repo,
     limits: ConnectionLimits,
-) -> Result<(Behaviour, Option<ClientTransport>), Error> {
-    Behaviour::new(keypair, options, repo, limits).await
+    custom: Option<C>
+) -> Result<(Behaviour<C>, Option<ClientTransport>), Error> {
+    Behaviour::new(keypair, options, repo, limits, custom).await
 }
