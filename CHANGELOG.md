@@ -1,4 +1,5 @@
 # 0.3.17 [unreleased]
+- feat: Ability to add custom behaviour [PR 81]
 - feat: Implement Ipfs::connection_events [PR 80]
 - chore: Remove the initial notify and add Ipfs::listener_addresses and Ipfs::external_addresses [PR 79]
 - fix: Properly emit pubsub event of a given topic [PR 77]
@@ -22,6 +23,7 @@
 [PR 77]: https://github.com/dariusc93/rust-ipfs/pull/77
 [PR 79]: https://github.com/dariusc93/rust-ipfs/pull/79
 [PR 80]: https://github.com/dariusc93/rust-ipfs/pull/80
+[PR 81]: https://github.com/dariusc93/rust-ipfs/pull/81
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]

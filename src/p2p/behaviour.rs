@@ -43,7 +43,7 @@ use std::time::Duration;
 /// Behaviour type.
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "BehaviourEvent")]
-pub struct Behaviour {
+pub struct Behaviour<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub mdns: Toggle<Mdns>,
     pub bitswap: Toggle<Bitswap<Repo>>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
@@ -60,6 +60,7 @@ pub struct Behaviour {
     pub addressbook: addressbook::Behaviour,
     pub peerbook: peerbook::Behaviour,
     pub protocol: protocol::Behaviour,
+    pub custom: Toggle<C>,
 }
 
 #[derive(Debug)]
@@ -418,12 +419,13 @@ impl From<BitswapConfig> for beetle_bitswap_next::Config {
     }
 }
 
-impl Behaviour {
+impl<C: NetworkBehaviour<ToSwarm = void::Void>> Behaviour<C> {
     pub async fn new(
         keypair: &Keypair,
         options: SwarmOptions,
         repo: Repo,
         limits: ConnectionLimits,
+        custom: Option<C>
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let peer_id = keypair.public().to_peer_id();
 
@@ -548,6 +550,7 @@ impl Behaviour {
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
         let protocol = protocol::Behaviour::default();
+        let custom = Toggle::from(custom);
 
         Ok((
             Behaviour {
@@ -567,6 +570,7 @@ impl Behaviour {
                 peerbook,
                 addressbook,
                 protocol,
+                custom,
             },
             transport,
         ))
@@ -637,11 +641,12 @@ impl Behaviour {
 }
 
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
-pub async fn build_behaviour(
+pub async fn build_behaviour<C: NetworkBehaviour<ToSwarm = void::Void>>(
     keypair: &Keypair,
     options: SwarmOptions,
     repo: Repo,
     limits: ConnectionLimits,
-) -> Result<(Behaviour, Option<ClientTransport>), Error> {
-    Behaviour::new(keypair, options, repo, limits).await
+    custom: Option<C>
+) -> Result<(Behaviour<C>, Option<ClientTransport>), Error> {
+    Behaviour::new(keypair, options, repo, limits, custom).await
 }

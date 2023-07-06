@@ -75,8 +75,8 @@ static BITSWAP_ID: AtomicU64 = AtomicU64::new(0);
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
-pub(crate) struct IpfsTask {
-    pub(crate) swarm: TSwarm,
+pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
+    pub(crate) swarm: TSwarm<C>,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
     pub(crate) listening_addresses: HashMap<Multiaddr, ListenerId>,
@@ -91,7 +91,7 @@ pub(crate) struct IpfsTask {
     pub(crate) listener_subscriptions:
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
-    pub(crate) swarm_event: Option<TSwarmEventFn>,
+    pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) failed_ping: HashMap<ConnectionId, usize>,
@@ -101,7 +101,7 @@ pub(crate) struct IpfsTask {
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
 }
 
-impl IpfsTask {
+impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self, delay: bool) {
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
         let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
@@ -237,7 +237,7 @@ impl IpfsTask {
         }
     }
 
-    fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent) {
+    fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent<C>) {
         if let Some(handler) = self.swarm_event.clone() {
             handler(&mut self.swarm, &swarm_event)
         }

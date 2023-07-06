@@ -2,7 +2,10 @@ use clap::Parser;
 use futures::{channel::mpsc, pin_mut, FutureExt};
 use libipld::ipld;
 use libp2p::{futures::StreamExt, swarm::SwarmEvent};
-use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, PubsubEvent, UninitializedIpfs};
+use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, PubsubEvent};
+
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+
 use rustyline_async::{Readline, ReadlineError};
 use std::{io::Write, sync::Arc};
 use tokio::sync::Notify;
