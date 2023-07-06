@@ -2140,8 +2140,9 @@ mod node {
         /// Returns the subscriptions for a `Node`.
         pub fn get_subscriptions(
             &self,
-        ) -> &parking_lot::RwLock<subscription::Subscriptions<Block, String>> {
-            &self.ipfs.repo.subscriptions.subscriptions
+        ) -> &parking_lot::Mutex<HashMap<Cid, Vec<oneshot::Sender<Result<Block, String>>>>>
+        {
+            &self.ipfs.repo.subscriptions
         }
 
         /// Bootstraps the local node to join the DHT: it looks up the node's own ID in the
