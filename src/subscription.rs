@@ -26,6 +26,7 @@ use std::task::{Context, Poll, Waker};
 
 // a counter used to assign unique identifiers to `Subscription`s and `SubscriptionFuture`s
 // (which obtain the same number as their counterpart `Subscription`)
+#[allow(dead_code)]
 static GLOBAL_REQ_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// The type of a request for subscription.
@@ -104,6 +105,7 @@ impl<T: Debug + Clone + PartialEq, E: Debug + Clone> fmt::Debug for Subscription
     }
 }
 
+#[allow(dead_code)]
 impl<T: Debug + Clone + PartialEq, E: Debug + Clone> SubscriptionRegistry<T, E> {
     /// Creates a `Subscription` and returns its associated `Future`, the `SubscriptionFuture`.
     pub fn create_subscription(
@@ -301,6 +303,7 @@ impl<T, E> fmt::Debug for Subscription<T, E> {
     }
 }
 
+#[allow(dead_code)]
 impl<T, E> Subscription<T, E> {
     fn new(cancel_notifier: Option<Sender<RepoEvent>>) -> Self {
         Self::Pending {
