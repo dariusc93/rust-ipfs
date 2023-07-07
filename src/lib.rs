@@ -2138,6 +2138,7 @@ mod node {
         }
 
         /// Returns the subscriptions for a `Node`.
+        #[allow(clippy::type_complexity)]
         pub fn get_subscriptions(
             &self,
         ) -> &parking_lot::Mutex<HashMap<Cid, Vec<oneshot::Sender<Result<Block, String>>>>>
