@@ -310,6 +310,7 @@ impl<C: Borrow<Cid>> PinKind<C> {
 ///
 /// Consolidates a blockstore, a datastore and a subscription registry.
 
+#[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
 pub struct Repo {
     block_store: Arc<dyn BlockStore>,
@@ -479,10 +480,6 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
     ) -> Result<Block, Error> {
-        // FIXME: here's a race: block_store might give Ok(None) and we get to create our
-        // subscription after the put has completed. So maybe create the subscription first, then
-        // cancel it?
-
         if let Some(block) = self.get_block_now(cid).await? {
             Ok(block)
         } else {
@@ -493,10 +490,6 @@ impl Repo {
             let (tx, rx) = futures::channel::oneshot::channel();
 
             self.subscriptions.lock().entry(*cid).or_default().push(tx);
-
-            // let subscription = self
-            //     .subscriptions
-            //     .create_subscription((*cid).into(), Some(self.events.clone()));
 
             // sending only fails if no one is listening anymore
             // and that is okay with us.
