@@ -7,7 +7,7 @@ use tracing::debug;
 
 use crate::Block;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Clone)]
 pub struct SessionInterestManager {
     /// Map of cids -> sessions -> bool
     ///
@@ -18,6 +18,12 @@ pub struct SessionInterestManager {
     /// the block, but still wants to receive messages from peers who have
     /// the block as they may have other blocks the session is interested in.
     wants: Arc<RwLock<AHashMap<Cid, AHashMap<u64, bool>>>>,
+}
+
+impl std::fmt::Debug for SessionInterestManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionInterestManager").finish()
+    }
 }
 
 impl SessionInterestManager {
