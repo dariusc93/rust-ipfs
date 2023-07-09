@@ -1,3 +1,6 @@
+# 0.3.18
+- fix: Add Sync + Send to custom transport signature
+
 # 0.3.17
 - feat: Support custom transport [PR 84]
 - chore: Implement functions to add session to bitswap [PR 83]

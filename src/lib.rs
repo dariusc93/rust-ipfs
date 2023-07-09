@@ -468,6 +468,15 @@ impl From<InnerConnectionEvent> for ConnectionEvent {
 
 type TSwarmEvent<C> = <TSwarm<C> as Stream>::Item;
 type TSwarmEventFn<C> = Arc<dyn Fn(&mut TSwarm<C>, &TSwarmEvent<C>) + Sync + Send>;
+type TTransportFn = Box<
+    dyn Fn(
+            &Keypair,
+            Option<libp2p::relay::client::Transport>,
+        ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>
+        + Sync
+        + Send
+        + 'static,
+>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum FDLimit {
@@ -484,14 +493,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> 
     delay: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     custom_behaviour: Option<C>,
-    custom_transport: Option<
-        Box<
-            dyn Fn(
-                &Keypair,
-                Option<libp2p::relay::client::Transport>,
-            ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>,
-        >,
-    >,
+    custom_transport: Option<TTransportFn>,
 }
 
 pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
@@ -681,12 +683,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
     /// Set a transport
     pub fn set_custom_transport(
         mut self,
-        transport: Box<
-            dyn Fn(
-                &Keypair,
-                Option<libp2p::relay::client::Transport>,
-            ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>,
-        >,
+        transport: TTransportFn,
     ) -> Self {
         self.custom_transport = Some(transport);
         self

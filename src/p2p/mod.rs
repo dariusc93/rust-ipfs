@@ -6,11 +6,9 @@ use std::num::{NonZeroU8, NonZeroUsize};
 
 use crate::error::Error;
 use crate::repo::Repo;
-use crate::IpfsOptions;
+use crate::{IpfsOptions, TTransportFn};
 
 use either::Either;
-use libp2p::core::muxing::StreamMuxerBox;
-use libp2p::core::transport::Boxed;
 use libp2p::gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
@@ -279,17 +277,7 @@ pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
     transport_config: TransportConfig,
     repo: Repo,
     span: Span,
-    (custom, custom_transport): (
-        Option<C>,
-        Option<
-            Box<
-                dyn Fn(
-                    &Keypair,
-                    Option<libp2p::relay::client::Transport>,
-                ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>,
-            >,
-        >,
-    ),
+    (custom, custom_transport): (Option<C>, Option<TTransportFn>),
 ) -> Result<TSwarm<C>, Error> {
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
@@ -301,7 +289,7 @@ pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = match custom_transport {
         Some(transport) => transport(&keypair, relay_transport)?,
-        None => transport::build_transport(keypair, relay_transport, transport_config)?
+        None => transport::build_transport(keypair, relay_transport, transport_config)?,
     };
 
     // Create a Swarm
