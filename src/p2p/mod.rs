@@ -9,6 +9,8 @@ use crate::repo::Repo;
 use crate::IpfsOptions;
 
 use either::Either;
+use libp2p::core::muxing::StreamMuxerBox;
+use libp2p::core::transport::Boxed;
 use libp2p::gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
@@ -268,6 +270,7 @@ impl Default for SwarmConfig {
     }
 }
 
+#[allow(clippy::type_complexity)]
 /// Creates a new IPFS swarm.
 pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
     keypair: &Keypair,
@@ -276,7 +279,17 @@ pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
     transport_config: TransportConfig,
     repo: Repo,
     span: Span,
-    custom: Option<C>,
+    (custom, custom_transport): (
+        Option<C>,
+        Option<
+            Box<
+                dyn Fn(
+                    &Keypair,
+                    Option<libp2p::relay::client::Transport>,
+                ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>,
+            >,
+        >,
+    ),
 ) -> Result<TSwarm<C>, Error> {
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
@@ -286,7 +299,10 @@ pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
             .await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
-    let transport = transport::build_transport(keypair, relay_transport, transport_config)?;
+    let transport = match custom_transport {
+        Some(transport) => transport(&keypair, relay_transport)?,
+        None => transport::build_transport(keypair, relay_transport, transport_config)?
+    };
 
     // Create a Swarm
     let swarm = libp2p::swarm::SwarmBuilder::with_executor(
