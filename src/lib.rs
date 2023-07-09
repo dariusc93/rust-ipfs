@@ -69,6 +69,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
+    sync::atomic::AtomicU64,
 };
 
 use self::{
@@ -110,6 +111,8 @@ use libp2p::{
     ping::Config as PingConfig,
     swarm::dial_opts::DialOpts,
 };
+
+pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
 pub enum StoragePath {

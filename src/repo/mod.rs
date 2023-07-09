@@ -474,8 +474,20 @@ impl Repo {
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
+    #[inline]
     pub async fn get_block(
         &self,
+        cid: &Cid,
+        peers: &[PeerId],
+        local_only: bool,
+    ) -> Result<Block, Error> {
+        self.get_block_with_session(None, cid, peers, local_only)
+            .await
+    }
+
+    pub(crate) async fn get_block_with_session(
+        &self,
+        session: Option<u64>,
         cid: &Cid,
         peers: &[PeerId],
         local_only: bool,
@@ -495,7 +507,7 @@ impl Repo {
             // and that is okay with us.
             self.events
                 .clone()
-                .send(RepoEvent::WantBlock(None, *cid, peers.to_vec()))
+                .send(RepoEvent::WantBlock(session, *cid, peers.to_vec()))
                 .await
                 .ok();
 

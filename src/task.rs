@@ -24,7 +24,6 @@ use tokio::task::JoinHandle;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     io,
-    sync::atomic::AtomicU64,
     time::Duration,
 };
 
@@ -69,9 +68,6 @@ use libp2p::{
     ping::Success as PingSuccess,
     swarm::SwarmEvent,
 };
-
-#[allow(dead_code)]
-static BITSWAP_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.

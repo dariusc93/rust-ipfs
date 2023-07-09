@@ -573,6 +573,8 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> Behaviour<C> {
             self.addressbook.add_address(peer, addr);
         }
 
+        self.pubsub.add_explicit_peer(&peer);
+
         // if let Some(bitswap) = self.bitswap.as_ref() {
         //     let client = bitswap.client().clone();
         //     let server = bitswap.server().cloned();
