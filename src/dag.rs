@@ -226,6 +226,17 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<Ipld, ResolveError> {
+        self.get_with_session(None, path, providers, local_only)
+            .await
+    }
+
+    pub(crate) async fn get_with_session(
+        &self,
+        session: Option<u64>,
+        path: IpfsPath,
+        providers: &[PeerId],
+        local_only: bool,
+    ) -> Result<Ipld, ResolveError> {
         let resolved_path = self
             .ipfs
             .resolve_ipns(&path, true)
@@ -240,7 +251,7 @@ impl IpldDag {
         let mut iter = resolved_path.iter().peekable();
 
         let (node, _) = match self
-            .resolve0(cid, &mut iter, true, providers, local_only)
+            .resolve0(session, cid, &mut iter, true, providers, local_only)
             .await
         {
             Ok(t) => t,
@@ -271,6 +282,18 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
+        self.resolve_with_session(None, path, follow_links, providers, local_only)
+            .await
+    }
+
+    pub(crate) async fn resolve_with_session(
+        &self,
+        session: Option<u64>,
+        path: IpfsPath,
+        follow_links: bool,
+        providers: &[PeerId],
+        local_only: bool,
+    ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
         let resolved_path = self
             .ipfs
             .resolve_ipns(&path, true)
@@ -285,7 +308,7 @@ impl IpldDag {
         let (node, matched_segments) = {
             let mut iter = resolved_path.iter().peekable();
             match self
-                .resolve0(cid, &mut iter, follow_links, providers, local_only)
+                .resolve0(session, cid, &mut iter, follow_links, providers, local_only)
                 .await
             {
                 Ok(t) => t,
@@ -307,6 +330,7 @@ impl IpldDag {
     /// Return the node where the resolving ended, and the **count** of segments matched.
     async fn resolve0<'a>(
         &self,
+        session: Option<u64>,
         cid: &Cid,
         segments: &mut Peekable<impl Iterator<Item = &'a str>>,
         follow_links: bool,
@@ -315,7 +339,7 @@ impl IpldDag {
     ) -> Result<(ResolvedNode, usize), RawResolveLocalError> {
         use LocallyResolved::*;
 
-        let mut current = cid.to_owned();
+        let mut current = *cid;
         let mut total = 0;
 
         let mut cache = None;
@@ -324,7 +348,7 @@ impl IpldDag {
             let block = match self
                 .ipfs
                 .repo
-                .get_block(&current, providers, local_only)
+                .get_block_with_session(session, &current, providers, local_only)
                 .await
             {
                 Ok(block) => block,
