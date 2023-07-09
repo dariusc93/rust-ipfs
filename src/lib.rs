@@ -67,9 +67,9 @@ use std::{
     fmt, io,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
+    sync::atomic::AtomicU64,
     sync::Arc,
     time::Duration,
-    sync::atomic::AtomicU64,
 };
 
 use self::{
@@ -107,6 +107,7 @@ pub use libp2p::{
 };
 
 use libp2p::{
+    core::{muxing::StreamMuxerBox, transport::Boxed},
     kad::{store::MemoryStoreConfig, KademliaConfig},
     ping::Config as PingConfig,
     swarm::dial_opts::DialOpts,
@@ -475,7 +476,7 @@ pub enum FDLimit {
 }
 
 /// Configured Ipfs which can only be started.
-
+#[allow(clippy::type_complexity)]
 pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> {
     keys: Keypair,
     options: IpfsOptions,
@@ -483,6 +484,14 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> 
     delay: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     custom_behaviour: Option<C>,
+    custom_transport: Option<
+        Box<
+            dyn Fn(
+                &Keypair,
+                Option<libp2p::relay::client::Transport>,
+            ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>,
+        >,
+    >,
 }
 
 pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
@@ -515,6 +524,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             delay,
             swarm_event: None,
             custom_behaviour: None,
+            custom_transport: None,
         }
     }
 
@@ -661,8 +671,24 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Set a custom behaviour
     pub fn set_custom_behaviour(mut self, behaviour: C) -> Self {
         self.custom_behaviour = Some(behaviour);
+        self
+    }
+
+    #[allow(clippy::type_complexity)]
+    /// Set a transport
+    pub fn set_custom_transport(
+        mut self,
+        transport: Box<
+            dyn Fn(
+                &Keypair,
+                Option<libp2p::relay::client::Transport>,
+            ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>,
+        >,
+    ) -> Self {
+        self.custom_transport = Some(transport);
         self
     }
 
@@ -697,6 +723,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             mut options,
             swarm_event,
             custom_behaviour,
+            custom_transport,
             ..
         } = self;
 
@@ -813,7 +840,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             transport_config,
             repo.clone(),
             exec_span,
-            custom_behaviour,
+            (custom_behaviour, custom_transport),
         )
         .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
         .await?;
