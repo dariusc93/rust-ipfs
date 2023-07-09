@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.3.16"
+version = "0.3.17"
 
 [features]
 
@@ -22,7 +22,7 @@ anyhow = "1.0"
 async-stream = { default-features = false, version = "0.3" }
 async-trait = { default-features = false, version = "0.1" }
 base64 = { default-features = false, features = ["alloc"], version = "0.21" }
-beetle-bitswap-next = { path = "beetle-bitswap-next" }
+beetle-bitswap-next = { version = "0.3.0", path = "beetle-bitswap-next" }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
 libipld = "0.15"

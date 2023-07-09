@@ -1,4 +1,4 @@
-# 0.3.17 [unreleased]
+# 0.3.17
 - feat: Support custom transport [PR 84]
 - chore: Implement functions to add session to bitswap [PR 83]
 - refactor: Use channels instead of Subscription [PR 82]
