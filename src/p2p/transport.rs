@@ -3,7 +3,7 @@ use futures::future::Either as FutureEither;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
-use libp2p::core::transport::{Boxed, OrTransport};
+use libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 use libp2p::core::upgrade::SelectUpgrade;
 use libp2p::dns::{ResolverConfig, ResolverOpts, TokioDnsConfig};
 use libp2p::relay::client::Transport as ClientTransport;
@@ -232,6 +232,32 @@ pub(crate) fn build_transport(
                 .boxed()
         }
         false => transport,
+    };
+
+    Ok(transport)
+}
+
+#[allow(dead_code)]
+pub(crate) fn memory_transport(
+    keypair: &identity::Keypair,
+    relay: Option<ClientTransport>,
+) -> io::Result<TTransport> {
+    let noise_config =
+        noise::Config::new(keypair).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
+    let transport = match relay {
+        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
+            .upgrade(Version::V1)
+            .authenticate(noise_config)
+            .multiplex(YamuxConfig::default())
+            .timeout(Duration::from_secs(20))
+            .boxed(),
+        None => MemoryTransport::default()
+            .upgrade(Version::V1)
+            .authenticate(noise_config)
+            .multiplex(YamuxConfig::default())
+            .timeout(Duration::from_secs(20))
+            .boxed(),
     };
 
     Ok(transport)

@@ -1,4 +1,9 @@
-# 0.3.17 [unreleased]
+# 0.3.18
+- fix: Add Sync + Send to custom transport signature
+
+# 0.3.17
+- feat: Support custom transport [PR 84]
+- chore: Implement functions to add session to bitswap [PR 83]
 - refactor: Use channels instead of Subscription [PR 82]
 - feat: Ability to add custom behaviour [PR 81]
 - feat: Implement Ipfs::connection_events [PR 80]
@@ -26,6 +31,8 @@
 [PR 80]: https://github.com/dariusc93/rust-ipfs/pull/80
 [PR 81]: https://github.com/dariusc93/rust-ipfs/pull/81
 [PR 82]: https://github.com/dariusc93/rust-ipfs/pull/82
+[PR 83]: https://github.com/dariusc93/rust-ipfs/pull/83
+[PR 84]: https://github.com/dariusc93/rust-ipfs/pull/84
 
 # 0.3.16
 - fix: Return events from gossipsub stream [PR 68]

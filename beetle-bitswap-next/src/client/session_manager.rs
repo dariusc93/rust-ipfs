@@ -22,12 +22,11 @@ use super::{
     session_interest_manager::SessionInterestManager,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SessionManager {
     inner: Arc<Inner>,
 }
 
-#[derive(Debug)]
 struct Inner {
     session_interest_manager: SessionInterestManager,
     block_presence_manager: BlockPresenceManager,
@@ -36,6 +35,12 @@ struct Inner {
     sessions: RwLock<AHashMap<u64, Session>>,
     session_index: AtomicU64,
     notify: async_broadcast::Sender<Block>,
+}
+
+impl std::fmt::Debug for SessionManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionManager").finish()
+    }
 }
 
 impl SessionManager {
