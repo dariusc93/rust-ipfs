@@ -1,6 +1,6 @@
 [package]
 authors = ["Darius C", "Rust-IPFS contributors"]
-rust-version = "1.68"
+rust-version = "1.70"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 name = "rust-ipfs"
