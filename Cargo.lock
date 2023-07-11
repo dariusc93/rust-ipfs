@@ -4188,7 +4188,6 @@ dependencies = [
  "libipld",
  "libp2p",
  "libp2p-nat",
- "once_cell",
  "parking_lot 0.12.1",
  "prost",
  "prost-build",
