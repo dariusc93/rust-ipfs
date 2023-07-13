@@ -143,8 +143,4 @@ exclude = ["archived", "bitswap"]
 resolver = "2"
 
 [patch.crates-io]
-libp2p = { version = "0.52", git = "https://github.com/libp2p/rust-libp2p/", rev = "cbb9c7c0f392b78a61c43a1b876ed5d89b101634" }
-libp2p-quic = { version = "0.8.0-alpha", git = "https://github.com/libp2p/rust-libp2p/", rev = "cbb9c7c0f392b78a61c43a1b876ed5d89b101634" }
-libp2p-mplex = { version = "0.40", git = "https://github.com/libp2p/rust-libp2p/", rev = "cbb9c7c0f392b78a61c43a1b876ed5d89b101634" }
-libp2p-allow-block-list = { version = "0.2", git = "https://github.com/libp2p/rust-libp2p/", rev = "cbb9c7c0f392b78a61c43a1b876ed5d89b101634" }
-libp2p-nat = { version = "0.3", git = "https://github.com/dariusc93/libp2p-nat", rev = "d5852c55d26b6c3f9aa0603128efb17c01c2a6ff" }
+libp2p-nat = { version = "0.3", git = "https://github.com/dariusc93/libp2p-nat", rev = "13b7111dfe06d1d7e978cf31105194e835f99dde" }
