@@ -4,7 +4,7 @@ use crate::repo::{PinKind, PinMode, PinStore, References};
 use async_trait::async_trait;
 use futures::stream::{StreamExt, TryStreamExt};
 use libipld::cid::Cid;
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 use sled::{
     self,
     transaction::{
@@ -31,7 +31,7 @@ use std::str::{self, FromStr};
 pub struct SledDataStore {
     path: PathBuf,
     // it is a trick for not modifying the Data:init
-    db: OnceCell<Db>,
+    db: OnceLock<Db>,
 }
 
 impl SledDataStore {

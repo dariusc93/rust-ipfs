@@ -3740,7 +3740,6 @@ dependencies = [
  "libp2p-mplex",
  "libp2p-nat",
  "libp2p-quic",
- "once_cell",
  "parking_lot 0.12.1",
  "prost",
  "prost-build",
