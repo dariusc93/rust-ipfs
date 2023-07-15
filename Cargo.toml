@@ -141,6 +141,3 @@ members = ["beetle-bitswap-next", "unixfs"]
 exclude = ["archived", "bitswap"]
 
 resolver = "2"
-
-[patch.crates-io]
-libp2p-nat = { version = "0.3", git = "https://github.com/dariusc93/libp2p-nat", rev = "13b7111dfe06d1d7e978cf31105194e835f99dde" }
