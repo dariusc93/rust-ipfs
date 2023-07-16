@@ -1861,14 +1861,16 @@ impl Ipfs {
     /// containing that key.
     pub async fn dht_get<T: AsRef<[u8]>>(&self, key: T) -> Result<RecordStream, Error> {
         async move {
-            let key = String::from_utf8_lossy(key.as_ref());
+            let key = key.as_ref();
 
-            let (prefix, _) = split_dht_key(&key)?;
+            let key_str = String::from_utf8_lossy(key);
+
+            let (prefix, _) = split_dht_key(&key_str)?;
 
             let key = if let Some(key_fn) = self.record_key_validator.get(prefix) {
-                key_fn(&key)?
+                key_fn(&key_str)?
             } else {
-                Key::from(key.as_bytes().to_vec())
+                Key::from(key.to_vec())
             };
 
             let (tx, rx) = oneshot_channel();
@@ -1887,18 +1889,30 @@ impl Ipfs {
     /// Stores the given key + value record locally and replicates it in the DHT. It doesn't
     /// expire locally and is periodically replicated in the DHT, as per the `KademliaConfig`
     /// setup.
-    pub async fn dht_put<T: Into<Key>>(
+    pub async fn dht_put<T: AsRef<[u8]>>(
         &self,
         key: T,
         value: Vec<u8>,
         quorum: Quorum,
     ) -> Result<(), Error> {
         let kad_result = async move {
+            let key = key.as_ref();
+
+            let key_str = String::from_utf8_lossy(key);
+
+            let (prefix, _) = split_dht_key(&key_str)?;
+
+            let key = if let Some(key_fn) = self.record_key_validator.get(prefix) {
+                key_fn(&key_str)?
+            } else {
+                Key::from(key.to_vec())
+            };
+
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::DhtPut(key.into(), value, quorum, tx))
+                .send(IpfsEvent::DhtPut(key, value, quorum, tx))
                 .await?;
 
             Ok(rx.await?).map_err(|e: String| anyhow!(e))
