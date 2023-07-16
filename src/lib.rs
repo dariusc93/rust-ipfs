@@ -324,7 +324,8 @@ impl IpfsOptions {
 /// endpoint implementations in `ipfs-http`.
 ///
 /// The facade is created through [`UninitializedIpfs`] which is configured with [`IpfsOptions`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct Ipfs {
     span: Span,
     repo: Repo,
@@ -332,6 +333,13 @@ pub struct Ipfs {
     keystore: Keystore,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
+    record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
+}
+
+impl std::fmt::Debug for Ipfs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Ipfs").finish()
+    }
 }
 
 type Channel<T> = OneshotSender<Result<T, Error>>;
@@ -492,6 +500,8 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> 
     fdlimit: Option<FDLimit>,
     delay: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
+    // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
+    record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
     custom_behaviour: Option<C>,
     custom_transport: Option<TTransportFn>,
 }
@@ -500,13 +510,13 @@ pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behavio
 
 impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> Default for UninitializedIpfs<C> {
     fn default() -> Self {
-        Self::with_opt(Default::default())
+        Self::new()
     }
 }
 
 impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_opt(Default::default())
     }
 
     /// Configures a new UninitializedIpfs with from the given options and optionally a span.
@@ -524,6 +534,8 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             options,
             fdlimit,
             delay,
+            // record_validators: Default::default(),
+            record_key_validator: Default::default(),
             swarm_event: None,
             custom_behaviour: None,
             custom_transport: None,
@@ -590,6 +602,41 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
     /// Set ping configuration
     pub fn set_ping_configuration(mut self, config: PingConfig) -> Self {
         self.options.ping_configuration = Some(config);
+        self
+    }
+
+    /// Set default record validator for IPFS
+    /// Note: This will override any keys set for `ipns` prefix
+    pub fn default_record_key_validator(mut self) -> Self {
+        #[inline]
+        fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
+            use libipld::multibase;
+
+            let default_ipns_prefix = b"/ipns/";
+
+            let mut key = key.as_ref().trim().to_string();
+
+            anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
+
+            if key.starts_with('1') || key.starts_with('Q') {
+                key.insert(0, 'z');
+            }
+
+            let mut data = multibase::decode(key).map(|(_, data)| data)?;
+
+            if data[0] != 0x01 && data[1] != 0x72 {
+                data = vec![vec![0x01, 0x72], data].concat();
+            }
+
+            data = vec![default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
+
+            Ok(data.into())
+        }
+
+        self.record_key_validator.insert(
+            "ipns".into(),
+            Arc::new(|key| to_dht_key(("ipns", |key| ipns_to_dht_key(key)), key)),
+        );
         self
     }
 
@@ -681,10 +728,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
 
     #[allow(clippy::type_complexity)]
     /// Set a transport
-    pub fn set_custom_transport(
-        mut self,
-        transport: TTransportFn,
-    ) -> Self {
+    pub fn set_custom_transport(mut self, transport: TTransportFn) -> Self {
         self.custom_transport = Some(transport);
         self
     }
@@ -721,6 +765,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             swarm_event,
             custom_behaviour,
             custom_transport,
+            record_key_validator,
             ..
         } = self;
 
@@ -785,6 +830,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             key: keys.clone(),
             keystore,
             to_task,
+            record_key_validator,
         };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
@@ -1813,13 +1859,23 @@ impl Ipfs {
 
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.
-    pub async fn dht_get<T: Into<Key>>(&self, key: T) -> Result<RecordStream, Error> {
+    pub async fn dht_get<T: AsRef<[u8]>>(&self, key: T) -> Result<RecordStream, Error> {
         async move {
+            let key = String::from_utf8_lossy(key.as_ref());
+
+            let (prefix, _) = split_dht_key(&key)?;
+
+            let key = if let Some(key_fn) = self.record_key_validator.get(prefix) {
+                key_fn(&key)?
+            } else {
+                Key::from(key.as_bytes().to_vec())
+            };
+
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::DhtGet(key.into(), tx))
+                .send(IpfsEvent::DhtGet(key, tx))
                 .await?;
 
             Ok(rx.await?).map_err(|e: String| anyhow!(e))
@@ -2083,6 +2139,40 @@ impl Ipfs {
         // ignoring the error because it'd mean that the background task had already been dropped
         let _ = self.to_task.try_send(IpfsEvent::Exit);
     }
+}
+
+#[inline]
+pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
+    anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
+
+    let (key, val) = {
+        let data = key
+            .split('/')
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>();
+        (data[0], data[1])
+    };
+
+    Ok((key, val))
+}
+
+#[inline]
+pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
+    (prefix, func): (&str, F),
+    key: B,
+) -> anyhow::Result<Key> {
+    let key = key.as_ref().trim();
+
+    let (key, val) = split_dht_key(key)?;
+
+    anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
+    anyhow::ensure!(!val.is_empty(), "Value cannot be empty");
+
+    if key == prefix {
+        return func(val);
+    }
+
+    anyhow::bail!("Invalid prefix")
 }
 
 #[allow(dead_code)]
