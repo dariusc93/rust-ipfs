@@ -1865,10 +1865,12 @@ impl Ipfs {
 
             let key_str = String::from_utf8_lossy(key);
 
-            let (prefix, _) = split_dht_key(&key_str)?;
-
-            let key = if let Some(key_fn) = self.record_key_validator.get(prefix) {
-                key_fn(&key_str)?
+            let key = if let Ok((prefix, _)) = split_dht_key(&key_str) {
+                if let Some(key_fn) = self.record_key_validator.get(prefix) {
+                    key_fn(&key_str)?
+                } else {
+                    Key::from(key.to_vec())
+                }
             } else {
                 Key::from(key.to_vec())
             };
@@ -1900,10 +1902,12 @@ impl Ipfs {
 
             let key_str = String::from_utf8_lossy(key);
 
-            let (prefix, _) = split_dht_key(&key_str)?;
-
-            let key = if let Some(key_fn) = self.record_key_validator.get(prefix) {
-                key_fn(&key_str)?
+            let key = if let Ok((prefix, _)) = split_dht_key(&key_str) {
+                if let Some(key_fn) = self.record_key_validator.get(prefix) {
+                    key_fn(&key_str)?
+                } else {
+                    Key::from(key.to_vec())
+                }
             } else {
                 Key::from(key.to_vec())
             };
@@ -2164,6 +2168,9 @@ pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
             .split('/')
             .filter(|s| !s.trim().is_empty())
             .collect::<Vec<_>>();
+
+        anyhow::ensure!(!data.is_empty() && data.len() == 2, "split dats cannot be empty");
+        
         (data[0], data[1])
     };
 
