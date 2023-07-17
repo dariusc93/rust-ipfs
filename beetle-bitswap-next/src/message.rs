@@ -12,7 +12,15 @@ use crate::block::Block;
 use crate::error::Error;
 use crate::prefix::Prefix;
 
-use crate::pb::bitswap_pb as pb;
+mod pb {
+    pub use super::super::pb::bitswap_pb::Message;
+    pub mod message {
+        use super::super::super::pb::bitswap_pb::mod_Message as message;
+        pub use message::mod_Wantlist as wantlist;
+        pub use message::Wantlist;
+        pub use message::{Block, BlockPresence, BlockPresenceType};
+    }
+}
 
 /// Represents a HAVE / DONT_HAVE for a given Cid.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,22 +31,22 @@ pub struct BlockPresence {
 
 impl BlockPresence {
     pub fn encoded_len(&self) -> usize {
-        let bpm: pb::mod_Message::BlockPresence = self.clone().into();
+        let bpm: pb::message::BlockPresence = self.clone().into();
         bpm.get_size()
     }
 
     pub fn encoded_len_for_cid(cid: Cid) -> usize {
-        pb::mod_Message::BlockPresence {
+        pb::message::BlockPresence {
             cid: cid.to_bytes().into(),
-            type_pb: pb::mod_Message::BlockPresenceType::Have,
+            type_pb: pb::message::BlockPresenceType::Have,
         }
         .get_size()
     }
 }
 
-impl From<BlockPresence> for pb::mod_Message::BlockPresence<'_> {
+impl From<BlockPresence> for pb::message::BlockPresence<'_> {
     fn from(bp: BlockPresence) -> Self {
-        pb::mod_Message::BlockPresence {
+        pb::message::BlockPresence {
             cid: bp.cid.to_bytes().into(),
             type_pb: bp.typ.into(),
         }
@@ -54,20 +62,20 @@ pub enum BlockPresenceType {
     DontHave = 1,
 }
 
-impl From<BlockPresenceType> for pb::mod_Message::BlockPresenceType {
+impl From<BlockPresenceType> for pb::message::BlockPresenceType {
     fn from(ty: BlockPresenceType) -> Self {
         match ty {
-            BlockPresenceType::Have => pb::mod_Message::BlockPresenceType::Have,
-            BlockPresenceType::DontHave => pb::mod_Message::BlockPresenceType::DontHave,
+            BlockPresenceType::Have => pb::message::BlockPresenceType::Have,
+            BlockPresenceType::DontHave => pb::message::BlockPresenceType::DontHave,
         }
     }
 }
 
-impl From<pb::mod_Message::BlockPresenceType> for BlockPresenceType {
-    fn from(ty: pb::mod_Message::BlockPresenceType) -> Self {
+impl From<pb::message::BlockPresenceType> for BlockPresenceType {
+    fn from(ty: pb::message::BlockPresenceType) -> Self {
         match ty {
-            pb::mod_Message::BlockPresenceType::Have => BlockPresenceType::Have,
-            pb::mod_Message::BlockPresenceType::DontHave => BlockPresenceType::DontHave,
+            pb::message::BlockPresenceType::Have => BlockPresenceType::Have,
+            pb::message::BlockPresenceType::DontHave => BlockPresenceType::DontHave,
         }
     }
 }
@@ -81,20 +89,20 @@ pub enum WantType {
     Have = 1,
 }
 
-impl From<WantType> for pb::mod_Message::mod_Wantlist::WantType {
+impl From<WantType> for pb::message::wantlist::WantType {
     fn from(want: WantType) -> Self {
         match want {
-            WantType::Block => pb::mod_Message::mod_Wantlist::WantType::Block,
-            WantType::Have => pb::mod_Message::mod_Wantlist::WantType::Have,
+            WantType::Block => pb::message::wantlist::WantType::Block,
+            WantType::Have => pb::message::wantlist::WantType::Have,
         }
     }
 }
 
-impl From<pb::mod_Message::mod_Wantlist::WantType> for WantType {
-    fn from(want: pb::mod_Message::mod_Wantlist::WantType) -> Self {
+impl From<pb::message::wantlist::WantType> for WantType {
+    fn from(want: pb::message::wantlist::WantType) -> Self {
         match want {
-            pb::mod_Message::mod_Wantlist::WantType::Block => WantType::Block,
-            pb::mod_Message::mod_Wantlist::WantType::Have => WantType::Have,
+            pb::message::wantlist::WantType::Block => WantType::Block,
+            pb::message::wantlist::WantType::Have => WantType::Have,
         }
     }
 }
@@ -127,14 +135,14 @@ impl Debug for Entry {
 impl Entry {
     /// Returns the encoded length of this entry.
     pub fn encoded_len(&self) -> usize {
-        let pb: pb::mod_Message::mod_Wantlist::Entry = self.into();
+        let pb: pb::message::wantlist::Entry = self.into();
         pb.get_size()
     }
 }
 
-impl From<&Entry> for pb::mod_Message::mod_Wantlist::Entry<'_> {
+impl From<&Entry> for pb::message::wantlist::Entry<'_> {
     fn from(e: &Entry) -> Self {
-        pb::mod_Message::mod_Wantlist::Entry {
+        pb::message::wantlist::Entry {
             block: e.cid.to_bytes().into(),
             priority: e.priority,
             wantType: e.want_type.into(),
@@ -397,7 +405,7 @@ impl BitswapMessage {
         let mut message = pb::Message::default();
 
         // wantlist
-        let mut wantlist = pb::mod_Message::Wantlist::default();
+        let mut wantlist = pb::message::Wantlist::default();
         for entry in self.wantlist.values() {
             wantlist.entries.push(entry.into());
         }
@@ -416,7 +424,7 @@ impl BitswapMessage {
         let mut message = pb::Message::default();
 
         // wantlist
-        let mut wantlist = pb::mod_Message::Wantlist::default();
+        let mut wantlist = pb::message::Wantlist::default();
         for entry in self.wantlist.values() {
             wantlist.entries.push(entry.into());
         }
@@ -425,7 +433,7 @@ impl BitswapMessage {
 
         // blocks
         for block in self.blocks.values() {
-            message.payload.push(pb::mod_Message::Block {
+            message.payload.push(pb::message::Block {
                 prefix: Prefix::from(block.cid()).to_bytes().into(),
                 data: block.data().to_vec().into(),
             });
@@ -433,7 +441,7 @@ impl BitswapMessage {
 
         // block presences
         for (cid, typ) in &self.block_presences {
-            message.blockPresences.push(pb::mod_Message::BlockPresence {
+            message.blockPresences.push(pb::message::BlockPresence {
                 cid: cid.to_bytes().into(),
                 type_pb: (*typ).into(),
             });
