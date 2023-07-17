@@ -1,3 +1,8 @@
+# 0.3.19 [unreleased]
+- refactor: Update libipld and switch to using quick-protobuf [PR 87]
+
+[PR 87]: https://github.com/dariusc93/rust-ipfs/pull/87
+
 # 0.3.18
 - fix: Add Sync + Send to custom transport signature
 

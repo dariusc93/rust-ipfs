@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 use ahash::AHashMap;
 use bytes::Bytes;
 use cid::Cid;
-use prost::Message;
+use quick_protobuf::{BytesReader, MessageRead, MessageWrite};
 use tokio::time::Instant;
 use tracing::{trace, warn};
 
@@ -13,8 +13,13 @@ use crate::error::Error;
 use crate::prefix::Prefix;
 
 mod pb {
-    #![allow(clippy::all)]
-    include!(concat!(env!("OUT_DIR"), "/bitswap_pb.rs"));
+    pub use super::super::pb::bitswap_pb::Message;
+    pub mod message {
+        use super::super::super::pb::bitswap_pb::mod_Message as message;
+        pub use message::mod_Wantlist as wantlist;
+        pub use message::Wantlist;
+        pub use message::{Block, BlockPresence, BlockPresenceType};
+    }
 }
 
 /// Represents a HAVE / DONT_HAVE for a given Cid.
@@ -27,23 +32,23 @@ pub struct BlockPresence {
 impl BlockPresence {
     pub fn encoded_len(&self) -> usize {
         let bpm: pb::message::BlockPresence = self.clone().into();
-        bpm.encoded_len()
+        bpm.get_size()
     }
 
     pub fn encoded_len_for_cid(cid: Cid) -> usize {
         pb::message::BlockPresence {
-            cid: cid.to_bytes(),
-            r#type: BlockPresenceType::Have.into(),
+            cid: cid.to_bytes().into(),
+            type_pb: pb::message::BlockPresenceType::Have,
         }
-        .encoded_len()
+        .get_size()
     }
 }
 
-impl From<BlockPresence> for pb::message::BlockPresence {
+impl From<BlockPresence> for pb::message::BlockPresence<'_> {
     fn from(bp: BlockPresence) -> Self {
         pb::message::BlockPresence {
-            cid: bp.cid.to_bytes(),
-            r#type: bp.typ.into(),
+            cid: bp.cid.to_bytes().into(),
+            type_pb: bp.typ.into(),
         }
     }
 }
@@ -66,6 +71,15 @@ impl From<BlockPresenceType> for pb::message::BlockPresenceType {
     }
 }
 
+impl From<pb::message::BlockPresenceType> for BlockPresenceType {
+    fn from(ty: pb::message::BlockPresenceType) -> Self {
+        match ty {
+            pb::message::BlockPresenceType::Have => BlockPresenceType::Have,
+            pb::message::BlockPresenceType::DontHave => BlockPresenceType::DontHave,
+        }
+    }
+}
+
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, num_enum::IntoPrimitive, num_enum::TryFromPrimitive,
 )]
@@ -80,6 +94,15 @@ impl From<WantType> for pb::message::wantlist::WantType {
         match want {
             WantType::Block => pb::message::wantlist::WantType::Block,
             WantType::Have => pb::message::wantlist::WantType::Have,
+        }
+    }
+}
+
+impl From<pb::message::wantlist::WantType> for WantType {
+    fn from(want: pb::message::wantlist::WantType) -> Self {
+        match want {
+            pb::message::wantlist::WantType::Block => WantType::Block,
+            pb::message::wantlist::WantType::Have => WantType::Have,
         }
     }
 }
@@ -113,18 +136,18 @@ impl Entry {
     /// Returns the encoded length of this entry.
     pub fn encoded_len(&self) -> usize {
         let pb: pb::message::wantlist::Entry = self.into();
-        pb.encoded_len()
+        pb.get_size()
     }
 }
 
-impl From<&Entry> for pb::message::wantlist::Entry {
+impl From<&Entry> for pb::message::wantlist::Entry<'_> {
     fn from(e: &Entry) -> Self {
         pb::message::wantlist::Entry {
-            block: e.cid.to_bytes(),
+            block: e.cid.to_bytes().into(),
             priority: e.priority,
-            want_type: e.want_type.into(),
+            wantType: e.want_type.into(),
             cancel: e.cancel,
-            send_dont_have: e.send_dont_have,
+            sendDontHave: e.send_dont_have,
         }
     }
 }
@@ -391,7 +414,7 @@ impl BitswapMessage {
 
         // blocks
         for block in self.blocks.values() {
-            message.blocks.push(block.data().clone());
+            message.blocks.push(block.data().clone().to_vec().into());
         }
 
         message
@@ -411,41 +434,41 @@ impl BitswapMessage {
         // blocks
         for block in self.blocks.values() {
             message.payload.push(pb::message::Block {
-                prefix: Prefix::from(block.cid()).to_bytes(),
-                data: block.data().clone(),
+                prefix: Prefix::from(block.cid()).to_bytes().into(),
+                data: block.data().to_vec().into(),
             });
         }
 
         // block presences
         for (cid, typ) in &self.block_presences {
-            message.block_presences.push(pb::message::BlockPresence {
-                cid: cid.to_bytes(),
-                r#type: (*typ).into(),
+            message.blockPresences.push(pb::message::BlockPresence {
+                cid: cid.to_bytes().into(),
+                type_pb: (*typ).into(),
             });
         }
 
-        message.pending_bytes = self.pending_bytes();
+        message.pendingBytes = self.pending_bytes();
 
         message
     }
 }
 
-impl TryFrom<pb::Message> for BitswapMessage {
+impl<'a> TryFrom<pb::Message<'a>> for BitswapMessage {
     type Error = Error;
 
-    fn try_from(pbm: pb::Message) -> Result<Self, Self::Error> {
+    fn try_from(pbm: pb::Message<'a>) -> Result<Self, Self::Error> {
         let full = pbm.wantlist.as_ref().map(|w| w.full).unwrap_or_default();
         let mut message = BitswapMessage::new(full);
 
         if let Some(wantlist) = pbm.wantlist {
             for entry in wantlist.entries {
-                let cid = Cid::try_from(entry.block)?;
+                let cid = Cid::try_from(&*entry.block)?;
                 message.add_full_entry(
                     cid,
                     entry.priority,
                     entry.cancel,
-                    entry.want_type.try_into()?,
-                    entry.send_dont_have,
+                    entry.wantType.into(),
+                    entry.sendDontHave,
                 );
             }
         }
@@ -453,23 +476,23 @@ impl TryFrom<pb::Message> for BitswapMessage {
         // deprecated
         for data in pbm.blocks {
             // CID v0, SHA26
-            let block = Block::from_v0_data(data)?;
+            let block = Block::from_v0_data(data.to_vec())?;
             message.add_block(block);
         }
 
         for block in pbm.payload {
             let prefix = Prefix::new(&block.prefix)?;
             let cid = prefix.to_cid(&block.data)?;
-            let block = Block::new(block.data, cid);
+            let block = Block::new(block.data.to_vec(), cid);
             message.add_block(block);
         }
 
-        for block_presence in pbm.block_presences {
-            let cid = Cid::try_from(block_presence.cid)?;
-            message.add_block_presence(cid, block_presence.r#type.try_into()?);
+        for block_presence in pbm.blockPresences {
+            let cid = Cid::try_from(&*block_presence.cid)?;
+            message.add_block_presence(cid, block_presence.type_pb.into());
         }
 
-        message.pending_bytes = pbm.pending_bytes;
+        message.pending_bytes = pbm.pendingBytes;
 
         Ok(message)
     }
@@ -479,7 +502,8 @@ impl TryFrom<Bytes> for BitswapMessage {
     type Error = Error;
 
     fn try_from(value: Bytes) -> Result<Self, Self::Error> {
-        let pbm = pb::Message::decode(value)?;
+        let mut reader = BytesReader::from_bytes(&value);
+        let pbm = pb::Message::from_reader(&mut reader, &value)?;
         pbm.try_into()
     }
 }
