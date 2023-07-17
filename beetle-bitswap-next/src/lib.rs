@@ -42,6 +42,7 @@ mod network;
 mod prefix;
 mod protocol;
 mod server;
+mod pb;
 
 pub mod message;
 pub mod peer_task_queue;
