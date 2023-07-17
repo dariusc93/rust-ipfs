@@ -640,6 +640,16 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    #[allow(clippy::type_complexity)]
+    pub fn set_record_prefix_validator(
+        mut self,
+        key: &str,
+        callback: Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>,
+    ) -> Self {
+        self.record_key_validator.insert(key.to_string(), callback);
+        self
+    }
+
     /// Set address book configuration
     pub fn set_addrbook_configuration(mut self, config: AddressBookConfig) -> Self {
         self.options.addr_config = Some(config);
@@ -2169,8 +2179,11 @@ pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
             .filter(|s| !s.trim().is_empty())
             .collect::<Vec<_>>();
 
-        anyhow::ensure!(!data.is_empty() && data.len() == 2, "split dats cannot be empty");
-        
+        anyhow::ensure!(
+            !data.is_empty() && data.len() == 2,
+            "split dats cannot be empty"
+        );
+
         (data[0], data[1])
     };
 
