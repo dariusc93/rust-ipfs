@@ -7,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use futures::future;
 use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::core::{InboundUpgrade, OutboundUpgrade, ProtocolName, UpgradeInfo};
-use prost::Message;
+use quick_protobuf::{MessageWrite, Writer};
 use unsigned_varint::codec;
 
 use crate::{handler::BitswapHandlerError, message::BitswapMessage};
@@ -163,8 +163,10 @@ impl Encoder for BitswapCodec {
             ProtocolId::Legacy | ProtocolId::Bitswap100 => item.encode_as_proto_v0(),
             ProtocolId::Bitswap110 | ProtocolId::Bitswap120 => item.encode_as_proto_v1(),
         };
-        let mut buf = BytesMut::with_capacity(message.encoded_len());
-        message.encode(&mut buf).expect("fixed target");
+        let mut buf = Vec::with_capacity(message.get_size());
+        let mut writer = Writer::new(&mut buf);
+
+        message.write_message(&mut writer).expect("fixed target");
 
         // length prefix the protobuf message, ensuring the max limit is not hit
         self.length_codec

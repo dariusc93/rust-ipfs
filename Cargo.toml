@@ -25,7 +25,7 @@ base64 = { default-features = false, features = ["alloc"], version = "0.21" }
 beetle-bitswap-next = { version = "0.3.0", path = "beetle-bitswap-next" }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
-libipld = "0.15"
+libipld = "0.16"
 trust-dns-resolver = "0.22"
 either = { default-features = false, version = "1.5" }
 futures = { default-features = false, version = "0.3", features = [
@@ -84,8 +84,6 @@ fs2 = "0.4"
 sled = "0.34"
 libp2p-nat = { version = "0.2" }
 
-prost = { default-features = false, version = "0.11" }
-
 rlimit = "0.9"
 
 wasm-timer = "0.2"
@@ -93,9 +91,6 @@ wasm-timer = "0.2"
 rand = "0.8"
 
 zeroize = "1"
-
-[build-dependencies]
-prost-build = { default-features = false, version = "0.11" }
 
 [dev-dependencies]
 bs58 = "0.4"

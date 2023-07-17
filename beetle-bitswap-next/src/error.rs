@@ -7,7 +7,7 @@ pub enum Error {
     #[error("Error while reading from socket: {0}")]
     Read(#[from] std::io::Error),
     #[error("Error while decoding bitswap message: {0}")]
-    Protobuf(#[from] prost::DecodeError),
+    QuickProtobuf(#[from] quick_protobuf::Error),
     #[error("Error while parsing cid: {0}")]
     Cid(#[from] cid::Error),
     #[error("Error while parsing multihash: {0}")]

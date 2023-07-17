@@ -21,12 +21,14 @@ impl Debug for Block {
 }
 
 impl Block {
-    pub fn new(data: Bytes, cid: Cid) -> Self {
+    pub fn new<B: Into<Bytes>>(data: B, cid: Cid) -> Self {
+        let data = data.into();
         Self { cid, data }
     }
 
-    pub fn from_v0_data(data: Bytes) -> cid::Result<Self> {
-        let digest = Code::Sha2_256.digest(&data);
+    pub fn from_v0_data<B: Into<Bytes>>(data: B) -> cid::Result<Self> {
+        let data = data.into();
+        let digest = Code::Sha2_256.digest(&data[..]);
         let cid = Cid::new_v0(digest)?;
         Ok(Self { cid, data })
     }
