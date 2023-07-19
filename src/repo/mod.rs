@@ -20,7 +20,6 @@ use libp2p::identity::PeerId;
 use parking_lot::Mutex;
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{error, fmt, io};
@@ -47,23 +46,6 @@ pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
             datastore,
             lock,
         } => Repo::new(blockstore, datastore, lock),
-    }
-}
-
-/// A wrapper for `Cid` that has a `Multihash`-based equality check.
-#[derive(Debug)]
-pub struct RepoCid(Cid);
-
-impl PartialEq for RepoCid {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.hash() == other.0.hash()
-    }
-}
-impl Eq for RepoCid {}
-
-impl Hash for RepoCid {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash().hash(state)
     }
 }
 
