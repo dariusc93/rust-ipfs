@@ -39,10 +39,10 @@ mod client;
 mod error;
 mod handler;
 mod network;
+mod pb;
 mod prefix;
 mod protocol;
 mod server;
-mod pb;
 
 pub mod message;
 pub mod peer_task_queue;
@@ -259,7 +259,7 @@ impl<S: Store> Bitswap<S> {
     /// Called on identify events from swarm, informing us about available protocols of this peer.
     /// TODO: Check within handler after updating to libp2p 0.52 instead of checking identify
     ///       If peer does not contain the protocol, emit an event from the handler to notify
-    ///       the behaviour and make sure to set `keep_alive` to `KeepAlive::No` 
+    ///       the behaviour and make sure to set `keep_alive` to `KeepAlive::No`
     pub fn on_identify(&self, peer: &PeerId, protocols: &[String]) {
         if let Some(PeerState::Connected(conn_id)) = self.get_peer_state(peer) {
             let mut protocols: Vec<ProtocolId> =

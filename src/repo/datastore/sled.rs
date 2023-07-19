@@ -4,7 +4,6 @@ use crate::repo::{PinKind, PinMode, PinStore, References};
 use async_trait::async_trait;
 use futures::stream::{StreamExt, TryStreamExt};
 use libipld::cid::Cid;
-use std::sync::OnceLock;
 use sled::{
     self,
     transaction::{
@@ -17,6 +16,7 @@ use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::str::{self, FromStr};
+use std::sync::OnceLock;
 
 /// [`sled`] based pinstore implementation. Implements datastore which errors for each call.
 /// Currently feature-gated behind `sled_data_store` feature in the [`crate::Types`], usable

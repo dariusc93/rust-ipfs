@@ -681,10 +681,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
 
     #[allow(clippy::type_complexity)]
     /// Set a transport
-    pub fn set_custom_transport(
-        mut self,
-        transport: TTransportFn,
-    ) -> Self {
+    pub fn set_custom_transport(mut self, transport: TTransportFn) -> Self {
         self.custom_transport = Some(transport);
         self
     }
