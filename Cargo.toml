@@ -18,7 +18,7 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-libp2p = "0.52.0"
+libp2p = "0.52.1"
 
 [dependencies]
 anyhow = "1.0"
