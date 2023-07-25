@@ -443,7 +443,7 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "beetle-bitswap-next"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
@@ -2019,6 +2019,7 @@ dependencies = [
  "libp2p-noise",
  "libp2p-ping",
  "libp2p-relay",
+ "libp2p-request-response",
  "libp2p-swarm",
  "libp2p-tcp",
  "libp2p-websocket",
@@ -3630,7 +3631,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ipfs"
-version = "0.3.18"
+version = "0.3.19"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3679,7 +3680,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unixfs"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "criterion",
  "either",

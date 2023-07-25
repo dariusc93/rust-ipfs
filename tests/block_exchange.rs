@@ -33,9 +33,7 @@ async fn two_node_put_get() {
 
 // check that a long line of nodes still works with get_block
 #[tokio::test]
-#[ignore]
 async fn long_get_block() {
-    // this number could be higher, but it starts hanging above ~24
     const N: usize = 10;
     let nodes = spawn_nodes::<N>(Topology::Line).await;
     let block = create_block();

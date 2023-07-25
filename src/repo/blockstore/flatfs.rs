@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
-use crate::repo::{BlockRm, BlockRmError, RepoCid};
+use crate::repo::{BlockRm, BlockRmError};
 use crate::Block;
 use async_trait::async_trait;
 use hash_hasher::{HashBuildHasher, HashedMap};
@@ -30,7 +30,7 @@ pub struct FsBlockStore {
     /// Synchronize concurrent reads and writes to the same Cid.
     /// If the write ever happens, the message sent will be Ok(()), on failure it'll be an Err(()).
     /// Since this is a broadcast channel, the late arriving receiver might not get any messages.
-    writes: ArcMutexHashedMap<RepoCid, broadcast::Sender<Result<(), ()>>>,
+    writes: ArcMutexHashedMap<Cid, broadcast::Sender<Result<(), ()>>>,
 
     /// Initially used to demonstrate a bug, not really needed anymore. Could be used as a basis
     /// for periodic synching to disk to know much space we have used.
@@ -96,7 +96,7 @@ impl FsBlockStore {
             .writes
             .lock()
             .expect("cannot support poisoned")
-            .entry(RepoCid(*cid))
+            .entry(*cid)
         {
             Entry::Occupied(oe) => oe.get().subscribe(),
             Entry::Vacant(_) => return WriteCompletion::NotOngoing,
@@ -152,7 +152,7 @@ impl BlockStore for FsBlockStore {
 
             let path = block_path(self.path.clone(), cid);
 
-            let cid = cid.to_owned();
+            let cid = *cid;
 
             // probably best to do everything in the blocking thread if we are to issue multiple
             // syscalls
@@ -197,7 +197,7 @@ impl BlockStore for FsBlockStore {
             let (tx, mut rx) = {
                 let mut g = self.writes.lock().expect("cant support poisoned");
 
-                match g.entry(RepoCid(*block.cid())) {
+                match g.entry(*block.cid()) {
                     Entry::Occupied(oe) => {
                         // someone is already writing this, nice
                         trace!("joining in on another already writing the block");
@@ -213,7 +213,7 @@ impl BlockStore for FsBlockStore {
             };
 
             // create this in case the winner is dropped while awaiting
-            let cleanup = RemoveOnDrop(self.writes.clone(), Some(RepoCid(*block.cid())));
+            let cleanup = RemoveOnDrop(self.writes.clone(), Some(*block.cid()));
 
             // launch a blocking task for the filesystem mutation.
             let je = tokio::task::spawn_blocking(move || {
