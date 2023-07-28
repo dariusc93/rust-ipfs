@@ -92,7 +92,7 @@ fs2 = "0.4"
 sled = "0.34"
 libp2p-nat = { version = "0.3" }
 
-rlimit = "0.9"
+rlimit = "0.10"
 
 wasm-timer = "0.2"
 
@@ -124,10 +124,6 @@ rand = { default-features = false, version = "0.8", features = [
 tempfile = "3.1.0"
 
 clap = { version = "4.1", features = ["derive"] }
-
-# [[bench]]
-# name = "hashed-map-cid"
-# harness = false
 
 [profile.dev.build-override]
 debug = true
