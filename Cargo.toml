@@ -22,19 +22,16 @@ libp2p = "0.52.1"
 
 [dependencies]
 anyhow = "1.0"
-async-stream = { default-features = false, version = "0.3" }
-async-trait = { default-features = false, version = "0.1" }
+async-stream = { version = "0.3" }
+async-trait = { version = "0.1" }
 base64 = { default-features = false, features = ["alloc"], version = "0.21" }
 beetle-bitswap-next = { version = "0.4.0", path = "beetle-bitswap-next" }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
 libipld = "0.16"
 trust-dns-resolver = "0.22"
-either = { default-features = false, version = "1.5" }
-futures = { default-features = false, version = "0.3", features = [
-    "alloc",
-    "std",
-] }
+either = { version = "1" }
+futures = { version = "0.3" }
 hash_hasher = "2.0.3"
 
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
@@ -69,6 +66,7 @@ libp2p-allow-block-list = "0.2"
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
+
 thiserror = { default-features = false, version = "1.0" }
 tokio = { default-features = false, features = [
     "fs",
