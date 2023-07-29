@@ -127,7 +127,7 @@ clap = { version = "4.1", features = ["derive"] }
 debug = true
 
 [workspace]
-members = ["beetle-bitswap-next", "unixfs"]
+members = ["tools/**", "unixfs"]
 exclude = ["archived", "deprecated/**"]
 
 resolver = "2"
