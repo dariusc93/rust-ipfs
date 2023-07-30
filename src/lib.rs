@@ -1370,16 +1370,6 @@ impl Ipfs {
         .await
     }
 
-    pub async fn protocols(&self) -> Result<Vec<String>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
-            Ok(rx.await?)
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
     /// Returns the peer identity information. If no peer id is supplied the local node identity is used.
     pub async fn identity(&self, peer_id: Option<PeerId>) -> Result<PeerInfo, Error> {
         async move {
@@ -1407,11 +1397,13 @@ impl Ipfs {
                         .cloned()
                         .collect::<Vec<_>>();
 
-                    let protocols = self.protocols().await.map(|s| {
-                        s.iter()
-                            .filter_map(|s| StreamProtocol::try_from_owned(s.clone()).ok())
-                            .collect()
-                    })?;
+                    let (tx, rx) = oneshot_channel();
+                    self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
+
+                    let protocols = rx.await?
+                        .iter()
+                        .filter_map(|s| StreamProtocol::try_from_owned(s.clone()).ok())
+                        .collect();
 
                     let public_key = self.key.public();
                     let peer_id = public_key.to_peer_id();
