@@ -889,6 +889,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             swarm_event,
             external_listener: Default::default(),
             local_listener: Default::default(),
+            timer: Default::default(),
         };
 
         for addr in listening_addrs.into_iter() {
@@ -916,7 +917,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         tokio::spawn({
             async move {
-                fut.run(delay).instrument(swarm_span).await;
+                let as_fut = false;
+
+                if as_fut {
+                    fut.instrument(swarm_span).await;
+                } else {
+                    fut.run(delay).instrument(swarm_span).await;
+                }
             }
         });
         Ok(ipfs)
@@ -1843,7 +1850,6 @@ impl Ipfs {
         .instrument(self.span.clone())
         .await
     }
-
 
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.

@@ -21,11 +21,16 @@ use crate::{
 use beetle_bitswap_next::BitswapEvent;
 use tokio::task::JoinHandle;
 
+use wasm_timer::Interval;
+
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     io,
     time::Duration,
 };
+
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
 
@@ -95,6 +100,114 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) connection_event_stream: Vec<UnboundedSender<InnerConnectionEvent>>,
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
+    pub(crate) timer: TaskTimer,
+}
+
+pub(crate) struct TaskTimer {
+    pub(crate) session_cleanup: Interval,
+    pub(crate) event_cleanup: Interval,
+    pub(crate) external_check: Interval,
+    pub(crate) local_check: Interval,
+}
+
+impl Default for TaskTimer {
+    fn default() -> Self {
+        let session_cleanup = Interval::new(Duration::from_secs(5));
+        let event_cleanup = Interval::new(Duration::from_secs(60));
+
+        let external_check = Interval::new_at(
+            std::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+        let local_check = Interval::new_at(
+            std::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+
+        Self {
+            session_cleanup,
+            event_cleanup,
+            external_check,
+            local_check,
+        }
+    }
+}
+
+impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            match self.swarm.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => self.handle_swarm_event(event),
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Pending => break,
+            }
+        }
+        loop {
+            match self.from_facade.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => self.handle_event(event),
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Pending => break,
+            }
+        }
+        loop {
+            match self.repo_events.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => self.handle_repo_event(event),
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Pending => break,
+            }
+        }
+
+        if self.timer.event_cleanup.poll_next_unpin(cx).is_ready() {
+            self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+            self.connection_event_stream.retain(|ch| !ch.is_closed());
+        }
+
+        if self.timer.session_cleanup.poll_next_unpin(cx).is_ready() {
+            let mut to_remove = Vec::new();
+            for (id, tasks) in &mut self.bitswap_sessions {
+                tasks.retain(|(_, task)| !task.is_finished());
+
+                if tasks.is_empty() {
+                    to_remove.push(*id);
+                }
+
+                // Only do a small chunk of cleanup on each iteration
+                // TODO(arqu): magic number
+                if to_remove.len() >= 10 {
+                    break;
+                }
+            }
+
+            for id in to_remove {
+                let (tx, _rx) = oneshot::channel();
+                self.destroy_bs_session(id, tx);
+            }
+        }
+
+        if self.timer.external_check.poll_next_unpin(cx).is_ready() {
+            let addrs = self.swarm.external_addresses().cloned().collect::<Vec<_>>();
+            if !addrs.is_empty() {
+                for ch in self.external_listener.drain(..) {
+                    let addrs = addrs.clone();
+                    let _ = ch.send(addrs);
+                }
+            }
+        }
+
+        if self.timer.local_check.poll_next_unpin(cx).is_ready() {
+            let addrs = self.swarm.listeners().cloned().collect::<Vec<_>>();
+            if !addrs.is_empty() {
+                for ch in self.local_listener.drain(..) {
+                    let addrs = addrs.clone();
+                    let _ = ch.send(addrs);
+                }
+            }
+        }
+
+        Poll::Pending
+    }
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
