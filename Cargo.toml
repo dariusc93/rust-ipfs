@@ -35,7 +35,7 @@ futures = { version = "0.3" }
 hash_hasher = "2.0.3"
 
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
-libp2p = { default-features = false, features = [
+libp2p = { features = [
     "gossipsub",
     "autonat",
     "relay",
