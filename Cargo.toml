@@ -25,7 +25,7 @@ anyhow = "1.0"
 async-stream = { version = "0.3" }
 async-trait = { version = "0.1" }
 base64 = { default-features = false, features = ["alloc"], version = "0.21" }
-beetle-bitswap-next = { version = "0.4.0", path = "beetle-bitswap-next" }
+beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
 libipld = "0.16"
@@ -127,7 +127,7 @@ clap = { version = "4.1", features = ["derive"] }
 debug = true
 
 [workspace]
-members = ["packages/**", "unixfs"]
-exclude = ["archived", "deprecated/**"]
+members = ["packages/*", "unixfs"]
+exclude = ["archived", "deprecated/*"]
 
 resolver = "2"
