@@ -19,13 +19,15 @@ test_js_interop = []
 
 [workspace.dependencies]
 libp2p = "0.52.1"
+beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
+rust-unixfs = { version = "0.4.0", path = "unixfs" }
 
 [dependencies]
 anyhow = "1.0"
 async-stream = { version = "0.3" }
 async-trait = { version = "0.1" }
 base64 = { default-features = false, features = ["alloc"], version = "0.21" }
-beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
+beetle-bitswap-next = { workspace = true }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
 libipld = "0.16"
@@ -34,7 +36,8 @@ either = { version = "1" }
 futures = { version = "0.3" }
 hash_hasher = "2.0.3"
 
-rust-unixfs = { version = "0.4.0", path = "unixfs" }
+rust-unixfs = { workspace = true }
+
 libp2p = { features = [
     "gossipsub",
     "autonat",
