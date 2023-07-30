@@ -271,7 +271,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 })
             }
             SwarmEvent::ConnectionClosed {
-                peer_id, endpoint, ..
+                peer_id,
+                endpoint,
+                connection_id,
+                ..
             } => {
                 let address = match endpoint {
                     libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
@@ -281,6 +284,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     peer_id,
                     address,
                 });
+
+                self.failed_ping.remove(&connection_id);
 
                 if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
                     tokio::spawn(async move {
