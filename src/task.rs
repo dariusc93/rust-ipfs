@@ -913,19 +913,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     result: Result::Err(libp2p::ping::Failure::Unsupported),
                     connection,
                 } => {
+                    //TODO: Do we want to reject peers that dont support this protocol?
                     error!("ping: failure with {}: unsupported", peer.to_base58());
-                    match self.failed_ping.entry(connection) {
-                        Entry::Occupied(mut entry) => {
-                            if *entry.get() > 1 {
-                                self.swarm.close_connection(connection);
-                            }
-
-                            *entry.get_mut() += 1;
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(1);
-                        }
-                    }
+                    self.swarm.close_connection(connection);
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
