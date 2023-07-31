@@ -899,7 +899,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     Entry::Occupied(mut entry) => {
                         if *entry.get() > 1 {
                             self.swarm.close_connection(connection);
-                            error!("ping: failure with {}: {}", peer.to_base58(), error);
+                            error!(
+                                "ping: closing {} with {:?} due to failure: {}",
+                                peer, connection, error
+                            );
                         }
 
                         *entry.get_mut() += 1;
