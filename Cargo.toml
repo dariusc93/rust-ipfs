@@ -62,7 +62,7 @@ libp2p = { features = [
     "request-response",
 ], workspace = true }
 
-libp2p-quic = { version = "0.8.0-alpha", features = ["tokio"] }
+libp2p-quic = { version = "0.9.0-alpha", features = ["tokio"] }
 libp2p-mplex = "0.40"
 libp2p-allow-block-list = "0.2"
 
