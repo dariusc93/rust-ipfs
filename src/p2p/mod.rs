@@ -262,9 +262,9 @@ impl Default for SwarmConfig {
         Self {
             connection: ConnectionLimits::default(),
             dial_concurrency_factor: 8.try_into().expect("8 > 0"),
-            notify_handler_buffer_size: 256.try_into().expect("256 > 0"),
-            connection_event_buffer_size: 256,
-            max_inbound_stream: 128,
+            notify_handler_buffer_size: 32.try_into().expect("256 > 0"),
+            connection_event_buffer_size: 7,
+            max_inbound_stream: 10_000,
         }
     }
 }
