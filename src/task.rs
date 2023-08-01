@@ -454,7 +454,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
             },
-            SwarmEvent::Behaviour(BehaviourEvent::Kad(event)) => {
+            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(event)) => {
                 match event {
                     InboundRequest { request } => {
                         trace!("kad: inbound {:?} request handled", request);
@@ -848,13 +848,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = response.send(duration).ok();
                 }
             },
-            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+            SwarmEvent::Behaviour(BehaviourEvent::Pubsub(
                 libp2p::gossipsub::Event::Subscribed { peer_id, topic },
             )) => self.emit_pubsub_event(InnerPubsubEvent::Subscribe {
                 topic: topic.to_string(),
                 peer_id,
             }),
-            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+            SwarmEvent::Behaviour(BehaviourEvent::Pubsub(
                 libp2p::gossipsub::Event::Unsubscribed { peer_id, topic },
             )) => self.emit_pubsub_event(InnerPubsubEvent::Unsubscribe {
                 topic: topic.to_string(),

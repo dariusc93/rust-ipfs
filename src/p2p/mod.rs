@@ -271,7 +271,7 @@ impl Default for SwarmConfig {
 
 #[allow(clippy::type_complexity)]
 /// Creates a new IPFS swarm.
-pub async fn create_swarm<C: NetworkBehaviour<ToSwarm = void::Void>>(
+pub async fn create_swarm<C>(
     keypair: &Keypair,
     options: SwarmOptions,
     swarm_config: SwarmConfig,
@@ -279,7 +279,11 @@ pub async fn create_swarm<C: NetworkBehaviour<ToSwarm = void::Void>>(
     repo: Repo,
     span: Span,
     (custom, custom_transport): (Option<C>, Option<TTransportFn>),
-) -> Result<TSwarm<C>, Error> {
+) -> Result<TSwarm<C>, Error>
+where
+    C: NetworkBehaviour,
+    <C as NetworkBehaviour>::ToSwarm: std::fmt::Debug + Send,
+{
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
 

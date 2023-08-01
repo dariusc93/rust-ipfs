@@ -12,38 +12,38 @@ use crate::error::Error;
 use crate::p2p::{MultiaddrExt, SwarmOptions};
 use crate::repo::Repo;
 
-// use cid::Cid;
-use beetle_bitswap_next::{Bitswap, BitswapEvent, ProtocolId};
+use beetle_bitswap_next::{Bitswap, ProtocolId};
 use libipld::Cid;
 use libp2p::core::Multiaddr;
-use libp2p::dcutr::{Behaviour as Dcutr, Event as DcutrEvent};
-use libp2p::gossipsub::Event as GossipsubEvent;
-use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig, Event as IdentifyEvent};
+use libp2p::dcutr::Behaviour as Dcutr;
+use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig};
 use libp2p::identity::{Keypair, PeerId};
 use libp2p::kad::record::{
     store::{MemoryStore, MemoryStoreConfig},
     Record,
 };
-use libp2p::kad::{
-    Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent, KademliaStoreInserts,
-};
-use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig, Event as MdnsEvent};
-use libp2p::ping::{Behaviour as Ping, Event as PingEvent};
+use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaStoreInserts};
+use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig};
+use libp2p::ping::Behaviour as Ping;
+use libp2p::relay::client::Behaviour as RelayClient;
 use libp2p::relay::client::{self, Transport as ClientTransport};
-use libp2p::relay::client::{Behaviour as RelayClient, Event as RelayClientEvent};
-use libp2p::relay::{Behaviour as Relay, Event as RelayEvent};
+use libp2p::relay::Behaviour as Relay;
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{autonat, StreamProtocol};
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
 
 /// Behaviour type.
 #[derive(NetworkBehaviour)]
-#[behaviour(to_swarm = "BehaviourEvent")]
-pub struct Behaviour<C: NetworkBehaviour<ToSwarm = void::Void>> {
+pub struct Behaviour<C>
+where
+    C: NetworkBehaviour,
+    <C as NetworkBehaviour>::ToSwarm: Debug + Send,
+{
     pub mdns: Toggle<Mdns>,
     pub bitswap: Toggle<Bitswap<Repo>>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
@@ -61,87 +61,6 @@ pub struct Behaviour<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub peerbook: peerbook::Behaviour,
     pub protocol: protocol::Behaviour,
     pub custom: Toggle<C>,
-}
-
-#[derive(Debug)]
-pub enum BehaviourEvent {
-    Mdns(MdnsEvent),
-    Kad(KademliaEvent),
-    Bitswap(BitswapEvent),
-    Ping(PingEvent),
-    Identify(IdentifyEvent),
-    Gossipsub(GossipsubEvent),
-    Autonat(autonat::Event),
-    Relay(RelayEvent),
-    RelayClient(RelayClientEvent),
-    Dcutr(DcutrEvent),
-    Void(void::Void),
-}
-
-impl From<MdnsEvent> for BehaviourEvent {
-    fn from(event: MdnsEvent) -> Self {
-        BehaviourEvent::Mdns(event)
-    }
-}
-
-impl From<KademliaEvent> for BehaviourEvent {
-    fn from(event: KademliaEvent) -> Self {
-        BehaviourEvent::Kad(event)
-    }
-}
-
-impl From<BitswapEvent> for BehaviourEvent {
-    fn from(event: BitswapEvent) -> Self {
-        BehaviourEvent::Bitswap(event)
-    }
-}
-
-impl From<PingEvent> for BehaviourEvent {
-    fn from(event: PingEvent) -> Self {
-        BehaviourEvent::Ping(event)
-    }
-}
-
-impl From<IdentifyEvent> for BehaviourEvent {
-    fn from(event: IdentifyEvent) -> Self {
-        BehaviourEvent::Identify(event)
-    }
-}
-
-impl From<GossipsubEvent> for BehaviourEvent {
-    fn from(event: GossipsubEvent) -> Self {
-        BehaviourEvent::Gossipsub(event)
-    }
-}
-
-impl From<autonat::Event> for BehaviourEvent {
-    fn from(event: autonat::Event) -> Self {
-        BehaviourEvent::Autonat(event)
-    }
-}
-
-impl From<RelayEvent> for BehaviourEvent {
-    fn from(event: RelayEvent) -> Self {
-        BehaviourEvent::Relay(event)
-    }
-}
-
-impl From<RelayClientEvent> for BehaviourEvent {
-    fn from(event: RelayClientEvent) -> Self {
-        BehaviourEvent::RelayClient(event)
-    }
-}
-
-impl From<DcutrEvent> for BehaviourEvent {
-    fn from(event: DcutrEvent) -> Self {
-        BehaviourEvent::Dcutr(event)
-    }
-}
-
-impl From<void::Void> for BehaviourEvent {
-    fn from(event: void::Void) -> Self {
-        BehaviourEvent::Void(event)
-    }
 }
 
 /// Represents the result of a Kademlia query.
@@ -419,7 +338,11 @@ impl From<BitswapConfig> for beetle_bitswap_next::Config {
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = void::Void>> Behaviour<C> {
+impl<C> Behaviour<C>
+where
+    C: NetworkBehaviour,
+    <C as NetworkBehaviour>::ToSwarm: Debug + Send,
+{
     pub async fn new(
         keypair: &Keypair,
         options: SwarmOptions,
@@ -643,12 +566,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> Behaviour<C> {
 }
 
 /// Create a IPFS behaviour with the IPFS bootstrap nodes.
-pub async fn build_behaviour<C: NetworkBehaviour<ToSwarm = void::Void>>(
+pub async fn build_behaviour<C>(
     keypair: &Keypair,
     options: SwarmOptions,
     repo: Repo,
     limits: ConnectionLimits,
     custom: Option<C>,
-) -> Result<(Behaviour<C>, Option<ClientTransport>), Error> {
+) -> Result<(Behaviour<C>, Option<ClientTransport>), Error>
+where
+    C: NetworkBehaviour,
+    <C as NetworkBehaviour>::ToSwarm: Debug + Send,
+{
     Behaviour::new(keypair, options, repo, limits, custom).await
 }
