@@ -3,6 +3,7 @@ use core::task::{Context, Poll};
 use futures::channel::oneshot;
 use futures::StreamExt;
 use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
+use libp2p::identify::Info;
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{
@@ -21,8 +22,6 @@ use tracing::log;
 use wasm_timer::Interval;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-
-use super::PeerInfo;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ConnectionLimits {
@@ -142,7 +141,7 @@ pub struct Behaviour {
 
     pending_identify: HashMap<PeerId, oneshot::Sender<anyhow::Result<()>>>,
 
-    peer_info: HashMap<PeerId, PeerInfo>,
+    peer_info: HashMap<PeerId, Info>,
     peer_rtt: HashMap<PeerId, [Duration; 3]>,
     peer_connections: HashMap<PeerId, Vec<(ConnectionId, Multiaddr)>>,
 
@@ -236,10 +235,9 @@ impl Behaviour {
         self.whitelist.remove(&peer_id);
     }
 
-    pub fn inject_peer_info<I: Into<PeerInfo>>(&mut self, info: I) {
-        let info: PeerInfo = info.into();
-        let peer_id = info.peer_id;
-        self.peer_info.insert(info.peer_id, info);
+    pub fn inject_peer_info(&mut self, info: Info) {
+        let peer_id = info.public_key.to_peer_id();
+        self.peer_info.insert(peer_id, info);
         if let Some(ch) = self.pending_identify.remove(&peer_id) {
             let _ = ch.send(Ok(()));
             if let Some((_, instant)) = self.pending_identify_timer.remove(&peer_id) {
@@ -282,7 +280,7 @@ impl Behaviour {
         self.get_peer_rtt(peer_id).map(|rtt| rtt[2])
     }
 
-    pub fn get_peer_info(&self, peer_id: PeerId) -> Option<&PeerInfo> {
+    pub fn get_peer_info(&self, peer_id: PeerId) -> Option<&Info> {
         self.peer_info.get(&peer_id)
     }
 

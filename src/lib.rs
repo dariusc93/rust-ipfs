@@ -388,7 +388,10 @@ enum IpfsEvent {
     AddPeer(PeerId, Multiaddr, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
-    FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
+    FindPeerIdentity(
+        PeerId,
+        OneshotSender<ReceiverChannel<libp2p::identify::Info>>,
+    ),
     FindPeer(
         PeerId,
         bool,
@@ -1382,7 +1385,7 @@ impl Ipfs {
                         .send(IpfsEvent::FindPeerIdentity(peer_id, tx))
                         .await?;
 
-                    rx.await?.await?
+                    rx.await?.await?.map(PeerInfo::from)
                 }
                 None => {
                     let (local_result, external_result) =
@@ -1400,7 +1403,8 @@ impl Ipfs {
                     let (tx, rx) = oneshot_channel();
                     self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
 
-                    let protocols = rx.await?
+                    let protocols = rx
+                        .await?
                         .iter()
                         .filter_map(|s| StreamProtocol::try_from_owned(s.clone()).ok())
                         .collect();

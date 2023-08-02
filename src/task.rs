@@ -11,7 +11,7 @@ use futures::{
 };
 
 use crate::{
-    p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt, PeerInfo},
+    p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
     Channel, InnerConnectionEvent, InnerPubsubEvent,
 };
 use crate::{
@@ -88,7 +88,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
-    pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
+    pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub(crate) listener_subscriptions:
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
