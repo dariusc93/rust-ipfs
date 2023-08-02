@@ -930,7 +930,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                     if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
                         for ret in rets {
-                            let _ = ret.send(Ok(info.clone().into()));
+                            let _ = ret.send(Ok(info.clone()));
                         }
                     }
 
