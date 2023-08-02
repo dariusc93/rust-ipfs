@@ -13,7 +13,7 @@ use libp2p::swarm::{
 #[allow(deprecated)]
 use libp2p::swarm::{
     ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, FromSwarm, THandler,
-    THandlerInEvent, ToSwarm as NetworkBehaviourAction,
+    THandlerInEvent, ToSwarm,
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
@@ -129,9 +129,7 @@ pub struct ConnectionLimitError {
 pub struct Behaviour {
     limits: ConnectionLimits,
 
-    events: VecDeque<
-        NetworkBehaviourAction<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>,
-    >,
+    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     cleanup_interval: Interval,
 
     pending_connections: HashMap<ConnectionId, oneshot::Sender<anyhow::Result<()>>>,
@@ -186,7 +184,7 @@ impl Behaviour {
         let opts: DialOpts = opt.into();
         let (tx, rx) = oneshot::channel();
         let id = opts.connection_id();
-        self.events.push_back(NetworkBehaviourAction::Dial { opts });
+        self.events.push_back(ToSwarm::Dial { opts });
         self.pending_connections.insert(id, tx);
         rx
     }
@@ -203,11 +201,10 @@ impl Behaviour {
             let _ = tx.send(Err(anyhow::anyhow!("Disconnection is pending")));
             return rx;
         }
-        self.events
-            .push_back(NetworkBehaviourAction::CloseConnection {
-                peer_id,
-                connection: CloseConnection::All,
-            });
+        self.events.push_back(ToSwarm::CloseConnection {
+            peer_id,
+            connection: CloseConnection::All,
+        });
 
         self.pending_disconnection.insert(peer_id, tx);
 
@@ -285,7 +282,6 @@ impl Behaviour {
             .map(|list| list.iter().map(|(_, addr)| addr).cloned().collect())
     }
 
-    #[allow(deprecated)]
     fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
         let limit = limit.unwrap_or(u32::MAX);
         let current = current as u32;
@@ -507,12 +503,11 @@ impl NetworkBehaviour for Behaviour {
         }
     }
 
-    #[allow(deprecated)]
     fn poll(
         &mut self,
         cx: &mut Context,
         _: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<Self::ToSwarm, THandlerInEvent<Self>>> {
+    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
