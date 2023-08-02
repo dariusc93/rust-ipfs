@@ -15,21 +15,11 @@ use libp2p::{
 
 mod handler;
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     protocol: Vec<StreamProtocol>,
     use_deprecated: bool,
-}
-
-impl Default for Behaviour {
-    fn default() -> Self {
-        Self {
-            events: Default::default(),
-            protocol: Default::default(),
-            use_deprecated: true,
-        }
-    }
 }
 
 impl Behaviour {
