@@ -147,8 +147,6 @@ pub struct Behaviour {
 
     whitelist: HashSet<PeerId>,
 
-    protocols: Vec<Vec<u8>>,
-
     // For connection limits (took from libp2p pr)
     pending_inbound_connections: HashSet<ConnectionId>,
     pending_outbound_connections: HashSet<ConnectionId>,
@@ -174,7 +172,6 @@ impl Default for Behaviour {
             peer_rtt: Default::default(),
             peer_connections: Default::default(),
             whitelist: Default::default(),
-            protocols: Default::default(),
             pending_inbound_connections: Default::default(),
             pending_outbound_connections: Default::default(),
             established_inbound_connections: Default::default(),
@@ -215,12 +212,6 @@ impl Behaviour {
         self.pending_disconnection.insert(peer_id, tx);
 
         rx
-    }
-
-    pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
-        self.protocols
-            .iter()
-            .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
     }
 
     pub fn set_connection_limit(&mut self, limit: ConnectionLimits) {
@@ -520,14 +511,8 @@ impl NetworkBehaviour for Behaviour {
     fn poll(
         &mut self,
         cx: &mut Context,
-        params: &mut impl PollParameters,
+        _: &mut impl PollParameters,
     ) -> Poll<NetworkBehaviourAction<Self::ToSwarm, THandlerInEvent<Self>>> {
-        //TODO: Replace
-        let supported_protocols = params.supported_protocols();
-        if supported_protocols.len() != self.protocols.len() {
-            self.protocols = supported_protocols.collect();
-        }
-
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
