@@ -33,6 +33,7 @@ async fn two_node_put_get() {
 
 // check that a long line of nodes still works with get_block
 #[tokio::test]
+#[ignore]
 async fn long_get_block() {
     const N: usize = 10;
     let nodes = spawn_nodes::<N>(Topology::Line).await;

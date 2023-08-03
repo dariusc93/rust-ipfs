@@ -19,7 +19,7 @@ use libp2p::gossipsub::{
 };
 use libp2p::swarm::{
     ConnectionDenied, ConnectionId, NetworkBehaviour, PollParameters, THandler, THandlerInEvent,
-    ToSwarm as NetworkBehaviourAction,
+    ToSwarm,
 };
 
 /// Currently a thin wrapper around Gossipsub.
@@ -244,7 +244,7 @@ impl GossipsubStream {
 
 impl NetworkBehaviour for GossipsubStream {
     type ConnectionHandler = <Gossipsub as NetworkBehaviour>::ConnectionHandler;
-    type OutEvent = GossipsubEvent;
+    type ToSwarm = GossipsubEvent;
 
     fn handle_pending_outbound_connection(
         &mut self,
@@ -309,7 +309,7 @@ impl NetworkBehaviour for GossipsubStream {
         &mut self,
         ctx: &mut Context,
         poll: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<libp2p::gossipsub::Event, THandlerInEvent<Self>>> {
+    ) -> Poll<ToSwarm<libp2p::gossipsub::Event, THandlerInEvent<Self>>> {
         use futures::stream::StreamExt;
         use std::collections::hash_map::Entry;
 
@@ -335,12 +335,12 @@ impl NetworkBehaviour for GossipsubStream {
 
         loop {
             match futures::ready!(self.gossipsub.poll(ctx, poll)) {
-                NetworkBehaviourAction::GenerateEvent(GossipsubEvent::Message {
-                    message, ..
-                }) => {
+                ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
                     let topic = message.topic.clone();
                     if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(TrySendError::Closed(_)) = oe.get().try_broadcast(message) {
+                        if let Err(TrySendError::Closed(_)) =
+                            oe.get().try_broadcast(message.clone())
+                        {
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
@@ -355,57 +355,20 @@ impl NetworkBehaviour for GossipsubStream {
                     }
                     continue;
                 }
-                NetworkBehaviourAction::GenerateEvent(GossipsubEvent::Subscribed {
-                    peer_id,
-                    topic,
-                }) => {
-                    return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
-                        GossipsubEvent::Subscribed { peer_id, topic },
-                    ));
+                ToSwarm::GenerateEvent(GossipsubEvent::Subscribed { peer_id, topic }) => {
+                    return Poll::Ready(ToSwarm::GenerateEvent(GossipsubEvent::Subscribed {
+                        peer_id,
+                        topic,
+                    }));
                 }
-                NetworkBehaviourAction::GenerateEvent(GossipsubEvent::Unsubscribed {
-                    peer_id,
-                    topic,
-                }) => {
-                    return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
-                        GossipsubEvent::Unsubscribed { peer_id, topic },
-                    ));
+                ToSwarm::GenerateEvent(GossipsubEvent::Unsubscribed { peer_id, topic }) => {
+                    return Poll::Ready(ToSwarm::GenerateEvent(GossipsubEvent::Unsubscribed {
+                        peer_id,
+                        topic,
+                    }));
                 }
-                NetworkBehaviourAction::GenerateEvent(GossipsubEvent::GossipsubNotSupported {
-                    peer_id,
-                }) => {
-                    return Poll::Ready(NetworkBehaviourAction::GenerateEvent(
-                        GossipsubEvent::GossipsubNotSupported { peer_id },
-                    ));
-                }
-                action @ NetworkBehaviourAction::Dial { .. } => {
+                action => {
                     return Poll::Ready(action);
-                }
-                NetworkBehaviourAction::NotifyHandler {
-                    peer_id,
-                    event,
-                    handler,
-                } => {
-                    return Poll::Ready(NetworkBehaviourAction::NotifyHandler {
-                        peer_id,
-                        event,
-                        handler,
-                    });
-                }
-                NetworkBehaviourAction::ReportObservedAddr { address, score } => {
-                    return Poll::Ready(NetworkBehaviourAction::ReportObservedAddr {
-                        address,
-                        score,
-                    });
-                }
-                NetworkBehaviourAction::CloseConnection {
-                    peer_id,
-                    connection,
-                } => {
-                    return Poll::Ready(NetworkBehaviourAction::CloseConnection {
-                        peer_id,
-                        connection,
-                    });
                 }
             }
         }

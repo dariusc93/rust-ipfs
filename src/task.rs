@@ -11,7 +11,7 @@ use futures::{
 };
 
 use crate::{
-    p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt, PeerInfo},
+    p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
     Channel, InnerConnectionEvent, InnerPubsubEvent,
 };
 use crate::{
@@ -21,11 +21,16 @@ use crate::{
 use beetle_bitswap_next::BitswapEvent;
 use tokio::task::JoinHandle;
 
+use wasm_timer::Interval;
+
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     io,
     time::Duration,
 };
+
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
 
@@ -65,14 +70,13 @@ use libp2p::{
         KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
-    ping::Success as PingSuccess,
-    swarm::SwarmEvent,
+    swarm::{ConnectionId, SwarmEvent},
 };
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
-pub(crate) struct IpfsTask<C: NetworkBehaviour<OutEvent = void::Void>> {
+pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) swarm: TSwarm<C>,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
@@ -84,23 +88,133 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<OutEvent = void::Void>> {
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
-    pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<PeerInfo>>>,
+    pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub(crate) listener_subscriptions:
         HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
+    pub(crate) failed_ping: HashMap<ConnectionId, usize>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub(crate) connection_event_stream: Vec<UnboundedSender<InnerConnectionEvent>>,
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
+    pub(crate) timer: TaskTimer,
 }
 
-impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
+pub(crate) struct TaskTimer {
+    pub(crate) session_cleanup: Interval,
+    pub(crate) event_cleanup: Interval,
+    pub(crate) external_check: Interval,
+    pub(crate) local_check: Interval,
+}
+
+impl Default for TaskTimer {
+    fn default() -> Self {
+        let session_cleanup = Interval::new(Duration::from_secs(5));
+        let event_cleanup = Interval::new(Duration::from_secs(60));
+
+        let external_check = Interval::new_at(
+            std::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+        let local_check = Interval::new_at(
+            std::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+
+        Self {
+            session_cleanup,
+            event_cleanup,
+            external_check,
+            local_check,
+        }
+    }
+}
+
+impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            match self.swarm.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => self.handle_swarm_event(event),
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Pending => break,
+            }
+        }
+        loop {
+            match self.from_facade.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => self.handle_event(event),
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Pending => break,
+            }
+        }
+        loop {
+            match self.repo_events.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => self.handle_repo_event(event),
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Pending => break,
+            }
+        }
+
+        if self.timer.event_cleanup.poll_next_unpin(cx).is_ready() {
+            self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+            self.connection_event_stream.retain(|ch| !ch.is_closed());
+        }
+
+        if self.timer.session_cleanup.poll_next_unpin(cx).is_ready() {
+            let mut to_remove = Vec::new();
+            for (id, tasks) in &mut self.bitswap_sessions {
+                tasks.retain(|(_, task)| !task.is_finished());
+
+                if tasks.is_empty() {
+                    to_remove.push(*id);
+                }
+
+                // Only do a small chunk of cleanup on each iteration
+                // TODO(arqu): magic number
+                if to_remove.len() >= 10 {
+                    break;
+                }
+            }
+
+            for id in to_remove {
+                let (tx, _rx) = oneshot::channel();
+                self.destroy_bs_session(id, tx);
+            }
+        }
+
+        if self.timer.external_check.poll_next_unpin(cx).is_ready() {
+            let addrs = self.swarm.external_addresses().cloned().collect::<Vec<_>>();
+            if !addrs.is_empty() {
+                for ch in self.external_listener.drain(..) {
+                    let addrs = addrs.clone();
+                    let _ = ch.send(addrs);
+                }
+            }
+        }
+
+        if self.timer.local_check.poll_next_unpin(cx).is_ready() {
+            let addrs = self.swarm.listeners().cloned().collect::<Vec<_>>();
+            if !addrs.is_empty() {
+                for ch in self.local_listener.drain(..) {
+                    let addrs = addrs.clone();
+                    let _ = ch.send(addrs);
+                }
+            }
+        }
+
+        Poll::Pending
+    }
+}
+
+impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self, delay: bool) {
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
         let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
+
         let mut external_check = tokio::time::interval_at(
             tokio::time::Instant::now() + Duration::from_secs(1),
             Duration::from_secs(1),
@@ -155,7 +269,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     }
                 }
                 _ = external_check.tick() => {
-                    let addrs = self.swarm.external_addresses().cloned().map(|a| a.addr).collect::<Vec<_>>();
+                    let addrs = self.swarm.external_addresses().cloned().collect::<Vec<_>>();
                     if !addrs.is_empty() {
                         for ch in self.external_listener.drain(..) {
                             tokio::spawn({
@@ -270,7 +384,10 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                 })
             }
             SwarmEvent::ConnectionClosed {
-                peer_id, endpoint, ..
+                peer_id,
+                endpoint,
+                connection_id,
+                ..
             } => {
                 let address = match endpoint {
                     libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
@@ -280,6 +397,8 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     peer_id,
                     address,
                 });
+
+                self.failed_ping.remove(&connection_id);
 
                 if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
                     tokio::spawn(async move {
@@ -335,7 +454,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     }
                 }
             },
-            SwarmEvent::Behaviour(BehaviourEvent::Kad(event)) => {
+            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(event)) => {
                 match event {
                     InboundRequest { request } => {
                         trace!("kad: inbound {:?} request handled", request);
@@ -729,13 +848,13 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     let _ = response.send(duration).ok();
                 }
             },
-            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+            SwarmEvent::Behaviour(BehaviourEvent::Pubsub(
                 libp2p::gossipsub::Event::Subscribed { peer_id, topic },
             )) => self.emit_pubsub_event(InnerPubsubEvent::Subscribe {
                 topic: topic.to_string(),
                 peer_id,
             }),
-            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+            SwarmEvent::Behaviour(BehaviourEvent::Pubsub(
                 libp2p::gossipsub::Event::Unsubscribed { peer_id, topic },
             )) => self.emit_pubsub_event(InnerPubsubEvent::Unsubscribe {
                 topic: topic.to_string(),
@@ -744,7 +863,8 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
             SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
                 libp2p::ping::Event {
                     peer,
-                    result: Result::Ok(PingSuccess::Ping { rtt }),
+                    result: Result::Ok(rtt),
+                    connection,
                 } => {
                     trace!(
                         "ping: rtt to {} is {} ms",
@@ -752,30 +872,53 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                         rtt.as_millis()
                     );
                     self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
-                }
-                libp2p::ping::Event {
-                    peer,
-                    result: Result::Ok(PingSuccess::Pong),
-                } => {
-                    trace!("ping: pong from {}", peer);
+                    self.failed_ping.remove(&connection);
                 }
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Timeout),
-                } => {
-                    trace!("ping: timeout to {}", peer);
-                }
+                    connection,
+                } => match self.failed_ping.entry(connection) {
+                    Entry::Occupied(mut entry) => {
+                        if *entry.get() > 1 {
+                            self.swarm.close_connection(connection);
+                            trace!("ping: timeout to {}", peer);
+                        }
+
+                        *entry.get_mut() += 1;
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                },
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Other { error }),
-                } => {
-                    error!("ping: failure with {}: {}", peer.to_base58(), error);
-                }
+                    connection,
+                } => match self.failed_ping.entry(connection) {
+                    Entry::Occupied(mut entry) => {
+                        if *entry.get() > 1 {
+                            self.swarm.close_connection(connection);
+                            error!(
+                                "ping: closing {} with {:?} due to failure: {}",
+                                peer, connection, error
+                            );
+                        }
+
+                        *entry.get_mut() += 1;
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                },
                 libp2p::ping::Event {
                     peer,
                     result: Result::Err(libp2p::ping::Failure::Unsupported),
+                    connection,
                 } => {
+                    //TODO: Do we want to reject peers that dont support this protocol?
                     error!("ping: failure with {}: unsupported", peer.to_base58());
+                    self.swarm.close_connection(connection);
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
@@ -787,7 +930,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
 
                     if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
                         for ret in rets {
-                            let _ = ret.send(Ok(info.clone().into()));
+                            let _ = ret.send(Ok(info.clone()));
                         }
                     }
 
@@ -802,10 +945,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     }
 
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
-                        if protocols
-                            .iter()
-                            .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
-                        {
+                        if protocols.iter().any(|p| libp2p::kad::PROTOCOL_NAME.eq(p)) {
                             for addr in &listen_addrs {
                                 kad.add_address(&peer_id, addr.clone());
                             }
@@ -814,7 +954,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
 
                     if protocols
                         .iter()
-                        .any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME)
+                        .any(|p| libp2p::autonat::DEFAULT_PROTOCOL_NAME.eq(p))
                     {
                         for addr in listen_addrs {
                             self.swarm
@@ -838,8 +978,6 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
         }
     }
 
-    #[allow(deprecated)]
-    //TODO: Replace addresses_of_peer
     fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {
@@ -871,7 +1009,6 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     .swarm
                     .external_addresses()
                     .cloned()
-                    .map(|a| a.addr)
                     .collect::<Vec<Multiaddr>>();
 
                 let res = match external.is_empty() {
@@ -906,11 +1043,11 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                 let _ = ret.send((recv, rx));
             }
             IpfsEvent::Ban(peer, ret) => {
-                self.swarm.ban_peer_id(peer);
+                self.swarm.behaviour_mut().block_list.block_peer(peer);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::Unban(peer, ret) => {
-                self.swarm.unban_peer_id(peer);
+                self.swarm.behaviour_mut().block_list.unblock_peer(peer);
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
@@ -1129,9 +1266,11 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     listener_addrs
                 } else {
                     self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .addresses_of_peer(&peer_id)
+                        .behaviour()
+                        .addressbook
+                        .get_peer_addresses(&peer_id)
+                        .cloned()
+                        .unwrap_or_default()
                 };
 
                 let addrs = if !locally_known_addrs.is_empty() || local_only {
@@ -1210,6 +1349,17 @@ impl<C: NetworkBehaviour<OutEvent = void::Void>> IpfsTask<C> {
                     None => Err(anyhow!("kad protocol is disabled")),
                 };
                 let _ = ret.send(future);
+            }
+            IpfsEvent::DhtMode(mode, ret) => {
+                let res = match self.swarm.behaviour_mut().kademlia.as_mut() {
+                    Some(kad) => {
+                        kad.set_mode(mode.into());
+                        Ok(())
+                    }
+                    None => Err(anyhow!("kad protocol is disabled")),
+                };
+
+                let _ = ret.send(res);
             }
             IpfsEvent::DhtGet(key, ret) => {
                 let id = self

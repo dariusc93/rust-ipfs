@@ -2,11 +2,9 @@
 use crate::error::Error;
 use crate::p2p::KadResult;
 use crate::path::IpfsPath;
-use crate::subscription::RequestKind;
 use crate::{Block, ReceiverChannel, StoragePath};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use core::convert::TryFrom;
 use core::fmt::Debug;
 use futures::channel::{
     mpsc::{channel, Receiver, Sender},
@@ -342,18 +340,6 @@ pub enum RepoEvent {
     RemovedBlock(Cid),
 }
 
-impl TryFrom<RequestKind> for RepoEvent {
-    type Error = &'static str;
-
-    fn try_from(req: RequestKind) -> Result<Self, Self::Error> {
-        if let RequestKind::GetBlock(cid) = req {
-            Ok(RepoEvent::UnwantBlock(cid))
-        } else {
-            Err("logic error: RepoEvent can only be created from a Request::GetBlock")
-        }
-    }
-}
-
 impl Repo {
     pub fn new(
         block_store: Arc<dyn BlockStore>,
@@ -393,7 +379,7 @@ impl Repo {
     pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
         let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default()));
         let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
-        let lockfile = Arc::new(lock::MemLock::default());
+        let lockfile = Arc::new(lock::MemLock);
         Self::new(block_store, data_store, lockfile)
     }
 
