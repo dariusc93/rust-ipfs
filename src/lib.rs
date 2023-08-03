@@ -31,7 +31,6 @@ pub mod p2p;
 pub mod path;
 pub mod refs;
 pub mod repo;
-mod subscription;
 mod task;
 pub mod unixfs;
 
@@ -76,7 +75,7 @@ use self::{
     dag::IpldDag,
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
-    repo::{create_repo, Repo, RepoEvent},
+    repo::{create_repo, Repo},
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
