@@ -919,6 +919,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         tokio::spawn({
             async move {
+                //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
 
                 if as_fut {
