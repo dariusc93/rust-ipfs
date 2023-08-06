@@ -101,6 +101,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) timer: TaskTimer,
+    pub(crate) local_external_addr: bool,
 }
 
 pub(crate) struct TaskTimer {
@@ -365,6 +366,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             let _ = ch.send(vec![addr]);
                         }
                     });
+                }
+
+                if self.local_external_addr
+                    && !address.is_relay()
+                    && (address.is_loopback() || address.is_private())
+                {
+                    self.swarm.add_external_address(address.clone());
                 }
 
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
