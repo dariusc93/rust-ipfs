@@ -1,9 +1,9 @@
 # 0.4.0 [unreleased]
 - chore: Update libp2p to 0.52 [PR 76]
-- chore: Flag to use local addresses as external addresses [PR 90]
+- chore: Add `UninitializedIpfs::use_local_external_addr` to use local addresses as external addresses [PR 90]
 
 [PR 76]: https://github.com/dariusc93/rust-ipfs/pull/76
-[PR XX]: https://github.com/dariusc93/rust-ipfs/pull/90
+[PR 90]: https://github.com/dariusc93/rust-ipfs/pull/90
 
 # 0.3.19
 - refactor: Update libipld and switch to using quick-protobuf [PR 87]
