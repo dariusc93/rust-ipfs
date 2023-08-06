@@ -384,6 +384,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Either::Left(address));
                 }
             }
+            SwarmEvent::ExpiredListenAddr { address, .. } => {
+                if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
+                    self.swarm.remove_external_address(&address);
+                }
+            }
+            SwarmEvent::ListenerClosed { addresses, .. } => {
+                for address in addresses {
+                    if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
+                        self.swarm.remove_external_address(&address);
+                    }
+                }
+            }
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
