@@ -375,6 +375,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     self.swarm.add_external_address(address.clone());
                 }
 
+                if !address.is_loopback() && !address.is_private() {
+                    // We will assume that the address is global and reachable externally
+                    self.swarm.add_external_address(address.clone());
+                }
+
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     let _ = ret.send(Either::Left(address));
                 }
