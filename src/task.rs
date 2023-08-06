@@ -384,18 +384,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Either::Left(address));
                 }
             }
-            SwarmEvent::ExpiredListenAddr { address, .. } => {
-                if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
-                    self.swarm.remove_external_address(&address);
-                }
-            }
-            SwarmEvent::ListenerClosed { addresses, .. } => {
-                for address in addresses {
-                    if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
-                        self.swarm.remove_external_address(&address);
-                    }
-                }
-            }
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
@@ -439,6 +427,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             } => {
                 self.listeners.remove(&listener_id);
                 self.listening_addresses.remove(&address);
+
+                if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
+                    self.swarm.remove_external_address(&address);
+                }
+
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     //TODO: Determine if we want to return the address or use the right side and return an error?
                     let _ = ret.send(Either::Left(address));
@@ -452,6 +445,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 self.listeners.remove(&listener_id);
                 for address in addresses {
                     self.listening_addresses.remove(&address);
+                    if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
+                        self.swarm.remove_external_address(&address);
+                    }
                 }
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     let _ = ret.send(Either::Right(reason));
