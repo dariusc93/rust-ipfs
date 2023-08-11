@@ -696,8 +696,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Use local addrs as external addresses
-    pub fn use_local_external_addr(mut self) -> Self {
+    /// Automatically add any listened address as an external address
+    pub fn listen_as_external_addr(mut self) -> Self {
         self.local_external_addr = true;
         self
     }
