@@ -87,4 +87,4 @@ Dual licensed under MIT or Apache License (Version 2.0). See [LICENSE-MIT](./LIC
 
 ## Trademarks
 
-The [Rust logo and wordmark](https://www.rust-lang.org/policies/media-guide) are trademarks owned and protected by the [Rust Foundation](foundation.rust-lang.org). The Rust and Cargo logos (bitmap and vector) are owned by Rust Foundation and distributed under the terms of the [Creative Commons Attribution license (CC-BY)](https://creativecommons.org/licenses/by/4.0/).
+The [Rust logo and wordmark](https://www.rust-lang.org/policies/media-guide) are trademarks owned and protected by the [Rust Foundation](https://foundation.rust-lang.org). The Rust and Cargo logos (bitmap and vector) are owned by Rust Foundation and distributed under the terms of the [Creative Commons Attribution license (CC-BY)](https://creativecommons.org/licenses/by/4.0/).
