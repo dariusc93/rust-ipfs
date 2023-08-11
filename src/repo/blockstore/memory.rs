@@ -9,14 +9,14 @@ use libipld::Cid;
 use std::path::PathBuf;
 use tokio::sync::Mutex;
 
-use crate::repo::{BlockRm, BlockRmError, RepoCid};
+use crate::repo::{BlockRm, BlockRmError};
 
 /// Describes an in-memory block store.
 ///
 /// Blocks are stored as a `HashMap` of the `Cid` and `Block`.
 #[derive(Debug, Default)]
 pub struct MemBlockStore {
-    blocks: Mutex<HashedMap<RepoCid, Block>>,
+    blocks: Mutex<HashedMap<Cid, Block>>,
 }
 
 impl MemBlockStore {
@@ -36,11 +36,7 @@ impl BlockStore for MemBlockStore {
     }
 
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
-        let contains = self
-            .blocks
-            .lock()
-            .await
-            .contains_key(&RepoCid(cid.to_owned()));
+        let contains = self.blocks.lock().await.contains_key(cid);
         Ok(contains)
     }
 
@@ -49,7 +45,7 @@ impl BlockStore for MemBlockStore {
             .blocks
             .lock()
             .await
-            .get(&RepoCid(cid.to_owned()))
+            .get(cid)
             .map(|block| block.to_owned());
         Ok(block)
     }
@@ -57,14 +53,14 @@ impl BlockStore for MemBlockStore {
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
         use std::collections::hash_map::Entry;
         let mut g = self.blocks.lock().await;
-        match g.entry(RepoCid(*block.cid())) {
+        match g.entry(*block.cid()) {
             Entry::Occupied(_) => {
                 trace!("already existing block");
                 Ok((*block.cid(), BlockPut::Existed))
             }
             Entry::Vacant(ve) => {
                 trace!("new block");
-                let cid = ve.key().0;
+                let cid = *ve.key();
                 ve.insert(block);
                 Ok((cid, BlockPut::NewBlock))
             }
@@ -72,7 +68,7 @@ impl BlockStore for MemBlockStore {
     }
 
     async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
-        match self.blocks.lock().await.remove(&RepoCid(cid.to_owned())) {
+        match self.blocks.lock().await.remove(cid) {
             Some(_block) => Ok(Ok(BlockRm::Removed(*cid))),
             None => Ok(Err(BlockRmError::NotFound(*cid))),
         }
@@ -80,7 +76,7 @@ impl BlockStore for MemBlockStore {
 
     async fn list(&self) -> Result<Vec<Cid>, Error> {
         let guard = self.blocks.lock().await;
-        Ok(guard.iter().map(|(cid, _block)| cid.0).collect())
+        Ok(guard.iter().map(|(cid, _block)| *cid).collect())
     }
 
     async fn wipe(&self) {

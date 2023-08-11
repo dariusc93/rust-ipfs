@@ -17,12 +17,18 @@ pub trait MultiaddrExt {
 
     /// Determine if the address is being relayed to a peer
     fn is_relayed(&self) -> bool;
+
+    /// Determine if address is loopback or local address
+    fn is_loopback(&self) -> bool;
+
+    /// Determine if address is private address
+    fn is_private(&self) -> bool;
 }
 
 impl MultiaddrExt for Multiaddr {
     fn peer_id(&self) -> Option<PeerId> {
-        if let Some(Protocol::P2p(hash)) = self.iter().last() {
-            return PeerId::from_multihash(hash).ok();
+        if let Some(Protocol::P2p(peer)) = self.iter().last() {
+            return Some(peer);
         }
 
         None
@@ -30,7 +36,7 @@ impl MultiaddrExt for Multiaddr {
 
     fn extract_peer_id(&mut self) -> Option<PeerId> {
         match self.pop() {
-            Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).ok(),
+            Some(Protocol::P2p(peer)) => Some(peer),
             _ => None,
         }
     }
@@ -42,8 +48,8 @@ impl MultiaddrExt for Multiaddr {
 
         while let Some(protocol) = self.iter().next() {
             //Find the first peer id and return it
-            if let Protocol::P2p(hash) = protocol {
-                return PeerId::from_multihash(hash).ok();
+            if let Protocol::P2p(peer) = protocol {
+                return Some(peer);
             }
         }
 
@@ -87,6 +93,24 @@ impl MultiaddrExt for Multiaddr {
 
         true
     }
+
+    fn is_loopback(&self) -> bool {
+        self.iter().any(|proto| match proto {
+            Protocol::Ip4(ip) => ip.is_loopback(),
+            Protocol::Ip6(ip) => ip.is_loopback(),
+            _ => false,
+        })
+    }
+
+    fn is_private(&self) -> bool {
+        self.iter().any(|proto| match proto {
+            Protocol::Ip4(ip) => ip.is_private(),
+            Protocol::Ip6(ip) => {
+                (ip.segments()[0] & 0xffc0) != 0xfe80 && (ip.segments()[0] & 0xfe00) != 0xfc00
+            }
+            _ => false,
+        })
+    }
 }
 
 #[allow(dead_code)]
@@ -100,10 +124,7 @@ pub(crate) fn peer_id_from_multiaddr(addr: Multiaddr) -> Option<PeerId> {
 pub(crate) fn extract_peer_id_from_multiaddr(mut addr: Multiaddr) -> (Option<PeerId>, Multiaddr) {
     let old_addr = addr.clone();
     match addr.pop() {
-        Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
-            Ok(id) => (Some(id), addr),
-            _ => (None, addr),
-        },
+        Some(Protocol::P2p(peer)) => (Some(peer), addr),
         _ => (None, old_addr),
     }
 }

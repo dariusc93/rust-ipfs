@@ -2,11 +2,9 @@
 use crate::error::Error;
 use crate::p2p::KadResult;
 use crate::path::IpfsPath;
-use crate::subscription::RequestKind;
 use crate::{Block, ReceiverChannel, StoragePath};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use core::convert::TryFrom;
 use core::fmt::Debug;
 use futures::channel::{
     mpsc::{channel, Receiver, Sender},
@@ -20,7 +18,6 @@ use libp2p::identity::PeerId;
 use parking_lot::Mutex;
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{error, fmt, io};
@@ -47,23 +44,6 @@ pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
             datastore,
             lock,
         } => Repo::new(blockstore, datastore, lock),
-    }
-}
-
-/// A wrapper for `Cid` that has a `Multihash`-based equality check.
-#[derive(Debug)]
-pub struct RepoCid(Cid);
-
-impl PartialEq for RepoCid {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.hash() == other.0.hash()
-    }
-}
-impl Eq for RepoCid {}
-
-impl Hash for RepoCid {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash().hash(state)
     }
 }
 
@@ -360,18 +340,6 @@ pub enum RepoEvent {
     RemovedBlock(Cid),
 }
 
-impl TryFrom<RequestKind> for RepoEvent {
-    type Error = &'static str;
-
-    fn try_from(req: RequestKind) -> Result<Self, Self::Error> {
-        if let RequestKind::GetBlock(cid) = req {
-            Ok(RepoEvent::UnwantBlock(cid))
-        } else {
-            Err("logic error: RepoEvent can only be created from a Request::GetBlock")
-        }
-    }
-}
-
 impl Repo {
     pub fn new(
         block_store: Arc<dyn BlockStore>,
@@ -411,7 +379,7 @@ impl Repo {
     pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
         let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default()));
         let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
-        let lockfile = Arc::new(lock::MemLock::default());
+        let lockfile = Arc::new(lock::MemLock);
         Self::new(block_store, data_store, lockfile)
     }
 

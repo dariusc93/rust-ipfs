@@ -15,13 +15,14 @@ use libp2p::identity::{Keypair, PublicKey};
 use libp2p::kad::KademliaConfig;
 use libp2p::ping::Config as PingConfig;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::Swarm;
 use libp2p::{Multiaddr, PeerId};
+use libp2p::{StreamProtocol, Swarm};
 use tracing::Span;
 
 pub(crate) mod addr;
 pub(crate) mod addressbook;
 pub(crate) mod peerbook;
+pub mod protocol;
 
 mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;
@@ -66,7 +67,7 @@ pub struct PeerInfo {
     pub listen_addrs: Vec<Multiaddr>,
 
     /// The list of protocols supported by the peer, e.g. `/ipfs/ping/1.0.0`.
-    pub protocols: Vec<String>,
+    pub protocols: Vec<StreamProtocol>,
 
     /// Address observed by or for the remote.
     pub observed_addr: Option<Multiaddr>,
@@ -261,16 +262,16 @@ impl Default for SwarmConfig {
         Self {
             connection: ConnectionLimits::default(),
             dial_concurrency_factor: 8.try_into().expect("8 > 0"),
-            notify_handler_buffer_size: 256.try_into().expect("256 > 0"),
-            connection_event_buffer_size: 256,
-            max_inbound_stream: 128,
+            notify_handler_buffer_size: 32.try_into().expect("256 > 0"),
+            connection_event_buffer_size: 7,
+            max_inbound_stream: 10_000,
         }
     }
 }
 
 #[allow(clippy::type_complexity)]
 /// Creates a new IPFS swarm.
-pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
+pub async fn create_swarm<C>(
     keypair: &Keypair,
     options: SwarmOptions,
     swarm_config: SwarmConfig,
@@ -278,7 +279,11 @@ pub async fn create_swarm<C: NetworkBehaviour<OutEvent = void::Void>>(
     repo: Repo,
     span: Span,
     (custom, custom_transport): (Option<C>, Option<TTransportFn>),
-) -> Result<TSwarm<C>, Error> {
+) -> Result<TSwarm<C>, Error>
+where
+    C: NetworkBehaviour,
+    <C as NetworkBehaviour>::ToSwarm: std::fmt::Debug + Send,
+{
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
 

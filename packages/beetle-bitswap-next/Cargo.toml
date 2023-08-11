@@ -2,7 +2,7 @@
 name = "beetle-bitswap-next"
 authors = ["Darius C", "dignifiedquire <me@dignifiedquire.com>"]
 description = "Implementation of the bitswap protocol"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "Apache-2.0/MIT"
 rust-version = "1.65"
@@ -25,7 +25,7 @@ futures = "0.3.28"
 futures-util = "0.3.28"
 
 keyed_priority_queue = "0.4.1"
-libp2p = { version = "0.51", default-features = false, features = ["ping"] }
+libp2p = { workspace = true, features = ["ping"] }
 multihash = "0.18"
 names = { version = "0.14.0", default-features = false }
 num_enum = "0.6.1"
@@ -44,7 +44,7 @@ quick-protobuf = { version = "0.8" }
 
 [dev-dependencies]
 criterion = "0.4"
-libp2p = { version = "0.51", default-features = false, features = [
+libp2p = { workspace = true, features = [
     "yamux",
     "noise",
     "tcp",

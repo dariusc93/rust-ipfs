@@ -22,7 +22,7 @@ use libp2p::swarm::{
     THandler, THandlerInEvent, ToSwarm,
 };
 use libp2p::swarm::{ConnectionClosed, ConnectionId, DialFailure, FromSwarm};
-use libp2p::{Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, StreamProtocol};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, trace, warn};
@@ -39,10 +39,10 @@ mod client;
 mod error;
 mod handler;
 mod network;
+mod pb;
 mod prefix;
 mod protocol;
 mod server;
-mod pb;
 
 pub mod message;
 pub mod peer_task_queue;
@@ -259,8 +259,8 @@ impl<S: Store> Bitswap<S> {
     /// Called on identify events from swarm, informing us about available protocols of this peer.
     /// TODO: Check within handler after updating to libp2p 0.52 instead of checking identify
     ///       If peer does not contain the protocol, emit an event from the handler to notify
-    ///       the behaviour and make sure to set `keep_alive` to `KeepAlive::No` 
-    pub fn on_identify(&self, peer: &PeerId, protocols: &[String]) {
+    ///       the behaviour and make sure to set `keep_alive` to `KeepAlive::No`
+    pub fn on_identify(&self, peer: &PeerId, protocols: &[StreamProtocol]) {
         if let Some(PeerState::Connected(conn_id)) = self.get_peer_state(peer) {
             let mut protocols: Vec<ProtocolId> =
                 protocols.iter().filter_map(ProtocolId::try_from).collect();
@@ -394,7 +394,7 @@ pub enum BitswapEvent {
 
 impl<S: Store> NetworkBehaviour for Bitswap<S> {
     type ConnectionHandler = BitswapHandler;
-    type OutEvent = BitswapEvent;
+    type ToSwarm = BitswapEvent;
 
     fn handle_established_inbound_connection(
         &mut self,
@@ -513,7 +513,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
         &mut self,
         cx: &mut Context,
         _: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::OutEvent, THandlerInEvent<Self>>> {
+    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         // limit work
         for _ in 0..50 {
             match Pin::new(&mut self.network).poll(cx) {
@@ -825,8 +825,8 @@ mod tests {
                         swarm2.behaviour().on_identify(
                             &peer_id,
                             &[
-                                "/ipfs/bitswap/1.2.0".to_string(),
-                                "/ipfs/bitswap/1.1.0".to_string(),
+                                StreamProtocol::new("/ipfs/bitswap/1.2.0"),
+                                StreamProtocol::new("/ipfs/bitswap/1.1.0"),
                             ],
                         );
                     }

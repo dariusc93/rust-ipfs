@@ -3,6 +3,7 @@ use core::task::{Context, Poll};
 use futures::channel::oneshot;
 use futures::StreamExt;
 use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
+use libp2p::identify::Info;
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{
@@ -11,8 +12,8 @@ use libp2p::swarm::{
 };
 #[allow(deprecated)]
 use libp2p::swarm::{
-    ConnectionClosed, ConnectionDenied, ConnectionId, ConnectionLimit, DialFailure, FromSwarm,
-    THandler, THandlerInEvent, ToSwarm as NetworkBehaviourAction,
+    ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, FromSwarm, THandler,
+    THandlerInEvent, ToSwarm,
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
@@ -21,8 +22,6 @@ use tracing::log;
 use wasm_timer::Interval;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-
-use super::PeerInfo;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ConnectionLimits {
@@ -118,14 +117,19 @@ impl ConnectionLimits {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Limit: {limit}, Current: {current}")]
+pub struct ConnectionLimitError {
+    limit: u32,
+    current: u32,
+}
+
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct Behaviour {
     limits: ConnectionLimits,
 
-    events: VecDeque<
-        NetworkBehaviourAction<<Self as NetworkBehaviour>::OutEvent, THandlerInEvent<Self>>,
-    >,
+    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     cleanup_interval: Interval,
 
     pending_connections: HashMap<ConnectionId, oneshot::Sender<anyhow::Result<()>>>,
@@ -135,13 +139,11 @@ pub struct Behaviour {
 
     pending_identify: HashMap<PeerId, oneshot::Sender<anyhow::Result<()>>>,
 
-    peer_info: HashMap<PeerId, PeerInfo>,
+    peer_info: HashMap<PeerId, Info>,
     peer_rtt: HashMap<PeerId, [Duration; 3]>,
     peer_connections: HashMap<PeerId, Vec<(ConnectionId, Multiaddr)>>,
 
     whitelist: HashSet<PeerId>,
-
-    protocols: Vec<Vec<u8>>,
 
     // For connection limits (took from libp2p pr)
     pending_inbound_connections: HashSet<ConnectionId>,
@@ -168,7 +170,6 @@ impl Default for Behaviour {
             peer_rtt: Default::default(),
             peer_connections: Default::default(),
             whitelist: Default::default(),
-            protocols: Default::default(),
             pending_inbound_connections: Default::default(),
             pending_outbound_connections: Default::default(),
             established_inbound_connections: Default::default(),
@@ -183,7 +184,7 @@ impl Behaviour {
         let opts: DialOpts = opt.into();
         let (tx, rx) = oneshot::channel();
         let id = opts.connection_id();
-        self.events.push_back(NetworkBehaviourAction::Dial { opts });
+        self.events.push_back(ToSwarm::Dial { opts });
         self.pending_connections.insert(id, tx);
         rx
     }
@@ -200,21 +201,14 @@ impl Behaviour {
             let _ = tx.send(Err(anyhow::anyhow!("Disconnection is pending")));
             return rx;
         }
-        self.events
-            .push_back(NetworkBehaviourAction::CloseConnection {
-                peer_id,
-                connection: CloseConnection::All,
-            });
+        self.events.push_back(ToSwarm::CloseConnection {
+            peer_id,
+            connection: CloseConnection::All,
+        });
 
         self.pending_disconnection.insert(peer_id, tx);
 
         rx
-    }
-
-    pub fn protocols(&self) -> impl Iterator<Item = String> + '_ {
-        self.protocols
-            .iter()
-            .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
     }
 
     pub fn set_connection_limit(&mut self, limit: ConnectionLimits) {
@@ -229,10 +223,9 @@ impl Behaviour {
         self.whitelist.remove(&peer_id);
     }
 
-    pub fn inject_peer_info<I: Into<PeerInfo>>(&mut self, info: I) {
-        let info: PeerInfo = info.into();
-        let peer_id = info.peer_id;
-        self.peer_info.insert(info.peer_id, info);
+    pub fn inject_peer_info(&mut self, info: Info) {
+        let peer_id = info.public_key.to_peer_id();
+        self.peer_info.insert(peer_id, info);
         if let Some(ch) = self.pending_identify.remove(&peer_id) {
             let _ = ch.send(Ok(()));
             if let Some((_, instant)) = self.pending_identify_timer.remove(&peer_id) {
@@ -244,6 +237,17 @@ impl Behaviour {
 
     pub fn peers(&self) -> impl Iterator<Item = &PeerId> {
         self.peer_connections.keys()
+    }
+
+    pub fn connected_peers_addrs(&self) -> impl Iterator<Item = (PeerId, Vec<Multiaddr>)> + '_ {
+        self.peer_connections.iter().map(|(peer_id, list)| {
+            let list = list
+                .iter()
+                .map(|(_, addr)| addr)
+                .cloned()
+                .collect::<Vec<_>>();
+            (*peer_id, list)
+        })
     }
 
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, rtt: Duration) {
@@ -264,7 +268,7 @@ impl Behaviour {
         self.get_peer_rtt(peer_id).map(|rtt| rtt[2])
     }
 
-    pub fn get_peer_info(&self, peer_id: PeerId) -> Option<&PeerInfo> {
+    pub fn get_peer_info(&self, peer_id: PeerId) -> Option<&Info> {
         self.peer_info.get(&peer_id)
     }
 
@@ -278,13 +282,15 @@ impl Behaviour {
             .map(|list| list.iter().map(|(_, addr)| addr).cloned().collect())
     }
 
-    #[allow(deprecated)]
     fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
         let limit = limit.unwrap_or(u32::MAX);
         let current = current as u32;
 
         if current >= limit {
-            return Err(ConnectionDenied::new(ConnectionLimit { limit, current }));
+            return Err(ConnectionDenied::new(ConnectionLimitError {
+                limit,
+                current,
+            }));
         }
 
         Ok(())
@@ -293,7 +299,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = DummyConnectionHandler;
-    type OutEvent = void::Void;
+    type ToSwarm = void::Void;
 
     fn handle_pending_inbound_connection(
         &mut self,
@@ -500,13 +506,8 @@ impl NetworkBehaviour for Behaviour {
     fn poll(
         &mut self,
         cx: &mut Context,
-        params: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<Self::OutEvent, THandlerInEvent<Self>>> {
-        let supported_protocols = params.supported_protocols();
-        if supported_protocols.len() != self.protocols.len() {
-            self.protocols = supported_protocols.collect();
-        }
-
+        _: &mut impl PollParameters,
+    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
@@ -558,8 +559,6 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
-
     use super::Behaviour as PeerBook;
     use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
     use futures::StreamExt;
@@ -797,12 +796,10 @@ mod test {
 
         let behaviour = Behaviour {
             peerbook: PeerBook::default(),
-            identify: Toggle::from(
-                identify.then_some(identify::Behaviour::new(
-                    Config::new("/peerbook/0.1".into(), pubkey)
-                        .with_initial_delay(Duration::from_secs(0)),
-                )),
-            ),
+            identify: Toggle::from(identify.then_some(identify::Behaviour::new(Config::new(
+                "/peerbook/0.1".into(),
+                pubkey,
+            )))),
             keep_alive: keep_alive::Behaviour,
         };
 

@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
         .enable_mdns()
-        .set_custom_behaviour(ext_behaviour::Behaviour::default())
+        .set_custom_behaviour(ext_behaviour::Behaviour)
         .start()
         .await?;
 
@@ -38,7 +38,7 @@ mod ext_behaviour {
 
     impl NetworkBehaviour for Behaviour {
         type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
-        type OutEvent = void::Void;
+        type ToSwarm = void::Void;
 
         fn handle_pending_inbound_connection(
             &mut self,
@@ -101,8 +101,9 @@ mod ext_behaviour {
                 | FromSwarm::ExpiredListenAddr(_)
                 | FromSwarm::ListenerError(_)
                 | FromSwarm::ListenerClosed(_)
-                | FromSwarm::NewExternalAddr(_)
-                | FromSwarm::ExpiredExternalAddr(_) => {}
+                | FromSwarm::ExternalAddrConfirmed(_)
+                | FromSwarm::ExternalAddrExpired(_)
+                | FromSwarm::NewExternalAddrCandidate(_) => {}
             }
         }
 
@@ -110,7 +111,7 @@ mod ext_behaviour {
             &mut self,
             _: &mut Context,
             _: &mut impl PollParameters,
-        ) -> Poll<ToSwarm<Self::OutEvent, THandlerInEvent<Self>>> {
+        ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
             Poll::Pending
         }
     }

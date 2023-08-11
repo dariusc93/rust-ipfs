@@ -31,7 +31,6 @@ pub mod p2p;
 pub mod path;
 pub mod refs;
 pub mod repo;
-mod subscription;
 mod task;
 pub mod unixfs;
 
@@ -76,7 +75,7 @@ use self::{
     dag::IpldDag,
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
-    repo::{create_repo, Repo, RepoEvent},
+    repo::{create_repo, Repo},
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -108,9 +107,10 @@ pub use libp2p::{
 
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
-    kad::{store::MemoryStoreConfig, KademliaConfig},
+    kad::{store::MemoryStoreConfig, KademliaConfig, Mode},
     ping::Config as PingConfig,
     swarm::dial_opts::DialOpts,
+    StreamProtocol,
 };
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
@@ -395,7 +395,10 @@ enum IpfsEvent {
     AddPeer(PeerId, Multiaddr, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
     GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
-    FindPeerIdentity(PeerId, OneshotSender<ReceiverChannel<PeerInfo>>),
+    FindPeerIdentity(
+        PeerId,
+        OneshotSender<ReceiverChannel<libp2p::identify::Info>>,
+    ),
     FindPeer(
         PeerId,
         bool,
@@ -405,6 +408,7 @@ enum IpfsEvent {
     RemoveWhitelistPeer(PeerId, Channel<()>),
     GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
+    DhtMode(DhtMode, Channel<()>),
     DhtGet(Key, OneshotSender<RecordStream>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
@@ -418,6 +422,23 @@ enum IpfsEvent {
     ConnectionEventStream(OneshotSender<UnboundedReceiver<InnerConnectionEvent>>),
 
     Exit,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum DhtMode {
+    Auto,
+    Client,
+    Server,
+}
+
+impl From<DhtMode> for Option<Mode> {
+    fn from(mode: DhtMode) -> Self {
+        match mode {
+            DhtMode::Auto => None,
+            DhtMode::Client => Some(Mode::Client),
+            DhtMode::Server => Some(Mode::Server),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -494,11 +515,12 @@ pub enum FDLimit {
 
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
-pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> {
+pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     delay: bool,
+    local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
@@ -508,13 +530,13 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<OutEvent = void::Void> + Send> 
 
 pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
 
-impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> Default for UninitializedIpfs<C> {
+impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> Default for UninitializedIpfs<C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
+impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     pub fn new() -> Self {
         Self::with_opt(Default::default())
     }
@@ -536,6 +558,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             delay,
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
+            local_external_addr: false,
             swarm_event: None,
             custom_behaviour: None,
             custom_transport: None,
@@ -730,6 +753,12 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Automatically add any listened address as an external address
+    pub fn listen_as_external_addr(mut self) -> Self {
+        self.local_external_addr = true;
+        self
+    }
+
     /// Set a custom behaviour
     pub fn set_custom_behaviour(mut self, behaviour: C) -> Self {
         self.custom_behaviour = Some(behaviour);
@@ -776,6 +805,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             custom_behaviour,
             custom_transport,
             record_key_validator,
+            local_external_addr,
             ..
         } = self;
 
@@ -919,6 +949,7 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             dht_peer_lookup: Default::default(),
             bitswap_sessions: Default::default(),
             disconnect_confirmation: Default::default(),
+            failed_ping: Default::default(),
             pubsub_event_stream: Default::default(),
             connection_event_stream: Default::default(),
             kad_subscriptions,
@@ -928,6 +959,8 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
             swarm_event,
             external_listener: Default::default(),
             local_listener: Default::default(),
+            timer: Default::default(),
+            local_external_addr,
         };
 
         for addr in listening_addrs.into_iter() {
@@ -955,7 +988,14 @@ impl<C: NetworkBehaviour<OutEvent = void::Void> + Send> UninitializedIpfs<C> {
 
         tokio::spawn({
             async move {
-                fut.run(delay).instrument(swarm_span).await;
+                //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
+                let as_fut = false;
+
+                if as_fut {
+                    fut.instrument(swarm_span).await;
+                } else {
+                    fut.run(delay).instrument(swarm_span).await;
+                }
             }
         });
         Ok(ipfs)
@@ -1402,16 +1442,6 @@ impl Ipfs {
         .await
     }
 
-    pub async fn protocols(&self) -> Result<Vec<String>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
-            Ok(rx.await?)
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
     /// Returns the peer identity information. If no peer id is supplied the local node identity is used.
     pub async fn identity(&self, peer_id: Option<PeerId>) -> Result<PeerInfo, Error> {
         async move {
@@ -1424,7 +1454,7 @@ impl Ipfs {
                         .send(IpfsEvent::FindPeerIdentity(peer_id, tx))
                         .await?;
 
-                    rx.await?.await?
+                    rx.await?.await?.map(PeerInfo::from)
                 }
                 None => {
                     let (local_result, external_result) =
@@ -1439,18 +1469,21 @@ impl Ipfs {
                         .cloned()
                         .collect::<Vec<_>>();
 
-                    let protocols = self.protocols().await?;
+                    let (tx, rx) = oneshot_channel();
+                    self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
+
+                    let protocols = rx
+                        .await?
+                        .iter()
+                        .filter_map(|s| StreamProtocol::try_from_owned(s.clone()).ok())
+                        .collect();
+
                     let public_key = self.key.public();
                     let peer_id = public_key.to_peer_id();
 
                     for addr in &mut addresses {
-                        if !addr
-                            .iter()
-                            .last()
-                            .map(|proto| matches!(proto, Protocol::P2p(_)))
-                            .unwrap_or_default()
-                        {
-                            addr.push(Protocol::P2p(peer_id.into()))
+                        if !matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                            addr.push(Protocol::P2p(peer_id))
                         }
                     }
 
@@ -1867,6 +1900,22 @@ impl Ipfs {
         }
     }
 
+    /// Change the DHT mode
+    pub async fn dht_mode(&self, mode: DhtMode) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::DhtMode(mode, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.
     pub async fn dht_get<T: AsRef<[u8]>>(&self, key: T) -> Result<RecordStream, Error> {
@@ -2213,9 +2262,7 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
 pub(crate) fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> {
     let mut addr = addr.clone();
     let peer_id = match addr.pop() {
-        Some(Protocol::P2p(hash)) => {
-            PeerId::from_multihash(hash).map_err(|_| anyhow::anyhow!("Multihash is not valid"))?
-        }
+        Some(Protocol::P2p(peer_id)) => peer_id,
         _ => anyhow::bail!("Invalid PeerId"),
     };
     Ok(peer_id)
@@ -2280,7 +2327,7 @@ mod node {
             for addr in &mut addrs {
                 if let Some(proto) = addr.iter().last() {
                     if !matches!(proto, Protocol::P2p(_)) {
-                        addr.push(Protocol::P2p(id.into()));
+                        addr.push(Protocol::P2p(id));
                     }
                 }
             }

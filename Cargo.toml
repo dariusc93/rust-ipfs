@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.3.18"
+version = "0.4.0"
 
 [features]
 
@@ -17,24 +17,28 @@ sled_data_store = []
 test_go_interop = []
 test_js_interop = []
 
+[workspace.dependencies]
+libp2p = "0.52.2"
+beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
+rust-unixfs = { version = "0.4.0", path = "unixfs" }
+
 [dependencies]
 anyhow = "1.0"
-async-stream = { default-features = false, version = "0.3" }
-async-trait = { default-features = false, version = "0.1" }
+async-stream = { version = "0.3" }
+async-trait = { version = "0.1" }
 base64 = { default-features = false, features = ["alloc"], version = "0.21" }
-beetle-bitswap-next = { version = "0.3.0", path = "beetle-bitswap-next" }
+beetle-bitswap-next = { workspace = true }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
 libipld = "0.16"
 trust-dns-resolver = "0.22"
-either = { default-features = false, version = "1.5" }
-futures = { default-features = false, version = "0.3", features = [
-    "alloc",
-    "std",
-] }
+either = { version = "1" }
+futures = { version = "0.3" }
 hash_hasher = "2.0.3"
-rust-unixfs = { version = "=0.3.1", path = "unixfs" }
-libp2p = { default-features = false, features = [
+
+rust-unixfs = { workspace = true }
+
+libp2p = { features = [
     "gossipsub",
     "autonat",
     "relay",
@@ -44,9 +48,7 @@ libp2p = { default-features = false, features = [
     "websocket",
     "tcp",
     "macros",
-    "quic",
     "tokio",
-    "mplex",
     "noise",
     "ping",
     "yamux",
@@ -57,10 +59,17 @@ libp2p = { default-features = false, features = [
     "ecdsa",
     "rsa",
     "serde",
-], version = "0.51.3" }
+    "request-response",
+], workspace = true }
+
+libp2p-quic = { version = "0.9.2-alpha", features = ["tokio"] }
+libp2p-mplex = "0.40"
+libp2p-allow-block-list = "0.2"
+
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
+
 thiserror = { default-features = false, version = "1.0" }
 tokio = { default-features = false, features = [
     "fs",
@@ -82,9 +91,9 @@ async-broadcast = "0.5"
 void = { default-features = false, version = "1.0" }
 fs2 = "0.4"
 sled = "0.34"
-libp2p-nat = { version = "0.2" }
+libp2p-nat = { version = "0.3" }
 
-rlimit = "0.9"
+rlimit = "0.10"
 
 wasm-timer = "0.2"
 
@@ -117,15 +126,11 @@ tempfile = "3.1.0"
 
 clap = { version = "4.1", features = ["derive"] }
 
-# [[bench]]
-# name = "hashed-map-cid"
-# harness = false
-
 [profile.dev.build-override]
 debug = true
 
 [workspace]
-members = ["beetle-bitswap-next", "unixfs"]
-exclude = ["archived", "bitswap"]
+members = ["packages/*", "unixfs"]
+exclude = ["archived", "deprecated/*"]
 
 resolver = "2"

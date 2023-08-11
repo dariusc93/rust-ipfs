@@ -1,4 +1,4 @@
-///! "Interface" tests for pin store, maybe more later
+//! "Interface" tests for pin store, maybe more later
 use crate::repo::DataStore;
 use std::path::PathBuf;
 use std::sync::Arc;
