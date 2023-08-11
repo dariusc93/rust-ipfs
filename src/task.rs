@@ -101,6 +101,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) timer: TaskTimer,
+    pub(crate) local_external_addr: bool,
 }
 
 pub(crate) struct TaskTimer {
@@ -367,6 +368,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     });
                 }
 
+                if self.local_external_addr
+                    && !address.is_relay()
+                    && (address.is_loopback() || address.is_private())
+                {
+                    self.swarm.add_external_address(address.clone());
+                }
+
+                if !address.is_loopback() && !address.is_private() {
+                    // We will assume that the address is global and reachable externally
+                    self.swarm.add_external_address(address.clone());
+                }
+
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     let _ = ret.send(Either::Left(address));
                 }
@@ -414,6 +427,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             } => {
                 self.listeners.remove(&listener_id);
                 self.listening_addresses.remove(&address);
+
+                if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
+                    self.swarm.remove_external_address(&address);
+                }
+
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     //TODO: Determine if we want to return the address or use the right side and return an error?
                     let _ = ret.send(Either::Left(address));
@@ -427,6 +445,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 self.listeners.remove(&listener_id);
                 for address in addresses {
                     self.listening_addresses.remove(&address);
+                    if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
+                        self.swarm.remove_external_address(&address);
+                    }
                 }
                 if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
                     let _ = ret.send(Either::Right(reason));

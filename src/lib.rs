@@ -512,6 +512,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     delay: bool,
+    local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     custom_behaviour: Option<C>,
     custom_transport: Option<TTransportFn>,
@@ -545,6 +546,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             options,
             fdlimit,
             delay,
+            local_external_addr: false,
             swarm_event: None,
             custom_behaviour: None,
             custom_transport: None,
@@ -694,6 +696,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Automatically add any listened address as an external address
+    pub fn listen_as_external_addr(mut self) -> Self {
+        self.local_external_addr = true;
+        self
+    }
+
     /// Set a custom behaviour
     pub fn set_custom_behaviour(mut self, behaviour: C) -> Self {
         self.custom_behaviour = Some(behaviour);
@@ -739,6 +747,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             swarm_event,
             custom_behaviour,
             custom_transport,
+            local_external_addr,
             ..
         } = self;
 
@@ -892,6 +901,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             external_listener: Default::default(),
             local_listener: Default::default(),
             timer: Default::default(),
+            local_external_addr,
         };
 
         for addr in listening_addrs.into_iter() {
