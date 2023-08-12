@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         println!("Record Key: {encoded_key}");
         println!("Publisher: {:?}", record.publisher);
         println!("Expires: {:?}", record.expires);
+        println!("Record Value Size: {}", record.value.len());
         println!();
     }
 
