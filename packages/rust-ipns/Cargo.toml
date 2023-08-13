@@ -1,0 +1,21 @@
+[package]
+name = "rust-ipns"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libipld = { workspace = true, features = ["serde-codec"] }
+quick-protobuf = "0.8"
+cid = "0.10"
+serde = { version = "1", features = ["derive"] }
+multihash = { version = "0.19" }
+sha2 = { version = "0.10" }
+chrono = { version = "0.4" }
+
+libp2p = { workspace = true, default-features = true, optional = true }
+
+[features]
+default = ["libp2p"]
+libp2p = ["dep:libp2p"]

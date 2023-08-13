@@ -21,6 +21,7 @@ test_js_interop = []
 libp2p = "0.52.2"
 beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
+libipld = "0.16"
 
 [dependencies]
 anyhow = "1.0"
@@ -30,7 +31,7 @@ base64 = { default-features = false, features = ["alloc"], version = "0.21" }
 beetle-bitswap-next = { workspace = true }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
-libipld = "0.16"
+libipld.workspace = true
 trust-dns-resolver = "0.22"
 either = { version = "1" }
 futures = { version = "0.3" }
@@ -102,6 +103,7 @@ rand = "0.8"
 zeroize = "1"
 
 [dev-dependencies]
+rust-ipns = { path = "packages/rust-ipns" }
 bs58 = "0.4"
 criterion = { default-features = false, version = "0.4" }
 hex-literal = { default-features = false, version = "0.3" }

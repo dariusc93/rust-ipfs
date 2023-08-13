@@ -53,7 +53,7 @@ use futures::{
 use keystore::Keystore;
 use p2p::{
     BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream,
-    PubsubConfig, RecordStream, RelayConfig,
+    PubsubConfig, RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
 use tokio::task::JoinHandle;
@@ -107,7 +107,7 @@ pub use libp2p::{
 
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
-    kad::{store::MemoryStoreConfig, KademliaConfig, Mode},
+    kad::{store::MemoryStoreConfig, KademliaConfig, Mode, Record},
     ping::Config as PingConfig,
     swarm::dial_opts::DialOpts,
     StreamProtocol,
@@ -409,7 +409,7 @@ enum IpfsEvent {
     GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
-    DhtGet(Key, OneshotSender<RecordStream>),
+    DhtGet(Key, OneshotSender<BoxStream<'static, Record>>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
     AddBootstrapper(Multiaddr, Channel<Multiaddr>),
@@ -1918,7 +1918,10 @@ impl Ipfs {
 
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.
-    pub async fn dht_get<T: AsRef<[u8]>>(&self, key: T) -> Result<RecordStream, Error> {
+    pub async fn dht_get<T: AsRef<[u8]>>(
+        &self,
+        key: T,
+    ) -> Result<BoxStream<'static, Record>, Error> {
         async move {
             let key = key.as_ref();
 

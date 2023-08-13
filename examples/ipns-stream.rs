@@ -1,6 +1,7 @@
 use clap::Parser;
 use futures::StreamExt;
-use libipld::multibase::{self, Base};
+// use libipld::multibase::{self, Base};
+use libipld::{Cid, Multihash};
 use rust_ipfs::Ipfs;
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
@@ -25,18 +26,37 @@ async fn main() -> anyhow::Result<()> {
 
     ipfs.default_bootstrap().await?;
 
-    let mut stream = ipfs.dht_get(&opt.key).await?;
+    let cid = resolve(&ipfs, &opt.key).await?;
 
-    while let Some(record) = stream.next().await {
-        //TODO: Look into a better conversion
-        let key = &record.key.as_ref()[6..];
-        let encoded_key = &multibase::encode(Base::Base58Btc, key)[1..];
-        println!("Record Key: {encoded_key}");
-        println!("Publisher: {:?}", record.publisher);
-        println!("Expires: {:?}", record.expires);
-        println!("Record Value Size: {}", record.value.len());
-        println!();
-    }
+    println!("{} resolves to {}", opt.key, cid);
 
     Ok(())
+}
+
+async fn resolve(ipfs: &Ipfs, link: &str) -> anyhow::Result<Cid> {
+    let stream = ipfs.dht_get(link).await?;
+
+    let mut records = stream
+        .filter_map(|record| async move {
+            let key = &record.key.as_ref()[6..];
+            let record = rust_ipns::Record::decode(&record.value).ok()?;
+            let mh = Multihash::from_bytes(key).ok()?;
+            let cid = libipld::Cid::new_v1(0x72, mh);
+            record.verify(cid).ok()?;
+            Some(record)
+        })
+        .collect::<Vec<_>>()
+        .await;
+
+    if records.is_empty() {
+        panic!()
+    }
+
+    records.sort_by_key(|record| record.sequence());
+
+    let record = records.last().ok_or(anyhow::anyhow!(""))?;
+
+    let cid = record.value()?;
+
+    Ok(cid)
 }
