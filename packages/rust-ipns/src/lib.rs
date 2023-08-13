@@ -172,7 +172,7 @@ impl Record {
 
         let document = ipld!({
             "Value": value.clone(),
-            "ValidityType": 0,
+            "ValidityType": i32::from(validity_type),
             "Validity": validity.clone(),
             "Sequence": seq,
             "TTL": ttl
