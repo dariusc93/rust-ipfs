@@ -10,9 +10,11 @@ use libipld::ipld;
 use libipld::prelude::Codec;
 use libipld::DagCbor;
 use libipld::Ipld;
-use libp2p::PeerId;
 use libp2p::identity::Keypair;
 use libp2p::identity::PublicKey;
+use libp2p::PeerId;
+use quick_protobuf::MessageWrite;
+use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize};
 
@@ -105,6 +107,22 @@ impl From<generate::ipns_pb::IpnsEntry<'_>> for Record {
     }
 }
 
+impl From<&Record> for generate::ipns_pb::IpnsEntry<'_> {
+    fn from(record: &Record) -> Self {
+        generate::ipns_pb::IpnsEntry {
+            validity: record.validity.clone().into(),
+            validityType: generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL,
+            value: record.value.clone().into(),
+            signatureV1: record.signature_v1.clone().into(),
+            signatureV2: record.signature_v2.clone().into(),
+            sequence: record.sequence,
+            pubKey: record.public_key.clone().into(),
+            ttl: record.ttl,
+            data: record.data.clone().into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, DagCbor)]
 pub struct Document {
     #[ipld(rename = "Valid")]
@@ -124,21 +142,7 @@ pub struct Document {
 }
 
 impl Record {
-    pub fn decode(data: impl AsRef<[u8]>) -> std::io::Result<Self> {
-        let data = data.as_ref();
-
-        if data.len() > 10 * 1024 {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
-        }
-
-        let mut reader = BytesReader::from_bytes(data);
-        let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        let record = entry.into();
-        Ok(record)
-    }
-
-    pub fn encode(
+    pub fn new(
         keypair: &Keypair,
         value: Vec<u8>,
         duration: Duration,
@@ -207,6 +211,33 @@ impl Record {
             signature_v1,
             signature_v2,
         })
+    }
+
+    pub fn decode(data: impl AsRef<[u8]>) -> std::io::Result<Self> {
+        let data = data.as_ref();
+
+        if data.len() > 10 * 1024 {
+            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+        }
+
+        let mut reader = BytesReader::from_bytes(data);
+        let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let record = entry.into();
+        Ok(record)
+    }
+
+    pub fn encode(&self) -> std::io::Result<Vec<u8>> {
+        let entry: generate::ipns_pb::IpnsEntry = self.into();
+
+        let mut buf = Vec::with_capacity(entry.get_size());
+        let mut writer = Writer::new(&mut buf);
+
+        entry
+            .write_message(&mut writer)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        Ok(buf)
     }
 }
 
@@ -297,7 +328,7 @@ impl Record {
                 "Empty data field",
             ));
         }
-        
+
         let key = peer_id.to_bytes();
 
         let mh = libipld::Multihash::from_bytes(&key).expect("msg");

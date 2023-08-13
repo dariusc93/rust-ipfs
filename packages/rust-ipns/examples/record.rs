@@ -6,7 +6,7 @@ use rust_ipns::Record;
 fn main() -> std::io::Result<()> {
     let keypair = Keypair::generate_ed25519();
 
-    let record = Record::encode(
+    let record = Record::new(
         &keypair,
         b"/path/cid".to_vec(),
         Duration::seconds(60),
@@ -16,6 +16,6 @@ fn main() -> std::io::Result<()> {
 
     let peer_id = keypair.public().to_peer_id();
     record.verify(peer_id)?;
-
+    
     Ok(())
 }
