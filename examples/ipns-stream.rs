@@ -2,6 +2,7 @@ use clap::Parser;
 use futures::StreamExt;
 // use libipld::multibase::{self, Base};
 use libipld::{Cid, Multihash};
+use libp2p::PeerId;
 use rust_ipfs::Ipfs;
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
@@ -40,9 +41,8 @@ async fn resolve(ipfs: &Ipfs, link: &str) -> anyhow::Result<Cid> {
         .filter_map(|record| async move {
             let key = &record.key.as_ref()[6..];
             let record = rust_ipns::Record::decode(&record.value).ok()?;
-            let mh = Multihash::from_bytes(key).ok()?;
-            let cid = libipld::Cid::new_v1(0x72, mh);
-            record.verify(cid).ok()?;
+            let peer_id = PeerId::from_bytes(key).ok()?;
+            record.verify(peer_id).ok()?;
             Some(record)
         })
         .collect::<Vec<_>>()

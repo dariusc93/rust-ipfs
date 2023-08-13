@@ -10,6 +10,7 @@ use libipld::ipld;
 use libipld::prelude::Codec;
 use libipld::DagCbor;
 use libipld::Ipld;
+use libp2p::PeerId;
 use libp2p::identity::Keypair;
 use libp2p::identity::PublicKey;
 use quick_protobuf::{BytesReader, MessageRead};
@@ -282,7 +283,7 @@ impl Record {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
-    pub fn verify(&self, key: Cid) -> std::io::Result<()> {
+    pub fn verify(&self, peer_id: PeerId) -> std::io::Result<()> {
         if self.signature_v2.is_empty() && self.signature_v1.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -296,9 +297,14 @@ impl Record {
                 "Empty data field",
             ));
         }
+        
+        let key = peer_id.to_bytes();
+
+        let mh = libipld::Multihash::from_bytes(&key).expect("msg");
+        let cid = libipld::Cid::new_v1(0x72, mh);
 
         let public_key = match self.public_key.is_empty() {
-            true => key.hash().digest(),
+            true => cid.hash().digest(),
             //TODO: Validate internal public key against the multhash publickey
             false => self.public_key.as_ref(),
         };
