@@ -124,7 +124,7 @@ impl From<&Record> for generate::ipns_pb::IpnsEntry<'_> {
 }
 
 #[derive(Debug, Clone, DagCbor)]
-pub struct Document {
+pub struct Data {
     #[ipld(rename = "Valid")]
     value: Vec<u8>,
 
@@ -255,8 +255,8 @@ impl Record {
         unimplemented!()
     }
 
-    pub fn document(&self) -> std::io::Result<Document> {
-        //Note: Because of the crate giving errors without exact reason, why have to convert it into an ipld document
+    pub fn data(&self) -> std::io::Result<Data> {
+        //Note: Because of the cbor4ii crate giving errors without exact reason, we will convert it into an ipld document instead
         //      and map it to the struct manually for the time being.
         //TODO: Investigate cbor crate and why it would not deserialize the data directly
         let document: Ipld = DagCborCodec
@@ -288,7 +288,7 @@ impl Record {
             _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
         };
 
-        let document = Document {
+        let data = Data {
             value: ipld_value,
             validity_type: ipld_validity_type,
             validity: ipld_validity,
@@ -296,16 +296,16 @@ impl Record {
             ttl: ipld_ttl,
         };
 
-        if document.value != self.value
-            || document.validity != self.validity
-            || document.validity_type != self.validity_type
-            || document.sequence != self.sequence
-            || document.ttl != self.ttl
+        if data.value != self.value
+            || data.validity != self.validity
+            || data.validity_type != self.validity_type
+            || data.sequence != self.sequence
+            || data.ttl != self.ttl
         {
             return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
         }
 
-        Ok(document)
+        Ok(data)
     }
 
     pub fn value(&self) -> std::io::Result<Cid> {
@@ -358,7 +358,7 @@ impl Record {
 
         signature_v2.extend(self.data.iter());
 
-        self.document()?;
+        self.data()?;
 
         if !pk.verify(&signature_v2, &self.signature_v2) {
             return Err(std::io::Error::new(
