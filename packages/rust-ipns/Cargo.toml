@@ -17,6 +17,9 @@ chrono = { version = "0.4" }
 libp2p = { workspace = true, default-features = true, optional = true }
 derive_more = "0.99"
 
+[dev-dependencies]
+clap = { workspace = true, features = ["derive"] }
+
 [features]
 default = ["libp2p"]
 libp2p = ["dep:libp2p"]

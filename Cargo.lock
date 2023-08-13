@@ -3702,6 +3702,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cid",
+ "clap 4.3.21",
  "derive_more",
  "libipld",
  "libp2p",

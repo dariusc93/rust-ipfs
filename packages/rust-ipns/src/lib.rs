@@ -2,6 +2,7 @@ use std::ops::Add;
 
 use chrono::DateTime;
 use chrono::Duration;
+use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use cid::Cid;
@@ -250,9 +251,22 @@ impl Record {
         self.validity_type
     }
 
-    pub fn validity(&self) -> DateTime<Utc> {
-        // chrono::DateTime::try_from(self.validity.clone()).unwrap()
-        unimplemented!()
+    pub fn validity(&self) -> std::io::Result<DateTime<FixedOffset>> {
+        let time = String::from_utf8_lossy(&self.validity);
+        chrono::DateTime::parse_from_rfc3339(&time)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    pub fn ttl(&self) -> u64 {
+        self.ttl
+    }
+
+    pub fn signature_v1(&self) -> bool {
+        !self.signature_v1.is_empty()
+    }
+
+    pub fn signature_v2(&self) -> bool {
+        !self.signature_v2.is_empty()
     }
 
     pub fn data(&self) -> std::io::Result<Data> {

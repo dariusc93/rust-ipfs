@@ -22,6 +22,7 @@ libp2p = "0.52.2"
 beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
 libipld = "0.16"
+clap = { version = "4.3", features = ["derive"] }
 
 [dependencies]
 anyhow = "1.0"
@@ -126,7 +127,7 @@ rand = { default-features = false, version = "0.8", features = [
 ] }
 tempfile = "3.1.0"
 
-clap = { version = "4.1", features = ["derive"] }
+clap = { workspace = true }
 
 [profile.dev.build-override]
 debug = true
