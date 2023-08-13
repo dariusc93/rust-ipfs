@@ -1,9 +1,16 @@
+use std::ops::Add;
+
 use chrono::DateTime;
+use chrono::Duration;
+use chrono::SecondsFormat;
 use chrono::Utc;
 use cid::Cid;
 use libipld::cbor::DagCborCodec;
+use libipld::ipld;
+use libipld::prelude::Codec;
 use libipld::DagCbor;
 use libipld::Ipld;
+use libp2p::identity::Keypair;
 use libp2p::identity::PublicKey;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize};
@@ -11,7 +18,18 @@ use serde::{Deserialize, Serialize};
 mod generate;
 
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, DagCbor,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    DagCbor,
+    derive_more::Display,
 )]
 #[repr(i32)]
 pub enum ValidityType {
@@ -118,6 +136,77 @@ impl Record {
         let record = entry.into();
         Ok(record)
     }
+
+    pub fn encode(
+        keypair: &Keypair,
+        value: Vec<u8>,
+        duration: Duration,
+        seq: u64,
+        ttl: u64,
+    ) -> std::io::Result<Self> {
+        let validity = Utc::now()
+            .add(duration)
+            .to_rfc3339_opts(SecondsFormat::Nanos, false)
+            .into_bytes();
+
+        let validity_type = ValidityType::EOL;
+
+        let signature_v1_construct = {
+            let mut data = Vec::with_capacity(value.len() + validity.len() + 3);
+
+            data.extend(value.iter());
+            data.extend(validity.iter());
+            data.extend(validity_type.to_string().as_bytes());
+
+            data
+        };
+
+        let signature_v1 = keypair
+            .sign(&signature_v1_construct)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        let document = ipld!({
+            "Value": value.clone(),
+            "ValidityType": 0,
+            "Validity": validity.clone(),
+            "Sequence": seq,
+            "TTL": ttl
+        });
+
+        let data = DagCborCodec
+            .encode(&document)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let mut signature_v2_construct = vec![
+            0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65,
+            0x3a,
+        ];
+
+        signature_v2_construct.extend(data.iter());
+
+        let signature_v2 = keypair
+            .sign(&signature_v2_construct)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        let public_key = match keypair.key_type().into() {
+            KeyType::RSA => keypair
+                .to_protobuf_encoding()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+            _ => vec![],
+        };
+
+        Ok(Record {
+            data,
+            value,
+            validity_type,
+            validity,
+            sequence: seq,
+            ttl,
+            public_key,
+            signature_v1,
+            signature_v2,
+        })
+    }
 }
 
 impl Record {
@@ -135,8 +224,6 @@ impl Record {
     }
 
     pub fn document(&self) -> std::io::Result<Document> {
-        use libipld::prelude::Codec;
-
         //Note: Because of the crate giving errors without exact reason, why have to convert it into an ipld document
         //      and map it to the struct manually for the time being.
         //TODO: Investigate cbor crate and why it would not deserialize the data directly
@@ -195,10 +282,6 @@ impl Record {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
-    pub fn address(&self) -> Option<Cid> {
-        None
-    }
-
     pub fn verify(&self, key: Cid) -> std::io::Result<()> {
         if self.signature_v2.is_empty() && self.signature_v1.is_empty() {
             return Err(std::io::Error::new(
@@ -222,7 +305,6 @@ impl Record {
 
         let pk = PublicKey::try_decode_protobuf(public_key)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        
 
         //TODO: Implement support for RSA
         if matches!(pk.key_type().into(), KeyType::RSA) {
