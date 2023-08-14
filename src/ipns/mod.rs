@@ -31,16 +31,21 @@ impl Ipns {
                 use std::time::Duration;
 
                 use futures::StreamExt;
+                use libipld::Cid;
                 use libp2p::PeerId;
-                // let hash: libipld::multihash::Multihash =
-                //     libipld::multihash::Multihash::from_bytes(&peer.to_bytes())?;
 
-                // let cid = Cid::new_v1(0x72, hash);
+                let hash: libipld::multihash::Multihash =
+                    libipld::multihash::Multihash::from_bytes(&peer.to_bytes())?;
 
-                // let mb = format!("/ipns/{}", cid.to_string_of_base(libipld::multibase::Base::Base36Lower)?);
+                let cid = Cid::new_v1(0x72, hash);
+
+                let mb = format!(
+                    "/ipns/{}",
+                    cid.to_string_of_base(libipld::multibase::Base::Base36Lower)?
+                );
 
                 //TODO: Determine if we want to encode the cid of the multihash in base32 or if we can just use the peer id instead
-                let mb = format!("/ipns/{}", peer);
+                // let mb = format!("/ipns/{}", peer);
 
                 let stream = self.ipfs.dht_get(mb).await?;
 
