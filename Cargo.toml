@@ -17,12 +17,15 @@ sled_data_store = []
 test_go_interop = []
 test_js_interop = []
 
+experimental = ["rust-ipns"]
+
 [workspace.dependencies]
 libp2p = "0.52.2"
 beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
 libipld = "0.16"
 clap = { version = "4.3", features = ["derive"] }
+rust-ipns = { path = "packages/rust-ipns" }
 
 [dependencies]
 anyhow = "1.0"
@@ -39,6 +42,8 @@ futures = { version = "0.3" }
 hash_hasher = "2.0.3"
 
 rust-unixfs = { workspace = true }
+
+rust-ipns = { workspace = true, optional = true }
 
 libp2p = { features = [
     "gossipsub",
@@ -104,7 +109,7 @@ rand = "0.8"
 zeroize = "1"
 
 [dev-dependencies]
-rust-ipns = { path = "packages/rust-ipns" }
+rust-ipns.workspace = true
 bs58 = "0.4"
 criterion = { default-features = false, version = "0.4" }
 hex-literal = { default-features = false, version = "0.3" }
