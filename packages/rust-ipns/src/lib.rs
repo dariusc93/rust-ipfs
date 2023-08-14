@@ -143,6 +143,28 @@ pub struct Data {
     ttl: u64,
 }
 
+impl Data {
+    pub fn value(&self) -> &[u8] {
+        &self.value
+    }
+
+    pub fn validity_type(&self) -> ValidityType {
+        self.validity_type
+    }
+
+    pub fn validity(&self) -> &[u8] {
+        &self.validity
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn ttl(&self) -> u64 {
+        self.ttl
+    }
+}
+
 impl Record {
     #[cfg(feature = "libp2p")]
     pub fn new(
