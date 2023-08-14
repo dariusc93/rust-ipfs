@@ -631,31 +631,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Set default record validator for IPFS
     /// Note: This will override any keys set for `ipns` prefix
     pub fn default_record_key_validator(mut self) -> Self {
-        #[inline]
-        fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
-            use libipld::multibase;
-
-            let default_ipns_prefix = b"/ipns/";
-
-            let mut key = key.as_ref().trim().to_string();
-
-            anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
-
-            if key.starts_with('1') || key.starts_with('Q') {
-                key.insert(0, 'z');
-            }
-
-            let mut data = multibase::decode(key).map(|(_, data)| data)?;
-
-            if data[0] != 0x01 && data[1] != 0x72 {
-                data = vec![vec![0x01, 0x72], data].concat();
-            }
-
-            data = vec![default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
-
-            Ok(data.into())
-        }
-
         self.record_key_validator.insert(
             "ipns".into(),
             Arc::new(|key| to_dht_key(("ipns", |key| ipns_to_dht_key(key)), key)),
@@ -1291,7 +1266,7 @@ impl Ipfs {
             .await
     }
 
-    /// Resolves a ipns path to an ipld path; currently only supports dnslink resolution.
+    /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.
     pub async fn resolve_ipns(&self, path: &IpfsPath, recursive: bool) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
@@ -2240,6 +2215,31 @@ pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
     };
 
     Ok((key, val))
+}
+
+#[inline]
+pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
+    use libipld::multibase;
+
+    let default_ipns_prefix = b"/ipns/";
+
+    let mut key = key.as_ref().trim().to_string();
+
+    anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
+
+    if key.starts_with('1') || key.starts_with('Q') {
+        key.insert(0, 'z');
+    }
+
+    let mut data = multibase::decode(key).map(|(_, data)| data)?;
+
+    if data[0] != 0x01 && data[1] != 0x72 {
+        data = vec![vec![0x01, 0x72], data].concat();
+    }
+
+    data = vec![default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
+
+    Ok(data.into())
 }
 
 #[inline]
