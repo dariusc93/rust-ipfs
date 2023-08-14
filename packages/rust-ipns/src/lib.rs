@@ -65,6 +65,7 @@ pub enum KeyType {
     ECDSA = 3,
 }
 
+#[cfg(feature = "libp2p")]
 impl From<libp2p::identity::KeyType> for KeyType {
     fn from(ty: libp2p::identity::KeyType) -> Self {
         match ty {
@@ -143,6 +144,7 @@ pub struct Data {
 }
 
 impl Record {
+    #[cfg(feature = "libp2p")]
     pub fn new(
         keypair: &Keypair,
         value: Vec<u8>,
@@ -328,6 +330,7 @@ impl Record {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
+    #[cfg(feature = "libp2p")]
     pub fn verify(&self, peer_id: PeerId) -> std::io::Result<()> {
         if self.signature_v2.is_empty() && self.signature_v1.is_empty() {
             return Err(std::io::Error::new(
