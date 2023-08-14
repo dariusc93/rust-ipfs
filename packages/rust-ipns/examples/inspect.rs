@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use chrono::Duration;
-
 use clap::Parser;
 use libp2p::PeerId;
 use rust_ipns::Record;
