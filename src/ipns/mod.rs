@@ -20,7 +20,8 @@ impl Ipns {
     }
 
     /// Resolves a ipns path to an ipld path.
-    // TODO: Implement a local store check and eventually pubsub
+    // TODO: Implement ipns pubsub
+    // TODO: Maybe implement a check to the dht store itself too?
     pub async fn resolve(&self, resolver: DnsResolver, path: &IpfsPath) -> Result<IpfsPath, Error> {
         let path = path.to_owned();
         match path.root() {
@@ -46,6 +47,21 @@ impl Ipns {
 
                 //TODO: Determine if we want to encode the cid of the multihash in base32 or if we can just use the peer id instead
                 // let mb = format!("/ipns/{}", peer);
+
+                let repo = self.ipfs.repo();
+                let datastore = repo.data_store();
+                
+                if let Ok(Some(data)) = datastore.get(mb.as_bytes()).await {
+                    if let Ok(path) = rust_ipns::Record::decode(data).and_then(|record| {
+                        //Although stored locally, we should verify the record anyway
+                        record.verify(*peer)?;
+                        let data = record.data()?;
+                        IpfsPath::from_str(&String::from_utf8_lossy(data.value()))
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    }) {
+                        return Ok(path);
+                    }
+                }
 
                 let stream = self.ipfs.dht_get(mb).await?;
 
