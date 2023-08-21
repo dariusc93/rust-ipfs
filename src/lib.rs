@@ -1287,6 +1287,17 @@ impl Ipfs {
         .await
     }
 
+    /// Publish ipns record to DHT
+    #[cfg(feature = "experimental")]
+    pub async fn publish_ipns(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
+        async move {
+            let ipns = self.ipns();
+            ipns.publish(None, path).await
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
     /// Connects to the peer
     pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<(), Error> {
         async move {

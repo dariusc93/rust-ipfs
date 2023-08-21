@@ -169,11 +169,13 @@ impl Record {
     #[cfg(feature = "libp2p")]
     pub fn new(
         keypair: &Keypair,
-        value: Vec<u8>,
+        value: impl AsRef<[u8]>,
         duration: Duration,
         seq: u64,
         ttl: u64,
     ) -> std::io::Result<Self> {
+        let value = value.as_ref().to_vec();
+        
         let validity = Utc::now()
             .add(duration)
             .to_rfc3339_opts(SecondsFormat::Nanos, false)

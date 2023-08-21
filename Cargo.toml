@@ -19,6 +19,8 @@ test_js_interop = []
 
 experimental = ["rust-ipns"]
 
+default = ["experimental"]
+
 [workspace.dependencies]
 libp2p = "0.52.2"
 beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
@@ -26,6 +28,7 @@ rust-unixfs = { version = "0.4.0", path = "unixfs" }
 libipld = "0.16"
 clap = { version = "4.3", features = ["derive"] }
 rust-ipns = { version = "0.1", path = "packages/rust-ipns" }
+chrono = { version = "0.4" }
 
 [dependencies]
 anyhow = "1.0"
@@ -44,6 +47,8 @@ hash_hasher = "2.0.3"
 rust-unixfs = { workspace = true }
 
 rust-ipns = { workspace = true, optional = true }
+
+chrono.workspace = true
 
 libp2p = { features = [
     "gossipsub",

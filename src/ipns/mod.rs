@@ -84,4 +84,71 @@ impl Ipns {
             PathRoot::Dns(domain) => Ok(dnslink::resolve(resolver, domain).await?),
         }
     }
+
+    #[cfg(feature = "experimental")]
+    pub async fn publish(&self, key: Option<&str>, path: &IpfsPath) -> Result<IpfsPath, Error> {
+        use libipld::Cid;
+        use libp2p::kad::Quorum;
+        use std::str::FromStr;
+
+        let keypair = match key {
+            Some(key) => self.ipfs.keystore().get_keypair(key).await?,
+            None => self.ipfs.keypair()?.clone(),
+        };
+
+        let peer_id = keypair.public().to_peer_id();
+
+        let hash: libipld::multihash::Multihash =
+            libipld::multihash::Multihash::from_bytes(&peer_id.to_bytes())?;
+
+        let cid = Cid::new_v1(0x72, hash);
+
+        let mb = format!(
+            "/ipns/{}",
+            cid.to_string_of_base(libipld::multibase::Base::Base36Lower)?
+        );
+
+        let repo = self.ipfs.repo();
+
+        let datastore = repo.data_store();
+
+        let record_data = datastore.get(mb.as_bytes()).await?;
+
+        let mut seq = 0;
+
+        if let Some(record) = record_data.as_ref() {
+            let record = rust_ipns::Record::decode(record)?;
+            //Although stored locally, we should verify the record anyway
+            record.verify(peer_id)?;
+
+            let data = record.data()?;
+
+            let ipfs_path = IpfsPath::from_str(&String::from_utf8_lossy(data.value()))?;
+
+            if ipfs_path.eq(path) {
+                anyhow::bail!("Record already exist with {path}");
+            }
+
+            // inc req of the record
+            seq = record.sequence() + 1;
+        }
+
+        let path_bytes = path.to_string();
+
+        let record = rust_ipns::Record::new(
+            &keypair,
+            path_bytes.as_bytes(),
+            chrono::Duration::hours(48),
+            seq,
+            60000,
+        )?;
+
+        let bytes = record.encode()?;
+
+        datastore.put(mb.as_bytes(), &bytes).await?;
+
+        self.ipfs.dht_put(&mb, bytes, Quorum::One).await?;
+
+        IpfsPath::from_str(&mb)
+    }
 }

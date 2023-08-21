@@ -3659,6 +3659,7 @@ dependencies = [
  "bs58 0.4.0",
  "byteorder",
  "bytes",
+ "chrono",
  "clap 4.3.21",
  "criterion",
  "either",
