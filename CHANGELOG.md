@@ -1,8 +1,10 @@
 # 0.4.0 [unreleased]
+- feat: Basic record key/prefix validator and basic ipns publisher/resolver [PR 88]
 - chore: Update dependencies [PR 91]
 - chore: Update libp2p to 0.52 [PR 76]
 - chore: Add `UninitializedIpfs::listen_as_external_addr` to use listened addresses as external addresses [PR 90]
 
+[PR 88]: https://github.com/dariusc93/rust-ipfs/pull/88
 [PR 91]: https://github.com/dariusc93/rust-ipfs/pull/91
 [PR 76]: https://github.com/dariusc93/rust-ipfs/pull/76
 [PR 90]: https://github.com/dariusc93/rust-ipfs/pull/90
