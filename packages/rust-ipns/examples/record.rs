@@ -8,7 +8,7 @@ fn main() -> std::io::Result<()> {
 
     let record = Record::new(
         &keypair,
-        b"/path/cid".to_vec(),
+        b"/path/cid",
         Duration::seconds(60),
         0,
         0,
