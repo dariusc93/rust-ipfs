@@ -1,8 +1,10 @@
 # 0.4.0 [unreleased]
+- refactor: Make `Repo` independent [PR 92]
 - chore: Update dependencies [PR 91]
 - chore: Update libp2p to 0.52 [PR 76]
 - chore: Add `UninitializedIpfs::listen_as_external_addr` to use listened addresses as external addresses [PR 90]
 
+[PR 92]: https://github.com/dariusc93/rust-ipfs/pull/92
 [PR 91]: https://github.com/dariusc93/rust-ipfs/pull/91
 [PR 76]: https://github.com/dariusc93/rust-ipfs/pull/76
 [PR 90]: https://github.com/dariusc93/rust-ipfs/pull/90
