@@ -282,6 +282,7 @@ impl<C: Borrow<Cid>> PinKind<C> {
 #[derive(Debug, Clone)]
 pub struct Repo {
     online: Arc<AtomicBool>,
+    initialized: Arc<AtomicBool>,
     block_store: Arc<dyn BlockStore>,
     data_store: Arc<dyn DataStore>,
     events: Arc<RwLock<Option<Sender<RepoEvent>>>>,
@@ -348,6 +349,7 @@ impl Repo {
         lockfile: Arc<dyn Lock>,
     ) -> Self {
         Repo {
+            initialized: Arc::default(),
             online: Arc::default(),
             block_store,
             data_store,
@@ -427,6 +429,10 @@ impl Repo {
     }
 
     pub async fn init(&self) -> Result<(), Error> {
+        //Avoid initializing again
+        if self.initialized.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         // Dropping the guard (even though not strictly necessary to compile) to avoid potential
         // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
@@ -438,10 +444,15 @@ impl Repo {
         let f1 = self.block_store.init();
         let f2 = self.data_store.init();
         let (r1, r2) = futures::future::join(f1, f2).await;
+        let init = self.initialized.clone();
         if r1.is_err() {
-            r1
+            r1.map(|_| {
+                init.store(true, Ordering::SeqCst);
+            })
         } else {
-            r2
+            r2.map(|_| {
+                init.store(true, Ordering::SeqCst);
+            })
         }
     }
 

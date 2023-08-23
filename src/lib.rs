@@ -760,6 +760,23 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             ..
         } = self;
 
+        let root_span = Option::take(&mut options.span)
+            // not sure what would be the best practice with tracing and spans
+            .unwrap_or_else(|| tracing::trace_span!(parent: &Span::current(), "ipfs"));
+
+        // the "current" span which is not entered but the awaited futures are instrumented with it
+        let init_span = tracing::trace_span!(parent: &root_span, "init");
+
+        // stored in the Ipfs, instrumenting every method call
+        let facade_span = tracing::trace_span!("facade");
+
+        // stored in the executor given to libp2p, used to spawn at least the connections,
+        // instrumenting each of those.
+        let exec_span = tracing::trace_span!(parent: &root_span, "exec");
+
+        // instruments the IpfsFuture, the background task.
+        let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
+
         let repo = match repo_handle {
             Some(repo) => {
                 if repo.is_online() {
@@ -777,24 +794,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         };
 
+        repo.init().instrument(init_span.clone()).await?;
+
         let repo_events = repo.initialize_channel();
-
-        let root_span = Option::take(&mut options.span)
-            // not sure what would be the best practice with tracing and spans
-            .unwrap_or_else(|| tracing::trace_span!(parent: &Span::current(), "ipfs"));
-
-        // the "current" span which is not entered but the awaited futures are instrumented with it
-        let init_span = tracing::trace_span!(parent: &root_span, "init");
-
-        // stored in the Ipfs, instrumenting every method call
-        let facade_span = tracing::trace_span!("facade");
-
-        // stored in the executor given to libp2p, used to spawn at least the connections,
-        // instrumenting each of those.
-        let exec_span = tracing::trace_span!(parent: &root_span, "exec");
-
-        // instruments the IpfsFuture, the background task.
-        let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
 
         if let Some(limit) = fdlimit {
             #[cfg(unix)]
@@ -817,8 +819,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 warn!("Cannot set {limit:?}. Can only set a fd limit on unix systems. Ignoring...")
             }
         }
-
-        repo.init().instrument(init_span.clone()).await?;
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone().unwrap_or_default();
