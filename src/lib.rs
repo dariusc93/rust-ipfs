@@ -75,7 +75,7 @@ use self::{
     dag::IpldDag,
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
-    repo::{create_repo, Repo},
+    repo::Repo,
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -512,6 +512,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     delay: bool,
+    repo_handle: Option<Repo>,
     local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     custom_behaviour: Option<C>,
@@ -546,6 +547,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             options,
             fdlimit,
             delay,
+            repo_handle: None,
             local_external_addr: false,
             swarm_event: None,
             custom_behaviour: None,
@@ -637,6 +639,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Set keypair
     pub fn set_keypair(mut self, keypair: Keypair) -> Self {
         self.keys = keypair;
+        self
+    }
+
+    /// Set block and data repo
+    pub fn set_repo(mut self, repo: Repo) -> Self {
+        self.repo_handle = Some(repo);
         self
     }
 
@@ -748,16 +756,28 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             custom_behaviour,
             custom_transport,
             local_external_addr,
+            repo_handle,
             ..
         } = self;
 
-        if let StoragePath::Disk(path) = &options.ipfs_path {
-            if !path.is_dir() {
-                tokio::fs::create_dir_all(path).await?;
+        let repo = match repo_handle {
+            Some(repo) => {
+                if repo.is_online() {
+                    anyhow::bail!("Repo is already initialized");
+                }
+                repo
             }
-        }
+            None => {
+                if let StoragePath::Disk(path) = &options.ipfs_path {
+                    if !path.is_dir() {
+                        tokio::fs::create_dir_all(path).await?;
+                    }
+                }
+                Repo::new(options.ipfs_path.clone())
+            }
+        };
 
-        let (repo, repo_events) = create_repo(options.ipfs_path.clone());
+        let repo_events = repo.initialize_channel();
 
         let root_span = Option::take(&mut options.span)
             // not sure what would be the best practice with tracing and spans
