@@ -1,8 +1,10 @@
 use crate::{
-    dag::{ResolveError, UnexpectedResolved},
+    dag::{ResolveError, UnexpectedResolved, IpldDag},
+    repo::Repo,
     Block, Error, Ipfs,
 };
 use async_stream::stream;
+use either::Either;
 use futures::stream::Stream;
 use libipld::Cid;
 use libp2p::PeerId;
@@ -17,15 +19,24 @@ use std::ops::Range;
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
 pub async fn cat<'a>(
-    ipfs: &Ipfs,
+    which: Either<&Ipfs, &Repo>,
     starting_point: impl Into<StartingPoint>,
     range: Option<Range<u64>>,
     providers: &'a [PeerId],
     local_only: bool,
 ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed> {
-    let session = Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
-
-    let ipfs = ipfs.clone();
+    let (repo, session) = match which {
+        Either::Left(ipfs) => (
+            ipfs.repo().clone(),
+            Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
+        ),
+        Either::Right(repo) => {
+            let session = repo
+                .is_online()
+                .then_some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+            (repo.clone(), session)
+        }
+    };
     let mut visit = IdleFileVisit::default();
     if let Some(range) = range {
         visit = visit.with_target_range(range);
@@ -35,8 +46,7 @@ pub async fn cat<'a>(
     // metadata. To get to it the user needs to create a Visitor over the first block.
     let block = match starting_point.into() {
         StartingPoint::Left(path) => {
-            let borrow = ipfs.clone();
-            let dag = borrow.dag();
+            let dag = IpldDag::from(repo.clone());
             let (resolved, _) = dag
                 .resolve_with_session(session, path, true, providers, local_only)
                 .await
@@ -90,8 +100,8 @@ pub async fn cat<'a>(
             // going. Not that we have any "operation" concept of the Want yet.
             let (next, _) = visit.pending_links();
 
-            let borrow = ipfs.borrow();
-            let block = match borrow.repo().get_block_with_session(session, next, providers, local_only).await {
+            let borrow = repo.borrow();
+            let block = match borrow.get_block_with_session(session, next, providers, local_only).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield Err(TraversalFailed::Loading(next.to_owned(), e));

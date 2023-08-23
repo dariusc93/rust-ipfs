@@ -1,28 +1,40 @@
 use std::path::Path;
 
+use either::Either;
 use futures::{stream::BoxStream, StreamExt};
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
 
-use crate::{Ipfs, IpfsPath};
+use crate::{Ipfs, IpfsPath, dag::IpldDag, repo::Repo};
 
 use super::UnixfsStatus;
 
 pub async fn get<'a, P: AsRef<Path>>(
-    ipfs: &Ipfs,
+    which: Either<&Ipfs, &Repo>,
     path: IpfsPath,
     dest: P,
     providers: &'a [PeerId],
     local_only: bool,
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
     let mut file = tokio::fs::File::create(dest).await?;
-    let ipfs = ipfs.clone();
 
-    let session = Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+    let (repo, session) = match which {
+        Either::Left(ipfs) => (
+            ipfs.repo().clone(),
+            Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
+        ),
+        Either::Right(repo) => {
+            let session = repo
+                .is_online()
+                .then_some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+            (repo.clone(), session)
+        }
+    };
 
-    let (resolved, _) = ipfs
-        .dag()
+    let dag = IpldDag::from(repo.clone());
+
+    let (resolved, _) = dag
         .resolve_with_session(session, path.clone(), true, providers, local_only)
         .await?;
 
@@ -39,7 +51,7 @@ pub async fn get<'a, P: AsRef<Path>>(
         let mut written = 0;
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match ipfs.repo().get_block_with_session(session, next, providers, local_only).await {
+            let block = match repo.get_block_with_session(session, next, providers, local_only).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };

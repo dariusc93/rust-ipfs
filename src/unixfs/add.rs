@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use crate::Block;
+use crate::{repo::Repo, Block};
+use either::Either;
 use futures::{stream::BoxStream, Stream, StreamExt};
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use tokio_util::io::ReaderStream;
@@ -29,7 +30,7 @@ impl Default for AddOption {
 }
 
 pub async fn add_file<'a, P: AsRef<Path>>(
-    ipfs: &Ipfs,
+    which: Either<&Ipfs, &Repo>,
     path: P,
     opt: Option<AddOption>,
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
@@ -45,17 +46,25 @@ where
 
     let name = path.file_name().map(|f| f.to_string_lossy().to_string());
 
-    add(ipfs, name, Some(size), stream.boxed(), opt).await
+    add(which, name, Some(size), stream.boxed(), opt).await
 }
 
 pub async fn add<'a>(
-    ipfs: &Ipfs,
+    which: Either<&Ipfs, &Repo>,
     name: Option<String>,
     total_size: Option<usize>,
     mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
     opt: Option<AddOption>,
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
-    let ipfs = ipfs.clone();
+    let (ipfs, repo) = match which {
+        Either::Left(ipfs) => {
+            let repo = ipfs.repo().clone();
+            let ipfs = ipfs.clone();
+            (Some(ipfs), repo)
+        }
+        Either::Right(repo) => (None, repo.clone()),
+    };
+
     let stream = async_stream::stream! {
 
         let mut adder = FileAdderBuilder::default()
@@ -85,7 +94,7 @@ pub async fn add<'a>(
                             return;
                         }
                     };
-                    let _cid = match ipfs.put_block(block).await {
+                    let _cid = match repo.put_block(block).await {
                         Ok(cid) => cid,
                         Err(e) => {
                             yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
@@ -111,7 +120,7 @@ pub async fn add<'a>(
                     return;
                 }
             };
-            let _cid = match ipfs.put_block(block).await {
+            let _cid = match repo.put_block(block).await {
                 Ok(cid) => cid,
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
@@ -136,7 +145,7 @@ pub async fn add<'a>(
             if opt.wrap {
                 if let Some(name) = name {
                     let result = {
-                        let ipfs = ipfs.clone();
+                        let repo = repo.clone();
                         async move {
                             let mut opts = rust_unixfs::dir::builder::TreeOptions::default();
                             opts.wrap_with_directory();
@@ -151,7 +160,7 @@ pub async fn add<'a>(
                                 let node = node?;
                                 let block = Block::new(node.cid.to_owned(), node.block.into())?;
 
-                                ipfs.put_block(block).await?;
+                                repo.put_block(block).await?;
 
                                 cids.push(*node.cid);
                             }
@@ -176,8 +185,8 @@ pub async fn add<'a>(
             let cid = path.root().cid().copied().expect("Cid is apart of the path");
 
             if opt.pin {
-                if let Ok(false) = ipfs.is_pinned(&cid).await {
-                    if let Err(e) = ipfs.insert_pin(&cid, true).await {
+                if let Ok(false) = repo.is_pinned(&cid).await {
+                    if let Err(e) = repo.insert_pin(&cid, true, true).await {
                         error!("Unable to pin {cid}: {e}");
                     }
                 }
@@ -187,8 +196,10 @@ pub async fn add<'a>(
                 let ipfs = ipfs;
                 async move {
                     if opt.provide {
-                        if let Err(e) = ipfs.provide(cid).await {
-                            error!("Unable to provide {cid}: {e}");
+                        if let Some(ipfs) = ipfs {
+                            if let Err(e) = ipfs.provide(cid).await {
+                                error!("Unable to provide {cid}: {e}");
+                            }
                         }
                     }
                 }

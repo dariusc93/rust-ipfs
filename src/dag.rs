@@ -199,6 +199,20 @@ impl IpldDag {
         }
     }
 
+    /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
+    ///
+    /// Returns Cid version 1 for the document
+    pub async fn put_dag(&self, ipld: Ipld) -> Result<Cid, Error> {
+        self.put(IpldCodec::DagCbor, ipld, None).await
+    }
+
+    /// Gets an ipld node from the ipfs, fetching the block if necessary.
+    ///
+    /// See [`IpldDag::get`] for more information.
+    pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
+        self.get(path, &[], false).await.map_err(Error::new)
+    }
+
     /// Returns the `Cid` of a newly inserted block.
     ///
     /// The block is created from the `data`, encoded with the `codec` and inserted into the repo.

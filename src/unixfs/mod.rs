@@ -6,6 +6,7 @@
 use std::{ops::Range, path::PathBuf};
 
 use anyhow::Error;
+use either::Either;
 use futures::{stream::BoxStream, Stream};
 use libp2p::PeerId;
 pub use rust_unixfs as ll;
@@ -87,7 +88,7 @@ impl IpfsUnixfs {
     {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
-        cat(&self.ipfs, starting_point, range, peers, local).await
+        cat(Either::Left(&self.ipfs), starting_point, range, peers, local).await
     }
 
     /// Add a file from either a file or stream
@@ -100,10 +101,12 @@ impl IpfsUnixfs {
     ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
         let item = item.into();
         match item {
-            AddOpt::Path(path) => add_file(&self.ipfs, path, option).await,
-            AddOpt::Stream(stream) => add(&self.ipfs, None, None, stream, option).await,
+            AddOpt::Path(path) => add_file(Either::Left(&self.ipfs), path, option).await,
+            AddOpt::Stream(stream) => {
+                add(Either::Left(&self.ipfs), None, None, stream, option).await
+            }
             AddOpt::StreamWithName(name, stream) => {
-                add(&self.ipfs, Some(name), None, stream, option).await
+                add(Either::Left(&self.ipfs), Some(name), None, stream, option).await
             }
         }
     }
@@ -118,7 +121,7 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
     ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
-        get(&self.ipfs, path, dest, peers, local).await
+        get(Either::Left(&self.ipfs), path, dest, peers, local).await
     }
 
     /// List directory contents
@@ -128,7 +131,7 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
     ) -> Result<BoxStream<'a, NodeItem>, Error> {
-        ls(&self.ipfs, path, peers, local).await
+        ls(Either::Left(&self.ipfs), path, peers, local).await
     }
 }
 

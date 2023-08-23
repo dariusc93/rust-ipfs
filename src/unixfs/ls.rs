@@ -1,9 +1,10 @@
+use either::Either;
 use futures::{stream::BoxStream, StreamExt};
 use libipld::Cid;
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 
-use crate::{Ipfs, IpfsPath};
+use crate::{Ipfs, IpfsPath, repo::Repo, dag::IpldDag};
 
 #[derive(Debug)]
 pub enum NodeItem {
@@ -14,17 +15,27 @@ pub enum NodeItem {
 }
 
 pub async fn ls<'a>(
-    ipfs: &Ipfs,
+    which: Either<&Ipfs, &Repo>,
     path: IpfsPath,
     providers: &'a [PeerId],
     local_only: bool,
 ) -> anyhow::Result<BoxStream<'a, NodeItem>> {
-    let ipfs = ipfs.clone();
+    let (repo, session) = match which {
+        Either::Left(ipfs) => (
+            ipfs.repo().clone(),
+            Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
+        ),
+        Either::Right(repo) => {
+            let session = repo
+                .is_online()
+                .then_some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+            (repo.clone(), session)
+        }
+    };
 
-    let session = Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+    let dag = IpldDag::from(repo.clone());
 
-    let (resolved, _) = ipfs
-        .dag()
+    let (resolved, _) = dag
         .resolve_with_session(session, path.clone(), true, providers, local_only)
         .await?;
 
@@ -40,7 +51,7 @@ pub async fn ls<'a>(
         let mut root_directory = String::new();
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match ipfs.repo().get_block_with_session(session, next, providers, local_only).await {
+            let block = match repo.get_block_with_session(session, next, providers, local_only).await {
                 Ok(block) => block,
                 Err(error) => {
                     yield NodeItem::Error { error };
