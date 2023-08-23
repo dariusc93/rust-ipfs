@@ -18,7 +18,7 @@ use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{error, fmt, io};
@@ -359,7 +359,8 @@ impl Repo {
         }
     }
 
-    pub fn new_fs(path: PathBuf) -> Self {
+    pub fn new_fs(path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
         let mut lockfile_path = path;
