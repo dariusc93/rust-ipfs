@@ -1,7 +1,8 @@
 //! `ipfs.dag` interface implementation around [`Ipfs`].
 
 use crate::error::Error;
-use crate::path::{IpfsPath, SlashedPath};
+use crate::path::{IpfsPath, PathRoot, SlashedPath};
+use crate::repo::Repo;
 use crate::{Block, Ipfs};
 use libipld::{
     cid::{
@@ -167,7 +168,8 @@ impl RawResolveLocalError {
 /// `ipfs.dag` interface providing wrapper around Ipfs.
 #[derive(Clone, Debug)]
 pub struct IpldDag {
-    ipfs: Ipfs,
+    ipfs: Option<Ipfs>,
+    repo: Repo,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -181,11 +183,20 @@ pub struct DagPinOpt {
     pub recursive: bool,
 }
 
+impl From<Repo> for IpldDag {
+    fn from(repo: Repo) -> Self {
+        IpldDag { ipfs: None, repo }
+    }
+}
+
 impl IpldDag {
     /// Creates a new `IpldDag` for DAG operations.
-    // FIXME: duplicates Ipfs::dag(), having both is redundant.
     pub fn new(ipfs: Ipfs) -> Self {
-        IpldDag { ipfs }
+        let repo = ipfs.repo().clone();
+        IpldDag {
+            ipfs: Some(ipfs),
+            repo,
+        }
     }
 
     /// Returns the `Cid` of a newly inserted block.
@@ -206,11 +217,11 @@ impl IpldDag {
         };
         let cid = Cid::new(version, codec.into(), hash)?;
         let block = Block::new(cid, bytes)?;
-        let (cid, _) = self.ipfs.repo.put_block(block).await?;
+        let (cid, _) = self.repo.put_block(block).await?;
         if let Some(opt) = opt {
             if let Some(opt) = opt.pin {
-                if !self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.insert_pin(&cid, opt.recursive).await?;
+                if !self.repo.is_pinned(&cid).await? {
+                    self.repo.insert_pin(&cid, opt.recursive, true).await?;
                 }
             }
         }
@@ -237,11 +248,18 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<Ipld, ResolveError> {
-        let resolved_path = self
-            .ipfs
-            .resolve_ipns(&path, true)
-            .await
-            .map_err(|_| ResolveError::IpnsResolutionFailed(path))?;
+        let resolved_path = match &self.ipfs {
+            Some(ipfs) => ipfs
+                .resolve_ipns(&path, true)
+                .await
+                .map_err(|_| ResolveError::IpnsResolutionFailed(path))?,
+            None => {
+                if !matches!(path.root(), PathRoot::Ipld(_)) {
+                    return Err(ResolveError::IpnsResolutionFailed(path));
+                }
+                path
+            }
+        };
 
         let cid = match resolved_path.root().cid() {
             Some(cid) => cid,
@@ -294,11 +312,18 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
-        let resolved_path = self
-            .ipfs
-            .resolve_ipns(&path, true)
-            .await
-            .map_err(|_| ResolveError::IpnsResolutionFailed(path))?;
+        let resolved_path = match &self.ipfs {
+            Some(ipfs) => ipfs
+                .resolve_ipns(&path, true)
+                .await
+                .map_err(|_| ResolveError::IpnsResolutionFailed(path))?,
+            None => {
+                if !matches!(path.root(), PathRoot::Ipld(_)) {
+                    return Err(ResolveError::IpnsResolutionFailed(path));
+                }
+                path
+            }
+        };
 
         let cid = match resolved_path.root().cid() {
             Some(cid) => cid,
@@ -346,7 +371,6 @@ impl IpldDag {
 
         loop {
             let block = match self
-                .ipfs
                 .repo
                 .get_block_with_session(session, &current, providers, local_only)
                 .await
@@ -405,11 +429,7 @@ impl IpldDag {
         loop {
             let (next, _) = lookup.pending_links();
 
-            let block = self
-                .ipfs
-                .repo
-                .get_block(next, providers, local_only)
-                .await?;
+            let block = self.repo.get_block(next, providers, local_only).await?;
 
             match lookup.continue_walk(block.data(), cache)? {
                 NeedToLoadMore(next) => lookup = next,
