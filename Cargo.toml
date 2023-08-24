@@ -17,10 +17,16 @@ sled_data_store = []
 test_go_interop = []
 test_js_interop = []
 
+experimental = ["rust-ipns"]
+
 [workspace.dependencies]
 libp2p = "0.52.2"
 beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
+libipld = "0.16"
+clap = { version = "4.3", features = ["derive"] }
+rust-ipns = { version = "0.1", path = "packages/rust-ipns" }
+chrono = { version = "0.4" }
 
 [dependencies]
 anyhow = "1.0"
@@ -30,13 +36,17 @@ base64 = { default-features = false, features = ["alloc"], version = "0.21" }
 beetle-bitswap-next = { workspace = true }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
-libipld = "0.16"
+libipld.workspace = true
 trust-dns-resolver = "0.22"
 either = { version = "1" }
 futures = { version = "0.3" }
 hash_hasher = "2.0.3"
 
 rust-unixfs = { workspace = true }
+
+rust-ipns = { workspace = true, optional = true }
+
+chrono.workspace = true
 
 libp2p = { features = [
     "gossipsub",
@@ -102,6 +112,7 @@ rand = "0.8"
 zeroize = "1"
 
 [dev-dependencies]
+rust-ipns.workspace = true
 bs58 = "0.4"
 criterion = { default-features = false, version = "0.4" }
 hex-literal = { default-features = false, version = "0.3" }
@@ -124,7 +135,7 @@ rand = { default-features = false, version = "0.8", features = [
 ] }
 tempfile = "3.1.0"
 
-clap = { version = "4.1", features = ["derive"] }
+clap = { workspace = true }
 
 [profile.dev.build-override]
 debug = true

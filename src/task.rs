@@ -10,13 +10,10 @@ use futures::{
     FutureExt, StreamExt,
 };
 
+use crate::{p2p::ProviderStream, TSwarmEvent};
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
     Channel, InnerConnectionEvent, InnerPubsubEvent,
-};
-use crate::{
-    p2p::{ProviderStream, RecordStream},
-    TSwarmEvent,
 };
 use beetle_bitswap_next::BitswapEvent;
 use tokio::task::JoinHandle;
@@ -1400,7 +1397,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     self.record_stream.insert(id, tx);
                 }
 
-                let _ = ret.send(RecordStream(stream.boxed()));
+                let _ = ret.send(stream.boxed());
             }
             IpfsEvent::DhtPut(key, value, quorum, ret) => {
                 let record = Record {
