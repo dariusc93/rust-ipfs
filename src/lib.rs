@@ -75,7 +75,7 @@ use self::{
     dag::IpldDag,
     ipns::Ipns,
     p2p::{create_swarm, SwarmOptions, TSwarm},
-    repo::{create_repo, Repo},
+    repo::Repo,
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -520,6 +520,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     delay: bool,
+    repo_handle: Option<Repo>,
     local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
@@ -556,6 +557,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             options,
             fdlimit,
             delay,
+            repo_handle: None,
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
             local_external_addr: false,
@@ -672,6 +674,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Set block and data repo
+    pub fn set_repo(mut self, repo: Repo) -> Self {
+        self.repo_handle = Some(repo);
+        self
+    }
+
     /// Enable keep alive
     pub fn enable_keepalive(mut self) -> Self {
         self.options.keep_alive = true;
@@ -781,16 +789,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             custom_transport,
             record_key_validator,
             local_external_addr,
+            repo_handle,
             ..
         } = self;
-
-        if let StoragePath::Disk(path) = &options.ipfs_path {
-            if !path.is_dir() {
-                tokio::fs::create_dir_all(path).await?;
-            }
-        }
-
-        let (repo, repo_events) = create_repo(options.ipfs_path.clone());
 
         let root_span = Option::take(&mut options.span)
             // not sure what would be the best practice with tracing and spans
@@ -808,6 +809,27 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         // instruments the IpfsFuture, the background task.
         let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
+
+        let repo = match repo_handle {
+            Some(repo) => {
+                if repo.is_online() {
+                    anyhow::bail!("Repo is already initialized");
+                }
+                repo
+            }
+            None => {
+                if let StoragePath::Disk(path) = &options.ipfs_path {
+                    if !path.is_dir() {
+                        tokio::fs::create_dir_all(path).await?;
+                    }
+                }
+                Repo::new(options.ipfs_path.clone())
+            }
+        };
+
+        repo.init().instrument(init_span.clone()).await?;
+
+        let repo_events = repo.initialize_channel();
 
         if let Some(limit) = fdlimit {
             #[cfg(unix)]
@@ -830,8 +852,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 warn!("Cannot set {limit:?}. Can only set a fd limit on unix systems. Ignoring...")
             }
         }
-
-        repo.init().instrument(init_span.clone()).await?;
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone().unwrap_or_default();

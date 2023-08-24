@@ -15,10 +15,11 @@ use futures::{StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{error, fmt, io};
 use tracing::log;
@@ -33,19 +34,6 @@ pub mod lock;
 
 /// Path mangling done for pins and blocks
 pub(crate) mod paths;
-
-/// Convenience for creating a new `Repo` from the `RepoOptions`.
-pub fn create_repo(storage_type: StoragePath) -> (Repo, Receiver<RepoEvent>) {
-    match storage_type {
-        StoragePath::Memory => Repo::new_memory(),
-        StoragePath::Disk(path) => Repo::new_fs(path),
-        StoragePath::Custom {
-            blockstore,
-            datastore,
-            lock,
-        } => Repo::new(blockstore, datastore, lock),
-    }
-}
 
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
@@ -293,9 +281,11 @@ impl<C: Borrow<Cid>> PinKind<C> {
 #[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
 pub struct Repo {
+    online: Arc<AtomicBool>,
+    initialized: Arc<AtomicBool>,
     block_store: Arc<dyn BlockStore>,
     data_store: Arc<dyn DataStore>,
-    events: Sender<RepoEvent>,
+    events: Arc<RwLock<Option<Sender<RepoEvent>>>>,
     pub(crate) subscriptions:
         Arc<Mutex<HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>>>,
     lockfile: Arc<dyn Lock>,
@@ -341,25 +331,36 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(
+    pub fn new(repo_type: StoragePath) -> Self {
+        match repo_type {
+            StoragePath::Memory => Repo::new_memory(),
+            StoragePath::Disk(path) => Repo::new_fs(path),
+            StoragePath::Custom {
+                blockstore,
+                datastore,
+                lock,
+            } => Repo::new_raw(blockstore, datastore, lock),
+        }
+    }
+
+    pub fn new_raw(
         block_store: Arc<dyn BlockStore>,
         data_store: Arc<dyn DataStore>,
         lockfile: Arc<dyn Lock>,
-    ) -> (Self, Receiver<RepoEvent>) {
-        let (sender, receiver) = channel(1);
-        (
-            Repo {
-                block_store,
-                data_store,
-                events: sender,
-                subscriptions: Default::default(),
-                lockfile,
-            },
-            receiver,
-        )
+    ) -> Self {
+        Repo {
+            initialized: Arc::default(),
+            online: Arc::default(),
+            block_store,
+            data_store,
+            events: Arc::default(),
+            subscriptions: Default::default(),
+            lockfile,
+        }
     }
 
-    pub fn new_fs(path: PathBuf) -> (Self, Receiver<RepoEvent>) {
+    pub fn new_fs(path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
         let mut lockfile_path = path;
@@ -373,14 +374,23 @@ impl Repo {
         #[cfg(feature = "sled_data_store")]
         let data_store = Arc::new(datastore::SledDataStore::new(datastore_path));
         let lockfile = Arc::new(lock::FsLock::new(lockfile_path));
-        Self::new(block_store, data_store, lockfile)
+        Self::new_raw(block_store, data_store, lockfile)
     }
 
-    pub fn new_memory() -> (Self, Receiver<RepoEvent>) {
+    pub fn new_memory() -> Self {
         let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default()));
         let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
         let lockfile = Arc::new(lock::MemLock);
-        Self::new(block_store, data_store, lockfile)
+        Self::new_raw(block_store, data_store, lockfile)
+    }
+
+    pub(crate) fn initialize_channel(&self) -> Receiver<RepoEvent> {
+        let mut event_guard = self.events.write();
+        let (sender, receiver) = channel(1);
+        debug_assert!(event_guard.is_none());
+        *event_guard = Some(sender);
+        self.set_online();
+        receiver
     }
 
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
@@ -389,9 +399,41 @@ impl Repo {
         let mut map = self.subscriptions.lock();
         map.clear();
         drop(map);
+        if let Some(mut event) = self.events.write().take() {
+            event.close_channel()
+        }
+        self.set_offline();
+    }
+
+    pub fn is_online(&self) -> bool {
+        self.online.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn set_online(&self) {
+        if self.is_online() {
+            return;
+        }
+
+        self.online.store(true, Ordering::SeqCst)
+    }
+
+    pub(crate) fn set_offline(&self) {
+        if !self.is_online() {
+            return;
+        }
+
+        self.online.store(false, Ordering::SeqCst)
+    }
+
+    fn repo_channel(&self) -> Option<Sender<RepoEvent>> {
+        self.events.read().clone()
     }
 
     pub async fn init(&self) -> Result<(), Error> {
+        //Avoid initializing again
+        if self.initialized.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         // Dropping the guard (even though not strictly necessary to compile) to avoid potential
         // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
@@ -403,10 +445,15 @@ impl Repo {
         let f1 = self.block_store.init();
         let f2 = self.data_store.init();
         let (r1, r2) = futures::future::join(f1, f2).await;
+        let init = self.initialized.clone();
         if r1.is_err() {
-            r1
+            r1.map(|_| {
+                init.store(true, Ordering::SeqCst);
+            })
         } else {
-            r2
+            r2.map(|_| {
+                init.store(true, Ordering::SeqCst);
+            })
         }
     }
 
@@ -463,7 +510,7 @@ impl Repo {
         if let Some(block) = self.get_block_now(cid).await? {
             Ok(block)
         } else {
-            if local_only {
+            if local_only || !self.is_online() {
                 anyhow::bail!("Unable to locate block {cid}");
             }
 
@@ -473,8 +520,12 @@ impl Repo {
 
             // sending only fails if no one is listening anymore
             // and that is okay with us.
-            self.events
-                .clone()
+
+            let mut events = self
+                .repo_channel()
+                .ok_or(anyhow::anyhow!("Channel is not available"))?;
+
+            events
                 .send(RepoEvent::WantBlock(session, *cid, peers.to_vec()))
                 .await
                 .ok();
@@ -512,11 +563,11 @@ impl Repo {
             Ok(success) => match success {
                 BlockRm::Removed(_cid) => {
                     // sending only fails if the background task has exited
-                    self.events
-                        .clone()
-                        .send(RepoEvent::RemovedBlock(*cid))
-                        .await
-                        .ok();
+                    let mut events = self
+                        .repo_channel()
+                        .ok_or(anyhow::anyhow!("Channel is not available"))?;
+
+                    events.send(RepoEvent::RemovedBlock(*cid)).await.ok();
                     Ok(*cid)
                 }
             },
