@@ -14,6 +14,14 @@ pub struct Ipns {
     ipfs: Ipfs,
 }
 
+#[cfg(feature = "experimental")]
+#[derive(Clone, Copy, Debug, Default)]
+pub enum IpnsOption {
+    Local,
+    #[default]
+    DHT,
+}
+
 impl Ipns {
     pub fn new(ipfs: Ipfs) -> Self {
         Ipns { ipfs }
@@ -50,7 +58,7 @@ impl Ipns {
 
                 let repo = self.ipfs.repo();
                 let datastore = repo.data_store();
-                
+
                 if let Ok(Some(data)) = datastore.get(mb.as_bytes()).await {
                     if let Ok(path) = rust_ipns::Record::decode(data).and_then(|record| {
                         //Although stored locally, we should verify the record anyway
@@ -102,7 +110,12 @@ impl Ipns {
     }
 
     #[cfg(feature = "experimental")]
-    pub async fn publish(&self, key: Option<&str>, path: &IpfsPath) -> Result<IpfsPath, Error> {
+    pub async fn publish(
+        &self,
+        key: Option<&str>,
+        path: &IpfsPath,
+        option: Option<IpnsOption>,
+    ) -> Result<IpfsPath, Error> {
         use libipld::Cid;
         use libp2p::kad::Quorum;
         use std::str::FromStr;
@@ -163,7 +176,10 @@ impl Ipns {
 
         datastore.put(mb.as_bytes(), &bytes).await?;
 
-        self.ipfs.dht_put(&mb, bytes, Quorum::One).await?;
+        match option.unwrap_or_default() {
+            IpnsOption::DHT => self.ipfs.dht_put(&mb, bytes, Quorum::One).await?,
+            IpnsOption::Local => {}
+        };
 
         IpfsPath::from_str(&mb)
     }

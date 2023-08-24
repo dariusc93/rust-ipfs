@@ -993,7 +993,7 @@ impl Ipfs {
         IpfsUnixfs::new(self.clone())
     }
 
-    fn ipns(&self) -> Ipns {
+    pub fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
 
@@ -1292,7 +1292,7 @@ impl Ipfs {
     pub async fn publish_ipns(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
-            ipns.publish(None, path).await
+            ipns.publish(None, path, None).await
         }
         .instrument(self.span.clone())
         .await
