@@ -1,6 +1,4 @@
 //! P2P handling for IPFS nodes.
-mod stream;
-
 use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
 
@@ -32,7 +30,6 @@ pub use self::behaviour::{BitswapConfig, BitswapProtocol};
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
-pub use self::stream::ProviderStream;
 pub use self::transport::{
     DnsResolver, MultiPlexOption, TransportConfig, UpdateMode, UpgradeVersion,
 };

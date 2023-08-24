@@ -10,7 +10,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 
-use crate::{p2p::ProviderStream, TSwarmEvent};
+use crate::TSwarmEvent;
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
     Channel, InnerConnectionEvent, InnerPubsubEvent,
@@ -1341,7 +1341,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         }
                     };
                     self.provider_stream.insert(id, tx);
-                    provider_stream = Some(ProviderStream(stream.boxed()));
+                    provider_stream = Some(stream.boxed());
                 }
 
                 let _ = ret.send(provider_stream);

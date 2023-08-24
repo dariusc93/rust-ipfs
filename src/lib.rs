@@ -52,8 +52,8 @@ use futures::{
 
 use keystore::Keystore;
 use p2p::{
-    BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream,
-    PubsubConfig, RelayConfig,
+    BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig,
+    RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
 use tokio::task::JoinHandle;
@@ -406,7 +406,7 @@ enum IpfsEvent {
     ),
     WhitelistPeer(PeerId, Channel<()>),
     RemoveWhitelistPeer(PeerId, Channel<()>),
-    GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
+    GetProviders(Cid, OneshotSender<Option<BoxStream<'static, PeerId>>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
     DhtGet(Key, OneshotSender<BoxStream<'static, Record>>),
@@ -1839,9 +1839,7 @@ impl Ipfs {
                 .send(IpfsEvent::GetProviders(cid, tx))
                 .await?;
 
-            rx.await?
-                .ok_or_else(|| anyhow!("Provider already exist"))
-                .map(|s| s.0)
+            rx.await?.ok_or_else(|| anyhow!("Provider already exist"))
         }
         .instrument(self.span.clone())
         .await
