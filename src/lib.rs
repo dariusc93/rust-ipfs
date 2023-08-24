@@ -419,7 +419,6 @@ enum IpfsEvent {
 
     //event streams
     PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
-    ConnectionEventStream(OneshotSender<UnboundedReceiver<InnerConnectionEvent>>),
 
     Exit,
 }
@@ -451,13 +450,6 @@ pub enum PubsubEvent {
 }
 
 #[derive(Debug, Clone)]
-pub enum ConnectionEvent {
-    ConnectionEstablished { address: Multiaddr },
-
-    ConnectionClosed { address: Multiaddr },
-}
-
-#[derive(Debug, Clone)]
 pub(crate) enum InnerPubsubEvent {
     /// Subscription event to a given topic
     Subscribe { topic: String, peer_id: PeerId },
@@ -466,31 +458,11 @@ pub(crate) enum InnerPubsubEvent {
     Unsubscribe { topic: String, peer_id: PeerId },
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum InnerConnectionEvent {
-    ConnectionEstablished { peer_id: PeerId, address: Multiaddr },
-
-    ConnectionClosed { peer_id: PeerId, address: Multiaddr },
-}
-
 impl From<InnerPubsubEvent> for PubsubEvent {
     fn from(event: InnerPubsubEvent) -> Self {
         match event {
             InnerPubsubEvent::Subscribe { peer_id, .. } => PubsubEvent::Subscribe { peer_id },
             InnerPubsubEvent::Unsubscribe { peer_id, .. } => PubsubEvent::Unsubscribe { peer_id },
-        }
-    }
-}
-
-impl From<InnerConnectionEvent> for ConnectionEvent {
-    fn from(event: InnerConnectionEvent) -> Self {
-        match event {
-            InnerConnectionEvent::ConnectionClosed { address, .. } => {
-                ConnectionEvent::ConnectionClosed { address }
-            }
-            InnerConnectionEvent::ConnectionEstablished { address, .. } => {
-                ConnectionEvent::ConnectionEstablished { address }
-            }
         }
     }
 }
@@ -946,7 +918,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             disconnect_confirmation: Default::default(),
             failed_ping: Default::default(),
             pubsub_event_stream: Default::default(),
-            connection_event_stream: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
@@ -1752,39 +1723,6 @@ impl Ipfs {
                 )),
                 Either::Right(result) => result.map_err(anyhow::Error::from),
             }
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Return a [`ConnectionEvent`] regarding a peer
-    pub async fn connection_events(
-        &self,
-        peer_id: PeerId,
-    ) -> Result<BoxStream<'static, ConnectionEvent>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::ConnectionEventStream(tx))
-                .await?;
-
-            let mut receiver = rx
-                .await?;
-
-            let peer_id_defined = peer_id;
-
-            let stream = async_stream::stream! {
-                while let Some(event) = receiver.next().await {
-                    match &event {
-                        InnerConnectionEvent::ConnectionEstablished { peer_id, .. } | InnerConnectionEvent::ConnectionClosed { peer_id, .. } if peer_id.eq(&peer_id_defined) => yield event.into(),
-                        _ => {}
-                    }
-                }
-            };
-
-            Ok(stream.boxed())
         }
         .instrument(self.span.clone())
         .await
