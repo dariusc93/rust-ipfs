@@ -476,6 +476,8 @@ impl NetworkBehaviour for Behaviour {
             }) => {
                 self.established_inbound_connections.remove(&connection_id);
                 self.established_outbound_connections.remove(&connection_id);
+                self.peer_rtt.remove(&peer_id);
+
                 if let Entry::Occupied(mut entry) = self.peer_connections.entry(peer_id) {
                     let list = entry.get_mut();
                     if let Some(index) = list.iter().position(|(id, _)| connection_id.eq(id)) {
@@ -512,45 +514,33 @@ impl NetworkBehaviour for Behaviour {
             return Poll::Ready(event);
         }
 
-        let mut removal = vec![];
-        for (peer_id, (timer, _)) in self.pending_identify_timer.iter_mut() {
-            match timer.poll_next_unpin(cx) {
-                Poll::Ready(Some(_)) => {
-                    removal.push(*peer_id);
-                    continue;
-                }
-                Poll::Ready(None) => {
-                    log::error!("timer for {} was not available", peer_id);
-                    removal.push(*peer_id);
-                    continue;
-                }
-                Poll::Pending => continue,
-            }
-        }
+        self.pending_identify_timer
+            .retain(
+                |peer_id, (timer, instant)| match timer.poll_next_unpin(cx) {
+                    Poll::Ready(Some(_)) => {
+                        let elapse = instant.elapsed();
+                        log::debug!("Took {:?} to complete", elapse);
 
-        for peer_id in removal.iter() {
-            if let Some(ch) = self.pending_identify.remove(peer_id) {
-                let _ = ch.send(Ok(()));
-            }
-            if let Some((_, instant)) = self.pending_identify_timer.remove(peer_id) {
-                let elapse = instant.elapsed();
-                log::debug!("Took {:?} to complete", elapse);
-            }
-        }
+                        if let Some(ch) = self.pending_identify.remove(peer_id) {
+                            let _ = ch.send(Ok(()));
+                        }
+                        false
+                    }
+                    Poll::Ready(None) => {
+                        log::error!("timer for {} was not available", peer_id);
+                        false
+                    }
+                    Poll::Pending => true,
+                },
+            );
 
         // Used to cleanup any info that may be left behind after a peer is no longer connected while giving time to all
         // Note: If a peer is whitelisted, this will retain the info as a cache, although this may change in the future
-        //
         while let Poll::Ready(Some(_)) = self.cleanup_interval.poll_next_unpin(cx) {
-            let list = self.peer_info.keys().copied().collect::<Vec<_>>();
-            for peer_id in list {
-                if !self.established_per_peer.contains_key(&peer_id)
-                    && !self.whitelist.contains(&peer_id)
-                {
-                    self.peer_info.remove(&peer_id);
-                    self.peer_rtt.remove(&peer_id);
-                }
-            }
+            self.peer_info.retain(|peer_id, _| {
+                !self.established_per_peer.contains_key(peer_id)
+                    && !self.whitelist.contains(peer_id)
+            });
         }
 
         Poll::Pending
