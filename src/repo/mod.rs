@@ -94,6 +94,8 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error>;
     /// Removes a key-value pair from the datastore.
     async fn remove(&self, key: &[u8]) -> Result<(), Error>;
+    /// Iterate over the k/v of the datastore
+    async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>;
     /// Wipes the datastore.
     async fn wipe(&self) {}
 }

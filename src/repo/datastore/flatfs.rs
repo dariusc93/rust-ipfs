@@ -5,6 +5,7 @@ use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore, Ref
 use async_trait::async_trait;
 use core::convert::TryFrom;
 use futures::stream::TryStreamExt;
+use futures::StreamExt;
 use hash_hasher::HashedSet;
 use libipld::Cid;
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::Semaphore;
-use tokio_stream::{empty, wrappers::ReadDirStream, StreamExt};
+use tokio_stream::{empty, wrappers::ReadDirStream};
 use tokio_util::either::Either;
 
 /// FsDataStore which uses the filesystem as a lockable key-value store. Maintains a similar to
@@ -75,6 +76,10 @@ impl DataStore for FsDataStore {
         Err(anyhow::anyhow!("not implemented"))
     }
 
+    async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)> {
+        futures::stream::empty().boxed()
+    }
+
     async fn wipe(&self) {}
 }
 
@@ -99,7 +104,7 @@ impl PinStore for FsDataStore {
 
         futures::pin_mut!(st);
 
-        while let Some(recursive) = StreamExt::try_next(&mut st).await? {
+        while let Some(recursive) = TryStreamExt::try_next(&mut st).await? {
             // TODO: it might be much better to just deserialize the vec one by one and comparing while
             // going
             let (_, references) =
@@ -328,7 +333,7 @@ impl PinStore for FsDataStore {
 
             futures::pin_mut!(cids);
 
-            while let Some((cid, mode)) = StreamExt::try_next(&mut cids).await? {
+            while let Some((cid, mode)) = TryStreamExt::try_next(&mut cids).await? {
 
                 let matches = requirement.matches(&mode);
 
@@ -370,7 +375,7 @@ impl PinStore for FsDataStore {
                 .map_ok(move |cid| read_recursively_pinned(path.clone(), cid))
                 .try_buffer_unordered(4);
 
-            while let Some((_, next_batch)) = StreamExt::try_next(&mut recursive).await? {
+            while let Some((_, next_batch)) = TryStreamExt::try_next(&mut recursive).await? {
                 for indirect in next_batch {
                     if returned.insert(indirect) {
                         yield (indirect, PinMode::Indirect);
@@ -477,7 +482,7 @@ impl PinStore for FsDataStore {
             futures::pin_mut!(recursives);
 
             'out: while let Some((referring, references)) =
-                StreamExt::try_next(&mut recursives).await?
+                TryStreamExt::try_next(&mut recursives).await?
             {
                 // FIXME: maybe binary search?
                 for cid in references {

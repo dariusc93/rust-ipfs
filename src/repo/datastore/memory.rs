@@ -1,6 +1,7 @@
 use crate::error::Error;
 use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore};
 use async_trait::async_trait;
+use futures::StreamExt;
 use libipld::{cid, Cid};
 use std::path::PathBuf;
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -347,6 +348,18 @@ impl DataStore for MemDataStore {
     async fn remove(&self, key: &[u8]) -> Result<(), Error> {
         self.inner.lock().await.remove(key);
         Ok(())
+    }
+
+    async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)> {
+        let list = self.inner.lock().await.clone();
+
+        let stream = async_stream::stream! {
+            for (k, v) in list {
+                yield (k, v)
+            }
+        };
+
+        stream.boxed()
     }
 
     async fn wipe(&self) {
