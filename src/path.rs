@@ -58,7 +58,18 @@ impl FromStr for IpfsPath {
                 ("", Some("ipld"), Some(key)) => PathRoot::Ipld(Cid::try_from(key)?),
                 ("", Some("ipns"), Some(key)) => match PeerId::from_str(key).ok() {
                     Some(peer_id) => PathRoot::Ipns(peer_id),
-                    None => PathRoot::Dns(key.to_string()),
+                    None => {
+                        let result = |key: &str| -> Result<PathRoot, Self::Err> {
+                            let p = PeerId::from_bytes(&Cid::from_str(key)?.hash().to_bytes())?;
+
+                            Ok(PathRoot::Ipns(p))
+                        };
+
+                        match result(key).ok() {
+                            Some(path) => path,
+                            None => PathRoot::Dns(key.to_string()),
+                        }
+                    }
                 },
                 _ => {
                     return Err(IpfsPathError::InvalidPath(string.to_owned()).into());

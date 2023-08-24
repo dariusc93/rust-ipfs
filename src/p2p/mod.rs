@@ -33,7 +33,6 @@ pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
 pub use self::stream::ProviderStream;
-pub use self::stream::RecordStream;
 pub use self::transport::{
     DnsResolver, MultiPlexOption, TransportConfig, UpdateMode, UpgradeVersion,
 };

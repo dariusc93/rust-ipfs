@@ -53,7 +53,7 @@ use futures::{
 use keystore::Keystore;
 use p2p::{
     BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream,
-    PubsubConfig, RecordStream, RelayConfig,
+    PubsubConfig, RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
 use tokio::task::JoinHandle;
@@ -107,7 +107,7 @@ pub use libp2p::{
 
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
-    kad::{store::MemoryStoreConfig, KademliaConfig, Mode},
+    kad::{store::MemoryStoreConfig, KademliaConfig, Mode, Record},
     ping::Config as PingConfig,
     swarm::dial_opts::DialOpts,
     StreamProtocol,
@@ -324,7 +324,8 @@ impl IpfsOptions {
 /// endpoint implementations in `ipfs-http`.
 ///
 /// The facade is created through [`UninitializedIpfs`] which is configured with [`IpfsOptions`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct Ipfs {
     span: Span,
     repo: Repo,
@@ -332,6 +333,13 @@ pub struct Ipfs {
     keystore: Keystore,
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
+    record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
+}
+
+impl std::fmt::Debug for Ipfs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Ipfs").finish()
+    }
 }
 
 type Channel<T> = OneshotSender<Result<T, Error>>;
@@ -401,7 +409,7 @@ enum IpfsEvent {
     GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
-    DhtGet(Key, OneshotSender<RecordStream>),
+    DhtGet(Key, OneshotSender<BoxStream<'static, Record>>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
     AddBootstrapper(Multiaddr, Channel<Multiaddr>),
@@ -514,6 +522,8 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     delay: bool,
     local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
+    // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
+    record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
     custom_behaviour: Option<C>,
     custom_transport: Option<TTransportFn>,
 }
@@ -522,13 +532,13 @@ pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behavio
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> Default for UninitializedIpfs<C> {
     fn default() -> Self {
-        Self::with_opt(Default::default())
+        Self::new()
     }
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_opt(Default::default())
     }
 
     /// Configures a new UninitializedIpfs with from the given options and optionally a span.
@@ -546,6 +556,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             options,
             fdlimit,
             delay,
+            // record_validators: Default::default(),
+            record_key_validator: Default::default(),
             local_external_addr: false,
             swarm_event: None,
             custom_behaviour: None,
@@ -613,6 +625,26 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Set ping configuration
     pub fn set_ping_configuration(mut self, config: PingConfig) -> Self {
         self.options.ping_configuration = Some(config);
+        self
+    }
+
+    /// Set default record validator for IPFS
+    /// Note: This will override any keys set for `ipns` prefix
+    pub fn default_record_key_validator(mut self) -> Self {
+        self.record_key_validator.insert(
+            "ipns".into(),
+            Arc::new(|key| to_dht_key(("ipns", |key| ipns_to_dht_key(key)), key)),
+        );
+        self
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn set_record_prefix_validator(
+        mut self,
+        key: &str,
+        callback: Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>,
+    ) -> Self {
+        self.record_key_validator.insert(key.to_string(), callback);
         self
     }
 
@@ -747,6 +779,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             swarm_event,
             custom_behaviour,
             custom_transport,
+            record_key_validator,
             local_external_addr,
             ..
         } = self;
@@ -812,6 +845,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             key: keys.clone(),
             keystore,
             to_task,
+            record_key_validator,
         };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
@@ -959,7 +993,7 @@ impl Ipfs {
         IpfsUnixfs::new(self.clone())
     }
 
-    fn ipns(&self) -> Ipns {
+    pub fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
 
@@ -1232,7 +1266,7 @@ impl Ipfs {
             .await
     }
 
-    /// Resolves a ipns path to an ipld path; currently only supports dnslink resolution.
+    /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.
     pub async fn resolve_ipns(&self, path: &IpfsPath, recursive: bool) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
@@ -1248,6 +1282,17 @@ impl Ipfs {
                 }
             }
             resolved
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Publish ipns record to DHT
+    #[cfg(feature = "experimental")]
+    pub async fn publish_ipns(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
+        async move {
+            let ipns = self.ipns();
+            ipns.publish(None, path, None).await
         }
         .instrument(self.span.clone())
         .await
@@ -1859,13 +1904,30 @@ impl Ipfs {
 
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.
-    pub async fn dht_get<T: Into<Key>>(&self, key: T) -> Result<RecordStream, Error> {
+    pub async fn dht_get<T: AsRef<[u8]>>(
+        &self,
+        key: T,
+    ) -> Result<BoxStream<'static, Record>, Error> {
         async move {
+            let key = key.as_ref();
+
+            let key_str = String::from_utf8_lossy(key);
+
+            let key = if let Ok((prefix, _)) = split_dht_key(&key_str) {
+                if let Some(key_fn) = self.record_key_validator.get(prefix) {
+                    key_fn(&key_str)?
+                } else {
+                    Key::from(key.to_vec())
+                }
+            } else {
+                Key::from(key.to_vec())
+            };
+
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::DhtGet(key.into(), tx))
+                .send(IpfsEvent::DhtGet(key, tx))
                 .await?;
 
             Ok(rx.await?).map_err(|e: String| anyhow!(e))
@@ -1877,18 +1939,32 @@ impl Ipfs {
     /// Stores the given key + value record locally and replicates it in the DHT. It doesn't
     /// expire locally and is periodically replicated in the DHT, as per the `KademliaConfig`
     /// setup.
-    pub async fn dht_put<T: Into<Key>>(
+    pub async fn dht_put<T: AsRef<[u8]>>(
         &self,
         key: T,
         value: Vec<u8>,
         quorum: Quorum,
     ) -> Result<(), Error> {
         let kad_result = async move {
+            let key = key.as_ref();
+
+            let key_str = String::from_utf8_lossy(key);
+
+            let key = if let Ok((prefix, _)) = split_dht_key(&key_str) {
+                if let Some(key_fn) = self.record_key_validator.get(prefix) {
+                    key_fn(&key_str)?
+                } else {
+                    Key::from(key.to_vec())
+                }
+            } else {
+                Key::from(key.to_vec())
+            };
+
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::DhtPut(key.into(), value, quorum, tx))
+                .send(IpfsEvent::DhtPut(key, value, quorum, tx))
                 .await?;
 
             Ok(rx.await?).map_err(|e: String| anyhow!(e))
@@ -2129,6 +2205,71 @@ impl Ipfs {
         // ignoring the error because it'd mean that the background task had already been dropped
         let _ = self.to_task.try_send(IpfsEvent::Exit);
     }
+}
+
+#[inline]
+pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
+    anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
+
+    let (key, val) = {
+        let data = key
+            .split('/')
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>();
+
+        anyhow::ensure!(
+            !data.is_empty() && data.len() == 2,
+            "split dats cannot be empty"
+        );
+
+        (data[0], data[1])
+    };
+
+    Ok((key, val))
+}
+
+#[inline]
+pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
+    use libipld::multibase;
+
+    let default_ipns_prefix = b"/ipns/";
+
+    let mut key = key.as_ref().trim().to_string();
+
+    anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
+
+    if key.starts_with('1') || key.starts_with('Q') {
+        key.insert(0, 'z');
+    }
+
+    let mut data = multibase::decode(key).map(|(_, data)| data)?;
+
+    if data[0] != 0x01 && data[1] != 0x72 {
+        data = vec![vec![0x01, 0x72], data].concat();
+    }
+
+    data = vec![default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
+
+    Ok(data.into())
+}
+
+#[inline]
+pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
+    (prefix, func): (&str, F),
+    key: B,
+) -> anyhow::Result<Key> {
+    let key = key.as_ref().trim();
+
+    let (key, val) = split_dht_key(key)?;
+
+    anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
+    anyhow::ensure!(!val.is_empty(), "Value cannot be empty");
+
+    if key == prefix {
+        return func(val);
+    }
+
+    anyhow::bail!("Invalid prefix")
 }
 
 #[allow(dead_code)]
