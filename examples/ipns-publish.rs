@@ -1,9 +1,14 @@
-use rust_ipfs::Ipfs;
-use rust_ipfs::IpfsPath;
-use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+#[cfg(not(feature = "experimental"))]
+fn main() {
+    panic!("Enable \"experimental\" flag");
+}
 
+#[cfg(feature = "experimental")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use rust_ipfs::Ipfs;
+    use rust_ipfs::IpfsPath;
+    use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
