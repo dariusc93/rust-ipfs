@@ -374,7 +374,7 @@ impl Repo {
         #[cfg(not(feature = "sled_data_store"))]
         let data_store = Arc::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
-        let data_store = Arc::new(datastore::SledDataStore::new(datastore_path));
+        let data_store = Arc::new(datastore::sled::SledDataStore::new(datastore_path));
         let lockfile = Arc::new(lock::FsLock::new(lockfile_path));
         Self::new_raw(block_store, data_store, lockfile)
     }
