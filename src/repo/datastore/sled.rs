@@ -218,7 +218,7 @@ impl PinStore for SledDataStore {
                 for cid in set.iter() {
                     let indirect_key = get_pin_key(cid, &PinMode::Indirect);
 
-                    if matches!(get_pinned_mode(tx_tree, cid)?, Some(_)) {
+                    if get_pinned_mode(tx_tree, cid)?.is_some() {
                         // TODO: quite costly to do the get_pinned_mode here
                         continue;
                     }
