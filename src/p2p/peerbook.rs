@@ -6,6 +6,7 @@ use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
 use libp2p::identify::Info;
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
+use libp2p::swarm::ListenFailure;
 use libp2p::swarm::{
     self, dummy::ConnectionHandler as DummyConnectionHandler, CloseConnection, NetworkBehaviour,
     PollParameters,
@@ -17,7 +18,7 @@ use libp2p::swarm::{
 };
 use libp2p::PeerId;
 use std::collections::hash_map::Entry;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::log;
 use wasm_timer::Interval;
 
@@ -135,7 +136,7 @@ pub struct Behaviour {
     pending_connections: HashMap<ConnectionId, oneshot::Sender<anyhow::Result<()>>>,
     pending_disconnection: HashMap<PeerId, oneshot::Sender<anyhow::Result<()>>>,
 
-    pending_identify_timer: HashMap<PeerId, (Interval, Instant)>,
+    pending_identify_timer: HashMap<PeerId, Interval>,
 
     pending_identify: HashMap<PeerId, oneshot::Sender<anyhow::Result<()>>>,
 
@@ -151,6 +152,8 @@ pub struct Behaviour {
     established_inbound_connections: HashSet<ConnectionId>,
     established_outbound_connections: HashSet<ConnectionId>,
     established_per_peer: HashMap<PeerId, HashSet<ConnectionId>>,
+
+    config: Config,
 }
 
 impl Default for Behaviour {
@@ -175,8 +178,14 @@ impl Default for Behaviour {
             established_inbound_connections: Default::default(),
             established_outbound_connections: Default::default(),
             established_per_peer: Default::default(),
+            config: Config::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    wait_on_identify: bool,
 }
 
 impl Behaviour {
@@ -226,11 +235,10 @@ impl Behaviour {
     pub fn inject_peer_info(&mut self, info: Info) {
         let peer_id = info.public_key.to_peer_id();
         self.peer_info.insert(peer_id, info);
-        if let Some(ch) = self.pending_identify.remove(&peer_id) {
-            let _ = ch.send(Ok(()));
-            if let Some((_, instant)) = self.pending_identify_timer.remove(&peer_id) {
-                let elapse = instant.elapsed();
-                log::debug!("Took {:?} to obtain identify for {peer_id}", elapse);
+        self.pending_identify_timer.remove(&peer_id);
+        if self.config.wait_on_identify {
+            if let Some(ch) = self.pending_identify.remove(&peer_id) {
+                let _ = ch.send(Ok(()));
             }
         }
     }
@@ -370,12 +378,6 @@ impl NetworkBehaviour for Behaviour {
             )?;
         }
 
-        self.established_inbound_connections.insert(connection_id);
-        self.established_per_peer
-            .entry(peer_id)
-            .or_default()
-            .insert(connection_id);
-
         Ok(DummyConnectionHandler)
     }
 
@@ -407,12 +409,6 @@ impl NetworkBehaviour for Behaviour {
             )?;
         }
 
-        self.established_outbound_connections.insert(connection_id);
-        self.established_per_peer
-            .entry(peer_id)
-            .or_default()
-            .insert(connection_id);
-
         Ok(DummyConnectionHandler)
     }
 
@@ -434,37 +430,52 @@ impl NetworkBehaviour for Behaviour {
                 ..
             }) => {
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
-                    if self.get_peer_info(peer_id).is_none() {
-                        self.pending_identify.insert(peer_id, ch);
-                        self.pending_identify_timer.insert(
-                            peer_id,
-                            (
+                    match (
+                        self.get_peer_info(peer_id).is_none(),
+                        self.config.wait_on_identify,
+                    ) {
+                        (true, true) => {
+                            self.pending_identify.insert(peer_id, ch);
+                            self.pending_identify_timer.insert(
+                                peer_id,
                                 Interval::new_at(
                                     std::time::Instant::now() + Duration::from_secs(5),
                                     Duration::from_secs(5),
                                 ),
-                                Instant::now(),
-                            ),
-                        );
-                    } else {
-                        let _ = ch.send(Ok(()));
+                            );
+                        }
+                        _ => {
+                            let _ = ch.send(Ok(()));
+                        }
                     }
                 }
                 let multiaddr = match endpoint {
-                    ConnectedPoint::Dialer { address, .. } => address.clone(),
-                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
+                    ConnectedPoint::Dialer { address, .. } => {
+                        self.established_outbound_connections.insert(connection_id);
+                        address.clone()
+                    }
+                    ConnectedPoint::Listener { send_back_addr, .. } => {
+                        self.established_inbound_connections.insert(connection_id);
+                        send_back_addr.clone()
+                    }
                 };
 
                 self.peer_connections
                     .entry(peer_id)
                     .or_default()
                     .push((connection_id, multiaddr));
+
+                self.established_per_peer
+                    .entry(peer_id)
+                    .or_default()
+                    .insert(connection_id);
             }
             FromSwarm::DialFailure(DialFailure {
                 error,
                 connection_id,
                 ..
             }) => {
+                self.pending_outbound_connections.remove(&connection_id);
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
                     let _ = ch.send(Err(anyhow::anyhow!("{error}")));
                 }
@@ -476,6 +487,11 @@ impl NetworkBehaviour for Behaviour {
             }) => {
                 self.established_inbound_connections.remove(&connection_id);
                 self.established_outbound_connections.remove(&connection_id);
+                self.established_per_peer
+                    .entry(peer_id)
+                    .or_default()
+                    .remove(&connection_id);
+
                 self.peer_rtt.remove(&peer_id);
 
                 if let Entry::Occupied(mut entry) = self.peer_connections.entry(peer_id) {
@@ -501,6 +517,9 @@ impl NetworkBehaviour for Behaviour {
                     let _ = ch.send(Ok(()));
                 }
             }
+            FromSwarm::ListenFailure(ListenFailure { connection_id, .. }) => {
+                self.pending_inbound_connections.remove(&connection_id);
+            }
             _ => {}
         }
     }
@@ -515,24 +534,19 @@ impl NetworkBehaviour for Behaviour {
         }
 
         self.pending_identify_timer
-            .retain(
-                |peer_id, (timer, instant)| match timer.poll_next_unpin(cx) {
-                    Poll::Ready(Some(_)) => {
-                        let elapse = instant.elapsed();
-                        log::debug!("Took {:?} to complete", elapse);
-
-                        if let Some(ch) = self.pending_identify.remove(peer_id) {
-                            let _ = ch.send(Ok(()));
-                        }
-                        false
+            .retain(|peer_id, timer| match timer.poll_next_unpin(cx) {
+                Poll::Ready(Some(_)) => {
+                    if let Some(ch) = self.pending_identify.remove(peer_id) {
+                        let _ = ch.send(Ok(()));
                     }
-                    Poll::Ready(None) => {
-                        log::error!("timer for {} was not available", peer_id);
-                        false
-                    }
-                    Poll::Pending => true,
-                },
-            );
+                    false
+                }
+                Poll::Ready(None) => {
+                    log::error!("timer for {} was not available", peer_id);
+                    false
+                }
+                Poll::Pending => true,
+            });
 
         // Used to cleanup any info that may be left behind after a peer is no longer connected while giving time to all
         // Note: If a peer is whitelisted, this will retain the info as a cache, although this may change in the future
