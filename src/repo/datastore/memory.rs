@@ -437,7 +437,7 @@ impl PinDocument {
                         set.remove(&root)
                     };
 
-                    self.indirect_by.extend(set.into_iter());
+                    self.indirect_by.extend(set);
                     modified
                 };
 

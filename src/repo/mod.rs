@@ -386,6 +386,93 @@ impl Repo {
         Self::new_raw(block_store, data_store, lockfile)
     }
 
+    pub async fn migrate(&self, repo: &Self) -> Result<(), Error> {
+        if self.is_online() || repo.is_online() {
+            anyhow::bail!("Repository cannot be online");
+        }
+        let block_migration = {
+            let this = self.clone();
+            let external = repo.clone();
+            async move {
+                if let Ok(list) = this.list_blocks().await {
+                    for cid in list {
+                        match this.get_block_now(&cid).await {
+                            Ok(Some(block)) => match external.block_store.put(block).await {
+                                Ok(_) => {}
+                                Err(e) => error!("Error migrating {cid}: {e}"),
+                            },
+                            Ok(None) => error!("{cid} doesnt exist"),
+                            Err(e) => error!("Error getting block {cid}: {e}"),
+                        }
+                    }
+                }
+            }
+        };
+
+        let data_migration = {
+            let this = self.clone();
+            let external = repo.clone();
+            async move {
+                let mut data_stream = this.data_store().iter().await;
+                while let Some((k, v)) = data_stream.next().await {
+                    if let Err(e) = external.data_store().put(&k, &v).await {
+                        error!("Unable to migrate {k:?} into repo: {e}");
+                    }
+                }
+            }
+        };
+
+        let pins_migration = {
+            let this = self.clone();
+            let external = repo.clone();
+            async move {
+                let mut stream = this.data_store().list(None).await;
+                while let Some(Ok((cid, pin_mode))) = stream.next().await {
+                    match pin_mode {
+                        PinMode::Direct => {
+                            match external.data_store().insert_direct_pin(&cid).await {
+                                Ok(_) => {}
+                                Err(e) => error!("Unable to migrate pin {cid}: {e}"),
+                            }
+                        }
+                        PinMode::Indirect => {
+                            //No need to track since we will be obtaining the reference from the pin that is recursive
+                            continue;
+                        }
+                        PinMode::Recursive => {
+                            let block = match this.get_block_now(&cid).await.map(|block| {
+                                block.and_then(|block| block.decode::<IpldCodec, Ipld>().ok())
+                            }) {
+                                Ok(Some(block)) => block,
+                                Ok(None) => continue,
+                                Err(e) => {
+                                    error!("Block {cid} does not exist but is pinned: {e}");
+                                    continue;
+                                }
+                            };
+
+                            let st = crate::refs::IpldRefs::default()
+                                .with_only_unique()
+                                .refs_of_resolved(self, vec![(cid, block.clone())].into_iter())
+                                .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                                .into_stream()
+                                .boxed();
+
+                            if let Err(e) = external.insert_recursive_pin(&cid, st).await {
+                                error!("Error migrating pin {cid}: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        futures::join!(block_migration, data_migration, pins_migration);
+
+        Ok(())
+    }
+
     pub(crate) fn initialize_channel(&self) -> Receiver<RepoEvent> {
         let mut event_guard = self.events.write();
         let (sender, receiver) = channel(1);
