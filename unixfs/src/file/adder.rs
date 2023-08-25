@@ -176,7 +176,7 @@ impl FileAdder {
             assert!(leaf.is_some(), "chunk completed, must produce a new block");
             self.block_buffer.clear();
             let links = self.flush_buffered_links(false);
-            (leaf.into_iter().chain(links.into_iter()), accepted.len())
+            (leaf.into_iter().chain(links), accepted.len())
         } else {
             // slower path as we manage the buffer.
 
@@ -205,7 +205,7 @@ impl FileAdder {
 
                 (leaf, links)
             };
-            (leaf.into_iter().chain(links.into_iter()), written)
+            (leaf.into_iter().chain(links), written)
         }
     }
 
@@ -220,7 +220,7 @@ impl FileAdder {
             Self::flush_buffered_leaf(&self.block_buffer, &mut self.unflushed_links, true);
         let root_links = self.flush_buffered_links(true);
         // should probably error if there is neither?
-        last_leaf.into_iter().chain(root_links.into_iter())
+        last_leaf.into_iter().chain(root_links)
     }
 
     /// Returns `None` when the input is empty but there are links, otherwise a new Cid and a

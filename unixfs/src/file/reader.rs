@@ -173,7 +173,7 @@ impl<'a> FileReader<'a> {
         let fc = if self.links.is_empty() {
             FileContent::Bytes(self.data)
         } else {
-            let zipped = self.links.into_iter().zip(self.blocksizes.into_iter());
+            let zipped = self.links.into_iter().zip(self.blocksizes);
             FileContent::Links(RangeLinks::from_links_and_blocksizes(
                 zipped,
                 Some(self.offset),

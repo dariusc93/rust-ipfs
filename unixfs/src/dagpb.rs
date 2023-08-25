@@ -1,5 +1,5 @@
-///! dag-pb support operations. Placing this module inside unixfs module is a bit unfortunate but
-///! follows from the inseparability of dag-pb and UnixFS.
+//! dag-pb support operations. Placing this module inside unixfs module is a bit unfortunate but
+//! follows from the inseparability of dag-pb and UnixFS.
 use crate::pb::PBNode;
 use alloc::borrow::Cow;
 use core::convert::TryFrom;
