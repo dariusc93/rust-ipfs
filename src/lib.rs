@@ -2201,10 +2201,10 @@ pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
     let mut data = multibase::decode(key).map(|(_, data)| data)?;
 
     if data[0] != 0x01 && data[1] != 0x72 {
-        data = vec![vec![0x01, 0x72], data].concat();
+        data = [vec![0x01, 0x72], data].concat();
     }
 
-    data = vec![default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
+    data = [default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
 
     Ok(data.into())
 }
