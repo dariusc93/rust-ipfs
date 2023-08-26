@@ -131,47 +131,11 @@ impl From<RelayConfig> for libp2p::relay::Config {
             max_circuits_per_peer,
             max_circuit_duration,
             max_circuit_bytes,
-            ..
+            reservation_rate_limiters,
+            circuit_src_rate_limiters,
         }: RelayConfig,
     ) -> Self {
-        // let reservation_rate_limiters = reservation_rate_limiters
-        //     .iter()
-        //     .map(|rate| match rate {
-        //         RateLimit::PerPeer { limit, interval } => {
-        //             libp2p::relay::
-        //             GenericRateLimiter(GenericRateLimiterConfig {
-        //                 limit: *limit,
-        //                 interval: *interval,
-        //             })
-        //         }
-        //         RateLimit::PerIp { limit, interval } => {
-        //             new_per_ip(rate_limiter::GenericRateLimiterConfig {
-        //                 limit: *limit,
-        //                 interval: *interval,
-        //             })
-        //         }
-        //     })
-        //     .collect::<Vec<_>>();
-
-        // let circuit_src_rate_limiters = circuit_src_rate_limiters
-        //     .iter()
-        //     .map(|rate| match rate {
-        //         RateLimit::PerPeer { limit, interval } => {
-        //             rate_limiter::new_per_peer(rate_limiter::GenericRateLimiterConfig {
-        //                 limit: *limit,
-        //                 interval: *interval,
-        //             })
-        //         }
-        //         RateLimit::PerIp { limit, interval } => {
-        //             rate_limiter::new_per_ip(rate_limiter::GenericRateLimiterConfig {
-        //                 limit: *limit,
-        //                 interval: *interval,
-        //             })
-        //         }
-        //     })
-        //     .collect::<Vec<_>>();
-
-        libp2p::relay::Config {
+        let mut config = libp2p::relay::Config {
             max_reservations,
             max_reservations_per_peer,
             reservation_duration,
@@ -180,7 +144,31 @@ impl From<RelayConfig> for libp2p::relay::Config {
             max_circuit_duration,
             max_circuit_bytes,
             ..Default::default()
+        };
+
+        for rate in circuit_src_rate_limiters {
+            match rate {
+                RateLimit::PerPeer { limit, interval } => {
+                    config = config.circuit_src_per_peer(limit, interval);
+                }
+                RateLimit::PerIp { limit, interval } => {
+                    config = config.circuit_src_per_ip(limit, interval);
+                }
+            }
         }
+
+        for rate in reservation_rate_limiters {
+            match rate {
+                RateLimit::PerPeer { limit, interval } => {
+                    config = config.reservation_rate_per_peer(limit, interval);
+                }
+                RateLimit::PerIp { limit, interval } => {
+                    config = config.reservation_rate_per_ip(limit, interval);
+                }
+            }
+        }
+
+        config
     }
 }
 

@@ -1,4 +1,5 @@
 # 0.4.0 [unreleased]
+- chore: Uncomment and update relay configuration [PR XX]
 - chore: Minor Optimizations [PR 93]
 - refactor: Make `Repo` independent [PR 92]
 - feat: Basic record key/prefix validator and basic ipns publisher/resolver [PR 88]
@@ -6,6 +7,7 @@
 - chore: Update libp2p to 0.52 [PR 76]
 - chore: Add `UninitializedIpfs::listen_as_external_addr` to use listened addresses as external addresses [PR 90]
 
+[PR XX]: https://github.com/dariusc93/rust-ipfs/pull/XX
 [PR 93]: https://github.com/dariusc93/rust-ipfs/pull/93
 [PR 92]: https://github.com/dariusc93/rust-ipfs/pull/92
 [PR 88]: https://github.com/dariusc93/rust-ipfs/pull/88
