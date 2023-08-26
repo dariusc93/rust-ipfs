@@ -183,12 +183,27 @@ impl Default for Behaviour {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Config {
-    wait_on_identify: bool,
+    pub wait_on_identify: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            wait_on_identify: true,
+        }
+    }
 }
 
 impl Behaviour {
+    pub fn new(config: Config) -> Self {
+        Self {
+            config,
+            ..Default::default()
+        }
+    }
+
     pub fn connect(&mut self, opt: impl Into<DialOpts>) -> oneshot::Receiver<anyhow::Result<()>> {
         let opts: DialOpts = opt.into();
         let (tx, rx) = oneshot::channel();
