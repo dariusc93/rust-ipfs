@@ -103,6 +103,19 @@ impl DataStore for SledDataStore {
         tokio::task::spawn_blocking(move || db.remove(key).map_err(Error::from).map(|_| ())).await?
     }
 
+    async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)> {
+        let db = self.get_db().to_owned();
+        
+        let stream = async_stream::stream! {
+            let iter = db.iter();
+            for (k, v) in iter.flatten() {
+                yield (k.to_vec(), v.to_vec());
+            }
+        };
+        
+        stream.boxed()
+    }
+
     /// Wipes the datastore.
     async fn wipe(&self) {}
 }
@@ -205,7 +218,7 @@ impl PinStore for SledDataStore {
                 for cid in set.iter() {
                     let indirect_key = get_pin_key(cid, &PinMode::Indirect);
 
-                    if matches!(get_pinned_mode(tx_tree, cid)?, Some(_)) {
+                    if get_pinned_mode(tx_tree, cid)?.is_some() {
                         // TODO: quite costly to do the get_pinned_mode here
                         continue;
                     }

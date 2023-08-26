@@ -1,18 +1,25 @@
-use std::str::FromStr;
+#[cfg(not(feature = "experimental"))]
+fn main() {
+    panic!("Enable \"experimental\" flag");
+}
 
-use clap::Parser;
-use rust_ipfs::Ipfs;
-use rust_ipfs::IpfsPath;
-use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
-
+#[cfg(feature = "experimental")]
 #[derive(Debug, clap::Parser)]
 #[clap(name = "ipns")]
 struct Opt {
     key: String,
 }
 
+#[cfg(feature = "experimental")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use std::str::FromStr;
+
+    use clap::Parser;
+    use rust_ipfs::Ipfs;
+    use rust_ipfs::IpfsPath;
+    use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+
     tracing_subscriber::fmt::init();
 
     let opt = Opt::parse();

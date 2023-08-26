@@ -1,7 +1,7 @@
-///! UnixFS file support.
-///!
-///! The module provides low-level File tree visitor support and file importing support. Note: The
-///! [`ipfs_unixfs::walk::Walker`] should typically be used for accessing file content.
+//! UnixFS file support.
+//!
+//! The module provides low-level File tree visitor support and file importing support. Note: The
+//! [`ipfs_unixfs::walk::Walker`] should typically be used for accessing file content.
 use crate::pb::ParsingFailed;
 use crate::{InvalidCidInLink, Metadata, UnexpectedNodeType};
 use alloc::borrow::Cow;

@@ -6,7 +6,7 @@ use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
 
-use crate::{Ipfs, IpfsPath, dag::IpldDag, repo::Repo};
+use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 use super::UnixfsStatus;
 
@@ -19,20 +19,19 @@ pub async fn get<'a, P: AsRef<Path>>(
 ) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
     let mut file = tokio::fs::File::create(dest).await?;
 
-    let (repo, session) = match which {
+    let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
+            ipfs.dag(),
             Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
         ),
         Either::Right(repo) => {
             let session = repo
                 .is_online()
                 .then_some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
-            (repo.clone(), session)
+            (repo.clone(), IpldDag::from(repo.clone()), session)
         }
     };
-
-    let dag = IpldDag::from(repo.clone());
 
     let (resolved, _) = dag
         .resolve_with_session(session, path.clone(), true, providers, local_only)

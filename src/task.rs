@@ -10,10 +10,10 @@ use futures::{
     FutureExt, StreamExt,
 };
 
-use crate::{p2p::ProviderStream, TSwarmEvent};
+use crate::TSwarmEvent;
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
-    Channel, InnerConnectionEvent, InnerPubsubEvent,
+    Channel, InnerPubsubEvent,
 };
 use beetle_bitswap_next::BitswapEvent;
 use tokio::task::JoinHandle;
@@ -94,7 +94,6 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) failed_ping: HashMap<ConnectionId, usize>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
-    pub(crate) connection_event_stream: Vec<UnboundedSender<InnerConnectionEvent>>,
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) timer: TaskTimer,
@@ -159,7 +158,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
         if self.timer.event_cleanup.poll_next_unpin(cx).is_ready() {
             self.pubsub_event_stream.retain(|ch| !ch.is_closed());
-            self.connection_event_stream.retain(|ch| !ch.is_closed());
         }
 
         if self.timer.session_cleanup.poll_next_unpin(cx).is_ready() {
@@ -243,7 +241,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 },
                 _ = event_cleanup.tick() => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
-                    self.connection_event_stream.retain(|ch| !ch.is_closed());
                 }
                 _ = session_cleanup.tick() => {
                     let mut to_remove = Vec::new();
@@ -334,16 +331,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         }
     }
 
-    fn emit_connection_event(&self, event: InnerConnectionEvent) {
-        for ch in &self.connection_event_stream {
-            let ch = ch.clone();
-            let event = event.clone();
-            tokio::spawn(async move {
-                let _ = ch.unbounded_send(event);
-            });
-        }
-    }
-
     fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent<C>) {
         if let Some(handler) = self.swarm_event.clone() {
             handler(&mut self.swarm, &swarm_event)
@@ -381,33 +368,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Either::Left(address));
                 }
             }
-            SwarmEvent::ConnectionEstablished {
-                peer_id, endpoint, ..
-            } => {
-                let address = match endpoint {
-                    libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
-                    libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
-                };
-                self.emit_connection_event(InnerConnectionEvent::ConnectionEstablished {
-                    peer_id,
-                    address,
-                })
-            }
             SwarmEvent::ConnectionClosed {
                 peer_id,
-                endpoint,
                 connection_id,
                 ..
             } => {
-                let address = match endpoint {
-                    libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
-                    libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
-                };
-                self.emit_connection_event(InnerConnectionEvent::ConnectionClosed {
-                    peer_id,
-                    address,
-                });
-
                 self.failed_ping.remove(&connection_id);
 
                 if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
@@ -1109,11 +1074,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 self.pubsub_event_stream.push(tx);
                 let _ = ret.send(rx);
             }
-            IpfsEvent::ConnectionEventStream(ret) => {
-                let (tx, rx) = unbounded();
-                self.connection_event_stream.push(tx);
-                let _ = ret.send(rx);
-            }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
                 Ok(id) => {
                     self.listeners.insert(id);
@@ -1341,7 +1301,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         }
                     };
                     self.provider_stream.insert(id, tx);
-                    provider_stream = Some(ProviderStream(stream.boxed()));
+                    provider_stream = Some(stream.boxed());
                 }
 
                 let _ = ret.send(provider_stream);

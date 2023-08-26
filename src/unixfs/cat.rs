@@ -1,5 +1,5 @@
 use crate::{
-    dag::{ResolveError, UnexpectedResolved, IpldDag},
+    dag::{IpldDag, ResolveError, UnexpectedResolved},
     repo::Repo,
     Block, Error, Ipfs,
 };
@@ -25,18 +25,20 @@ pub async fn cat<'a>(
     providers: &'a [PeerId],
     local_only: bool,
 ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed> {
-    let (repo, session) = match which {
+    let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
+            ipfs.dag(),
             Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
         ),
         Either::Right(repo) => {
             let session = repo
                 .is_online()
                 .then_some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
-            (repo.clone(), session)
+            (repo.clone(), IpldDag::from(repo.clone()), session)
         }
     };
+
     let mut visit = IdleFileVisit::default();
     if let Some(range) = range {
         visit = visit.with_target_range(range);
@@ -46,7 +48,6 @@ pub async fn cat<'a>(
     // metadata. To get to it the user needs to create a Visitor over the first block.
     let block = match starting_point.into() {
         StartingPoint::Left(path) => {
-            let dag = IpldDag::from(repo.clone());
             let (resolved, _) = dag
                 .resolve_with_session(session, path, true, providers, local_only)
                 .await

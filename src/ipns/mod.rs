@@ -155,7 +155,7 @@ impl Ipns {
             let ipfs_path = IpfsPath::from_str(&String::from_utf8_lossy(data.value()))?;
 
             if ipfs_path.eq(path) {
-                anyhow::bail!("Record already exist with {path}");
+                return IpfsPath::from_str(&mb);
             }
 
             // inc req of the record

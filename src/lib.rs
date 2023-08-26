@@ -52,8 +52,8 @@ use futures::{
 
 use keystore::Keystore;
 use p2p::{
-    BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, ProviderStream,
-    PubsubConfig, RelayConfig,
+    BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig,
+    RelayConfig,
 };
 use repo::{BlockStore, DataStore, Lock};
 use tokio::task::JoinHandle;
@@ -406,7 +406,7 @@ enum IpfsEvent {
     ),
     WhitelistPeer(PeerId, Channel<()>),
     RemoveWhitelistPeer(PeerId, Channel<()>),
-    GetProviders(Cid, OneshotSender<Option<ProviderStream>>),
+    GetProviders(Cid, OneshotSender<Option<BoxStream<'static, PeerId>>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
     DhtGet(Key, OneshotSender<BoxStream<'static, Record>>),
@@ -419,7 +419,6 @@ enum IpfsEvent {
 
     //event streams
     PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
-    ConnectionEventStream(OneshotSender<UnboundedReceiver<InnerConnectionEvent>>),
 
     Exit,
 }
@@ -451,13 +450,6 @@ pub enum PubsubEvent {
 }
 
 #[derive(Debug, Clone)]
-pub enum ConnectionEvent {
-    ConnectionEstablished { address: Multiaddr },
-
-    ConnectionClosed { address: Multiaddr },
-}
-
-#[derive(Debug, Clone)]
 pub(crate) enum InnerPubsubEvent {
     /// Subscription event to a given topic
     Subscribe { topic: String, peer_id: PeerId },
@@ -466,31 +458,11 @@ pub(crate) enum InnerPubsubEvent {
     Unsubscribe { topic: String, peer_id: PeerId },
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum InnerConnectionEvent {
-    ConnectionEstablished { peer_id: PeerId, address: Multiaddr },
-
-    ConnectionClosed { peer_id: PeerId, address: Multiaddr },
-}
-
 impl From<InnerPubsubEvent> for PubsubEvent {
     fn from(event: InnerPubsubEvent) -> Self {
         match event {
             InnerPubsubEvent::Subscribe { peer_id, .. } => PubsubEvent::Subscribe { peer_id },
             InnerPubsubEvent::Unsubscribe { peer_id, .. } => PubsubEvent::Unsubscribe { peer_id },
-        }
-    }
-}
-
-impl From<InnerConnectionEvent> for ConnectionEvent {
-    fn from(event: InnerConnectionEvent) -> Self {
-        match event {
-            InnerConnectionEvent::ConnectionClosed { address, .. } => {
-                ConnectionEvent::ConnectionClosed { address }
-            }
-            InnerConnectionEvent::ConnectionEstablished { address, .. } => {
-                ConnectionEvent::ConnectionEstablished { address }
-            }
         }
     }
 }
@@ -946,7 +918,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             disconnect_confirmation: Default::default(),
             failed_ping: Default::default(),
             pubsub_event_stream: Default::default(),
-            connection_event_stream: Default::default(),
             kad_subscriptions,
             listener_subscriptions,
             repo,
@@ -1757,39 +1728,6 @@ impl Ipfs {
         .await
     }
 
-    /// Return a [`ConnectionEvent`] regarding a peer
-    pub async fn connection_events(
-        &self,
-        peer_id: PeerId,
-    ) -> Result<BoxStream<'static, ConnectionEvent>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::ConnectionEventStream(tx))
-                .await?;
-
-            let mut receiver = rx
-                .await?;
-
-            let peer_id_defined = peer_id;
-
-            let stream = async_stream::stream! {
-                while let Some(event) = receiver.next().await {
-                    match &event {
-                        InnerConnectionEvent::ConnectionEstablished { peer_id, .. } | InnerConnectionEvent::ConnectionClosed { peer_id, .. } if peer_id.eq(&peer_id_defined) => yield event.into(),
-                        _ => {}
-                    }
-                }
-            };
-
-            Ok(stream.boxed())
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
     /// Obtain the addresses associated with the given `PeerId`; they are first searched for locally
     /// and the DHT is used as a fallback: a `Kademlia::get_closest_peers(peer_id)` query is run and
     /// when it's finished, the newly added DHT records are checked for the existence of the desired
@@ -1839,9 +1777,7 @@ impl Ipfs {
                 .send(IpfsEvent::GetProviders(cid, tx))
                 .await?;
 
-            rx.await?
-                .ok_or_else(|| anyhow!("Provider already exist"))
-                .map(|s| s.0)
+            rx.await?.ok_or_else(|| anyhow!("Provider already exist"))
         }
         .instrument(self.span.clone())
         .await
@@ -2265,10 +2201,10 @@ pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
     let mut data = multibase::decode(key).map(|(_, data)| data)?;
 
     if data[0] != 0x01 && data[1] != 0x72 {
-        data = vec![vec![0x01, 0x72], data].concat();
+        data = [vec![0x01, 0x72], data].concat();
     }
 
-    data = vec![default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
+    data = [default_ipns_prefix.to_vec(), data[2..].to_vec()].concat();
 
     Ok(data.into())
 }
