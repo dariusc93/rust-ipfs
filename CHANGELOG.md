@@ -1,4 +1,4 @@
-# 0.4.0 [unreleased]
+# 0.4.0
 - chore: Uncomment and update relay configuration [PR 94]
 - chore: Minor Optimizations [PR 93]
 - refactor: Make `Repo` independent [PR 92]
