@@ -4,7 +4,7 @@ use libipld::Cid;
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 
-use crate::{Ipfs, IpfsPath, repo::Repo, dag::IpldDag};
+use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 #[derive(Debug)]
 pub enum NodeItem {
@@ -20,20 +20,19 @@ pub async fn ls<'a>(
     providers: &'a [PeerId],
     local_only: bool,
 ) -> anyhow::Result<BoxStream<'a, NodeItem>> {
-    let (repo, session) = match which {
+    let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
+            ipfs.dag(),
             Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
         ),
         Either::Right(repo) => {
             let session = repo
                 .is_online()
                 .then_some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
-            (repo.clone(), session)
+            (repo.clone(), IpldDag::from(repo.clone()), session)
         }
     };
-
-    let dag = IpldDag::from(repo.clone());
 
     let (resolved, _) = dag
         .resolve_with_session(session, path.clone(), true, providers, local_only)
