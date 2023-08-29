@@ -67,7 +67,7 @@ use libp2p::{
         KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
-    swarm::{ConnectionId, SwarmEvent},
+    swarm::SwarmEvent,
 };
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
@@ -92,7 +92,6 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
-    pub(crate) failed_ping: HashMap<ConnectionId, usize>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
@@ -368,13 +367,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Either::Left(address));
                 }
             }
-            SwarmEvent::ConnectionClosed {
-                peer_id,
-                connection_id,
-                ..
-            } => {
-                self.failed_ping.remove(&connection_id);
-
+            SwarmEvent::ConnectionClosed { peer_id, .. } => {
                 if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
                     tokio::spawn(async move {
                         for ch in ch {
@@ -847,7 +840,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 libp2p::ping::Event {
                     peer,
                     result: Result::Ok(rtt),
-                    connection,
+                    ..
                 } => {
                     trace!(
                         "ping: rtt to {} is {} ms",
@@ -855,53 +848,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         rtt.as_millis()
                     );
                     self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
-                    self.failed_ping.remove(&connection);
                 }
-                libp2p::ping::Event {
-                    peer,
-                    result: Result::Err(libp2p::ping::Failure::Timeout),
-                    connection,
-                } => match self.failed_ping.entry(connection) {
-                    Entry::Occupied(mut entry) => {
-                        if *entry.get() > 1 {
-                            self.swarm.close_connection(connection);
-                            trace!("ping: timeout to {}", peer);
-                        }
-
-                        *entry.get_mut() += 1;
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(1);
-                    }
-                },
-                libp2p::ping::Event {
-                    peer,
-                    result: Result::Err(libp2p::ping::Failure::Other { error }),
-                    connection,
-                } => match self.failed_ping.entry(connection) {
-                    Entry::Occupied(mut entry) => {
-                        if *entry.get() > 1 {
-                            self.swarm.close_connection(connection);
-                            error!(
-                                "ping: closing {} with {:?} due to failure: {}",
-                                peer, connection, error
-                            );
-                        }
-
-                        *entry.get_mut() += 1;
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(1);
-                    }
-                },
-                libp2p::ping::Event {
-                    peer,
-                    result: Result::Err(libp2p::ping::Failure::Unsupported),
-                    connection,
-                } => {
-                    //TODO: Do we want to reject peers that dont support this protocol?
-                    error!("ping: failure with {}: unsupported", peer.to_base58());
-                    self.swarm.close_connection(connection);
+                libp2p::ping::Event { .. } => {
+                    //TODO: Determine if we should continue handling ping errors and if we should disconnect/close connection.
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {

@@ -1,3 +1,8 @@
+# 0.4.1 [unreleased]
+-  fix: Dont close connections on ping error [PR 95]
+
+[PR 95]: https://github.com/dariusc93/rust-ipfs/pull/95
+
 # 0.4.0
 - chore: Uncomment and update relay configuration [PR 94]
 - chore: Minor Optimizations [PR 93]
