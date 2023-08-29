@@ -916,7 +916,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             dht_peer_lookup: Default::default(),
             bitswap_sessions: Default::default(),
             disconnect_confirmation: Default::default(),
-            failed_ping: Default::default(),
             pubsub_event_stream: Default::default(),
             kad_subscriptions,
             listener_subscriptions,

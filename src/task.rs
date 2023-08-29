@@ -67,7 +67,7 @@ use libp2p::{
         KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
-    swarm::{ConnectionId, SwarmEvent},
+    swarm::SwarmEvent,
 };
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
@@ -367,11 +367,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Either::Left(address));
                 }
             }
-            SwarmEvent::ConnectionClosed {
-                peer_id,
-                connection_id,
-                ..
-            } => {
+            SwarmEvent::ConnectionClosed { peer_id, .. } => {
                 if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
                     tokio::spawn(async move {
                         for ch in ch {
@@ -844,7 +840,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 libp2p::ping::Event {
                     peer,
                     result: Result::Ok(rtt),
-                    connection,
+                    ..
                 } => {
                     trace!(
                         "ping: rtt to {} is {} ms",
@@ -854,7 +850,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
                 }
                 libp2p::ping::Event { .. } => {
-                   //TODO: Determine if we should continue handling ping errors and if we should disconnect/close connection.
+                    //TODO: Determine if we should continue handling ping errors and if we should disconnect/close connection.
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
