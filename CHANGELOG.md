@@ -1,4 +1,4 @@
-# 0.4.1 [unreleased]
+# 0.4.1
 -  fix: Dont close connections on ping error [PR 95]
 
 [PR 95]: https://github.com/dariusc93/rust-ipfs/pull/95
