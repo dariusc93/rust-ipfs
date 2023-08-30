@@ -275,12 +275,7 @@ impl Default for IpfsOptions {
             addr_config: Default::default(),
             provider: Default::default(),
             keystore: Keystore::in_memory(),
-            listening_addrs: vec![
-                "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
-                "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
-                "/ip6/::/tcp/0".parse().unwrap(),
-                "/ip6/::/udp/0/quic-v1".parse().unwrap(),
-            ],
+            listening_addrs: vec![],
             port_mapping: false,
             transport_configuration: None,
             pubsub_config: None,
@@ -510,7 +505,21 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> Default for Uninitialized
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
+    /// New uninitualized instance
     pub fn new() -> Self {
+        Self::with_opt(IpfsOptions {
+            listening_addrs: vec![
+                "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+                "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+                "/ip6/::/tcp/0".parse().unwrap(),
+                "/ip6/::/udp/0/quic-v1".parse().unwrap(),
+            ],
+            ..Default::default()
+        })
+    }
+
+    /// New uninitualized instance without any listener addresses
+    pub fn empty() -> Self {
         Self::with_opt(Default::default())
     }
 
@@ -553,6 +562,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             self.options.listening_addrs = addrs;
         }
 
+        self
+    }
+
+    /// Set a list of listening addresses
+    pub fn set_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
+        self.options.listening_addrs = addrs;
         self
     }
 
