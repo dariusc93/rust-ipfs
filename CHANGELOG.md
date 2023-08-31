@@ -1,3 +1,7 @@
+# 0.4.2 [unreleased]
+- chore: Add UninitializedIpfs::set_listening_addrs and minor changes
+- chore: Add peer to dht when discovered over mdns
+
 # 0.4.1
 -  fix: Dont close connections on ping error [PR 95]
 

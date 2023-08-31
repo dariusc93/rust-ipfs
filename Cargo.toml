@@ -70,6 +70,7 @@ libp2p = { features = [
     "rsa",
     "serde",
     "request-response",
+    "rendezvous",
     "quic"
 ], workspace = true }
 

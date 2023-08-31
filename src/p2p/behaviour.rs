@@ -489,21 +489,12 @@ where
 
     pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
         if !self.addressbook.contains(&peer, &addr) {
-            self.addressbook.add_address(peer, addr);
+            self.addressbook.add_address(peer, addr.clone());
         }
 
-        self.pubsub.add_explicit_peer(&peer);
-
-        // if let Some(bitswap) = self.bitswap.as_ref() {
-        //     let client = bitswap.client().clone();
-        //     let server = bitswap.server().cloned();
-        //     tokio::spawn(async move {
-        //         client.peer_connected(&peer).await;
-        //         if let Some(server) = server {
-        //             server.peer_connected(&peer).await;
-        //         }
-        //     });
-        // }
+        if let Some(kad) = self.kademlia.as_mut() {
+            kad.add_address(&peer, addr);
+        }
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId) {

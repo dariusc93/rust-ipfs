@@ -331,7 +331,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     }
 
     fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent<C>) {
-        if let Some(handler) = self.swarm_event.clone() {
+        if let Some(handler) = self.swarm_event.as_ref() {
             handler(&mut self.swarm, &swarm_event)
         }
         match swarm_event {
@@ -417,7 +417,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
-                        self.swarm.behaviour_mut().add_peer(peer, addr.clone());
+                        self.swarm.behaviour_mut().add_peer(peer, addr);
                     }
                 }
                 MdnsEvent::Expired(list) => {
