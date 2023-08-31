@@ -652,11 +652,9 @@ impl Repo {
             Ok(success) => match success {
                 BlockRm::Removed(_cid) => {
                     // sending only fails if the background task has exited
-                    let mut events = self
-                        .repo_channel()
-                        .ok_or(anyhow::anyhow!("Channel is not available"))?;
-
-                    events.send(RepoEvent::RemovedBlock(*cid)).await.ok();
+                    if let Some(mut events) = self.repo_channel() {
+                        events.send(RepoEvent::RemovedBlock(*cid)).await.ok();
+                    }
                     Ok(*cid)
                 }
             },
