@@ -2,7 +2,7 @@ use clap::Parser;
 use futures::{channel::mpsc, pin_mut, FutureExt};
 use libipld::ipld;
 use libp2p::{futures::StreamExt, swarm::SwarmEvent};
-use rust_ipfs::{BehaviourEvent, Ipfs, IpfsOptions, Protocol, PubsubEvent};
+use rust_ipfs::{BehaviourEvent, Ipfs, Protocol, PubsubEvent};
 
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
@@ -14,13 +14,13 @@ use tokio::sync::Notify;
 #[clap(name = "pubsub")]
 struct Opt {
     #[clap(long)]
-    disable_bootstrap: bool,
+    bootstrap: bool,
     #[clap(long)]
-    disable_mdns: bool,
+    use_mdns: bool,
     #[clap(long)]
-    disable_relay: bool,
+    use_relay: bool,
     #[clap(long)]
-    disable_upnp: bool,
+    use_upnp: bool,
     #[clap(long)]
     topic: Option<String>,
     #[clap(long)]
@@ -37,21 +37,22 @@ async fn main() -> anyhow::Result<()> {
     let topic = opt.topic.unwrap_or_else(|| String::from("ipfs-chat"));
 
     // Initialize the repo and start a daemon
-    let opts = IpfsOptions {
-        // Used to discover peers locally
-        mdns: !opt.disable_mdns,
-        // Used, along with relay [client] for hole punching
-        dcutr: !opt.disable_relay,
-        // Used to connect to relays
-        relay: !opt.disable_relay,
-        // used to attempt port forwarding
-        port_mapping: !opt.disable_upnp,
-        ..Default::default()
-    };
+    let mut uninitialized = UninitializedIpfs::new();
+
+    if opt.use_mdns {
+        uninitialized = uninitialized.enable_mdns();
+    }
+
+    if opt.use_relay {
+        uninitialized = uninitialized.enable_relay(true);
+    }
+
+    if opt.use_upnp {
+        uninitialized = uninitialized.enable_upnp();
+    }
 
     let (tx, mut rx) = mpsc::unbounded();
-
-    let ipfs: Ipfs = UninitializedIpfs::with_opt(opts)
+    let ipfs: Ipfs = uninitialized
         .swarm_events({
             move |_, event| {
                 if let SwarmEvent::Behaviour(BehaviourEvent::Autonat(
@@ -73,13 +74,14 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
 
-    ipfs.default_bootstrap().await?;
+    
 
     let identity = ipfs.identity(None).await?;
     let peer_id = identity.peer_id;
     let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
 
-    if !opt.disable_bootstrap {
+    if opt.bootstrap {
+        ipfs.default_bootstrap().await?;
         tokio::spawn({
             let ipfs = ipfs.clone();
             async move { if let Err(_e) = ipfs.bootstrap().await {} }
@@ -87,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cancel = Arc::new(Notify::new());
-    if !opt.disable_relay {
+    if opt.use_relay {
         //Until autorelay is implemented and/or functions to use relay more directly, we will manually listen to the relays (using libp2p bootstrap, though you can add your own)
         tokio::spawn({
             let ipfs = ipfs.clone();
