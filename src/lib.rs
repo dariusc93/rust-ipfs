@@ -1533,7 +1533,12 @@ impl Ipfs {
 
             let defined_topic = topic.to_string();
 
+            let peers = self.pubsub_peers(Some(defined_topic.clone())).await?;
+            
             let stream = async_stream::stream! {
+                for peer_id in peers {
+                    yield PubsubEvent::Subscribe { peer_id };
+                }
                 while let Some(event) = receiver.next().await {
                     match &event {
                         InnerPubsubEvent::Subscribe { topic, .. } | InnerPubsubEvent::Unsubscribe { topic, .. } if topic.eq(&defined_topic) => yield event.into(),
