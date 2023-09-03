@@ -2406,6 +2406,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-relay-manager"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "futures-timer",
+ "libp2p",
+ "log",
+ "rand",
+ "thiserror",
+ "void",
+]
+
+[[package]]
 name = "libp2p-rendezvous"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
