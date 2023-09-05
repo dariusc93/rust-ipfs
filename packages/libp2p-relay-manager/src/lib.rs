@@ -50,9 +50,9 @@ impl PartialEq for Connection {
 }
 
 #[derive(Debug)]
-pub struct PendingReservation {
+struct PendingReservation {
     peer_id: PeerId,
-    addr: Multiaddr,
+    connection_id: ConnectionId,
 }
 
 #[derive(Debug)]
@@ -245,10 +245,10 @@ impl Behaviour {
 
         let pending_reservation = PendingReservation {
             peer_id,
-            addr: relay_addr,
+            connection_id: connection.id,
         };
 
-        let opts = ListenOpts::new(pending_reservation.addr.clone());
+        let opts = ListenOpts::new(relay_addr);
 
         let id = opts.listener_id();
 
@@ -279,6 +279,7 @@ impl Behaviour {
             return;
         }
 
+
         addr.pop();
 
         let pending_reservation = match self.pending_reservation.remove(&listener_id) {
@@ -286,17 +287,13 @@ impl Behaviour {
             None => return,
         };
 
-        if pending_reservation.addr != addr {
-            return;
-        }
-
         if let Entry::Occupied(mut entry) = self.connections.entry(pending_reservation.peer_id) {
             let connections = entry.get_mut();
             let mut raw_addr = addr.clone();
             raw_addr.pop();
             if let Some(connection) = connections
                 .iter_mut()
-                .find(|connection| connection.addr.eq(&raw_addr))
+                .find(|connection| connection.id.eq(&pending_reservation.connection_id))
             {
                 connection.reserved = Some(listener_id);
                 connection.accepted = true;
@@ -317,7 +314,14 @@ impl Behaviour {
             .flatten()
             .find(|connection| matches!(connection.reserved, Some(_id)))
         {
-            connection.reserved.take();
+            if connection.reserved.take().is_some() {
+                let addr = connection
+                    .addr
+                    .clone()
+                    .with(Protocol::P2pCircuit)
+                    .with(Protocol::P2p(self.local_peer_id));
+                self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+            }
         }
     }
 
@@ -380,14 +384,13 @@ impl Behaviour {
                 .iter_mut()
                 .find(|connection| connection.id == connection_id)
             {
-                if let Some(id) = connection.reserved {
-                    self.events.push_back(ToSwarm::RemoveListener { id });
+                if connection.reserved.take().is_some() {
                     let addr = connection
                         .addr
                         .clone()
                         .with(Protocol::P2pCircuit)
                         .with(Protocol::P2p(self.local_peer_id));
-                    self.events.push_back(ToSwarm::ExternalAddrExpired(addr))
+                    self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
                 }
             }
 
