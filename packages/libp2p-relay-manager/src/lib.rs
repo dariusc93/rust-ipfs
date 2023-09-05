@@ -494,6 +494,7 @@ impl NetworkBehaviour for Behaviour {
                         .find(|connection| connection.id == connection_id)
                     {
                         connection.confirmed = false;
+                        self.pending_selection.remove(&peer_id);
                     }
                 }
             }
