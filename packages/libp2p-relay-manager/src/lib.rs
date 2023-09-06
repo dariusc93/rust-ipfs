@@ -270,15 +270,14 @@ impl Behaviour {
         }
     }
 
-    fn on_listen_on(&mut self, NewListenAddr { listener_id, addr }: NewListenAddr) {
-        let mut addr = addr.clone();
+    fn on_listen_on(&mut self, NewListenAddr { listener_id, addr: direct_addr }: NewListenAddr) {
+        let mut addr = direct_addr.clone();
         if !addr
             .iter()
             .any(|proto| matches!(proto, Protocol::P2pCircuit))
         {
             return;
         }
-
 
         addr.pop();
 
@@ -297,7 +296,7 @@ impl Behaviour {
             {
                 connection.reserved = Some(listener_id);
                 connection.accepted = true;
-                self.events.push_back(ToSwarm::ExternalAddrConfirmed(addr));
+                self.events.push_back(ToSwarm::ExternalAddrConfirmed(direct_addr.clone()));
             }
         }
     }
