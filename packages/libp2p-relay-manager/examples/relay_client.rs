@@ -41,7 +41,7 @@ struct Opts {
     relay_addrs: Vec<Multiaddr>,
 
     #[clap(long)]
-    select_relay: PeerId,
+    select_relay: Vec<PeerId>,
 
     #[clap(long)]
     listener: bool,
@@ -114,10 +114,12 @@ async fn main() -> anyhow::Result<()> {
             .add_address(peer_id, node);
     }
 
-    swarm
-        .behaviour_mut()
-        .relay_manager
-        .select(opts.select_relay, Default::default());
+    for relay_peer_id in opts.select_relay {
+        swarm
+            .behaviour_mut()
+            .relay_manager
+            .select(relay_peer_id, Default::default());
+    }
 
     loop {
         futures::select! {
