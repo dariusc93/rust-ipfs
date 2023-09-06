@@ -114,11 +114,12 @@ async fn main() -> anyhow::Result<()> {
             .add_address(peer_id, node);
     }
 
-    for relay_peer_id in opts.select_relay {
-        swarm
-            .behaviour_mut()
-            .relay_manager
-            .select(relay_peer_id, Default::default());
+    if !opts.select_relay.is_empty() {
+        for relay_peer_id in opts.select_relay {
+            swarm.behaviour_mut().relay_manager.select(relay_peer_id);
+        }
+    } else {
+        swarm.behaviour_mut().relay_manager.random_select()
     }
 
     loop {

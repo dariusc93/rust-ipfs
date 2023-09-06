@@ -40,7 +40,7 @@ struct Connection {
     pub confirmed: bool,
     pub reserved: Option<ListenerId>,
     pub accepted: bool,
-    pub rtt: [Duration; 3],
+    pub rtt: Option<[Duration; 3]>,
 }
 
 impl PartialEq for Connection {
@@ -48,6 +48,8 @@ impl PartialEq for Connection {
         self.id.eq(&other.id)
     }
 }
+
+impl Eq for Connection {}
 
 #[derive(Debug)]
 struct PendingReservation {
@@ -63,25 +65,16 @@ pub struct Behaviour {
     connections: HashMap<PeerId, Vec<Connection>>,
 
     pending_connection: HashSet<ConnectionId>,
-    pending_selection: HashMap<PeerId, SelectOpt>,
+    pending_selection: HashSet<PeerId>,
     pending_reservation: HashMap<ListenerId, PendingReservation>,
     config: Config,
 }
 
 #[derive(Debug, Default, Clone)]
 pub enum SelectOpt {
-    Multiaddr {
-        addr: Multiaddr,
-    },
-    Connection {
-        connection_id: ConnectionId,
-    },
     LowestRTT,
     #[default]
     Random,
-    Index {
-        index: usize,
-    },
 }
 
 #[derive(Debug, Default)]
@@ -105,7 +98,7 @@ impl Behaviour {
             relays: HashMap::default(),
             connections: HashMap::default(),
             pending_connection: HashSet::default(),
-            pending_selection: HashMap::default(),
+            pending_selection: HashSet::default(),
             pending_reservation: HashMap::default(),
         }
     }
@@ -156,30 +149,30 @@ impl Behaviour {
         }
     }
 
+    #[allow(dead_code)]
     fn avg_rtt(&self, connection: &Connection) -> u128 {
-        let rtts = connection.rtt;
+        let rtts = connection.rtt.unwrap_or_default();
         let avg: u128 = rtts.iter().map(|duration| duration.as_millis()).sum();
         // used in case we cant produce a full avg
         let div = rtts.iter().filter(|i| !i.is_zero()).count() as u128;
         avg / div
     }
 
-    pub fn select(&mut self, peer_id: PeerId, opts: SelectOpt) {
+    pub fn select(&mut self, peer_id: PeerId) {
         if !self.relays.contains_key(&peer_id) {
             return;
         }
 
-        if self.pending_selection.contains_key(&peer_id) {
+        if self.pending_selection.contains(&peer_id) {
             return;
         }
 
         if !self.connections.contains_key(&peer_id) {
-            let select_opts = opts;
             let opts = DialOpts::peer_id(peer_id).build();
             let id = opts.connection_id();
             self.pending_connection.insert(id);
             self.events.push_back(ToSwarm::Dial { opts });
-            self.pending_selection.insert(peer_id, select_opts);
+            self.pending_selection.insert(peer_id);
             return;
         }
 
@@ -188,56 +181,30 @@ impl Behaviour {
             None => return,
         };
 
-        let connection = match &opts {
-            SelectOpt::Multiaddr { addr } => connections
-                .iter()
-                .find(|connection| connection.addr.eq(addr))
-                .expect("Address to be within a connection"),
-            SelectOpt::LowestRTT => {
-                let mut lowest_connection = None;
-                for connection in connections {
-                    match lowest_connection {
-                        Some(current) => {
-                            let current_avg_rtt = self.avg_rtt(current);
-                            let connection_avg_rtt = self.avg_rtt(connection);
+        if connections.is_empty() {
+            return;
+        }
 
-                            if connection_avg_rtt < current_avg_rtt {
-                                lowest_connection = Some(connection);
-                            }
-                        }
-                        None => {
-                            lowest_connection = Some(connection);
-                        }
-                    }
-                }
-                lowest_connection.expect("connection with lowest avg rtt to be available")
+        let mut blacklist = Vec::new();
+        let mut rng = rand::thread_rng();
+        let connection = loop {
+            let connection = connections
+                .choose(&mut rng)
+                .expect("Connections to be available");
+
+            if blacklist.contains(&connection) {
+                continue;
             }
-            SelectOpt::Random => {
-                let mut blacklist = Vec::new();
-                let mut rng = rand::thread_rng();
-                loop {
-                    let connection = connections
-                        .choose(&mut rng)
-                        .expect("Connections to be available");
-                    if blacklist.contains(&connection) {
-                        continue;
-                    }
-                    if connection.reserved.is_some() {
-                        blacklist.push(connection);
-                        continue;
-                    }
-                    break connection;
-                }
+
+            if connection.reserved.is_some() {
+                blacklist.push(connection);
+                continue;
             }
-            SelectOpt::Connection { connection_id } => connections
-                .iter()
-                .find(|connection| connection.id.eq(connection_id))
-                .expect("Address to be within a connection"),
-            SelectOpt::Index { index } => connections.get(*index).expect("Index to exist"),
+            break connection;
         };
 
         if !connection.confirmed {
-            self.pending_selection.insert(peer_id, opts);
+            self.pending_selection.insert(peer_id);
             return;
         }
 
@@ -257,6 +224,21 @@ impl Behaviour {
         self.pending_reservation.insert(id, pending_reservation);
     }
 
+    pub fn random_select(&mut self) {
+        let relay_peers = self.relays.keys().copied().collect::<Vec<_>>();
+        if relay_peers.is_empty() {
+            return;
+        }
+
+        let mut rng = rand::thread_rng();
+
+        let Some(peer_id) = relay_peers.choose(&mut rng) else {
+            return;
+        };
+
+        self.select(*peer_id);
+    }
+
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, connection_id: ConnectionId, rtt: Duration) {
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let connections = entry.get_mut();
@@ -264,13 +246,24 @@ impl Behaviour {
                 .iter_mut()
                 .find(|connection| connection.id == connection_id)
             {
-                connection.rtt.rotate_left(1);
-                connection.rtt[2] = rtt;
+                match connection.rtt.as_mut() {
+                    Some(connection_rtt) => {
+                        connection_rtt.rotate_left(1);
+                        connection_rtt[2] = rtt;
+                    }
+                    None => connection.rtt = Some([Duration::ZERO, Duration::ZERO, rtt]),
+                }
             }
         }
     }
 
-    fn on_listen_on(&mut self, NewListenAddr { listener_id, addr: direct_addr }: NewListenAddr) {
+    fn on_listen_on(
+        &mut self,
+        NewListenAddr {
+            listener_id,
+            addr: direct_addr,
+        }: NewListenAddr,
+    ) {
         let mut addr = direct_addr.clone();
         if !addr
             .iter()
@@ -288,15 +281,14 @@ impl Behaviour {
 
         if let Entry::Occupied(mut entry) = self.connections.entry(pending_reservation.peer_id) {
             let connections = entry.get_mut();
-            let mut raw_addr = addr.clone();
-            raw_addr.pop();
             if let Some(connection) = connections
                 .iter_mut()
                 .find(|connection| connection.id.eq(&pending_reservation.connection_id))
             {
                 connection.reserved = Some(listener_id);
                 connection.accepted = true;
-                self.events.push_back(ToSwarm::ExternalAddrConfirmed(direct_addr.clone()));
+                self.events
+                    .push_back(ToSwarm::ExternalAddrConfirmed(direct_addr.clone()));
             }
         }
     }
@@ -356,7 +348,7 @@ impl Behaviour {
             confirmed: false,
             reserved: None,
             accepted: false,
-            rtt: [Duration::ZERO, Duration::ZERO, Duration::ZERO],
+            rtt: None,
         };
 
         self.connections
@@ -364,8 +356,8 @@ impl Behaviour {
             .or_default()
             .push(connection);
 
-        if let Some(opts) = self.pending_selection.remove(&peer_id) {
-            self.select(peer_id, opts);
+        if self.pending_selection.remove(&peer_id) {
+            self.select(peer_id);
         }
     }
 
@@ -482,8 +474,8 @@ impl NetworkBehaviour for Behaviour {
                         .find(|connection| connection.id == connection_id)
                     {
                         connection.confirmed = true;
-                        if let Some(opts) = self.pending_selection.remove(&peer_id) {
-                            self.select(peer_id, opts);
+                        if self.pending_selection.remove(&peer_id) {
+                            self.select(peer_id);
                         }
                     }
                 }
