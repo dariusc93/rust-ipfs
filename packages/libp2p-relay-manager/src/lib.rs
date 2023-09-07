@@ -3,10 +3,12 @@ mod handler;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     error::Error,
+    hash::Hash,
     task::{Context, Poll},
     time::Duration,
 };
 
+use futures::StreamExt;
 use libp2p::{
     core::Endpoint,
     multiaddr::Protocol,
@@ -37,10 +39,18 @@ pub enum Event {
 struct Connection {
     pub id: ConnectionId,
     pub addr: Multiaddr,
-    pub confirmed: bool,
-    pub reserved: Option<ListenerId>,
-    pub accepted: bool,
+    pub candidacy: Candidate,
     pub rtt: Option<[Duration; 3]>,
+}
+
+#[derive(Debug)]
+enum Candidate {
+    Pending,
+    Unsupported,
+    Confirmed {
+        listener_id: Option<ListenerId>,
+        addresses: Vec<Multiaddr>,
+    },
 }
 
 impl PartialEq for Connection {
@@ -51,22 +61,30 @@ impl PartialEq for Connection {
 
 impl Eq for Connection {}
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingReservation {
     peer_id: PeerId,
     connection_id: ConnectionId,
+    listener_id: ListenerId,
 }
 
-#[derive(Debug)]
+impl Hash for PendingReservation {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.listener_id.hash(state)
+    }
+}
+
+#[derive(Default, Debug)]
 pub struct Behaviour {
-    local_peer_id: PeerId,
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     relays: HashMap<PeerId, Vec<Multiaddr>>,
     connections: HashMap<PeerId, Vec<Connection>>,
 
+    discovery_channel: HashMap<u64, futures::channel::mpsc::Receiver<HashSet<PeerId>>>,
+
     pending_connection: HashSet<ConnectionId>,
     pending_selection: HashSet<PeerId>,
-    pending_reservation: HashMap<ListenerId, PendingReservation>,
+    pending_reservation: HashSet<PendingReservation>,
     config: Config,
 }
 
@@ -90,16 +108,16 @@ pub struct Config {
 }
 
 impl Behaviour {
-    pub fn new(local_peer_id: PeerId, config: Config) -> Behaviour {
+    pub fn new(config: Config) -> Behaviour {
         Self {
             config,
             events: VecDeque::default(),
-            local_peer_id,
             relays: HashMap::default(),
             connections: HashMap::default(),
+            discovery_channel: HashMap::default(),
             pending_connection: HashSet::default(),
             pending_selection: HashSet::default(),
-            pending_reservation: HashMap::default(),
+            pending_reservation: HashSet::default(),
         }
     }
 
@@ -137,7 +155,11 @@ impl Behaviour {
                     .iter()
                     .find(|connection| connection.addr.eq(&addr))
             }) {
-                if let Some(id) = connection.reserved {
+                if let Candidate::Confirmed {
+                    listener_id: Some(id),
+                    ..
+                } = connection.candidacy
+                {
                     self.events.push_back(ToSwarm::RemoveListener { id });
                 }
             }
@@ -176,7 +198,7 @@ impl Behaviour {
             return;
         }
 
-        let connections = match self.connections.get(&peer_id) {
+        let connections = match self.connections.get_mut(&peer_id) {
             Some(conns) => conns,
             None => return,
         };
@@ -189,39 +211,45 @@ impl Behaviour {
         let mut rng = rand::thread_rng();
         let connection = loop {
             let connection = connections
-                .choose(&mut rng)
+                .choose_mut(&mut rng)
                 .expect("Connections to be available");
 
-            if blacklist.contains(&connection) {
+            if blacklist.contains(&connection.id) {
                 continue;
             }
 
-            if connection.reserved.is_some() {
-                blacklist.push(connection);
+            if let Candidate::Confirmed {
+                listener_id: Some(_),
+                ..
+            } = connection.candidacy
+            {
+                blacklist.push(connection.id);
                 continue;
             }
+
             break connection;
         };
 
-        if !connection.confirmed {
+        if matches!(connection.candidacy, Candidate::Pending) {
             self.pending_selection.insert(peer_id);
             return;
         }
 
         let relay_addr = connection.addr.clone().with(Protocol::P2pCircuit);
 
-        let pending_reservation = PendingReservation {
-            peer_id,
-            connection_id: connection.id,
-        };
-
         let opts = ListenOpts::new(relay_addr);
 
         let id = opts.listener_id();
 
+        let pending_reservation = PendingReservation {
+            peer_id,
+            connection_id: connection.id,
+            listener_id: id,
+        };
+
         self.events.push_back(ToSwarm::ListenOn { opts });
 
-        self.pending_reservation.insert(id, pending_reservation);
+        self.pending_reservation.insert(pending_reservation);
     }
 
     pub fn random_select(&mut self) {
@@ -274,10 +302,16 @@ impl Behaviour {
 
         addr.pop();
 
-        let pending_reservation = match self.pending_reservation.remove(&listener_id) {
-            Some(reservation) => reservation,
+        let pending_reservation = match self
+            .pending_reservation
+            .iter()
+            .find(|pending| pending.listener_id == listener_id)
+        {
+            Some(reservation) => reservation.clone(),
             None => return,
         };
+
+        self.pending_reservation.remove(&pending_reservation);
 
         if let Entry::Occupied(mut entry) = self.connections.entry(pending_reservation.peer_id) {
             let connections = entry.get_mut();
@@ -285,33 +319,45 @@ impl Behaviour {
                 .iter_mut()
                 .find(|connection| connection.id.eq(&pending_reservation.connection_id))
             {
-                connection.reserved = Some(listener_id);
-                connection.accepted = true;
-                self.events
-                    .push_back(ToSwarm::ExternalAddrConfirmed(direct_addr.clone()));
+                match &mut connection.candidacy {
+                    Candidate::Confirmed {
+                        listener_id: id,
+                        addresses,
+                    } => {
+                        *id = Some(listener_id);
+                        addresses.push(direct_addr.clone());
+                    }
+                    Candidate::Pending | Candidate::Unsupported => {
+                        // Maybe panic if we reach this clause?
+                    }
+                };
             }
         }
     }
 
-    fn on_close_listener(
-        &mut self,
-        ListenerClosed {
-            listener_id: _id, ..
-        }: ListenerClosed,
-    ) {
-        if let Some(connection) = self
-            .connections
-            .values_mut()
-            .flatten()
-            .find(|connection| matches!(connection.reserved, Some(_id)))
+    fn on_close_listener(&mut self, ListenerClosed { listener_id, .. }: ListenerClosed) {
+        if let Some(connection) =
+            self.connections
+                .values_mut()
+                .flatten()
+                .find(|connection| match connection.candidacy {
+                    Candidate::Confirmed {
+                        listener_id: Some(id),
+                        ..
+                    } => id == listener_id,
+                    _ => false,
+                })
         {
-            if connection.reserved.take().is_some() {
-                let addr = connection
-                    .addr
-                    .clone()
-                    .with(Protocol::P2pCircuit)
-                    .with(Protocol::P2p(self.local_peer_id));
-                self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+            if let Candidate::Confirmed {
+                listener_id,
+                addresses,
+            } = &mut connection.candidacy
+            {
+                listener_id.take();
+                let addrs = std::mem::take(addresses);
+                for addr in addrs {
+                    self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+                }
             }
         }
     }
@@ -345,9 +391,7 @@ impl Behaviour {
         let connection = Connection {
             id: connection_id,
             addr: addr.clone(),
-            confirmed: false,
-            reserved: None,
-            accepted: false,
+            candidacy: Candidate::Pending,
             rtt: None,
         };
 
@@ -375,13 +419,22 @@ impl Behaviour {
                 .iter_mut()
                 .find(|connection| connection.id == connection_id)
             {
-                if connection.reserved.take().is_some() {
-                    let addr = connection
-                        .addr
-                        .clone()
-                        .with(Protocol::P2pCircuit)
-                        .with(Protocol::P2p(self.local_peer_id));
-                    self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+                //Note: If the listener has been closed, then this condition may not happen
+                //      but is set as a precaution
+                //TODO: Confirm that the order is consistent if the relay is removed
+                if let Candidate::Confirmed {
+                    listener_id,
+                    addresses,
+                } = &mut connection.candidacy
+                {
+                    if let Some(listener_id) = listener_id.take() {
+                        let addrs = std::mem::take(addresses);
+                        for addr in addrs {
+                            self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+                        }
+                        self.events
+                            .push_back(ToSwarm::RemoveListener { id: listener_id });
+                    }
                 }
             }
 
@@ -473,9 +526,16 @@ impl NetworkBehaviour for Behaviour {
                         .iter_mut()
                         .find(|connection| connection.id == connection_id)
                     {
-                        connection.confirmed = true;
-                        if self.pending_selection.remove(&peer_id) {
-                            self.select(peer_id);
+                        let canadate_state = &mut connection.candidacy;
+
+                        if matches!(canadate_state, Candidate::Pending | Candidate::Unsupported) {
+                            *canadate_state = Candidate::Confirmed {
+                                listener_id: None,
+                                addresses: vec![],
+                            };
+                            if self.pending_selection.remove(&peer_id) {
+                                self.select(peer_id);
+                            }
                         }
                     }
                 }
@@ -487,7 +547,18 @@ impl NetworkBehaviour for Behaviour {
                         .iter_mut()
                         .find(|connection| connection.id == connection_id)
                     {
-                        connection.confirmed = false;
+                        let canadate_state = &mut connection.candidacy;
+
+                        if let Candidate::Confirmed {
+                            listener_id: Some(id),
+                            ..
+                        } = canadate_state
+                        {
+                            let id = *id;
+                            self.events.push_back(ToSwarm::RemoveListener { id });
+                        }
+
+                        *canadate_state = Candidate::Unsupported;
                         self.pending_selection.remove(&peer_id);
                     }
                 }
@@ -497,12 +568,24 @@ impl NetworkBehaviour for Behaviour {
 
     fn poll(
         &mut self,
-        _: &mut Context<'_>,
+        cx: &mut Context<'_>,
         _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
+
+        self.discovery_channel
+            .retain(|_, rx| match rx.poll_next_unpin(cx) {
+                Poll::Ready(Some(list)) => {
+                    for peer_id in list {
+                        self.relays.entry(peer_id).or_default();
+                    }
+                    false
+                }
+                Poll::Ready(None) => false,
+                Poll::Pending => true,
+            });
 
         Poll::Pending
     }

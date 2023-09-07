@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
             config
         }),
         relay_client,
-        relay_manager: libp2p_relay_manager::Behaviour::new(local_peer_id, Default::default()),
+        relay_manager: libp2p_relay_manager::Behaviour::default(),
     };
 
     let mut swarm =
@@ -121,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         swarm.behaviour_mut().relay_manager.random_select()
     }
-
+    
     loop {
         futures::select! {
             event = swarm.select_next_some() => {
