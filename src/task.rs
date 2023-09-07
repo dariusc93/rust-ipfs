@@ -896,7 +896,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         }
                     }
                 }
-                event => trace!("identify: {:?}", event),
+                event => debug!("identify: {:?}", event),
             },
             SwarmEvent::Behaviour(BehaviourEvent::Autonat(autonat::Event::StatusChanged {
                 old,
@@ -906,7 +906,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 debug!("Old Nat Status: {:?}", old);
                 debug!("New Nat Status: {:?}", new);
             }
-            _ => trace!("Swarm event: {:?}", swarm_event),
+            _ => debug!("Swarm event: {:?}", swarm_event),
         }
     }
 
