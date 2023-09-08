@@ -141,8 +141,6 @@ pub struct SwarmOptions {
     pub addrbook_config: Option<AddressBookConfig>,
     /// UPnP/PortMapping
     pub portmapping: bool,
-    /// Keep alive
-    pub keep_alive: bool,
     /// Relay client
     pub relay: bool,
     /// Enables dcutr
@@ -167,7 +165,6 @@ impl From<&IpfsOptions> for SwarmOptions {
         let disable_bitswap = options.disable_bitswap;
         let bitswap_config = options.bitswap_config.clone();
 
-        let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
         let portmapping = options.port_mapping;
         let pubsub_config = options.pubsub_config.clone();
@@ -189,7 +186,6 @@ impl From<&IpfsOptions> for SwarmOptions {
             kad_config,
             kad_store_config,
             ping_config,
-            keep_alive,
             identify_config,
             portmapping,
             addrbook_config,
