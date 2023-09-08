@@ -1,7 +1,7 @@
 use std::{io, time::Duration};
 
 use clap::Parser;
-use futures::{future::Either, StreamExt};
+use futures::{future::Either, FutureExt, StreamExt};
 use libp2p::{
     core::{
         muxing::StreamMuxerBox,
@@ -37,14 +37,22 @@ struct Opts {
     #[clap(long)]
     secret_key_seed: Option<u8>,
 
+    /// List of relay addresses
     #[clap(long)]
     relay_addrs: Vec<Multiaddr>,
 
+
+    /// Peer id of a specific relay. If none is provided, it will select at random
     #[clap(long)]
     select_relay: Vec<PeerId>,
 
+    /// Listen on local addresses
     #[clap(long)]
     listener: bool,
+
+    /// Attempts to establish connection to a specific address after 10 seconds
+    #[clap(long)]
+    connect: Option<Multiaddr>,
 }
 
 #[async_std::main]
@@ -65,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (relay_transport, relay_client) = libp2p::relay::client::new(local_peer_id);
 
-    let transport = build_transport(local_keypair.clone(), relay_transport)?;
+    let transport = build_transport(local_keypair.clone(), relay_transport).await?;
 
     let behaviour = Behaviour {
         ping: Ping::new(Default::default()),
@@ -121,40 +129,60 @@ async fn main() -> anyhow::Result<()> {
     } else {
         swarm.behaviour_mut().relay_manager.random_select()
     }
-    
-    loop {
-        futures::select! {
-            event = swarm.select_next_some() => {
 
-                match event {
+    let mut timer = futures_timer::Delay::new(Duration::from_secs(10));
+    let mut connect_addr = opts.connect.clone();
+
+    futures::future::poll_fn(move |cx| {
+        if timer.poll_unpin(cx).is_ready() {
+            if let Some(addr) = connect_addr.take() {
+                if let Err(e) = swarm.dial(addr.clone()) {
+                    println!("Error dialing {addr}: {e}");
+                }
+            }
+        }
+
+        loop {
+            match swarm.poll_next_unpin(cx) {
+                std::task::Poll::Ready(Some(event)) => match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         println!("Listening on {address}");
                     }
-                    SwarmEvent::Behaviour(event) =>
-                    {
+                    SwarmEvent::Behaviour(event) => {
                         println!("{event:?}");
                         match event {
                             BehaviourEvent::RelayClient(event) => {
-                                swarm.behaviour_mut().relay_manager.process_relay_event(event);
+                                swarm
+                                    .behaviour_mut()
+                                    .relay_manager
+                                    .process_relay_event(event);
                             }
                             BehaviourEvent::Ping(ping::Event {
                                 peer,
                                 connection,
                                 result: Result::Ok(rtt),
                             }) => {
-                                swarm.behaviour_mut().relay_manager.set_peer_rtt(peer, connection, rtt);
-                            },
-                            _ => {},
+                                swarm
+                                    .behaviour_mut()
+                                    .relay_manager
+                                    .set_peer_rtt(peer, connection, rtt);
+                            }
+                            _ => {}
                         }
                     }
                     _e => println!("{_e:?}"),
-                }
+                },
+                std::task::Poll::Ready(None) => return std::task::Poll::Ready(Option::<()>::None),
+                std::task::Poll::Pending => return std::task::Poll::Pending,
             }
         }
-    }
+    })
+    .await;
+
+    Ok(())
 }
 
-pub fn build_transport(
+pub async fn build_transport(
     keypair: Keypair,
     relay: ClientTransport,
 ) -> io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
@@ -168,11 +196,12 @@ pub fn build_transport(
 
     let transport_timeout = TransportTimeout::new(transport, Duration::from_secs(30));
 
-    let transport = futures::executor::block_on(DnsConfig::custom(
+    let transport = DnsConfig::custom(
         transport_timeout,
         ResolverConfig::cloudflare(),
         Default::default(),
-    ))?;
+    )
+    .await?;
 
     let transport = OrTransport::new(relay, transport)
         .upgrade(Version::V1)

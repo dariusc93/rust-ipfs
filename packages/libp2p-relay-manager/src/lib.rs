@@ -15,9 +15,9 @@ use libp2p::{
     swarm::{
         derive_prelude::{ConnectionEstablished, ListenerId},
         dial_opts::DialOpts,
-        ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, ListenOpts, ListenerClosed,
-        NetworkBehaviour, NewListenAddr, PollParameters, THandler, THandlerInEvent,
-        THandlerOutEvent, ToSwarm,
+        AddressChange, ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure,
+        ExpiredListenAddr, FromSwarm, ListenOpts, ListenerClosed, ListenerError, NetworkBehaviour,
+        NewListenAddr, PollParameters, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -28,10 +28,17 @@ pub enum Event {
     ReservationSuccessful {
         peer_id: PeerId,
         addr: Multiaddr,
+        listener_id: ListenerId,
     },
     ReservationFailure {
         peer_id: PeerId,
         result: Box<dyn Error + Send>,
+    },
+    FindRelays {
+        /// Namespace of where to locate possible relay candidates
+        namespace: Option<String>,
+        /// Channel to send peer ids of the candidates
+        channel: futures::channel::mpsc::Sender<HashSet<PeerId>>,
     },
 }
 
@@ -84,7 +91,6 @@ pub struct Behaviour {
 
     pending_connection: HashSet<ConnectionId>,
     pending_selection: HashSet<PeerId>,
-    pending_reservation: HashSet<PendingReservation>,
     config: Config,
 }
 
@@ -117,7 +123,6 @@ impl Behaviour {
             discovery_channel: HashMap::default(),
             pending_connection: HashSet::default(),
             pending_selection: HashSet::default(),
-            pending_reservation: HashSet::default(),
         }
     }
 
@@ -169,6 +174,33 @@ impl Behaviour {
                 entry.remove();
             }
         }
+    }
+
+    pub fn list_active_relays(&self) -> Vec<(PeerId, Vec<Multiaddr>)> {
+        self.connections
+            .iter()
+            .filter(|(_, connections)| {
+                connections.iter().any(|connection| {
+                    matches!(
+                        connection.candidacy,
+                        Candidate::Confirmed {
+                            listener_id: Some(_),
+                            ..
+                        }
+                    )
+                })
+            })
+            .map(|(peer_id, connections)| {
+                (
+                    *peer_id,
+                    connections
+                        .iter()
+                        .map(|connection| &connection.addr)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -241,15 +273,11 @@ impl Behaviour {
 
         let id = opts.listener_id();
 
-        let pending_reservation = PendingReservation {
-            peer_id,
-            connection_id: connection.id,
-            listener_id: id,
-        };
+        if let Candidate::Confirmed { listener_id, .. } = &mut connection.candidacy {
+            *listener_id = Some(id);
+        }
 
         self.events.push_back(ToSwarm::ListenOn { opts });
-
-        self.pending_reservation.insert(pending_reservation);
     }
 
     pub fn random_select(&mut self) {
@@ -265,6 +293,24 @@ impl Behaviour {
         };
 
         self.select(*peer_id);
+    }
+
+    pub fn disable_relay(&mut self, peer_id: PeerId) {
+        for connection in self
+            .connections
+            .iter()
+            .filter(|(peer, _)| peer_id == **peer)
+            .flat_map(|(_, connections)| connections)
+        {
+            if let Candidate::Confirmed { .. } = connection.candidacy {
+                //TODO: Use ListenerId instead of closing a connection
+                let connection = libp2p::swarm::CloseConnection::One(connection.id);
+                self.events.push_back(ToSwarm::CloseConnection {
+                    peer_id,
+                    connection,
+                });
+            }
+        }
     }
 
     pub fn set_peer_rtt(&mut self, peer_id: PeerId, connection_id: ConnectionId, rtt: Duration) {
@@ -292,50 +338,45 @@ impl Behaviour {
             addr: direct_addr,
         }: NewListenAddr,
     ) {
-        let mut addr = direct_addr.clone();
-        if !addr
+        if !direct_addr
             .iter()
             .any(|proto| matches!(proto, Protocol::P2pCircuit))
         {
             return;
         }
 
-        addr.pop();
-
-        let pending_reservation = match self
-            .pending_reservation
-            .iter()
-            .find(|pending| pending.listener_id == listener_id)
+        for connection in self
+            .connections
+            .values_mut()
+            .flatten()
+            .filter(|connection| {
+                if let Candidate::Confirmed {
+                    listener_id: Some(id),
+                    ..
+                } = connection.candidacy
+                {
+                    id == listener_id
+                } else {
+                    false
+                }
+            })
         {
-            Some(reservation) => reservation.clone(),
-            None => return,
-        };
-
-        self.pending_reservation.remove(&pending_reservation);
-
-        if let Entry::Occupied(mut entry) = self.connections.entry(pending_reservation.peer_id) {
-            let connections = entry.get_mut();
-            if let Some(connection) = connections
-                .iter_mut()
-                .find(|connection| connection.id.eq(&pending_reservation.connection_id))
-            {
-                match &mut connection.candidacy {
-                    Candidate::Confirmed {
-                        listener_id: id,
-                        addresses,
-                    } => {
-                        *id = Some(listener_id);
-                        addresses.push(direct_addr.clone());
-                    }
-                    Candidate::Pending | Candidate::Unsupported => {
-                        // Maybe panic if we reach this clause?
-                    }
-                };
-            }
+            match &mut connection.candidacy {
+                Candidate::Confirmed {
+                    listener_id: id,
+                    addresses,
+                } => {
+                    *id = Some(listener_id);
+                    addresses.push(direct_addr.clone());
+                }
+                Candidate::Pending | Candidate::Unsupported => {
+                    // Maybe panic if we reach this clause?
+                }
+            };
         }
     }
 
-    fn on_close_listener(&mut self, ListenerClosed { listener_id, .. }: ListenerClosed) {
+    fn on_listener_close(&mut self, ListenerClosed { listener_id, .. }: ListenerClosed) {
         if let Some(connection) =
             self.connections
                 .values_mut()
@@ -362,6 +403,106 @@ impl Behaviour {
         }
     }
 
+    fn on_listener_error(&mut self, ListenerError { listener_id, .. }: ListenerError) {
+        if let Some(connection) =
+            self.connections
+                .values_mut()
+                .flatten()
+                .find(|connection| match connection.candidacy {
+                    Candidate::Confirmed {
+                        listener_id: Some(id),
+                        ..
+                    } => id == listener_id,
+                    _ => false,
+                })
+        {
+            if let Candidate::Confirmed {
+                listener_id,
+                addresses,
+            } = &mut connection.candidacy
+            {
+                listener_id.take();
+                let addrs = std::mem::take(addresses);
+                for addr in addrs {
+                    self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+                }
+            }
+        }
+    }
+
+    fn on_listener_expired(&mut self, ExpiredListenAddr { listener_id, addr }: ExpiredListenAddr) {
+        if let Some(connection) =
+            self.connections
+                .values_mut()
+                .flatten()
+                .find(|connection| match connection.candidacy {
+                    Candidate::Confirmed {
+                        listener_id: Some(id),
+                        ..
+                    } => id == listener_id,
+                    _ => false,
+                })
+        {
+            if let Candidate::Confirmed { addresses, .. } = &mut connection.candidacy {
+                if !addresses.contains(addr) {
+                    return;
+                }
+
+                addresses.retain(|a| a != addr);
+
+                self.events
+                    .push_back(ToSwarm::ExternalAddrExpired(addr.clone()));
+            }
+        }
+    }
+
+    fn on_address_change(
+        &mut self,
+        AddressChange {
+            peer_id,
+            connection_id,
+            old,
+            new,
+        }: AddressChange,
+    ) {
+        let Some(connections) = self.connections.get_mut(&peer_id) else {
+            return;
+        };
+
+        let Some(connection) = connections
+            .iter_mut()
+            .find(|connection| connection.id == connection_id)
+        else {
+            return;
+        };
+
+        let old_addr = match old {
+            libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
+            libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
+        };
+
+        let new_addr = match new {
+            libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
+            libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
+        };
+
+        if old_addr == new_addr {
+            return;
+        }
+
+        connection.addr = new_addr.clone();
+    }
+
+    fn on_dial_failure(
+        &mut self,
+        DialFailure {
+            peer_id: _,
+            error: _,
+            connection_id: _,
+        }: DialFailure,
+    ) {
+    }
+
     fn on_connection_established(
         &mut self,
         ConnectionEstablished {
@@ -385,7 +526,7 @@ impl Behaviour {
                     return;
                 }
             }
-            Entry::Vacant(_) if self.config.auto_relay => {}
+            Entry::Vacant(_) if self.config.auto_connect => {}
             _ => return,
         };
         let connection = Connection {
@@ -499,14 +640,14 @@ impl NetworkBehaviour for Behaviour {
             FromSwarm::ConnectionEstablished(event) => self.on_connection_established(event),
             FromSwarm::ConnectionClosed(event) => self.on_connection_closed(event),
             FromSwarm::NewListenAddr(event) => self.on_listen_on(event),
-            FromSwarm::ListenerClosed(event) => self.on_close_listener(event),
-            FromSwarm::ExternalAddrConfirmed(_) => {}
-            FromSwarm::NewExternalAddrCandidate(_)
-            | FromSwarm::ExpiredListenAddr(_)
-            | FromSwarm::ListenerError(_)
+            FromSwarm::ListenerClosed(event) => self.on_listener_close(event),
+            FromSwarm::DialFailure(event) => self.on_dial_failure(event),
+            FromSwarm::ListenerError(event) => self.on_listener_error(event),
+            FromSwarm::ExpiredListenAddr(event) => self.on_listener_expired(event),
+            FromSwarm::AddressChange(event) => self.on_address_change(event),
+            FromSwarm::ExternalAddrConfirmed(_)
+            | FromSwarm::NewExternalAddrCandidate(_)
             | FromSwarm::ExternalAddrExpired(_)
-            | FromSwarm::AddressChange(_)
-            | FromSwarm::DialFailure(_)
             | FromSwarm::ListenFailure(_)
             | FromSwarm::NewListener(_) => {}
         }
