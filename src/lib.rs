@@ -603,8 +603,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Set timeout for idle connections 
-    pub fn set_idle_connection(mut self, duration: Duration) -> Self {
-        self.options.connection_idle = duration;
+    pub fn set_idle_connection(mut self, duration: u64) -> Self {
+        let duration = match duration > 0 {
+            true => duration,
+            false => 30
+        };
+        self.options.connection_idle = Duration::from_secs(duration);
         self
     }
 
@@ -678,9 +682,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable keep alive
-    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(Duration::from_secs(u64::MAX))")]
+    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(u64::MAX)")]
     pub fn enable_keepalive(self) -> Self {
-        self.set_idle_connection(Duration::from_secs(u64::MAX))
+        self.set_idle_connection(u64::MAX)
     }
 
     /// Disables kademlia
