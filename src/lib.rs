@@ -227,6 +227,9 @@ pub struct IpfsOptions {
 
     pub keystore: Keystore,
 
+    /// Connection idle
+    pub connection_idle: Duration,
+
     /// Repo Provider option
     pub provider: RepoProvider,
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
@@ -275,6 +278,7 @@ impl Default for IpfsOptions {
             addr_config: Default::default(),
             provider: Default::default(),
             keystore: Keystore::in_memory(),
+            connection_idle: Duration::from_secs(30),
             listening_addrs: vec![],
             port_mapping: false,
             transport_configuration: None,
@@ -598,6 +602,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Set timeout for idle connections 
+    pub fn set_idle_connection(mut self, duration: Duration) -> Self {
+        self.options.connection_idle = duration;
+        self
+    }
+
     /// Set swarm configuration
     pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
         self.options.swarm_configuration = Some(config);
@@ -668,9 +678,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable keep alive
-    pub fn enable_keepalive(mut self) -> Self {
-        self.options.keep_alive = true;
-        self
+    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(Duration::from_secs(u64::MAX))")]
+    pub fn enable_keepalive(self) -> Self {
+        self.set_idle_connection(Duration::from_secs(u64::MAX))
     }
 
     /// Disables kademlia

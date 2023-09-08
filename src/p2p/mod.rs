@@ -1,6 +1,7 @@
 //! P2P handling for IPFS nodes.
 use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
+use std::time::Duration;
 
 use crate::error::Error;
 use crate::repo::Repo;
@@ -19,6 +20,7 @@ use tracing::Span;
 
 pub(crate) mod addr;
 pub(crate) mod addressbook;
+pub(crate) mod connection_idle;
 pub(crate) mod peerbook;
 pub mod protocol;
 
@@ -145,6 +147,8 @@ pub struct SwarmOptions {
     pub relay: bool,
     /// Enables dcutr
     pub dcutr: bool,
+    /// Connection idle
+    pub connection_idle: Duration,
 }
 
 impl From<&IpfsOptions> for SwarmOptions {
@@ -169,6 +173,8 @@ impl From<&IpfsOptions> for SwarmOptions {
         let pubsub_config = options.pubsub_config.clone();
         let addrbook_config = options.addr_config;
 
+        let connection_idle = options.connection_idle;
+
         SwarmOptions {
             bootstrap,
             mdns,
@@ -188,6 +194,7 @@ impl From<&IpfsOptions> for SwarmOptions {
             portmapping,
             addrbook_config,
             pubsub_config,
+            connection_idle,
         }
     }
 }

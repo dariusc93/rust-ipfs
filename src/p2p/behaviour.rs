@@ -1,5 +1,5 @@
 use super::gossipsub::GossipsubStream;
-use super::{addressbook, protocol};
+use super::{addressbook, connection_idle, protocol};
 use bytes::Bytes;
 use libp2p_allow_block_list::BlockedPeers;
 
@@ -58,6 +58,7 @@ where
     pub relay_client: Toggle<RelayClient>,
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
+    pub connection_idle: connection_idle::Behaviour,
     pub peerbook: peerbook::Behaviour,
     pub protocol: protocol::Behaviour,
     pub custom: Toggle<C>,
@@ -461,6 +462,7 @@ where
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
         let protocol = protocol::Behaviour::default();
+        let connection_idle = connection_idle::Behaviour::new(options.connection_idle);
         let custom = Toggle::from(custom);
 
         Ok((
@@ -482,6 +484,7 @@ where
                 addressbook,
                 protocol,
                 custom,
+                connection_idle
             },
             transport,
         ))
