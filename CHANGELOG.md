@@ -1,6 +1,9 @@
 # 0.4.2 [unreleased]
+- refactor: Use channels directly instead of broadcast [PR 99]
 - chore: Add UninitializedIpfs::set_listening_addrs and minor changes
 - chore: Add peer to dht when discovered over mdns
+
+[PR 99]: https://github.com/dariusc93/rust-ipfs/pull/99
 
 # 0.4.1
 -  fix: Dont close connections on ping error [PR 95]
