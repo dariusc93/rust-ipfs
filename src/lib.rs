@@ -170,9 +170,6 @@ pub struct IpfsOptions {
     /// Enables ipv6 for mdns
     pub mdns_ipv6: bool,
 
-    /// Keep connection alive
-    pub keep_alive: bool,
-
     /// Enables dcutr
     pub dcutr: bool,
 
@@ -268,7 +265,6 @@ impl Default for IpfsOptions {
             disable_kad: Default::default(),
             disable_bitswap: Default::default(),
             bitswap_config: Default::default(),
-            keep_alive: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
             kad_configuration: Default::default(),
