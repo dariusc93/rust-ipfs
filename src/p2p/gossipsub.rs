@@ -1,8 +1,7 @@
-use async_broadcast::TrySendError;
 use futures::channel::mpsc::{self as channel};
 use futures::stream::{FusedStream, Stream};
 use libp2p::gossipsub::PublishError;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,7 +26,7 @@ use libp2p::swarm::{
 /// to different topics.
 pub struct GossipsubStream {
     // Tracks the topic subscriptions.
-    streams: HashMap<TopicHash, async_broadcast::Sender<GossipsubMessage>>,
+    streams: HashMap<TopicHash, Vec<futures::channel::mpsc::Sender<GossipsubMessage>>>,
 
     active_streams: HashMap<TopicHash, Arc<AtomicUsize>>,
 
@@ -40,6 +39,9 @@ pub struct GossipsubStream {
         channel::UnboundedSender<TopicHash>,
         channel::UnboundedReceiver<TopicHash>,
     ),
+
+    // Backlog of messages received for a given topic
+    queue_messages: HashMap<TopicHash, VecDeque<GossipsubMessage>>,
 }
 
 impl core::ops::Deref for GossipsubStream {
@@ -59,20 +61,8 @@ impl core::ops::DerefMut for GossipsubStream {
 pub struct SubscriptionStream {
     on_drop: Option<channel::UnboundedSender<TopicHash>>,
     topic: Option<TopicHash>,
-    inner: async_broadcast::Receiver<GossipsubMessage>,
+    inner: futures::channel::mpsc::Receiver<GossipsubMessage>,
     counter: Arc<AtomicUsize>,
-}
-
-impl Clone for SubscriptionStream {
-    fn clone(&self) -> Self {
-        self.counter.fetch_add(1, Ordering::SeqCst);
-        Self {
-            on_drop: self.on_drop.clone(),
-            topic: self.topic.clone(),
-            inner: self.inner.clone(),
-            counter: self.counter.clone(),
-        }
-    }
 }
 
 impl Drop for SubscriptionStream {
@@ -142,6 +132,7 @@ impl From<Gossipsub> for GossipsubStream {
             gossipsub,
             unsubscriptions: (tx, rx),
             active_streams: Default::default(),
+            queue_messages: Default::default(),
         }
     }
 }
@@ -161,9 +152,9 @@ impl GossipsubStream {
                         let counter = Arc::new(AtomicUsize::new(1));
                         self.active_streams
                             .insert(topic.hash(), Arc::clone(&counter));
-                        let (tx, rx) = async_broadcast::broadcast(15000);
+                        let (tx, rx) = futures::channel::mpsc::channel(1);
                         let key = ve.key().clone();
-                        ve.insert(tx);
+                        ve.insert(vec![tx]);
                         Ok(SubscriptionStream {
                             on_drop: Some(self.unsubscriptions.0.clone()),
                             topic: Some(key),
@@ -178,14 +169,15 @@ impl GossipsubStream {
                     }
                 }
             }
-            Entry::Occupied(entry) => {
-                let rx = entry.get().clone().new_receiver();
+            Entry::Occupied(mut entry) => {
+                let (tx, rx) = futures::channel::mpsc::channel(1);
                 let key = entry.key().clone();
                 let counter = self
                     .active_streams
                     .get(&key)
                     .cloned()
                     .ok_or(anyhow::anyhow!("No active stream"))?;
+                entry.get_mut().push(tx);
                 counter.fetch_add(1, Ordering::SeqCst);
                 Ok(SubscriptionStream {
                     on_drop: Some(self.unsubscriptions.0.clone()),
@@ -203,8 +195,10 @@ impl GossipsubStream {
     /// Returns true if an existing subscription was dropped, false otherwise
     pub fn unsubscribe(&mut self, topic: impl Into<String>) -> anyhow::Result<bool> {
         let topic = Topic::new(topic.into());
-        if let Some(sender) = self.streams.remove(&topic.hash()) {
-            sender.close();
+        if let Some(senders) = self.streams.remove(&topic.hash()) {
+            for mut sender in senders {
+                sender.close_channel();
+            }
             self.active_streams.remove(&topic.hash());
             Ok(self.gossipsub.unsubscribe(&topic)?)
         } else {
@@ -316,8 +310,10 @@ impl NetworkBehaviour for GossipsubStream {
         loop {
             match self.unsubscriptions.1.poll_next_unpin(ctx) {
                 Poll::Ready(Some(dropped)) => {
-                    if let Some(sender) = self.streams.remove(&dropped) {
-                        sender.close();
+                    if let Some(senders) = self.streams.remove(&dropped) {
+                        for mut sender in senders {
+                            sender.close_channel();
+                        }
                         debug!("unsubscribing via drop from {:?}", dropped);
                         assert!(
                             self.gossipsub
@@ -326,6 +322,8 @@ impl NetworkBehaviour for GossipsubStream {
                             "Failed to unsubscribe a dropped subscription"
                         );
                         self.active_streams.remove(&dropped);
+                        self.queue_messages.remove(&dropped);
+                        self.queue_messages.shrink_to_fit();
                     }
                 }
                 Poll::Ready(None) => unreachable!("we own the sender"),
@@ -334,14 +332,18 @@ impl NetworkBehaviour for GossipsubStream {
         }
 
         loop {
-            match futures::ready!(self.gossipsub.poll(ctx, poll)) {
-                ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
-                    let topic = message.topic.clone();
-                    if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(TrySendError::Closed(_)) =
-                            oe.get().try_broadcast(message.clone())
-                        {
-                            // receiver has dropped
+            if !self.queue_messages.is_empty() {
+                self.queue_messages.retain(|topic, list| {
+                    if list.is_empty() {
+                        return false;
+                    }
+
+                    if let Entry::Occupied(mut oe) = self.streams.entry(topic.clone()) {
+                        let senders = oe.get_mut();
+
+                        senders.retain(|sender| !sender.is_closed());
+
+                        if senders.is_empty() {
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
                             assert!(
@@ -351,8 +353,42 @@ impl NetworkBehaviour for GossipsubStream {
                                 "Failed to unsubscribe following SendError"
                             );
                             self.active_streams.remove(&topic);
+                            return false;
+                        }
+
+                        let mut current_message = None;
+
+                        for sender in senders {
+                            match sender.poll_ready(ctx) {
+                                Poll::Ready(Ok(_)) => {
+                                    if current_message.is_none() {
+                                        let Some(message) = list.pop_front() else {
+                                            break;
+                                        };
+
+                                        current_message = Some(message);
+                                    }
+                                    if let Some(message) = current_message.as_ref() {
+                                        let _ = sender.start_send(message.clone());
+                                    }
+                                    continue;
+                                }
+                                Poll::Ready(Err(_)) => unreachable!("Sender is owned"),
+                                Poll::Pending => {}
+                            }
                         }
                     }
+                    true
+                });
+            }
+
+            match futures::ready!(self.gossipsub.poll(ctx, poll)) {
+                ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
+                    let topic = message.topic.clone();
+                    self.queue_messages
+                        .entry(topic)
+                        .or_default()
+                        .push_back(message);
                     continue;
                 }
                 ToSwarm::GenerateEvent(GossipsubEvent::Subscribed { peer_id, topic }) => {
