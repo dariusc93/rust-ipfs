@@ -1,5 +1,5 @@
 # 0.4.2 [unreleased]
-- feat: Implement idle connections [PR 98]
+- feat: Implement idle connections timeout [PR 98]
 - chore: Add UninitializedIpfs::set_listening_addrs and minor changes
 - chore: Add peer to dht when discovered over mdns
 
