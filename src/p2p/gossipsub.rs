@@ -380,16 +380,20 @@ impl NetworkBehaviour for GossipsubStream {
                     }
                     true
                 });
+
+                self.queue_messages.shrink_to_fit();
             }
 
             match futures::ready!(self.gossipsub.poll(ctx, poll)) {
                 ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
                     let topic = message.topic.clone();
+                    if !self.streams.contains_key(&topic) {
+                        continue;
+                    }
                     self.queue_messages
                         .entry(topic)
                         .or_default()
                         .push_back(message);
-                    continue;
                 }
                 ToSwarm::GenerateEvent(GossipsubEvent::Subscribed { peer_id, topic }) => {
                     return Poll::Ready(ToSwarm::GenerateEvent(GossipsubEvent::Subscribed {
