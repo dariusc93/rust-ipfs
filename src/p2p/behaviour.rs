@@ -1,5 +1,5 @@
 use super::gossipsub::GossipsubStream;
-use super::{addressbook, protocol};
+use super::{addressbook, connection_idle, protocol};
 use bytes::Bytes;
 use libp2p_allow_block_list::BlockedPeers;
 
@@ -29,7 +29,6 @@ use libp2p::relay::client::Behaviour as RelayClient;
 use libp2p::relay::client::{self, Transport as ClientTransport};
 use libp2p::relay::Behaviour as Relay;
 use libp2p::swarm::behaviour::toggle::Toggle;
-use libp2p::swarm::keep_alive::Behaviour as KeepAliveBehaviour;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{autonat, StreamProtocol};
 use std::borrow::Cow;
@@ -49,7 +48,6 @@ where
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
     pub ping: Ping,
     pub identify: Identify,
-    pub keepalive: Toggle<KeepAliveBehaviour>,
     pub pubsub: GossipsubStream,
     pub autonat: autonat::Behaviour,
     pub upnp: Toggle<libp2p_nat::Behaviour>,
@@ -59,6 +57,7 @@ where
     pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
+    pub connection_idle: connection_idle::Behaviour,
     pub peerbook: peerbook::Behaviour,
     pub protocol: protocol::Behaviour,
     pub custom: Toggle<C>,
@@ -389,8 +388,6 @@ where
             .then_some(Bitswap::new(peer_id, repo, Default::default()).await)
             .into();
 
-        let keepalive = options.keep_alive.then(KeepAliveBehaviour::default).into();
-
         let ping = Ping::new(options.ping_config.unwrap_or_default());
 
         let identify = Identify::new(
@@ -463,6 +460,7 @@ where
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
         let protocol = protocol::Behaviour::default();
+        let connection_idle = connection_idle::Behaviour::new(options.connection_idle);
         let custom = Toggle::from(custom);
 
         Ok((
@@ -470,7 +468,6 @@ where
                 mdns,
                 kademlia,
                 bitswap,
-                keepalive,
                 ping,
                 identify,
                 autonat,
@@ -485,6 +482,7 @@ where
                 addressbook,
                 protocol,
                 custom,
+                connection_idle
             },
             transport,
         ))
