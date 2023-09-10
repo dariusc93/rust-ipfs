@@ -7,6 +7,7 @@ use rust_ipfs::{BehaviourEvent, Ipfs, Protocol, PubsubEvent};
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 use rustyline_async::{Readline, ReadlineError};
+use std::time::Duration;
 use std::{io::Write, sync::Arc};
 use tokio::sync::Notify;
 
@@ -197,5 +198,6 @@ async fn topic_discovery(ipfs: Ipfs, topic: String) -> anyhow::Result<()> {
     loop {
         let mut stream = ipfs.get_providers(cid).await?.boxed();
         while let Some(_providers) = stream.next().await {}
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

@@ -1,6 +1,7 @@
 //! P2P handling for IPFS nodes.
 use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
+use std::time::Duration;
 
 use crate::error::Error;
 use crate::repo::Repo;
@@ -19,6 +20,7 @@ use tracing::Span;
 
 pub(crate) mod addr;
 pub(crate) mod addressbook;
+pub(crate) mod connection_idle;
 pub(crate) mod peerbook;
 pub mod protocol;
 
@@ -139,12 +141,12 @@ pub struct SwarmOptions {
     pub addrbook_config: Option<AddressBookConfig>,
     /// UPnP/PortMapping
     pub portmapping: bool,
-    /// Keep alive
-    pub keep_alive: bool,
     /// Relay client
     pub relay: bool,
     /// Enables dcutr
     pub dcutr: bool,
+    /// Connection idle
+    pub connection_idle: Duration,
 }
 
 impl From<&IpfsOptions> for SwarmOptions {
@@ -163,11 +165,12 @@ impl From<&IpfsOptions> for SwarmOptions {
         let disable_bitswap = options.disable_bitswap;
         let bitswap_config = options.bitswap_config.clone();
 
-        let keep_alive = options.keep_alive;
         let identify_config = options.identify_configuration.clone();
         let portmapping = options.port_mapping;
         let pubsub_config = options.pubsub_config.clone();
         let addrbook_config = options.addr_config;
+
+        let connection_idle = options.connection_idle;
 
         SwarmOptions {
             bootstrap,
@@ -183,11 +186,11 @@ impl From<&IpfsOptions> for SwarmOptions {
             kad_config,
             kad_store_config,
             ping_config,
-            keep_alive,
             identify_config,
             portmapping,
             addrbook_config,
             pubsub_config,
+            connection_idle,
         }
     }
 }
