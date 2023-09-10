@@ -170,9 +170,6 @@ pub struct IpfsOptions {
     /// Enables ipv6 for mdns
     pub mdns_ipv6: bool,
 
-    /// Keep connection alive
-    pub keep_alive: bool,
-
     /// Enables dcutr
     pub dcutr: bool,
 
@@ -227,6 +224,9 @@ pub struct IpfsOptions {
 
     pub keystore: Keystore,
 
+    /// Connection idle
+    pub connection_idle: Duration,
+
     /// Repo Provider option
     pub provider: RepoProvider,
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
@@ -265,7 +265,6 @@ impl Default for IpfsOptions {
             disable_kad: Default::default(),
             disable_bitswap: Default::default(),
             bitswap_config: Default::default(),
-            keep_alive: Default::default(),
             relay_server: Default::default(),
             relay_server_config: Default::default(),
             kad_configuration: Default::default(),
@@ -275,6 +274,7 @@ impl Default for IpfsOptions {
             addr_config: Default::default(),
             provider: Default::default(),
             keystore: Keystore::in_memory(),
+            connection_idle: Duration::from_secs(30),
             listening_addrs: vec![],
             port_mapping: false,
             transport_configuration: None,
@@ -598,6 +598,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Set timeout for idle connections 
+    pub fn set_idle_connection_timeout(mut self, duration: u64) -> Self {
+        let duration = match duration > 0 {
+            true => duration,
+            false => 30
+        };
+        self.options.connection_idle = Duration::from_secs(duration);
+        self
+    }
+
     /// Set swarm configuration
     pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
         self.options.swarm_configuration = Some(config);
@@ -668,9 +678,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable keep alive
-    pub fn enable_keepalive(mut self) -> Self {
-        self.options.keep_alive = true;
-        self
+    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(u64::MAX)")]
+    pub fn enable_keepalive(self) -> Self {
+        self.set_idle_connection_timeout(u64::MAX)
     }
 
     /// Disables kademlia
