@@ -288,19 +288,19 @@ impl Behaviour {
         self.events.push_back(ToSwarm::ListenOn { opts });
     }
 
-    pub fn random_select(&mut self) {
+    pub fn random_select(&mut self) -> Option<PeerId> {
         let relay_peers = self.relays.keys().copied().collect::<Vec<_>>();
         if relay_peers.is_empty() {
-            return;
+            return None;
         }
 
         let mut rng = rand::thread_rng();
 
-        let Some(peer_id) = relay_peers.choose(&mut rng) else {
-            return;
-        };
+        let peer_id = relay_peers.choose(&mut rng)?;
 
         self.select(*peer_id);
+
+        Some(*peer_id)
     }
 
     pub fn disable_relay(&mut self, peer_id: PeerId) {

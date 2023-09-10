@@ -2018,13 +2018,13 @@ impl Ipfs {
     }
 
     // TBD
-    pub async fn enable_relay(&self, peer_id: PeerId) -> Result<Multiaddr, Error> {
+    pub async fn enable_relay(&self, peer_id: Option<PeerId>) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::EnableRelay(Some(peer_id), tx))
+                .send(IpfsEvent::EnableRelay(peer_id, tx))
                 .await?;
 
             rx.await?

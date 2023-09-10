@@ -127,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
             swarm.behaviour_mut().relay_manager.select(relay_peer_id);
         }
     } else {
-        swarm.behaviour_mut().relay_manager.random_select()
+        swarm.behaviour_mut().relay_manager.random_select();
     }
 
     let mut timer = futures_timer::Delay::new(Duration::from_secs(10));
