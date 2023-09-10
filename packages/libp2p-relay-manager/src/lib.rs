@@ -176,6 +176,10 @@ impl Behaviour {
         }
     }
 
+    pub fn list_relays(&self) -> impl Iterator<Item = (&PeerId, &Vec<Multiaddr>)> {
+        self.relays.iter()
+    }
+
     pub fn list_active_relays(&self) -> Vec<(PeerId, Vec<Multiaddr>)> {
         self.connections
             .iter()
