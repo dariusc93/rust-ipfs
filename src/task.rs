@@ -97,6 +97,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) timer: TaskTimer,
     pub(crate) local_external_addr: bool,
+    pub(crate) relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
 }
 
 pub(crate) struct TaskTimer {
@@ -862,7 +863,44 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     m.process_relay_event(event);
                 }
             }
-            
+            SwarmEvent::Behaviour(BehaviourEvent::RelayManager(event)) => {
+                debug!("Relay Manager Event: {event:?}");
+                match event {
+                    libp2p_relay_manager::Event::ReservationSuccessful { peer_id, .. } => {
+                        if let Some(chs) = self.relay_listener.remove(&peer_id) {
+                            for ch in chs {
+                                let _ = ch.send(Ok(()));
+                            }
+                        }
+                    }
+                    libp2p_relay_manager::Event::ReservationClosed { peer_id, result } => {
+                        if let Some(chs) = self.relay_listener.remove(&peer_id) {
+                            match result {
+                                Ok(()) => {
+                                    for ch in chs {
+                                        let _ = ch.send(Ok(()));
+                                    }
+                                }
+                                Err(e) => {
+                                    let e = e.to_string();
+                                    for ch in chs {
+                                        let _ = ch.send(Err(anyhow::anyhow!("{}", e.clone())));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    libp2p_relay_manager::Event::ReservationFailure { peer_id, result } => {
+                        if let Some(chs) = self.relay_listener.remove(&peer_id) {
+                            for ch in chs {
+                                let _ = ch.send(Ok(()));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
                 IdentifyEvent::Received { peer_id, info } => {
                     self.swarm
@@ -1479,7 +1517,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                 relay.select(peer_id);
 
-                // let _ = tx.send(Ok(()));
+                self.relay_listener.entry(peer_id).or_default().push(tx);
             }
             IpfsEvent::EnableRelay(None, tx) => {
                 let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() else {
@@ -1487,9 +1525,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     return;
                 };
 
-                relay.random_select();
+                let Some(peer_id) = relay.random_select() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("No relay was selected or was unavailable")));
+                    return;
+                };
 
-                // let _ = tx.send(Ok(()));
+                self.relay_listener.entry(peer_id).or_default().push(tx);
             }
             IpfsEvent::DisableRelay(peer_id, tx) => {
                 let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() else {
@@ -1497,6 +1538,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     return;
                 };
                 relay.disable_relay(peer_id);
+
+                let _ = tx.send(Ok(()));
             }
             IpfsEvent::ListRelays(tx) => {
                 let Some(relay) = self.swarm.behaviour().relay_manager.as_ref() else {

@@ -414,7 +414,7 @@ enum IpfsEvent {
 
     AddRelay(PeerId, Multiaddr, Channel<()>),
     RemoveRelay(PeerId, Multiaddr, Channel<()>),
-    EnableRelay(Option<PeerId>, Channel<Multiaddr>),
+    EnableRelay(Option<PeerId>, Channel<()>),
     DisableRelay(PeerId, Channel<()>),
     ListRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     ListActiveRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
@@ -946,6 +946,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             external_listener: Default::default(),
             local_listener: Default::default(),
             timer: Default::default(),
+            relay_listener: Default::default(),
             local_external_addr,
         };
 

@@ -27,7 +27,7 @@ use rand::seq::SliceRandom;
 pub enum Event {
     ReservationSuccessful {
         peer_id: PeerId,
-        listener_id: ListenerId,
+        initial_addr: Multiaddr,
     },
     ReservationClosed {
         peer_id: PeerId,
@@ -382,7 +382,7 @@ impl Behaviour {
                             self.events.push_back(ToSwarm::GenerateEvent(
                                 Event::ReservationSuccessful {
                                     peer_id: connection.peer_id,
-                                    listener_id,
+                                    initial_addr: direct_addr.clone(),
                                 },
                             ))
                         }
