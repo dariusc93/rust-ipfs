@@ -27,8 +27,11 @@ use rand::seq::SliceRandom;
 pub enum Event {
     ReservationSuccessful {
         peer_id: PeerId,
-        addr: Multiaddr,
         listener_id: ListenerId,
+    },
+    ReservationClosed {
+        peer_id: PeerId,
+        result: Result<(), Box<dyn Error + Send>>,
     },
     ReservationFailure {
         peer_id: PeerId,
@@ -44,6 +47,7 @@ pub enum Event {
 
 #[derive(Debug)]
 struct Connection {
+    pub peer_id: PeerId,
     pub id: ConnectionId,
     pub addr: Multiaddr,
     pub candidacy: Candidate,
@@ -371,7 +375,18 @@ impl Behaviour {
                     addresses,
                 } => {
                     *id = Some(listener_id);
-                    addresses.push(direct_addr.clone());
+                    let first = addresses.is_empty();
+                    if !addresses.contains(direct_addr) {
+                        addresses.push(direct_addr.clone());
+                        if first {
+                            self.events.push_back(ToSwarm::GenerateEvent(
+                                Event::ReservationSuccessful {
+                                    peer_id: connection.peer_id,
+                                    listener_id,
+                                },
+                            ))
+                        }
+                    }
                 }
                 Candidate::Pending | Candidate::Unsupported => {
                     // Maybe panic if we reach this clause?
@@ -380,7 +395,13 @@ impl Behaviour {
         }
     }
 
-    fn on_listener_close(&mut self, ListenerClosed { listener_id, .. }: ListenerClosed) {
+    fn on_listener_close(
+        &mut self,
+        ListenerClosed {
+            listener_id,
+            reason,
+        }: ListenerClosed,
+    ) {
         if let Some(connection) =
             self.connections
                 .values_mut()
@@ -400,14 +421,36 @@ impl Behaviour {
             {
                 listener_id.take();
                 let addrs = std::mem::take(addresses);
+                let has_addresses = addrs.is_empty();
+
                 for addr in addrs {
                     self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+                }
+
+                match (has_addresses, reason) {
+                    (true, result) => {
+                        self.events
+                            .push_back(ToSwarm::GenerateEvent(Event::ReservationClosed {
+                                peer_id: connection.peer_id,
+                                result: result
+                                    .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))
+                                    .map_err(|e| Box::new(e) as Box<_>),
+                            }))
+                    }
+                    (false, Err(e)) => {
+                        self.events
+                            .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
+                                peer_id: connection.peer_id,
+                                result: Box::new(std::io::Error::new(e.kind(), e.to_string())),
+                            }))
+                    }
+                    _ => {}
                 }
             }
         }
     }
 
-    fn on_listener_error(&mut self, ListenerError { listener_id, .. }: ListenerError) {
+    fn on_listener_error(&mut self, ListenerError { listener_id, err }: ListenerError) {
         if let Some(connection) =
             self.connections
                 .values_mut()
@@ -430,6 +473,14 @@ impl Behaviour {
                 for addr in addrs {
                     self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
                 }
+                self.events
+                    .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
+                        peer_id: connection.peer_id,
+                        result: Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            err.to_string(),
+                        )),
+                    }))
             }
         }
     }
@@ -534,6 +585,7 @@ impl Behaviour {
             _ => return,
         };
         let connection = Connection {
+            peer_id,
             id: connection_id,
             addr: addr.clone(),
             candidacy: Candidate::Pending,
@@ -579,6 +631,12 @@ impl Behaviour {
                         }
                         self.events
                             .push_back(ToSwarm::RemoveListener { id: listener_id });
+
+                        self.events
+                            .push_back(ToSwarm::GenerateEvent(Event::ReservationClosed {
+                                peer_id: connection.peer_id,
+                                result: Ok(()),
+                            }))
                     }
                 }
             }
