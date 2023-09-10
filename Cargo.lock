@@ -4127,6 +4127,7 @@ dependencies = [
  "libp2p-allow-block-list",
  "libp2p-mplex",
  "libp2p-nat",
+ "libp2p-relay-manager",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "rlimit",

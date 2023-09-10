@@ -839,8 +839,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
                 libp2p::ping::Event {
                     peer,
+                    connection,
                     result: Result::Ok(rtt),
-                    ..
                 } => {
                     trace!(
                         "ping: rtt to {} is {} ms",
@@ -848,11 +848,21 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         rtt.as_millis()
                     );
                     self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
+                    if let Some(m) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                        m.set_peer_rtt(peer, connection, rtt)
+                    }
                 }
                 libp2p::ping::Event { .. } => {
                     //TODO: Determine if we should continue handling ping errors and if we should disconnect/close connection.
                 }
             },
+            SwarmEvent::Behaviour(BehaviourEvent::RelayClient(event)) => {
+                debug!("Relay Client Event: {event:?}");
+                if let Some(m) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                    m.process_relay_event(event);
+                }
+            }
+            
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
                 IdentifyEvent::Received { peer_id, info } => {
                     self.swarm
@@ -1440,6 +1450,76 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
 
                 let _ = ret.send(Ok(rets));
+            }
+            IpfsEvent::AddRelay(peer_id, addr, tx) => {
+                let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
+                    return;
+                };
+
+                relay.add_address(peer_id, addr);
+
+                let _ = tx.send(Ok(()));
+            }
+            IpfsEvent::RemoveRelay(peer_id, addr, tx) => {
+                let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
+                    return;
+                };
+
+                relay.remove_address(peer_id, addr);
+
+                let _ = tx.send(Ok(()));
+            }
+            IpfsEvent::EnableRelay(Some(peer_id), tx) => {
+                let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
+                    return;
+                };
+
+                relay.select(peer_id);
+
+                // let _ = tx.send(Ok(()));
+            }
+            IpfsEvent::EnableRelay(None, tx) => {
+                let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
+                    return;
+                };
+
+                relay.random_select();
+
+                // let _ = tx.send(Ok(()));
+            }
+            IpfsEvent::DisableRelay(peer_id, tx) => {
+                let Some(relay) = self.swarm.behaviour_mut().relay_manager.as_mut() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
+                    return;
+                };
+                relay.disable_relay(peer_id);
+            }
+            IpfsEvent::ListRelays(tx) => {
+                let Some(relay) = self.swarm.behaviour().relay_manager.as_ref() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
+                    return;
+                };
+
+                let list = relay
+                    .list_relays()
+                    .map(|(peer_id, addrs)| (*peer_id, addrs.clone()))
+                    .collect();
+
+                let _ = tx.send(Ok(list));
+            }
+            IpfsEvent::ListActiveRelays(tx) => {
+                let Some(relay) = self.swarm.behaviour().relay_manager.as_ref() else {
+                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
+                    return;
+                };
+
+                let list = relay.list_active_relays();
+
+                let _ = tx.send(Ok(list));
             }
             IpfsEvent::Exit => {
                 // FIXME: we could do a proper teardown
