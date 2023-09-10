@@ -1,8 +1,10 @@
 use clap::Parser;
-use futures::{channel::mpsc, pin_mut, FutureExt};
+use futures::{pin_mut, FutureExt};
 use libipld::ipld;
-use libp2p::{futures::StreamExt, swarm::SwarmEvent};
-use rust_ipfs::{BehaviourEvent, Ipfs, Protocol, PubsubEvent};
+use libp2p::futures::StreamExt;
+use libp2p::Multiaddr;
+use rust_ipfs::p2p::MultiaddrExt;
+use rust_ipfs::{Ipfs, PubsubEvent};
 
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
@@ -19,6 +21,8 @@ struct Opt {
     use_mdns: bool,
     #[clap(long)]
     use_relay: bool,
+    #[clap(long)]
+    relay_addrs: Vec<Multiaddr>,
     #[clap(long)]
     use_upnp: bool,
     #[clap(long)]
@@ -51,91 +55,35 @@ async fn main() -> anyhow::Result<()> {
         uninitialized = uninitialized.enable_upnp();
     }
 
-    let (tx, mut rx) = mpsc::unbounded();
-    let ipfs: Ipfs = uninitialized
-        .swarm_events({
-            move |_, event| {
-                if let SwarmEvent::Behaviour(BehaviourEvent::Autonat(
-                    libp2p::autonat::Event::StatusChanged { new, .. },
-                )) = event
-                {
-                    match new {
-                        libp2p::autonat::NatStatus::Public(_) => {
-                            let _ = tx.unbounded_send(true);
-                        }
-                        libp2p::autonat::NatStatus::Private
-                        | libp2p::autonat::NatStatus::Unknown => {
-                            let _ = tx.unbounded_send(false);
-                        }
-                    }
-                }
-            }
-        })
-        .start()
-        .await?;
-
-    
+    let ipfs: Ipfs = uninitialized.start().await?;
 
     let identity = ipfs.identity(None).await?;
     let peer_id = identity.peer_id;
     let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
 
+    ipfs.default_bootstrap().await?;
+
     if opt.bootstrap {
-        ipfs.default_bootstrap().await?;
-        tokio::spawn({
-            let ipfs = ipfs.clone();
-            async move { if let Err(_e) = ipfs.bootstrap().await {} }
-        });
+        if let Err(_e) = ipfs.bootstrap().await {}
     }
 
     let cancel = Arc::new(Notify::new());
     if opt.use_relay {
-        //Until autorelay is implemented and/or functions to use relay more directly, we will manually listen to the relays (using libp2p bootstrap, though you can add your own)
-        tokio::spawn({
-            let ipfs = ipfs.clone();
-            let mut stdout = stdout.clone();
-            let cancel = cancel.clone();
-            async move {
-                let mut listening_addrs = vec![];
-                let mut relay_used = false;
-                loop {
-                    let flag = tokio::select! {
-                        flag = rx.next() => {
-                            flag.unwrap_or_default()
-                        },
-                        _ = cancel.notified() => break
-                    };
+        let bootstrap_nodes = ipfs.get_bootstraps().await.expect("Bootstrap exist");
+        let addrs = opt
+            .relay_addrs
+            .iter()
+            .chain(bootstrap_nodes.iter())
+            .cloned();
 
-                    match flag {
-                        true => {
-                            if relay_used {
-                                writeln!(stdout, "Disabling Relay...")?;
-                                for addr in listening_addrs.drain(..) {
-                                    if let Err(_e) = ipfs.remove_listening_address(addr).await {}
-                                }
-                                relay_used = false;
-                            }
-                        }
-                        false => {
-                            if !relay_used {
-                                writeln!(stdout, "Enabling Relay...")?;
-                                for addr in ipfs.get_bootstraps().await? {
-                                    let circuit = addr.with(Protocol::P2pCircuit);
-                                    if let Ok(addr) =
-                                        ipfs.add_listening_address(circuit.clone()).await
-                                    {
-                                        listening_addrs.push(addr)
-                                    }
-                                }
-                                relay_used = !listening_addrs.is_empty();
-                            }
-                        }
-                    }
-                }
+        for mut addr in addrs {
+            let peer_id = addr.extract_peer_id().expect("Bootstrap to contain peer id");
+            ipfs.add_relay(peer_id, addr).await?;
+        }
 
-                Ok::<_, anyhow::Error>(())
-            }
-        });
+        if let Err(e) = ipfs.enable_relay(None).await {
+            writeln!(stdout, "> Error selecting a relay: {e}")?;
+        }
     }
 
     let mut event_stream = ipfs.pubsub_events(&topic).await?;
