@@ -890,10 +890,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             }
                         }
                     }
-                    libp2p_relay_manager::Event::ReservationFailure { peer_id, result } => {
+                    libp2p_relay_manager::Event::ReservationFailure { peer_id, result: err } => {
                         if let Some(chs) = self.relay_listener.remove(&peer_id) {
+                            let e = err.to_string();
                             for ch in chs {
-                                let _ = ch.send(Ok(()));
+                                let _ = ch.send(Err(anyhow::anyhow!("{}", e.clone())));
                             }
                         }
                     }
@@ -1526,7 +1527,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 };
 
                 let Some(peer_id) = relay.random_select() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("No relay was selected or was unavailable")));
+                    let _ = tx.send(Err(anyhow::anyhow!(
+                        "No relay was selected or was unavailable"
+                    )));
                     return;
                 };
 
