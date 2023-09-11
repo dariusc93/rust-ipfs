@@ -416,7 +416,7 @@ impl Behaviour {
             reason,
         }: ListenerClosed,
     ) {
-        if let Some(connection) =
+        let Some(connection) =
             self.connections
                 .values_mut()
                 .flatten()
@@ -427,39 +427,41 @@ impl Behaviour {
                     } => id == listener_id,
                     _ => false,
                 })
+        else {
+            return;
+        };
+
+        if let Candidate::Confirmed {
+            listener_id,
+            addresses,
+        } = &mut connection.candidacy
         {
-            if let Candidate::Confirmed {
-                listener_id,
-                addresses,
-            } = &mut connection.candidacy
-            {
-                listener_id.take();
-                let addrs = std::mem::take(addresses);
-                let has_addresses = addrs.is_empty();
+            listener_id.take();
+            let addrs = std::mem::take(addresses);
+            let has_addresses = addrs.is_empty();
 
-                for addr in addrs {
-                    self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
-                }
+            for addr in addrs {
+                self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
+            }
 
-                match (has_addresses, reason) {
-                    (true, result) => {
-                        self.events
-                            .push_back(ToSwarm::GenerateEvent(Event::ReservationClosed {
-                                peer_id: connection.peer_id,
-                                result: result
-                                    .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))
-                                    .map_err(|e| Box::new(e) as Box<_>),
-                            }))
-                    }
-                    (false, Err(e)) => {
-                        self.events
-                            .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
-                                peer_id: connection.peer_id,
-                                result: Box::new(std::io::Error::new(e.kind(), e.to_string())),
-                            }))
-                    }
-                    _ => {}
+            match (has_addresses, reason) {
+                (true, result) => {
+                    self.events
+                        .push_back(ToSwarm::GenerateEvent(Event::ReservationClosed {
+                            peer_id: connection.peer_id,
+                            result: result
+                                .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))
+                                .map_err(|e| Box::new(e) as Box<_>),
+                        }))
                 }
+                (false, Err(e)) => {
+                    self.events
+                        .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
+                            peer_id: connection.peer_id,
+                            result: Box::new(std::io::Error::new(e.kind(), e.to_string())),
+                        }))
+                }
+                _ => {}
             }
         }
     }
@@ -606,6 +608,8 @@ impl Behaviour {
             ..
         }: ConnectionEstablished,
     ) {
+        self.pending_connection.remove(&connection_id);
+
         let addr = match endpoint {
             libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
             libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
