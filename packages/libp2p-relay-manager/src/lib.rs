@@ -9,6 +9,7 @@ use std::{
 };
 
 use futures::StreamExt;
+use futures_timer::Delay;
 use libp2p::{
     core::Endpoint,
     multiaddr::Protocol,
@@ -85,24 +86,33 @@ impl Hash for PendingReservation {
     }
 }
 
+#[derive(Debug)]
+#[allow(dead_code)]
+enum ReconnectState {
+    Idle {
+        backoff: bool,
+        delay: Delay,
+    },
+    Pending {
+        connection_id: ConnectionId,
+        backoff: bool,
+    },
+}
+
 #[derive(Default, Debug)]
+#[allow(dead_code)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     relays: HashMap<PeerId, Vec<Multiaddr>>,
     connections: HashMap<PeerId, Vec<Connection>>,
+
+    reconnect: HashMap<PeerId, ReconnectState>,
 
     discovery_channel: HashMap<u64, futures::channel::mpsc::Receiver<HashSet<PeerId>>>,
 
     pending_connection: HashSet<ConnectionId>,
     pending_selection: HashSet<PeerId>,
     config: Config,
-}
-
-#[derive(Debug, Default, Clone)]
-pub enum SelectOpt {
-    LowestRTT,
-    #[default]
-    Random,
 }
 
 #[derive(Debug, Default)]
@@ -115,6 +125,9 @@ pub struct Config {
 
     /// Min data limit for relay reservation. Anything under this value would reject the relay reservation
     pub limit: Option<u64>,
+
+    /// Retry relay connection
+    pub backoff: Duration,
 }
 
 impl Behaviour {
@@ -124,6 +137,7 @@ impl Behaviour {
             events: VecDeque::default(),
             relays: HashMap::default(),
             connections: HashMap::default(),
+            reconnect: HashMap::default(),
             discovery_channel: HashMap::default(),
             pending_connection: HashSet::default(),
             pending_selection: HashSet::default(),
@@ -451,7 +465,7 @@ impl Behaviour {
     }
 
     fn on_listener_error(&mut self, ListenerError { listener_id, err }: ListenerError) {
-        if let Some(connection) =
+        let Some(connection) =
             self.connections
                 .values_mut()
                 .flatten()
@@ -462,31 +476,33 @@ impl Behaviour {
                     } => id == listener_id,
                     _ => false,
                 })
+        else {
+            return;
+        };
+
+        if let Candidate::Confirmed {
+            listener_id,
+            addresses,
+        } = &mut connection.candidacy
         {
-            if let Candidate::Confirmed {
-                listener_id,
-                addresses,
-            } = &mut connection.candidacy
-            {
-                listener_id.take();
-                let addrs = std::mem::take(addresses);
-                for addr in addrs {
-                    self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
-                }
-                self.events
-                    .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
-                        peer_id: connection.peer_id,
-                        result: Box::new(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            err.to_string(),
-                        )),
-                    }))
+            listener_id.take();
+            let addrs = std::mem::take(addresses);
+            for addr in addrs {
+                self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
             }
+            self.events
+                .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
+                    peer_id: connection.peer_id,
+                    result: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        err.to_string(),
+                    )),
+                }))
         }
     }
 
     fn on_listener_expired(&mut self, ExpiredListenAddr { listener_id, addr }: ExpiredListenAddr) {
-        if let Some(connection) =
+        let Some(connection) =
             self.connections
                 .values_mut()
                 .flatten()
@@ -497,17 +513,19 @@ impl Behaviour {
                     } => id == listener_id,
                     _ => false,
                 })
-        {
-            if let Candidate::Confirmed { addresses, .. } = &mut connection.candidacy {
-                if !addresses.contains(addr) {
-                    return;
-                }
+        else {
+            return;
+        };
 
-                addresses.retain(|a| a != addr);
-
-                self.events
-                    .push_back(ToSwarm::ExternalAddrExpired(addr.clone()));
+        if let Candidate::Confirmed { addresses, .. } = &mut connection.candidacy {
+            if !addresses.contains(addr) {
+                return;
             }
+
+            addresses.retain(|a| a != addr);
+
+            self.events
+                .push_back(ToSwarm::ExternalAddrExpired(addr.clone()));
         }
     }
 
@@ -553,9 +571,30 @@ impl Behaviour {
         DialFailure {
             peer_id: _,
             error: _,
-            connection_id: _,
+            connection_id,
         }: DialFailure,
     ) {
+        self.pending_connection.remove(&connection_id);
+
+        //TODO: perform checks and do a reconnect attempt
+
+        // let Some(peer_id) = peer_id else {
+        //     return;
+        // };
+
+        // match error {
+        //     libp2p::swarm::DialError::LocalPeerId { .. } => {
+        //         self.relays.remove(&peer_id);
+        //     }
+        //     libp2p::swarm::DialError::NoAddresses => {
+        //         self.relays.remove(&peer_id);
+        //     }
+        //     libp2p::swarm::DialError::DialPeerConditionFalse(_) => {}
+        //     libp2p::swarm::DialError::Aborted => {}
+        //     libp2p::swarm::DialError::WrongPeerId { obtained, endpoint } => {}
+        //     libp2p::swarm::DialError::Denied { cause } => {}
+        //     libp2p::swarm::DialError::Transport(_) => {}
+        // }
     }
 
     fn on_connection_established(
@@ -584,6 +623,7 @@ impl Behaviour {
             Entry::Vacant(_) if self.config.auto_connect => {}
             _ => return,
         };
+
         let connection = Connection {
             peer_id,
             id: connection_id,
@@ -612,32 +652,34 @@ impl Behaviour {
     ) {
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let connections = entry.get_mut();
-            if let Some(connection) = connections
+            let Some(connection) = connections
                 .iter_mut()
                 .find(|connection| connection.id == connection_id)
-            {
-                //Note: If the listener has been closed, then this condition may not happen
-                //      but is set as a precaution
-                //TODO: Confirm that the order is consistent if the relay is removed
-                if let Candidate::Confirmed {
-                    listener_id,
-                    addresses,
-                } = &mut connection.candidacy
-                {
-                    if let Some(listener_id) = listener_id.take() {
-                        let addrs = std::mem::take(addresses);
-                        for addr in addrs {
-                            self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
-                        }
-                        self.events
-                            .push_back(ToSwarm::RemoveListener { id: listener_id });
+            else {
+                return;
+            };
 
-                        self.events
-                            .push_back(ToSwarm::GenerateEvent(Event::ReservationClosed {
-                                peer_id: connection.peer_id,
-                                result: Ok(()),
-                            }))
+            //Note: If the listener has been closed, then this condition may not happen
+            //      but is set as a precaution
+            //TODO: Confirm that the order is consistent if the relay is removed
+            if let Candidate::Confirmed {
+                listener_id,
+                addresses,
+            } = &mut connection.candidacy
+            {
+                if let Some(listener_id) = listener_id.take() {
+                    let addrs = std::mem::take(addresses);
+                    for addr in addrs {
+                        self.events.push_back(ToSwarm::ExternalAddrExpired(addr));
                     }
+                    self.events
+                        .push_back(ToSwarm::RemoveListener { id: listener_id });
+
+                    self.events
+                        .push_back(ToSwarm::GenerateEvent(Event::ReservationClosed {
+                            peer_id: connection.peer_id,
+                            result: Ok(()),
+                        }))
                 }
             }
 
@@ -650,6 +692,12 @@ impl Behaviour {
     }
 
     pub fn process_relay_event(&mut self, event: libp2p::relay::client::Event) {
+        //TODO: Perform checks on limit reported from the reservation and either accept it or
+        //      disconnect and attempt a different connection to a relay with a higher
+        //      limit requirement
+        //NOTE: This is helpful if one knows that the relays will have a higher limit, otherwise
+        //      this may cause long waits when attempting to find relays with higher limits
+        //      for the reservation
         match event {
             libp2p::relay::client::Event::ReservationReqAccepted { .. } => {}
             libp2p::relay::client::Event::ReservationReqFailed { .. } => {}
