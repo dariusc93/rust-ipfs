@@ -27,7 +27,7 @@ libipld = "0.16"
 clap = { version = "4.3", features = ["derive"] }
 rust-ipns = { version = "0.1", path = "packages/rust-ipns" }
 chrono = { version = "0.4" }
-libp2p-relay-manager = { version = "0.0", path = "packages/libp2p-relay-manager" }
+libp2p-relay-manager = { version = "0.1", path = "packages/libp2p-relay-manager" }
 
 [dependencies]
 anyhow = "1.0"
