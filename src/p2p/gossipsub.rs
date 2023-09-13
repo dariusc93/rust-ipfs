@@ -373,7 +373,14 @@ impl NetworkBehaviour for GossipsubStream {
                                     }
                                     continue;
                                 }
-                                Poll::Ready(Err(_)) => unreachable!("Sender is owned"),
+                                Poll::Ready(Err(e)) => {
+                                    //NOTE: Maybe panic here as we should own the sender, but there could be a chance that during the time it is being polled
+                                    //      that the receiver to the sender may have been dropped.
+                                    //      As a result, on polling again, the sender would be filtered out prior to polling them
+                                    if e.is_disconnected() {
+                                        warn!("Receiver to channel was dropped. Skipping...");
+                                    }
+                                }
                                 Poll::Pending => {}
                             }
                         }
