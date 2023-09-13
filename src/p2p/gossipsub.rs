@@ -358,12 +358,12 @@ impl NetworkBehaviour for GossipsubStream {
 
                         let mut current_message = None;
 
-                        for sender in senders {
+                        senders.retain_mut(|sender| {
                             match sender.poll_ready(ctx) {
                                 Poll::Ready(Ok(_)) => {
                                     if current_message.is_none() {
                                         let Some(message) = list.pop_front() else {
-                                            break;
+                                            return true;
                                         };
 
                                         current_message = Some(message);
@@ -371,7 +371,7 @@ impl NetworkBehaviour for GossipsubStream {
                                     if let Some(message) = current_message.as_ref() {
                                         let _ = sender.start_send(message.clone());
                                     }
-                                    continue;
+                                    true
                                 }
                                 Poll::Ready(Err(e)) => {
                                     //NOTE: Maybe panic here as we should own the sender, but there could be a chance that during the time it is being polled
@@ -379,11 +379,13 @@ impl NetworkBehaviour for GossipsubStream {
                                     //      As a result, on polling again, the sender would be filtered out prior to polling them
                                     if e.is_disconnected() {
                                         warn!("Receiver to channel was dropped. Skipping...");
+                                        return false;
                                     }
+                                    true
                                 }
-                                Poll::Pending => {}
+                                Poll::Pending => true,
                             }
-                        }
+                        });
                     }
                     true
                 });
