@@ -412,6 +412,12 @@ enum IpfsEvent {
     ClearBootstrappers(OneshotSender<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
 
+    AddRelay(PeerId, Multiaddr, Channel<()>),
+    RemoveRelay(PeerId, Multiaddr, Channel<()>),
+    EnableRelay(Option<PeerId>, Channel<()>),
+    DisableRelay(PeerId, Channel<()>),
+    ListRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
+    ListActiveRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     //event streams
     PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
 
@@ -950,6 +956,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             external_listener: Default::default(),
             local_listener: Default::default(),
             timer: Default::default(),
+            relay_listener: Default::default(),
             local_external_addr,
         };
 
@@ -1961,33 +1968,96 @@ impl Ipfs {
     }
 
     // TBD
-    pub async fn add_relay(&self, _: Multiaddr) -> Result<(), Error> {
+    pub async fn add_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::AddRelay(peer_id, addr, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    // TBD
+    pub async fn remove_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RemoveRelay(peer_id, addr, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    // TBD
+    pub async fn list_relays(&self, active: bool) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            match active {
+                true => {
+                    self.to_task
+                        .clone()
+                        .send(IpfsEvent::ListActiveRelays(tx))
+                        .await?
+                }
+                false => self.to_task.clone().send(IpfsEvent::ListRelays(tx)).await?,
+            };
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn enable_autorelay(&self) -> Result<(), Error> {
+        Err(anyhow::anyhow!("Unimplemented"))
+    }
+
+    pub async fn disable_autorelay(&self) -> Result<(), Error> {
         Err(anyhow::anyhow!("Unimplemented"))
     }
 
     // TBD
-    pub async fn remove_relay(&self, _: Vec<Multiaddr>) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
+    pub async fn enable_relay(&self, peer_id: Option<PeerId>) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::EnableRelay(peer_id, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
     }
 
     // TBD
-    pub async fn default_relay(&self) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
-    }
+    pub async fn disable_relay(&self, peer_id: PeerId) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
 
-    // TBD
-    pub async fn relay_status(&self, _: Option<PeerId>) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
-    }
+            self.to_task
+                .clone()
+                .send(IpfsEvent::DisableRelay(peer_id, tx))
+                .await?;
 
-    // TBD
-    pub async fn set_relay(&self, _: Multiaddr) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
-    }
-
-    // TBD
-    pub async fn auto_relay(&self) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
     }
 
     /// Walk the given Iplds' links up to `max_depth` (or indefinitely for `None`). Will return
