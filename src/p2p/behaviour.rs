@@ -54,6 +54,7 @@ where
     pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
+    pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
     pub connection_idle: connection_idle::Behaviour,
@@ -442,12 +443,13 @@ where
                 .then_some(libp2p_nat::Behaviour::default()),
         );
 
-        let (transport, relay_client) = match options.relay {
+        let (transport, relay_client, relay_manager) = match options.relay {
             true => {
                 let (transport, client) = client::new(peer_id);
-                (Some(transport), Some(client).into())
+                let manager = libp2p_relay_manager::Behaviour::new(Default::default());
+                (Some(transport), Some(client).into(), Some(manager).into())
             }
-            false => (None, None.into()),
+            false => (None, None.into(), None.into()),
         };
 
         let mut peerbook = peerbook::Behaviour::default();
@@ -473,6 +475,7 @@ where
                 dcutr,
                 relay,
                 relay_client,
+                relay_manager,
                 block_list,
                 upnp,
                 peerbook,

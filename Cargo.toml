@@ -27,6 +27,7 @@ libipld = "0.16"
 clap = { version = "4.3", features = ["derive"] }
 rust-ipns = { version = "0.1", path = "packages/rust-ipns" }
 chrono = { version = "0.4" }
+libp2p-relay-manager = { version = "0.0", path = "packages/libp2p-relay-manager" }
 
 [dependencies]
 anyhow = "1.0"
@@ -45,6 +46,7 @@ hash_hasher = "2.0.3"
 rust-unixfs = { workspace = true }
 
 rust-ipns = { workspace = true, optional = true }
+libp2p-relay-manager = { workspace = true }
 
 chrono.workspace = true
 
@@ -71,7 +73,7 @@ libp2p = { features = [
     "serde",
     "request-response",
     "rendezvous",
-    "quic"
+    "quic",
 ], workspace = true }
 
 libp2p-mplex = "0.40"
