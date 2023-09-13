@@ -890,7 +890,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             }
                         }
                     }
-                    libp2p_relay_manager::Event::ReservationFailure { peer_id, result: err } => {
+                    libp2p_relay_manager::Event::ReservationFailure {
+                        peer_id,
+                        result: err,
+                    } => {
                         if let Some(chs) = self.relay_listener.remove(&peer_id) {
                             let e = err.to_string();
                             for ch in chs {
