@@ -1,8 +1,10 @@
 # 0.4.2 [unreleased]
+- feat: Implemented relay manager [PR 96]
 - feat: Implement idle connections timeout [PR 98]
 - chore: Add UninitializedIpfs::set_listening_addrs and minor changes
 - chore: Add peer to dht when discovered over mdns
 
+[PR 96]: https://github.com/dariusc93/rust-ipfs/pull/96
 [PR 98]: https://github.com/dariusc93/rust-ipfs/pull/98
 
 # 0.4.1
