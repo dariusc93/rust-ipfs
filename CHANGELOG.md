@@ -1,4 +1,4 @@
-# 0.4.2 [unreleased]
+# 0.4.2
 - feat: Implemented relay manager [PR 96]
 - feat: Implement idle connections timeout [PR 98]
 - chore: Add UninitializedIpfs::set_listening_addrs and minor changes
