@@ -229,6 +229,13 @@ pub struct IpfsOptions {
 
     /// Repo Provider option
     pub provider: RepoProvider,
+
+    /// Rendezvous Client
+    pub rendezvous_client: bool,
+
+    /// Rendezvous Server
+    pub rendezvous_server: bool,
+
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
@@ -604,11 +611,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Set timeout for idle connections 
+    /// Set timeout for idle connections
     pub fn set_idle_connection_timeout(mut self, duration: u64) -> Self {
         let duration = match duration > 0 {
             true => duration,
-            false => 30
+            false => 30,
         };
         self.options.connection_idle = Duration::from_secs(duration);
         self

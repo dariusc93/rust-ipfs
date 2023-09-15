@@ -147,6 +147,8 @@ pub struct SwarmOptions {
     pub dcutr: bool,
     /// Connection idle
     pub connection_idle: Duration,
+    pub rendezvous_client: bool,
+    pub rendezvous_server: bool,
 }
 
 impl From<&IpfsOptions> for SwarmOptions {
@@ -171,6 +173,8 @@ impl From<&IpfsOptions> for SwarmOptions {
         let addrbook_config = options.addr_config;
 
         let connection_idle = options.connection_idle;
+        let rendezvous_client = options.rendezvous_client;
+        let rendezvous_server = options.rendezvous_server;
 
         SwarmOptions {
             bootstrap,
@@ -191,6 +195,8 @@ impl From<&IpfsOptions> for SwarmOptions {
             addrbook_config,
             pubsub_config,
             connection_idle,
+            rendezvous_client,
+            rendezvous_server,
         }
     }
 }
