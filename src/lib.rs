@@ -604,11 +604,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Set timeout for idle connections 
+    /// Set timeout for idle connections
     pub fn set_idle_connection_timeout(mut self, duration: u64) -> Self {
         let duration = match duration > 0 {
             true => duration,
-            false => 30
+            false => 30,
         };
         self.options.connection_idle = Duration::from_secs(duration);
         self
@@ -1967,7 +1967,7 @@ impl Ipfs {
         }
     }
 
-    // TBD
+    /// Add relay address
     pub async fn add_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -1983,7 +1983,7 @@ impl Ipfs {
         .await
     }
 
-    // TBD
+    /// Remove relay address
     pub async fn remove_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -1999,7 +1999,7 @@ impl Ipfs {
         .await
     }
 
-    // TBD
+    /// List all relays. if `active` is true, it will list all active relays
     pub async fn list_relays(&self, active: bool) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -2028,7 +2028,7 @@ impl Ipfs {
         Err(anyhow::anyhow!("Unimplemented"))
     }
 
-    // TBD
+    /// Enable use of a relay. If `peer_id` is `None`, it will select a relay at random to use, if one have been added
     pub async fn enable_relay(&self, peer_id: Option<PeerId>) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -2044,7 +2044,7 @@ impl Ipfs {
         .await
     }
 
-    // TBD
+    /// Disable the use of a selected relay.
     pub async fn disable_relay(&self, peer_id: PeerId) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
