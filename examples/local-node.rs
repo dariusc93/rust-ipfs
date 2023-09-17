@@ -12,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
         .enable_relay(true)
         .enable_relay_server(None)
         .enable_upnp()
+        .enable_rendezvous_server()
         .listen_as_external_addr()
         .fd_limit(rust_ipfs::FDLimit::Max)
         .start()
