@@ -67,6 +67,7 @@ use libp2p::{
         KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
+    rendezvous::{Cookie, Namespace},
     swarm::SwarmEvent,
 };
 
@@ -98,6 +99,9 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) timer: TaskTimer,
     pub(crate) local_external_addr: bool,
     pub(crate) relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
+    pub(crate) rzv_register_pending: HashMap<(PeerId, Namespace), Vec<Channel<()>>>,
+    pub(crate) rzv_discover_pending: HashMap<(PeerId, Namespace), Vec<Channel<()>>>,
+    pub(crate) rzv_cookie: HashMap<PeerId, Option<Cookie>>,
 }
 
 pub(crate) struct TaskTimer {
@@ -958,6 +962,95 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 debug!("Old Nat Status: {:?}", old);
                 debug!("New Nat Status: {:?}", new);
             }
+            SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(
+                libp2p::rendezvous::client::Event::Discovered {
+                    rendezvous_node,
+                    registrations,
+                    cookie,
+                },
+            )) => {
+                self.rzv_cookie.insert(rendezvous_node, Some(cookie));
+                let mut ns_list = HashSet::new();
+                let addrbook = &mut self.swarm.behaviour_mut().addressbook;
+                for registration in registrations {
+                    let namespace = registration.namespace.clone();
+                    let peer_id = registration.record.peer_id();
+                    let addrs = registration.record.addresses();
+                    for addr in addrs {
+                        if addrbook.add_address(peer_id, addr.clone()) {
+                            info!("Discovered {peer_id} with address {addr}");
+                        }
+                    }
+                    ns_list.insert(namespace);
+                }
+
+                for ns in ns_list {
+                    if let Some(channels) = self.rzv_discover_pending.remove(&(rendezvous_node, ns))
+                    {
+                        for ch in channels {
+                            let _ = ch.send(Ok(()));
+                        }
+                    }
+                }
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(
+                libp2p::rendezvous::client::Event::DiscoverFailed {
+                    rendezvous_node,
+                    namespace,
+                    error,
+                },
+            )) => {
+                let Some(ns) = namespace else {
+                    error!("Error registering to {rendezvous_node}: {error:?}");
+                    return;
+                };
+
+                error!("Error registering namespace {ns} to {rendezvous_node}: {error:?}");
+
+                if let Some(channels) = self.rzv_discover_pending.remove(&(rendezvous_node, ns)) {
+                    for ch in channels {
+                        let _ = ch.send(Err(anyhow::anyhow!(
+                            "Error discovering peers on {rendezvous_node}: {error:?}"
+                        )));
+                    }
+                }
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(
+                libp2p::rendezvous::client::Event::Registered {
+                    rendezvous_node,
+                    ttl,
+                    namespace,
+                },
+            )) => {
+                info!("Registered to {rendezvous_node} under {namespace} for {ttl} secs");
+
+                if let Some(channels) = self
+                    .rzv_register_pending
+                    .remove(&(rendezvous_node, namespace.clone()))
+                {
+                    for ch in channels {
+                        let _ = ch.send(Ok(()));
+                    }
+                }
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(
+                libp2p::rendezvous::client::Event::RegisterFailed {
+                    rendezvous_node,
+                    namespace,
+                    error,
+                },
+            )) => {
+                error!("Error registering namespace {namespace} to {rendezvous_node}: {error:?}");
+
+                if let Some(channels) = self
+                    .rzv_register_pending
+                    .remove(&(rendezvous_node, namespace.clone()))
+                {
+                    for ch in channels {
+                        let _ = ch.send(Err(anyhow::anyhow!("Error registering namespace {namespace} to {rendezvous_node}: {error:?}")));
+                    }
+                }
+            }
             _ => debug!("Swarm event: {:?}", swarm_event),
         }
     }
@@ -1569,6 +1662,42 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let list = relay.list_active_relays();
 
                 let _ = tx.send(Ok(list));
+            }
+            IpfsEvent::RegisterRendezvousNamespace(ns, peer_id, ttl, res) => {
+                let Some(rz) = self.swarm.behaviour_mut().rendezvous_client.as_mut() else {
+                    let _ = res.send(Err(anyhow::anyhow!("Rendezvous client is not enabled")));
+                    return;
+                };
+
+                if let Err(e) = rz.register(ns.clone(), peer_id, ttl) {
+                    let _ = res.send(Err(anyhow::Error::from(e)));
+                    return;
+                }
+                self.rzv_register_pending
+                    .entry((peer_id, ns))
+                    .or_default()
+                    .push(res);
+            }
+            IpfsEvent::RendezvousNamespaceDiscovery(ns, ttl, peer_id, res) => {
+                let Some(rz) = self.swarm.behaviour_mut().rendezvous_client.as_mut() else {
+                    let _ = res.send(Err(anyhow::anyhow!("Rendezvous client is not enabled")));
+                    return;
+                };
+
+                let cookie = self.rzv_cookie.get(&peer_id).cloned().flatten();
+
+                rz.discover(ns.clone(), cookie, ttl, peer_id);
+
+                match ns {
+                    Some(ns) => self
+                        .rzv_discover_pending
+                        .entry((peer_id, ns))
+                        .or_default()
+                        .push(res),
+                    None => {
+                        let _ = res.send(Ok(()));
+                    }
+                }
             }
             IpfsEvent::Exit => {
                 // FIXME: we could do a proper teardown

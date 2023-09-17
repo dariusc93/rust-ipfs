@@ -109,6 +109,7 @@ use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
     kad::{store::MemoryStoreConfig, KademliaConfig, Mode, Record},
     ping::Config as PingConfig,
+    rendezvous::Namespace,
     swarm::dial_opts::DialOpts,
     StreamProtocol,
 };
@@ -288,6 +289,8 @@ impl Default for IpfsOptions {
             pubsub_config: None,
             swarm_configuration: None,
             span: None,
+            rendezvous_client: false,
+            rendezvous_server: false,
         }
     }
 }
@@ -427,6 +430,9 @@ enum IpfsEvent {
     ListActiveRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     //event streams
     PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
+
+    RegisterRendezvousNamespace(Namespace, PeerId, Option<u64>, Channel<()>),
+    RendezvousNamespaceDiscovery(Option<Namespace>, Option<u64>, PeerId, Channel<()>),
 
     Exit,
 }
@@ -691,9 +697,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable keep alive
-    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(u64::MAX)")]
+    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(u64::MAX / 2)")]
     pub fn enable_keepalive(self) -> Self {
-        self.set_idle_connection_timeout(u64::MAX)
+        self.set_idle_connection_timeout(u64::MAX / 2)
     }
 
     /// Disables kademlia
@@ -749,6 +755,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Automatically add any listened address as an external address
     pub fn listen_as_external_addr(mut self) -> Self {
         self.local_external_addr = true;
+        self
+    }
+
+    pub fn enable_rendezvous_server(mut self) -> Self {
+        self.options.rendezvous_server = true;
+        self
+    }
+
+    pub fn enable_rendezvous_client(mut self) -> Self {
+        self.options.rendezvous_client = true;
         self
     }
 
@@ -965,6 +981,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             timer: Default::default(),
             relay_listener: Default::default(),
             local_external_addr,
+            rzv_register_pending: Default::default(),
+            rzv_discover_pending: Default::default(),
+            rzv_cookie: Default::default(),
         };
 
         for addr in listening_addrs.into_iter() {
@@ -2059,6 +2078,57 @@ impl Ipfs {
             self.to_task
                 .clone()
                 .send(IpfsEvent::DisableRelay(peer_id, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn rendezvous_register_namespace(
+        &self,
+        namespace: String,
+        ttl: Option<u64>,
+        peer_id: PeerId,
+    ) -> Result<(), Error> {
+        async move {
+            let namespace = Namespace::new(namespace)?;
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RegisterRendezvousNamespace(
+                    namespace, peer_id, ttl, tx,
+                ))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn rendezvous_namespace_discovery(
+        &self,
+        namespace: Option<String>,
+        ttl: Option<u64>,
+        peer_id: PeerId,
+    ) -> Result<(), Error> {
+        async move {
+            let namespace = match namespace {
+                Some(ns) => Some(Namespace::new(ns)?),
+                None => None,
+            };
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RendezvousNamespaceDiscovery(
+                    namespace, ttl, peer_id, tx,
+                ))
                 .await?;
 
             rx.await?
