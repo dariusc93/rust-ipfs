@@ -978,7 +978,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let addrs = registration.record.addresses();
                     for addr in addrs {
                         if addrbook.add_address(peer_id, addr.clone()) {
-                            info!("Discovered {peer_id} with address {addr}");
+                            info!("Discovered {peer_id} with address {addr} in {namespace}");
                         }
                     }
                     ns_list.insert(namespace);
