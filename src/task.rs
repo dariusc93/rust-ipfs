@@ -1678,6 +1678,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     .or_default()
                     .push(res);
             }
+            IpfsEvent::UnregisterRendezvousNamespace(ns, peer_id, res) => {
+                let Some(rz) = self.swarm.behaviour_mut().rendezvous_client.as_mut() else {
+                    let _ = res.send(Err(anyhow::anyhow!("Rendezvous client is not enabled")));
+                    return;
+                };
+
+                rz.unregister(ns.clone(), peer_id);
+
+                let _ = res.send(Ok(()));
+            }
             IpfsEvent::RendezvousNamespaceDiscovery(ns, ttl, peer_id, res) => {
                 let Some(rz) = self.swarm.behaviour_mut().rendezvous_client.as_mut() else {
                     let _ = res.send(Err(anyhow::anyhow!("Rendezvous client is not enabled")));

@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     ipfs.rendezvous_register_namespace("rust-ipfs".into(), None, rendezvous_peer_id)
         .await?;
 
-    ipfs.rendezvous_namespace_discovery(Some("rust-ipfs".into()), None, rendezvous_peer_id)
+    ipfs.rendezvous_discovery_namespace(Some("rust-ipfs".into()), None, rendezvous_peer_id)
         .await?;
     Ok(())
 }

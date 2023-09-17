@@ -432,6 +432,7 @@ enum IpfsEvent {
     PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
 
     RegisterRendezvousNamespace(Namespace, PeerId, Option<u64>, Channel<()>),
+    UnregisterRendezvousNamespace(Namespace, PeerId, Channel<()>),
     RendezvousNamespaceDiscovery(Option<Namespace>, Option<u64>, PeerId, Channel<()>),
 
     Exit,
@@ -2110,7 +2111,30 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_namespace_discovery(
+    pub async fn rendezvous_unregister_namespace(
+        &self,
+        namespace: String,
+        peer_id: PeerId,
+    ) -> Result<(), Error> {
+        async move {
+            let namespace = Namespace::new(namespace)?;
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::UnregisterRendezvousNamespace(
+                    namespace, peer_id, tx,
+                ))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn rendezvous_discovery_namespace(
         &self,
         namespace: Option<String>,
         ttl: Option<u64>,
