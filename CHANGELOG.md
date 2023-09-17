@@ -1,3 +1,8 @@
+# 0.4.3 [unreleased]
+- feat: Implement rendezvous protocol [PR 101]
+
+[PR 101]: https://github.com/dariusc93/rust-ipfs/pull/101
+
 # 0.4.2
 - feat: Implemented relay manager [PR 96]
 - feat: Implement idle connections timeout [PR 98]
