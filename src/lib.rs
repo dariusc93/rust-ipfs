@@ -2137,7 +2137,6 @@ impl Ipfs {
     pub async fn rendezvous_discovery_namespace(
         &self,
         namespace: Option<String>,
-        use_cookie: bool,
         ttl: Option<u64>,
         peer_id: PeerId,
     ) -> Result<(), Error> {
@@ -2152,7 +2151,7 @@ impl Ipfs {
             self.to_task
                 .clone()
                 .send(IpfsEvent::RendezvousNamespaceDiscovery(
-                    namespace, use_cookie, ttl, peer_id, tx,
+                    namespace, false, ttl, peer_id, tx,
                 ))
                 .await?;
 
