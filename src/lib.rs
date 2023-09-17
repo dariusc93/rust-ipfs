@@ -433,7 +433,7 @@ enum IpfsEvent {
 
     RegisterRendezvousNamespace(Namespace, PeerId, Option<u64>, Channel<()>),
     UnregisterRendezvousNamespace(Namespace, PeerId, Channel<()>),
-    RendezvousNamespaceDiscovery(Option<Namespace>, Option<u64>, PeerId, Channel<()>),
+    RendezvousNamespaceDiscovery(Option<Namespace>, bool, Option<u64>, PeerId, Channel<()>),
 
     Exit,
 }
@@ -2137,6 +2137,7 @@ impl Ipfs {
     pub async fn rendezvous_discovery_namespace(
         &self,
         namespace: Option<String>,
+        use_cookie: bool,
         ttl: Option<u64>,
         peer_id: PeerId,
     ) -> Result<(), Error> {
@@ -2151,7 +2152,7 @@ impl Ipfs {
             self.to_task
                 .clone()
                 .send(IpfsEvent::RendezvousNamespaceDiscovery(
-                    namespace, ttl, peer_id, tx,
+                    namespace, use_cookie, ttl, peer_id, tx,
                 ))
                 .await?;
 

@@ -1688,13 +1688,15 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                 let _ = res.send(Ok(()));
             }
-            IpfsEvent::RendezvousNamespaceDiscovery(ns, ttl, peer_id, res) => {
+            IpfsEvent::RendezvousNamespaceDiscovery(ns, use_cookie, ttl, peer_id, res) => {
                 let Some(rz) = self.swarm.behaviour_mut().rendezvous_client.as_mut() else {
                     let _ = res.send(Err(anyhow::anyhow!("Rendezvous client is not enabled")));
                     return;
                 };
 
-                let cookie = self.rzv_cookie.get(&peer_id).cloned().flatten();
+                let cookie = use_cookie
+                    .then_some(self.rzv_cookie.get(&peer_id).cloned().flatten())
+                    .flatten();
 
                 rz.discover(ns.clone(), cookie, ttl, peer_id);
 
