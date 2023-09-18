@@ -2090,14 +2090,14 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_register_namespace(
+    pub async fn rendezvous_register_namespace<S: Into<String>>(
         &self,
-        namespace: String,
+        namespace: S,
         ttl: Option<u64>,
         peer_id: PeerId,
     ) -> Result<(), Error> {
         async move {
-            let namespace = Namespace::new(namespace)?;
+            let namespace = Namespace::new(namespace.into())?;
 
             let (tx, rx) = oneshot_channel();
 
@@ -2114,13 +2114,13 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_unregister_namespace(
+    pub async fn rendezvous_unregister_namespace<S: Into<String>>(
         &self,
-        namespace: String,
+        namespace: S,
         peer_id: PeerId,
     ) -> Result<(), Error> {
         async move {
-            let namespace = Namespace::new(namespace)?;
+            let namespace = Namespace::new(namespace.into())?;
 
             let (tx, rx) = oneshot_channel();
 
@@ -2137,14 +2137,14 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_namespace_discovery(
+    pub async fn rendezvous_namespace_discovery<S: Into<String>>(
         &self,
-        namespace: String,
+        namespace: S,
         ttl: Option<u64>,
         peer_id: PeerId,
     ) -> Result<HashMap<PeerId, Vec<Multiaddr>>, Error> {
         async move {
-            let namespace = Namespace::new(namespace)?;
+            let namespace = Namespace::new(namespace.into())?;
 
             let (tx, rx) = oneshot_channel();
 

@@ -29,11 +29,11 @@ async fn main() -> anyhow::Result<()> {
 
     ipfs.connect(opt.rendezvous_server).await?;
 
-    ipfs.rendezvous_register_namespace("rust-ipfs".into(), None, rendezvous_peer_id)
+    ipfs.rendezvous_register_namespace("rust-ipfs", None, rendezvous_peer_id)
         .await?;
 
     let list = ipfs
-        .rendezvous_namespace_discovery(Some("rust-ipfs".into()), None, rendezvous_peer_id)
+        .rendezvous_namespace_discovery("rust-ipfs", None, rendezvous_peer_id)
         .await?;
 
     for (peer, addrs) in list {
