@@ -1,4 +1,4 @@
-# 0.4.3 [unreleased]
+# 0.4.3
 - feat: Implement rendezvous protocol [PR 101]
 - chore: Cleanup future task [PR 102]
 
