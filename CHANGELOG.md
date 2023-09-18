@@ -1,7 +1,9 @@
 # 0.4.3 [unreleased]
 - feat: Implement rendezvous protocol [PR 101]
+- chore: Cleanup future task [PR 102]
 
 [PR 101]: https://github.com/dariusc93/rust-ipfs/pull/101
+[PR 102]: https://github.com/dariusc93/rust-ipfs/pull/102
 
 # 0.4.2
 - feat: Implemented relay manager [PR 96]

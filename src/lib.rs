@@ -399,27 +399,24 @@ enum IpfsEvent {
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Multiaddr, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
-    GetClosestPeers(PeerId, OneshotSender<ReceiverChannel<KadResult>>),
-    FindPeerIdentity(
-        PeerId,
-        OneshotSender<ReceiverChannel<libp2p::identify::Info>>,
-    ),
+    GetClosestPeers(PeerId, Channel<ReceiverChannel<KadResult>>),
+    FindPeerIdentity(PeerId, Channel<ReceiverChannel<libp2p::identify::Info>>),
     FindPeer(
         PeerId,
         bool,
-        OneshotSender<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
+        Channel<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
     ),
     WhitelistPeer(PeerId, Channel<()>),
     RemoveWhitelistPeer(PeerId, Channel<()>),
-    GetProviders(Cid, OneshotSender<Option<BoxStream<'static, PeerId>>>),
+    GetProviders(Cid, Channel<Option<BoxStream<'static, PeerId>>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
-    DhtGet(Key, OneshotSender<BoxStream<'static, Record>>),
+    DhtGet(Key, Channel<BoxStream<'static, Record>>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
     AddBootstrapper(Multiaddr, Channel<Multiaddr>),
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
-    ClearBootstrappers(OneshotSender<Vec<Multiaddr>>),
+    ClearBootstrappers(Channel<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
 
     AddRelay(PeerId, Multiaddr, Channel<()>),
@@ -1489,7 +1486,7 @@ impl Ipfs {
                         .send(IpfsEvent::FindPeerIdentity(peer_id, tx))
                         .await?;
 
-                    rx.await?.await?.map(PeerInfo::from)
+                    rx.await??.await?.map(PeerInfo::from)
                 }
                 None => {
                     let (local_result, external_result) =
@@ -1799,7 +1796,7 @@ impl Ipfs {
                 .send(IpfsEvent::FindPeer(peer_id, false, tx))
                 .await?;
 
-            match rx.await? {
+            match rx.await?? {
                 Either::Left(addrs) if !addrs.is_empty() => Ok(addrs),
                 Either::Left(_) => unreachable!(),
                 Either::Right(future) => {
@@ -1812,7 +1809,7 @@ impl Ipfs {
                         .send(IpfsEvent::FindPeer(peer_id, true, tx))
                         .await?;
 
-                    match rx.await? {
+                    match rx.await?? {
                         Either::Left(addrs) if !addrs.is_empty() => Ok(addrs),
                         _ => Err(anyhow!("couldn't find peer {}", peer_id)),
                     }
@@ -1835,7 +1832,7 @@ impl Ipfs {
                 .send(IpfsEvent::GetProviders(cid, tx))
                 .await?;
 
-            rx.await?.ok_or_else(|| anyhow!("Provider already exist"))
+            rx.await??.ok_or_else(|| anyhow!("Provider already exist"))
         }
         .instrument(self.span.clone())
         .await
@@ -1887,7 +1884,7 @@ impl Ipfs {
                 .send(IpfsEvent::GetClosestPeers(peer_id, tx))
                 .await?;
 
-            Ok(rx.await?).map_err(|e: String| anyhow!(e))
+            Ok(rx.await??).map_err(|e: String| anyhow!(e))
         }
         .instrument(self.span.clone())
         .await?
@@ -1944,7 +1941,7 @@ impl Ipfs {
                 .send(IpfsEvent::DhtGet(key, tx))
                 .await?;
 
-            Ok(rx.await?).map_err(|e: String| anyhow!(e))
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1994,7 +1991,7 @@ impl Ipfs {
         }
     }
 
-    // TBD
+    /// Add relay address
     pub async fn add_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -2010,7 +2007,7 @@ impl Ipfs {
         .await
     }
 
-    // TBD
+    /// Remove relay address
     pub async fn remove_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -2026,7 +2023,7 @@ impl Ipfs {
         .await
     }
 
-    // TBD
+    /// List all relays. if `active` is true, it will list all active relays
     pub async fn list_relays(&self, active: bool) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -2055,7 +2052,7 @@ impl Ipfs {
         Err(anyhow::anyhow!("Unimplemented"))
     }
 
-    // TBD
+    /// Enable use of a relay. If `peer_id` is `None`, it will select a relay at random to use, if one have been added
     pub async fn enable_relay(&self, peer_id: Option<PeerId>) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -2071,7 +2068,7 @@ impl Ipfs {
         .await
     }
 
-    // TBD
+    /// Disable the use of a selected relay.
     pub async fn disable_relay(&self, peer_id: PeerId) -> Result<(), Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -2239,7 +2236,7 @@ impl Ipfs {
                 .send(IpfsEvent::ClearBootstrappers(tx))
                 .await?;
 
-            Ok(rx.await?)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
