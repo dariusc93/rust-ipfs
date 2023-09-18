@@ -1,3 +1,8 @@
+# 0.4.3 [unreleased]
+- chore: Cleanup future task [PR 102]
+
+[PR 102]: https://github.com/dariusc93/rust-ipfs/pull/102
+
 # 0.4.2
 - feat: Implemented relay manager [PR 96]
 - feat: Implement idle connections timeout [PR 98]
