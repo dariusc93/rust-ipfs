@@ -5,7 +5,6 @@ use futures::{
         mpsc::{unbounded, Receiver, UnboundedSender},
         oneshot,
     },
-    sink::SinkExt,
     stream::Fuse,
     FutureExt, StreamExt,
 };
@@ -267,12 +266,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let addrs = self.swarm.external_addresses().cloned().collect::<Vec<_>>();
                     if !addrs.is_empty() {
                         for ch in self.external_listener.drain(..) {
-                            tokio::spawn({
-                                let addrs = addrs.clone();
-                                async move {
-                                    let _ = ch.send(addrs);
-                                }
-                            });
+                            let addrs = addrs.clone();
+                            let _ = ch.send(addrs);
                         }
                     }
                 }
@@ -280,12 +275,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let addrs = self.swarm.listeners().cloned().collect::<Vec<_>>();
                     if !addrs.is_empty() {
                         for ch in self.local_listener.drain(..) {
-                            tokio::spawn({
-                                let addrs = addrs.clone();
-                                async move {
-                                    let _ = ch.send(addrs);
-                                }
-                            });
+                            let addrs = addrs.clone();
+                            let _ = ch.send(addrs);
                         }
                     }
                 }
@@ -325,9 +316,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         for ch in &self.pubsub_event_stream {
             let ch = ch.clone();
             let event = event.clone();
-            tokio::spawn(async move {
-                let _ = ch.unbounded_send(event);
-            });
+            let _ = ch.unbounded_send(event);
         }
     }
 
@@ -344,12 +333,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     .insert(address.clone(), listener_id);
 
                 for ch in self.local_listener.drain(..) {
-                    tokio::spawn({
-                        let addr = address.clone();
-                        async move {
-                            let _ = ch.send(vec![addr]);
-                        }
-                    });
+                    let addr = address.clone();
+                    let _ = ch.send(vec![addr]);
                 }
 
                 if self.local_external_addr
@@ -370,11 +355,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             }
             SwarmEvent::ConnectionClosed { peer_id, .. } => {
                 if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
-                    tokio::spawn(async move {
-                        for ch in ch {
-                            let _ = ch.send(Ok(()));
-                        }
-                    });
+                    for ch in ch {
+                        let _ = ch.send(Ok(()));
+                    }
                 }
             }
             SwarmEvent::ExpiredListenAddr {
@@ -564,14 +547,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 }
                                 if let Entry::Occupied(entry) = self.provider_stream.entry(id) {
                                     if !providers.is_empty() {
-                                        tokio::spawn({
-                                            let mut tx = entry.get().clone();
-                                            async move {
-                                                for provider in providers {
-                                                    let _ = tx.send(provider).await;
-                                                }
-                                            }
-                                        });
+                                        for provider in providers {
+                                            let _ = entry.get().unbounded_send(provider);
+                                        }
                                     }
                                 }
                             }
@@ -637,12 +615,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             }
                             GetRecord(Ok(GetRecordOk::FoundRecord(record))) => {
                                 if let Entry::Occupied(entry) = self.record_stream.entry(id) {
-                                    tokio::spawn({
-                                        let mut tx = entry.get().clone();
-                                        async move {
-                                            let _ = tx.send(record.record).await;
-                                        }
-                                    });
+                                    let _ = entry.get().unbounded_send(record.record);
                                 }
                             }
                             GetRecord(Ok(GetRecordOk::FinishedWithNoAdditionalRecord {
