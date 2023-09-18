@@ -19,7 +19,6 @@ async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = UninitializedIpfs::new()
         .enable_rendezvous_client()
         .listen_as_external_addr()
-        .enable_upnp()
         .start()
         .await?;
 
