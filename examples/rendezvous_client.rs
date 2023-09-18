@@ -44,7 +44,5 @@ async fn main() -> anyhow::Result<()> {
         println!();
     }
 
-    tokio::signal::ctrl_c().await?;
-
     Ok(())
 }
