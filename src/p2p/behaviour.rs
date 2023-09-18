@@ -55,6 +55,8 @@ where
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
+    pub rendezvous_client: Toggle<libp2p::rendezvous::client::Behaviour>,
+    pub rendezvous_server: Toggle<libp2p::rendezvous::server::Behaviour>,
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
     pub connection_idle: connection_idle::Behaviour,
@@ -463,6 +465,17 @@ where
         let connection_idle = connection_idle::Behaviour::new(options.connection_idle);
         let custom = Toggle::from(custom);
 
+        let rendezvous_client = options
+            .rendezvous_client
+            .then_some(libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
+            .into();
+
+        let rendezvous_server = options
+            .rendezvous_server
+            .then_some(libp2p::rendezvous::server::Behaviour::new(
+                Default::default(),
+            ))
+            .into();
         Ok((
             Behaviour {
                 mdns,
@@ -482,7 +495,9 @@ where
                 addressbook,
                 protocol,
                 custom,
-                connection_idle
+                connection_idle,
+                rendezvous_client,
+                rendezvous_server,
             },
             transport,
         ))

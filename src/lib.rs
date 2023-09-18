@@ -109,6 +109,7 @@ use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
     kad::{store::MemoryStoreConfig, KademliaConfig, Mode, Record},
     ping::Config as PingConfig,
+    rendezvous::Namespace,
     swarm::dial_opts::DialOpts,
     StreamProtocol,
 };
@@ -229,6 +230,13 @@ pub struct IpfsOptions {
 
     /// Repo Provider option
     pub provider: RepoProvider,
+
+    /// Rendezvous Client
+    pub rendezvous_client: bool,
+
+    /// Rendezvous Server
+    pub rendezvous_server: bool,
+
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
@@ -281,6 +289,8 @@ impl Default for IpfsOptions {
             pubsub_config: None,
             swarm_configuration: None,
             span: None,
+            rendezvous_client: false,
+            rendezvous_server: false,
         }
     }
 }
@@ -417,6 +427,16 @@ enum IpfsEvent {
     ListActiveRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     //event streams
     PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
+
+    RegisterRendezvousNamespace(Namespace, PeerId, Option<u64>, Channel<()>),
+    UnregisterRendezvousNamespace(Namespace, PeerId, Channel<()>),
+    RendezvousNamespaceDiscovery(
+        Option<Namespace>,
+        bool,
+        Option<u64>,
+        PeerId,
+        Channel<HashMap<PeerId, Vec<Multiaddr>>>,
+    ),
 
     Exit,
 }
@@ -681,9 +701,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable keep alive
-    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(u64::MAX)")]
+    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(u64::MAX / 2)")]
     pub fn enable_keepalive(self) -> Self {
-        self.set_idle_connection_timeout(u64::MAX)
+        self.set_idle_connection_timeout(u64::MAX / 2)
     }
 
     /// Disables kademlia
@@ -739,6 +759,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Automatically add any listened address as an external address
     pub fn listen_as_external_addr(mut self) -> Self {
         self.local_external_addr = true;
+        self
+    }
+
+    pub fn enable_rendezvous_server(mut self) -> Self {
+        self.options.rendezvous_server = true;
+        self
+    }
+
+    pub fn enable_rendezvous_client(mut self) -> Self {
+        self.options.rendezvous_client = true;
         self
     }
 
@@ -955,6 +985,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             timer: Default::default(),
             relay_listener: Default::default(),
             local_external_addr,
+            rzv_register_pending: Default::default(),
+            rzv_discover_pending: Default::default(),
+            rzv_cookie: Default::default(),
         };
 
         for addr in listening_addrs.into_iter() {
@@ -2049,6 +2082,81 @@ impl Ipfs {
             self.to_task
                 .clone()
                 .send(IpfsEvent::DisableRelay(peer_id, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn rendezvous_register_namespace<S: Into<String>>(
+        &self,
+        namespace: S,
+        ttl: Option<u64>,
+        peer_id: PeerId,
+    ) -> Result<(), Error> {
+        async move {
+            let namespace = Namespace::new(namespace.into())?;
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RegisterRendezvousNamespace(
+                    namespace, peer_id, ttl, tx,
+                ))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn rendezvous_unregister_namespace<S: Into<String>>(
+        &self,
+        namespace: S,
+        peer_id: PeerId,
+    ) -> Result<(), Error> {
+        async move {
+            let namespace = Namespace::new(namespace.into())?;
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::UnregisterRendezvousNamespace(
+                    namespace, peer_id, tx,
+                ))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn rendezvous_namespace_discovery<S: Into<String>>(
+        &self,
+        namespace: S,
+        ttl: Option<u64>,
+        peer_id: PeerId,
+    ) -> Result<HashMap<PeerId, Vec<Multiaddr>>, Error> {
+        async move {
+            let namespace = Namespace::new(namespace.into())?;
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RendezvousNamespaceDiscovery(
+                    Some(namespace),
+                    false,
+                    ttl,
+                    peer_id,
+                    tx,
+                ))
                 .await?;
 
             rx.await?
