@@ -430,7 +430,7 @@ enum IpfsEvent {
 
     RegisterRendezvousNamespace(Namespace, PeerId, Option<u64>, Channel<()>),
     UnregisterRendezvousNamespace(Namespace, PeerId, Channel<()>),
-    RendezvousNamespaceDiscovery(Option<Namespace>, bool, Option<u64>, PeerId, Channel<()>),
+    RendezvousNamespaceDiscovery(Option<Namespace>, bool, Option<u64>, PeerId, Channel<HashMap<PeerId, Vec<Multiaddr>>>),
 
     Exit,
 }
@@ -2131,12 +2131,12 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_discovery_namespace(
+    pub async fn rendezvous_namespace_discovery(
         &self,
         namespace: Option<String>,
         ttl: Option<u64>,
         peer_id: PeerId,
-    ) -> Result<(), Error> {
+    ) -> Result<HashMap<PeerId, Vec<Multiaddr>>, Error> {
         async move {
             let namespace = match namespace {
                 Some(ns) => Some(Namespace::new(ns)?),

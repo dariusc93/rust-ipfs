@@ -99,7 +99,8 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) local_external_addr: bool,
     pub(crate) relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) rzv_register_pending: HashMap<(PeerId, Namespace), Vec<Channel<()>>>,
-    pub(crate) rzv_discover_pending: HashMap<(PeerId, Namespace), Vec<Channel<()>>>,
+    pub(crate) rzv_discover_pending:
+        HashMap<(PeerId, Namespace), Vec<Channel<HashMap<PeerId, Vec<Multiaddr>>>>>,
     pub(crate) rzv_cookie: HashMap<PeerId, Option<Cookie>>,
 }
 
@@ -945,6 +946,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 self.rzv_cookie.insert(rendezvous_node, Some(cookie));
                 let mut ns_list = HashSet::new();
                 let addrbook = &mut self.swarm.behaviour_mut().addressbook;
+                let mut ns_book: HashMap<Namespace, HashMap<PeerId, Vec<Multiaddr>>> =
+                    HashMap::new();
                 for registration in registrations {
                     let namespace = registration.namespace.clone();
                     let peer_id = registration.record.peer_id();
@@ -954,14 +957,21 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             info!("Discovered {peer_id} with address {addr} in {namespace}");
                         }
                     }
+                    ns_book
+                        .entry(namespace.clone())
+                        .or_default()
+                        .entry(peer_id)
+                        .or_default()
+                        .extend(addrs.to_vec());
                     ns_list.insert(namespace);
                 }
 
                 for ns in ns_list {
+                    let map = ns_book.remove(&ns).unwrap_or_default();
                     if let Some(channels) = self.rzv_discover_pending.remove(&(rendezvous_node, ns))
                     {
                         for ch in channels {
-                            let _ = ch.send(Ok(()));
+                            let _ = ch.send(Ok(map.clone()));
                         }
                     }
                 }
@@ -1653,7 +1663,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         .or_default()
                         .push(res),
                     None => {
-                        let _ = res.send(Ok(()));
+                        let _ = res.send(Ok(HashMap::new()));
                     }
                 }
             }

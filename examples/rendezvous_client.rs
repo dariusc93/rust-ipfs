@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = UninitializedIpfs::new()
         .enable_rendezvous_client()
         .listen_as_external_addr()
+        .enable_upnp()
         .start()
         .await?;
 
@@ -32,8 +33,17 @@ async fn main() -> anyhow::Result<()> {
     ipfs.rendezvous_register_namespace("rust-ipfs".into(), None, rendezvous_peer_id)
         .await?;
 
-    ipfs.rendezvous_discovery_namespace(Some("rust-ipfs".into()), None, rendezvous_peer_id)
+    let list = ipfs
+        .rendezvous_namespace_discovery(Some("rust-ipfs".into()), None, rendezvous_peer_id)
         .await?;
+
+    for (peer, addrs) in list {
+        println!("Discovered peer {peer} with the following addresses");
+        for addr in addrs {
+            println!("- {addr}");
+        }
+        println!();
+    }
 
     tokio::signal::ctrl_c().await?;
 
