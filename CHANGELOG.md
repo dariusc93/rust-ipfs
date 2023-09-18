@@ -1,11 +1,18 @@
-# 0.4.2 [unreleased]
+# 0.4.3 [unreleased]
 - refactor: Use channels directly instead of broadcast [PR 99]
+- feat: Implement rendezvous protocol [PR 101]
+- chore: Cleanup future task [PR 102]
+
+[PR 99]: https://github.com/dariusc93/rust-ipfs/pull/99
+[PR 101]: https://github.com/dariusc93/rust-ipfs/pull/101
+[PR 102]: https://github.com/dariusc93/rust-ipfs/pull/102
+
+# 0.4.2
 - feat: Implemented relay manager [PR 96]
 - feat: Implement idle connections timeout [PR 98]
 - chore: Add UninitializedIpfs::set_listening_addrs and minor changes
 - chore: Add peer to dht when discovered over mdns
 
-[PR 99]: https://github.com/dariusc93/rust-ipfs/pull/99
 [PR 96]: https://github.com/dariusc93/rust-ipfs/pull/96
 [PR 98]: https://github.com/dariusc93/rust-ipfs/pull/98
 
