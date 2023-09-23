@@ -4,7 +4,11 @@ use crate::path::IpfsPath;
 use std::str::FromStr;
 use tracing_futures::Instrument;
 
-pub async fn resolve(resolver: DnsResolver, domain: &str) -> Result<IpfsPath, Error> {
+pub async fn resolve<'a>(
+    resolver: DnsResolver,
+    domain: &str,
+    mut path: impl Iterator<Item = &'a str>,
+) -> Result<IpfsPath, Error> {
     use std::borrow::Cow;
     use trust_dns_resolver::AsyncResolver;
 
@@ -44,21 +48,27 @@ pub async fn resolve(resolver: DnsResolver, domain: &str) -> Result<IpfsPath, Er
                 }
             };
 
-            let mut paths = res
-                .iter()
-                .flat_map(|txt| txt.iter())
-                .filter_map(|txt| {
-                    if txt.starts_with(b"dnslink=") {
-                        Some(&txt[b"dnslink=".len()..])
-                    } else {
-                        None
-                    }
-                })
-                .map(|suffix| {
-                    std::str::from_utf8(suffix)
-                        .map_err(Error::from)
-                        .and_then(IpfsPath::from_str)
-                });
+            let mut paths =
+                res.iter()
+                    .flat_map(|txt| txt.iter())
+                    .filter_map(|txt| {
+                        if txt.starts_with(b"dnslink=") {
+                            Some(&txt[b"dnslink=".len()..])
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|suffix| {
+                        std::str::from_utf8(suffix)
+                            .map_err(Error::from)
+                            .and_then(IpfsPath::from_str)
+                            .and_then(|mut internal_path| {
+                                internal_path.path.push_split(path.by_ref()).map_err(|_| {
+                                    crate::path::IpfsPathError::InvalidPath("".into())
+                                })?;
+                                Ok(internal_path)
+                            })
+                    });
 
             if let Some(Ok(x)) = paths.next() {
                 tracing::trace!("dnslink found for {:?}", domain);
@@ -81,18 +91,26 @@ mod tests {
     #[tokio::test]
     async fn resolve_ipfs_io() {
         tracing_subscriber::fmt::init();
-        let res = resolve(crate::p2p::DnsResolver::Cloudflare, "ipfs.io")
-            .await
-            .unwrap()
-            .to_string();
+        let res = resolve(
+            crate::p2p::DnsResolver::Cloudflare,
+            "ipfs.io",
+            std::iter::empty(),
+        )
+        .await
+        .unwrap()
+        .to_string();
         assert_eq!(res, "/ipns/website.ipfs.io");
     }
 
     #[tokio::test]
     async fn resolve_website_ipfs_io() {
-        let res = resolve(crate::p2p::DnsResolver::Cloudflare, "website.ipfs.io")
-            .await
-            .unwrap();
+        let res = resolve(
+            crate::p2p::DnsResolver::Cloudflare,
+            "website.ipfs.io",
+            std::iter::empty(),
+        )
+        .await
+        .unwrap();
 
         assert!(
             matches!(res.root(), crate::path::PathRoot::Ipld(_)),

@@ -130,7 +130,8 @@ impl Ipns {
             #[cfg(not(feature = "experimental"))]
             PathRoot::Ipns(_) => Err(anyhow::anyhow!("unimplemented")),
             PathRoot::Dns(domain) => {
-                Ok(dnslink::resolve(self.resolver.unwrap_or_default(), domain).await?)
+                let path_iter = path.iter();
+                Ok(dnslink::resolve(self.resolver.unwrap_or_default(), domain, path_iter).await?)
             }
         }
     }
