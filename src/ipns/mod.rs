@@ -51,6 +51,8 @@ impl Ipns {
                 use libipld::Cid;
                 use libp2p::PeerId;
 
+                let mut path_iter = path.iter();
+
                 let hash: libipld::multihash::Multihash =
                     libipld::multihash::Multihash::from_bytes(&peer.to_bytes())?;
 
@@ -73,6 +75,12 @@ impl Ipns {
                         record.verify(*peer)?;
                         let data = record.data()?;
                         IpfsPath::from_str(&String::from_utf8_lossy(data.value()))
+                            .and_then(|mut internal_path| {
+                                internal_path.path.push_split(path_iter.by_ref()).map_err(
+                                    |_| crate::path::IpfsPathError::InvalidPath("".into()),
+                                )?;
+                                Ok(internal_path)
+                            })
                             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                     }) {
                         return Ok(path);
@@ -109,7 +117,15 @@ impl Ipns {
 
                 let path = String::from_utf8_lossy(data.value()).to_string();
 
-                IpfsPath::from_str(&path).map_err(anyhow::Error::from)
+                IpfsPath::from_str(&path)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|mut internal_path| {
+                        internal_path
+                            .path
+                            .push_split(path_iter)
+                            .map_err(|_| crate::path::IpfsPathError::InvalidPath("".into()))?;
+                        Ok(internal_path)
+                    })
             }
             #[cfg(not(feature = "experimental"))]
             PathRoot::Ipns(_) => Err(anyhow::anyhow!("unimplemented")),
