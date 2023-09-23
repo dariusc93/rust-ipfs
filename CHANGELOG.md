@@ -1,3 +1,8 @@
+# 0.4.4 [unreleased]
+- fix: Set dns resolver as a field, and fix resolved path [PR 103]
+
+[PR 103]: https://github.com/dariusc93/rust-ipfs/pull/103
+
 # 0.4.3
 - feat: Implement rendezvous protocol [PR 101]
 - chore: Cleanup future task [PR 102]
