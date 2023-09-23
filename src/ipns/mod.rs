@@ -12,6 +12,7 @@ mod dnslink;
 #[cfg_attr(not(feature = "experimental"), allow(dead_code))]
 pub struct Ipns {
     ipfs: Ipfs,
+    resolver: Option<DnsResolver>,
 }
 
 #[cfg(feature = "experimental")]
@@ -24,13 +25,20 @@ pub enum IpnsOption {
 
 impl Ipns {
     pub fn new(ipfs: Ipfs) -> Self {
-        Ipns { ipfs }
+        Ipns {
+            ipfs,
+            resolver: None,
+        }
+    }
+
+    pub fn set_resolver(&mut self, resolver: DnsResolver) {
+        self.resolver = Some(resolver);
     }
 
     /// Resolves a ipns path to an ipld path.
     // TODO: Implement ipns pubsub
     // TODO: Maybe implement a check to the dht store itself too?
-    pub async fn resolve(&self, resolver: DnsResolver, path: &IpfsPath) -> Result<IpfsPath, Error> {
+    pub async fn resolve(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
         let path = path.to_owned();
         match path.root() {
             PathRoot::Ipld(_) => Ok(path),
@@ -105,7 +113,9 @@ impl Ipns {
             }
             #[cfg(not(feature = "experimental"))]
             PathRoot::Ipns(_) => Err(anyhow::anyhow!("unimplemented")),
-            PathRoot::Dns(domain) => Ok(dnslink::resolve(resolver, domain).await?),
+            PathRoot::Dns(domain) => {
+                Ok(dnslink::resolve(self.resolver.unwrap_or_default(), domain).await?)
+            }
         }
     }
 
