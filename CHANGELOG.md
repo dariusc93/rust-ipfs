@@ -1,7 +1,9 @@
 # 0.4.4 [unreleased]
+- chore: Use new method over deprecated and internal behaviours [PR XXX]
 - fix: Set dns resolver as a field, and fix resolved path [PR 103]
 - chore: Remove experimental feature flag
 
+[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
 [PR 103]: https://github.com/dariusc93/rust-ipfs/pull/103
 
 # 0.4.3
