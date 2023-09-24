@@ -578,15 +578,15 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use super::Behaviour as PeerBook;
     use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
     use futures::StreamExt;
     use libp2p::{
         identify::{self, Config},
         identity::Keypair,
-        swarm::{
-            behaviour::toggle::Toggle, keep_alive, NetworkBehaviour, SwarmBuilder, SwarmEvent,
-        },
+        swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmBuilder, SwarmEvent},
         Multiaddr, PeerId, Swarm,
     };
 
@@ -594,7 +594,6 @@ mod test {
     struct Behaviour {
         peerbook: PeerBook,
         identify: Toggle<identify::Behaviour>,
-        keep_alive: keep_alive::Behaviour,
     }
 
     //TODO: Expand test out
@@ -819,10 +818,11 @@ mod test {
                 "/peerbook/0.1".into(),
                 pubkey,
             )))),
-            keep_alive: keep_alive::Behaviour,
         };
 
-        let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build();
+        let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id)
+            .idle_connection_timeout(Duration::from_secs(30))
+            .build();
 
         Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
 

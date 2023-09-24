@@ -1,5 +1,5 @@
 use super::gossipsub::GossipsubStream;
-use super::{addressbook, connection_idle, protocol};
+use super::{addressbook, protocol};
 use bytes::Bytes;
 use libp2p_allow_block_list::BlockedPeers;
 
@@ -59,7 +59,6 @@ where
     pub rendezvous_server: Toggle<libp2p::rendezvous::server::Behaviour>,
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
-    pub connection_idle: connection_idle::Behaviour,
     pub peerbook: peerbook::Behaviour,
     pub protocol: protocol::Behaviour,
     pub custom: Toggle<C>,
@@ -462,7 +461,6 @@ where
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
         let protocol = protocol::Behaviour::default();
-        let connection_idle = connection_idle::Behaviour::new(options.connection_idle);
         let custom = Toggle::from(custom);
 
         let rendezvous_client = options
@@ -495,7 +493,6 @@ where
                 addressbook,
                 protocol,
                 custom,
-                connection_idle,
                 rendezvous_client,
                 rendezvous_server,
             },

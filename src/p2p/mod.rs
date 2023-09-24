@@ -20,7 +20,6 @@ use tracing::Span;
 
 pub(crate) mod addr;
 pub(crate) mod addressbook;
-pub(crate) mod connection_idle;
 pub(crate) mod peerbook;
 pub mod protocol;
 
@@ -292,6 +291,8 @@ where
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
 
+    let idle = options.connection_idle;
+
     let (behaviour, relay_transport) =
         behaviour::build_behaviour(&keypair, options, repo, swarm_config.connection, custom)
             .await?;
@@ -313,6 +314,7 @@ where
     .per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
     .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
     .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
+    .idle_connection_timeout(idle)
     .build();
 
     Ok(swarm)
