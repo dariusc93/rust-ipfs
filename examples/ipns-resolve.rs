@@ -1,3 +1,9 @@
+#[derive(Debug, clap::Parser)]
+#[clap(name = "ipns")]
+struct Opt {
+    key: String,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use std::str::FromStr;
