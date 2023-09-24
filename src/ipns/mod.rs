@@ -74,10 +74,11 @@ impl Ipns {
                         //Although stored locally, we should verify the record anyway
                         record.verify(*peer)?;
                         let data = record.data()?;
-                        IpfsPath::from_str(&String::from_utf8_lossy(data.value()))
+                        let path = String::from_utf8_lossy(data.value());
+                        IpfsPath::from_str(&path)
                             .and_then(|mut internal_path| {
                                 internal_path.path.push_split(path_iter.by_ref()).map_err(
-                                    |_| crate::path::IpfsPathError::InvalidPath("".into()),
+                                    |_| crate::path::IpfsPathError::InvalidPath(path.to_string()),
                                 )?;
                                 Ok(internal_path)
                             })
@@ -123,7 +124,7 @@ impl Ipns {
                         internal_path
                             .path
                             .push_split(path_iter)
-                            .map_err(|_| crate::path::IpfsPathError::InvalidPath("".into()))?;
+                            .map_err(|_| crate::path::IpfsPathError::InvalidPath(path))?;
                         Ok(internal_path)
                     })
             }
