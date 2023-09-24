@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.4.3"
+version = "0.4.4"
 
 [features]
 
@@ -16,8 +16,6 @@ version = "0.4.3"
 sled_data_store = []
 test_go_interop = []
 test_js_interop = []
-
-experimental = ["rust-ipns"]
 
 [workspace.dependencies]
 libp2p = "0.52.3"
@@ -45,7 +43,7 @@ hash_hasher = "2.0.3"
 
 rust-unixfs = { workspace = true }
 
-rust-ipns = { workspace = true, optional = true }
+rust-ipns = { workspace = true }
 libp2p-relay-manager = { workspace = true }
 
 chrono.workspace = true

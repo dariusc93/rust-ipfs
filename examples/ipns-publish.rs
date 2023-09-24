@@ -1,9 +1,3 @@
-#[cfg(not(feature = "experimental"))]
-fn main() {
-    panic!("Enable \"experimental\" flag");
-}
-
-#[cfg(feature = "experimental")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use rust_ipfs::Ipfs;

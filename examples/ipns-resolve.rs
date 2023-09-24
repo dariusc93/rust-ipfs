@@ -1,16 +1,3 @@
-#[cfg(not(feature = "experimental"))]
-fn main() {
-    panic!("Enable \"experimental\" flag");
-}
-
-#[cfg(feature = "experimental")]
-#[derive(Debug, clap::Parser)]
-#[clap(name = "ipns")]
-struct Opt {
-    key: String,
-}
-
-#[cfg(feature = "experimental")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use std::str::FromStr;

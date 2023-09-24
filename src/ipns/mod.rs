@@ -9,13 +9,11 @@ mod dnslink;
 
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
-#[cfg_attr(not(feature = "experimental"), allow(dead_code))]
 pub struct Ipns {
     ipfs: Ipfs,
     resolver: Option<DnsResolver>,
 }
 
-#[cfg(feature = "experimental")]
 #[derive(Clone, Copy, Debug, Default)]
 pub enum IpnsOption {
     Local,
@@ -31,6 +29,7 @@ impl Ipns {
         }
     }
 
+    /// Set dns resolver
     pub fn set_resolver(&mut self, resolver: DnsResolver) {
         self.resolver = Some(resolver);
     }
@@ -42,7 +41,6 @@ impl Ipns {
         let path = path.to_owned();
         match path.root() {
             PathRoot::Ipld(_) => Ok(path),
-            #[cfg(feature = "experimental")]
             PathRoot::Ipns(peer) => {
                 use std::str::FromStr;
                 use std::time::Duration;
@@ -128,8 +126,6 @@ impl Ipns {
                         Ok(internal_path)
                     })
             }
-            #[cfg(not(feature = "experimental"))]
-            PathRoot::Ipns(_) => Err(anyhow::anyhow!("unimplemented")),
             PathRoot::Dns(domain) => {
                 let path_iter = path.iter();
                 Ok(dnslink::resolve(self.resolver.unwrap_or_default(), domain, path_iter).await?)
@@ -137,7 +133,6 @@ impl Ipns {
         }
     }
 
-    #[cfg(feature = "experimental")]
     pub async fn publish(
         &self,
         key: Option<&str>,

@@ -1340,7 +1340,6 @@ impl Ipfs {
     }
 
     /// Publish ipns record to DHT
-    #[cfg(feature = "experimental")]
     pub async fn publish_ipns(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
