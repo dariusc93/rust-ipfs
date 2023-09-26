@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
+use crate::repo::Repo;
 use crate::Ipfs;
 
 mod dnslink;
@@ -10,8 +11,26 @@ mod dnslink;
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
 pub struct Ipns {
-    ipfs: Ipfs,
+    ipfs: Option<Ipfs>,
+    repo: Repo,
     resolver: Option<DnsResolver>,
+}
+
+impl From<Repo> for Ipns {
+    fn from(repo: Repo) -> Self {
+        Self::from(&repo)
+    }
+}
+
+impl From<&Repo> for Ipns {
+    fn from(repo: &Repo) -> Self {
+        let repo = repo.clone();
+        Self {
+            ipfs: None,
+            repo,
+            resolver: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -23,8 +42,10 @@ pub enum IpnsOption {
 
 impl Ipns {
     pub fn new(ipfs: Ipfs) -> Self {
+        let repo = ipfs.repo.clone();
         Ipns {
-            ipfs,
+            ipfs: Some(ipfs),
+            repo,
             resolver: None,
         }
     }
@@ -64,7 +85,7 @@ impl Ipns {
                 //TODO: Determine if we want to encode the cid of the multihash in base32 or if we can just use the peer id instead
                 // let mb = format!("/ipns/{}", peer);
 
-                let repo = self.ipfs.repo();
+                let repo = &self.repo;
                 let datastore = repo.data_store();
 
                 if let Ok(Some(data)) = datastore.get(mb.as_bytes()).await {
@@ -86,7 +107,12 @@ impl Ipns {
                     }
                 }
 
-                let stream = self.ipfs.dht_get(mb).await?;
+                let ipfs = self
+                    .ipfs
+                    .as_ref()
+                    .ok_or(anyhow::anyhow!("No records found"))?;
+
+                let stream = ipfs.dht_get(mb).await?;
 
                 //TODO: Implement configurable timeout
                 let mut records = tokio::time::timeout(
@@ -143,9 +169,14 @@ impl Ipns {
         use libp2p::kad::Quorum;
         use std::str::FromStr;
 
+        let ipfs = self
+            .ipfs
+            .as_ref()
+            .ok_or(anyhow::anyhow!("Ipfs is not available"))?;
+
         let keypair = match key {
-            Some(key) => self.ipfs.keystore().get_keypair(key).await?,
-            None => self.ipfs.keypair()?.clone(),
+            Some(key) => ipfs.keystore().get_keypair(key).await?,
+            None => ipfs.keypair()?.clone(),
         };
 
         let peer_id = keypair.public().to_peer_id();
@@ -160,7 +191,7 @@ impl Ipns {
             cid.to_string_of_base(libipld::multibase::Base::Base36Lower)?
         );
 
-        let repo = self.ipfs.repo();
+        let repo = &self.repo;
 
         let datastore = repo.data_store();
 
@@ -200,7 +231,7 @@ impl Ipns {
         datastore.put(mb.as_bytes(), &bytes).await?;
 
         match option.unwrap_or_default() {
-            IpnsOption::DHT => self.ipfs.dht_put(&mb, bytes, Quorum::One).await?,
+            IpnsOption::DHT => ipfs.dht_put(&mb, bytes, Quorum::One).await?,
             IpnsOption::Local => {}
         };
 

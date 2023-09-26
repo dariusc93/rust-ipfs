@@ -1,7 +1,8 @@
 //! `ipfs.dag` interface implementation around [`Ipfs`].
 
 use crate::error::Error;
-use crate::path::{IpfsPath, PathRoot, SlashedPath};
+use crate::ipns::Ipns;
+use crate::path::{IpfsPath, SlashedPath};
 use crate::repo::Repo;
 use crate::{Block, Ipfs};
 use libipld::{
@@ -262,18 +263,15 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<Ipld, ResolveError> {
-        let resolved_path = match &self.ipfs {
-            Some(ipfs) => ipfs
-                .resolve_ipns(&path, true)
-                .await
-                .map_err(|_| ResolveError::IpnsResolutionFailed(path))?,
-            None => {
-                if !matches!(path.root(), PathRoot::Ipld(_)) {
-                    return Err(ResolveError::IpnsResolutionFailed(path));
-                }
-                path
-            }
+        let ipns_resolver = match &self.ipfs {
+            Some(ipfs) => ipfs.ipns(),
+            None => Ipns::from(&self.repo),
         };
+
+        let resolved_path = ipns_resolver
+            .resolve(&path)
+            .await
+            .map_err(|_| ResolveError::IpnsResolutionFailed(path))?;
 
         let cid = match resolved_path.root().cid() {
             Some(cid) => cid,
@@ -326,18 +324,15 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
-        let resolved_path = match &self.ipfs {
-            Some(ipfs) => ipfs
-                .resolve_ipns(&path, true)
-                .await
-                .map_err(|_| ResolveError::IpnsResolutionFailed(path))?,
-            None => {
-                if !matches!(path.root(), PathRoot::Ipld(_)) {
-                    return Err(ResolveError::IpnsResolutionFailed(path));
-                }
-                path
-            }
+        let ipns_resolver = match &self.ipfs {
+            Some(ipfs) => ipfs.ipns(),
+            None => Ipns::from(&self.repo),
         };
+
+        let resolved_path = ipns_resolver
+            .resolve(&path)
+            .await
+            .map_err(|_| ResolveError::IpnsResolutionFailed(path))?;
 
         let cid = match resolved_path.root().cid() {
             Some(cid) => cid,
