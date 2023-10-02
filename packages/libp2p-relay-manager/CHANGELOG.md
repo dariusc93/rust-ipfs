@@ -1,5 +1,5 @@
 # 0.1.1 [unreleased]
-- fix: Emit event on dial failure
+- fix: Emit event on dial failure [PR 105]
 
 [PR 105]: https://github.com/dariusc93/rust-ipfs/pull/105
 
