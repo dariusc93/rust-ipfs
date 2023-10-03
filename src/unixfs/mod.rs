@@ -88,7 +88,14 @@ impl IpfsUnixfs {
     {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
-        cat(Either::Left(&self.ipfs), starting_point, range, peers, local).await
+        cat(
+            Either::Left(&self.ipfs),
+            starting_point,
+            range,
+            peers,
+            local,
+        )
+        .await
     }
 
     /// Add a file from either a file or stream

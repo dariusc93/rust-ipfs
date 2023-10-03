@@ -78,7 +78,9 @@ async fn main() -> anyhow::Result<()> {
             .cloned();
 
         for mut addr in addrs {
-            let peer_id = addr.extract_peer_id().expect("Bootstrap to contain peer id");
+            let peer_id = addr
+                .extract_peer_id()
+                .expect("Bootstrap to contain peer id");
             ipfs.add_relay(peer_id, addr).await?;
         }
 
