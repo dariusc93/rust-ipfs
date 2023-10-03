@@ -1,3 +1,6 @@
+# 0.1.2 [unreleased]
+- chore: Emit event when selected peer is not an explicit relay
+
 # 0.1.1
 - fix: Emit event on dial failure [PR 105]
 

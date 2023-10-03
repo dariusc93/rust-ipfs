@@ -236,6 +236,14 @@ impl Behaviour {
 
     pub fn select(&mut self, peer_id: PeerId) {
         if !self.relays.contains_key(&peer_id) {
+            self.events
+                .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
+                    peer_id,
+                    result: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Peer is not added in relay list",
+                    )),
+                }));
             return;
         }
 
