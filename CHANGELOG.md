@@ -1,3 +1,6 @@
+# 0.4.6
+- chore: Updated libp2p-relay-manager
+
 # 0.4.5
 - chore: Add json and cbor feature
 

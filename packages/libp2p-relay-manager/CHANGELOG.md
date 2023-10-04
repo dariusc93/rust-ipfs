@@ -1,4 +1,4 @@
-# 0.1.2 [unreleased]
+# 0.1.2
 - chore: Emit event when selected peer is not an explicit relay
 
 # 0.1.1
