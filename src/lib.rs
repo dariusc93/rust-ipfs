@@ -1264,7 +1264,7 @@ impl Ipfs {
         unixfs::TraversalFailed,
     > {
         self.unixfs()
-            .cat(starting_point, range, &[], false)
+            .cat(starting_point, range, &[], false, None)
             .instrument(self.span.clone())
             .await
     }
@@ -1305,7 +1305,7 @@ impl Ipfs {
         dest: P,
     ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
         self.unixfs()
-            .get(path, dest, &[], false)
+            .get(path, dest, &[], false, None)
             .instrument(self.span.clone())
             .await
     }
@@ -1313,7 +1313,7 @@ impl Ipfs {
     /// List directory contents
     pub async fn ls_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'_, NodeItem>, Error> {
         self.unixfs()
-            .ls(path, &[], false)
+            .ls(path, &[], false, None)
             .instrument(self.span.clone())
             .await
     }
