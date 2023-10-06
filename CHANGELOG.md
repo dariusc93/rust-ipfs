@@ -1,4 +1,4 @@
-# 0.5.0 [unreleased]
+# 0.5.0
 - feat: Implement timeout while resolving blocks [PR 106]
 
 [PR 106]: https://github.com/dariusc93/rust-ipfs/pull/106
