@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use either::Either;
 use futures::{stream::BoxStream, StreamExt};
@@ -8,7 +8,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
-use super::UnixfsStatus;
+use super::{TraversalFailed, UnixfsStatus};
 
 pub async fn get<'a, P: AsRef<Path>>(
     which: Either<&Ipfs, &Repo>,
@@ -16,8 +16,11 @@ pub async fn get<'a, P: AsRef<Path>>(
     dest: P,
     providers: &'a [PeerId],
     local_only: bool,
-) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
-    let mut file = tokio::fs::File::create(dest).await?;
+    timeout: Option<Duration>,
+) -> Result<BoxStream<'a, UnixfsStatus>, TraversalFailed> {
+    let mut file = tokio::fs::File::create(dest)
+        .await
+        .map_err(TraversalFailed::Io)?;
 
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
@@ -34,10 +37,13 @@ pub async fn get<'a, P: AsRef<Path>>(
     };
 
     let (resolved, _) = dag
-        .resolve_with_session(session, path.clone(), true, providers, local_only)
-        .await?;
+        .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
+        .await
+        .map_err(TraversalFailed::Resolving)?;
 
-    let block = resolved.into_unixfs_block()?;
+    let block = resolved
+        .into_unixfs_block()
+        .map_err(TraversalFailed::Path)?;
 
     let cid = block.cid();
     let root_name = block.cid().to_string();
@@ -50,7 +56,7 @@ pub async fn get<'a, P: AsRef<Path>>(
         let mut written = 0;
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match repo.get_block_with_session(session, next, providers, local_only).await {
+            let block = match repo.get_block_with_session(session, next, providers, local_only, timeout).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };

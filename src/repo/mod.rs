@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use std::{error, fmt, io};
 use tracing::log;
 
@@ -585,7 +586,7 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
     ) -> Result<Block, Error> {
-        self.get_block_with_session(None, cid, peers, local_only)
+        self.get_block_with_session(None, cid, peers, local_only, None)
             .await
     }
 
@@ -595,6 +596,7 @@ impl Repo {
         cid: &Cid,
         peers: &[PeerId],
         local_only: bool,
+        timeout: Option<Duration>,
     ) -> Result<Block, Error> {
         if let Some(block) = self.get_block_now(cid).await? {
             Ok(block)
@@ -619,7 +621,10 @@ impl Repo {
                 .await
                 .ok();
 
-            rx.await?.map_err(|e| anyhow!("{e}"))
+            let timeout = timeout.unwrap_or(Duration::from_secs(60));
+            tokio::time::timeout(timeout, rx)
+                .await??
+                .map_err(|e| anyhow!("{e}"))
         }
     }
 

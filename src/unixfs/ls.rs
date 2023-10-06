@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use either::Either;
 use futures::{stream::BoxStream, StreamExt};
 use libipld::Cid;
@@ -19,6 +21,7 @@ pub async fn ls<'a>(
     path: IpfsPath,
     providers: &'a [PeerId],
     local_only: bool,
+    timeout: Option<Duration>,
 ) -> anyhow::Result<BoxStream<'a, NodeItem>> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
@@ -35,7 +38,7 @@ pub async fn ls<'a>(
     };
 
     let (resolved, _) = dag
-        .resolve_with_session(session, path.clone(), true, providers, local_only)
+        .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
         .await?;
 
     let block = resolved.into_unixfs_block()?;
@@ -50,7 +53,7 @@ pub async fn ls<'a>(
         let mut root_directory = String::new();
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match repo.get_block_with_session(session, next, providers, local_only).await {
+            let block = match repo.get_block_with_session(session, next, providers, local_only, timeout).await {
                 Ok(block) => block,
                 Err(error) => {
                     yield NodeItem::Error { error };
