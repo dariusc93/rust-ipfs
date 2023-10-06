@@ -621,7 +621,7 @@ impl Repo {
                 .await
                 .ok();
 
-            let timeout = timeout.unwrap_or(Duration::from_secs(60 * 5));
+            let timeout = timeout.unwrap_or(Duration::from_secs(60));
             tokio::time::timeout(timeout, rx)
                 .await??
                 .map_err(|e| anyhow!("{e}"))
