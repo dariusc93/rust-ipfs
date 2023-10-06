@@ -1,7 +1,7 @@
 # 0.5.0 [unreleased]
-- feat: Implement timeout while resolving blocks [PR XXX]
+- feat: Implement timeout while resolving blocks [PR 106]
 
-[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
+[PR 106]: https://github.com/dariusc93/rust-ipfs/pull/106
 
 # 0.4.6
 - chore: Updated libp2p-relay-manager
