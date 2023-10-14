@@ -191,15 +191,12 @@ pub async fn add<'a>(
                     }
                 }
             }
-            tokio::spawn({
-                let opt = opt;
-                let ipfs = ipfs;
-                async move {
-                    if opt.provide {
-                        if let Some(ipfs) = ipfs {
-                            if let Err(e) = ipfs.provide(cid).await {
-                                error!("Unable to provide {cid}: {e}");
-                            }
+
+            tokio::spawn(async move {
+                if opt.provide {
+                    if let Some(ipfs) = ipfs {
+                        if let Err(e) = ipfs.provide(cid).await {
+                            error!("Unable to provide {cid}: {e}");
                         }
                     }
                 }
