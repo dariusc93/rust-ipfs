@@ -8,7 +8,6 @@ use futures::{SinkExt, StreamExt, TryStreamExt};
 use libipld::Cid;
 use std::io::{ErrorKind, Read};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs;
 use tokio_stream::wrappers::ReadDirStream;
 
@@ -24,13 +23,7 @@ pub struct FsBlockStore {
 }
 
 pub struct FsBlockStoreTask {
-    /// The base directory under which we have a sharded directory structure, and the individual
-    /// blocks are stored under the shard. See unixfs/examples/cat.rs for read example.
     path: PathBuf,
-
-    /// Initially used to demonstrate a bug, not really needed anymore. Could be used as a basis
-    /// for periodic synching to disk to know much space we have used.
-    written_bytes: AtomicU64,
 
     rx: futures::channel::mpsc::Receiver<RepoBlockCommand>,
 }
@@ -40,7 +33,6 @@ impl FsBlockStore {
         let (tx, rx) = futures::channel::mpsc::channel(1);
         let mut task = FsBlockStoreTask {
             path: path.clone(),
-            written_bytes: AtomicU64::default(),
             rx,
         };
 
@@ -256,9 +248,6 @@ impl FsBlockStoreTask {
         match je {
             Ok(Ok(written)) => {
                 trace!(bytes = written, "block writing succeeded");
-
-                self.written_bytes
-                    .fetch_add(written as u64, Ordering::SeqCst);
 
                 Ok((cid, BlockPut::NewBlock))
             }
