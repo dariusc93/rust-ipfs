@@ -18,12 +18,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let ipfs: Ipfs = UninitializedIpfs::new()
+        .with_default()
         .with_mdns()
-        .with_identify(None)
-        .with_autonat()
-        .with_bitswap(None)
-        .with_kademlia(None, Default::default())
-        .with_ping(None)
         .start()
         .await?;
 

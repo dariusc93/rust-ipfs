@@ -573,8 +573,22 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Load default behaviour for basic functionality
+    pub fn with_default(self) -> Self {
+        self.with_identify(None)
+            .with_autonat()
+            .with_bitswap(None)
+            .with_kademlia(None, Default::default())
+            .with_ping(None)
+            .with_pubsub(None)
+    }
+
     /// Enables kademlia
-    pub fn with_kademlia(mut self, config: Option<Either<KadConfig, KademliaConfig>>, store: KadStoreConfig) -> Self {
+    pub fn with_kademlia(
+        mut self,
+        config: Option<Either<KadConfig, KademliaConfig>>,
+        store: KadStoreConfig,
+    ) -> Self {
         self.options.protocols.kad = true;
         self.options.kad_configuration = config;
         self.options.kad_store_config = store;
