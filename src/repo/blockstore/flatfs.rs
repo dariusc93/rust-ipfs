@@ -4,114 +4,43 @@ use crate::repo::{BlockPut, BlockStore};
 use crate::repo::{BlockRm, BlockRmError};
 use crate::Block;
 use async_trait::async_trait;
-use hash_hasher::{HashBuildHasher, HashedMap};
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use libipld::Cid;
-use std::hash::Hash;
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::sync::Mutex;
 use tokio::fs;
-use tokio::sync::broadcast;
-use tracing_futures::Instrument;
+use tokio_stream::wrappers::ReadDirStream;
 
-type ArcMutexHashedMap<A, B> = Arc<Mutex<HashedMap<A, B>>>;
+use super::RepoBlockCommand;
 
 /// File system backed block store.
 ///
 /// For information on path mangling, please see `block_path` and `filestem_to_block_cid`.
 #[derive(Debug)]
 pub struct FsBlockStore {
-    /// The base directory under which we have a sharded directory structure, and the individual
-    /// blocks are stored under the shard. See unixfs/examples/cat.rs for read example.
+    path: PathBuf,
+    tx: futures::channel::mpsc::Sender<RepoBlockCommand>,
+}
+
+pub struct FsBlockStoreTask {
     path: PathBuf,
 
-    /// Synchronize concurrent reads and writes to the same Cid.
-    /// If the write ever happens, the message sent will be Ok(()), on failure it'll be an Err(()).
-    /// Since this is a broadcast channel, the late arriving receiver might not get any messages.
-    writes: ArcMutexHashedMap<Cid, broadcast::Sender<Result<(), ()>>>,
-
-    /// Initially used to demonstrate a bug, not really needed anymore. Could be used as a basis
-    /// for periodic synching to disk to know much space we have used.
-    written_bytes: AtomicU64,
+    rx: futures::channel::mpsc::Receiver<RepoBlockCommand>,
 }
 
 impl FsBlockStore {
     pub fn new(path: PathBuf) -> Self {
-        FsBlockStore {
-            path,
-            writes: Arc::new(Mutex::new(HashedMap::with_capacity_and_hasher(
-                8,
-                HashBuildHasher::default(),
-            ))),
-            written_bytes: Default::default(),
-        }
-    }
-}
-
-/// A helper used to remove our key from `FsBlockStore::writes`. It is quite inefficient, some
-/// kind of reference counting would be great.
-///
-/// [`Drop`] is used to clean up the so that it is _safer_ to drop the future returned by
-/// `FsBlockStore::put`.
-///
-/// Without reference counting, there is a race condition with repeated multiple
-/// concurrent writers and dropping; this might lead to the first ones dropping the latter
-/// concurrent writes [`FsBlockStore::writes`] key.
-struct RemoveOnDrop<K: Eq + Hash, V>(ArcMutexHashedMap<K, V>, Option<K>);
-
-impl<K: Eq + Hash, V> Drop for RemoveOnDrop<K, V> {
-    fn drop(&mut self) {
-        if let Some(key) = self.1.take() {
-            let mut g = self.0.lock().unwrap();
-            // FIXME: there should be something here to make sure the value is of the expected
-            // "generation", not to remove any future channels. Or then, we could just use the
-            // tokio::sync::broadcast::Sender::receiver_count here to make sure we only remove an
-            // unused Sender. This would however wreak havoc on the FsBlockStore::put long match in
-            // the end, which has match arms which assume all of the senders have gone away.
-            g.remove(&key);
-        }
-    }
-}
-
-/// When synchronizing to a possible ongoing write through `FsBlockStore::writes` these are the
-/// possible outcomes.
-#[derive(Debug)]
-enum WriteCompletion {
-    KnownGood,
-    NotObserved,
-    KnownBad,
-    NotOngoing,
-}
-
-impl FsBlockStore {
-    /// Returns the same Cid in either case. Ok variant is returned in case it is suspected the
-    /// write completed successfully or there was never any write ongoing. Err variant is returned
-    /// if it's known that the write failed.
-    async fn write_completion(&self, cid: &Cid) -> WriteCompletion {
-        use std::collections::hash_map::Entry;
-
-        let mut rx = match self
-            .writes
-            .lock()
-            .expect("cannot support poisoned")
-            .entry(*cid)
-        {
-            Entry::Occupied(oe) => oe.get().subscribe(),
-            Entry::Vacant(_) => return WriteCompletion::NotOngoing,
+        let (tx, rx) = futures::channel::mpsc::channel(1);
+        let mut task = FsBlockStoreTask {
+            path: path.clone(),
+            rx,
         };
 
-        trace!("awaiting concurrent write to completion");
+        tokio::spawn(async move {
+            task.start().await;
+        });
 
-        match rx.recv().await {
-            Ok(Ok(())) => WriteCompletion::KnownGood,
-            Err(broadcast::error::RecvError::Closed) => WriteCompletion::NotObserved,
-            Ok(Err(_)) => WriteCompletion::KnownBad,
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                unreachable!("sending at most one message to the channel with capacity of one")
-            }
-        }
+        Self { path, tx }
     }
 }
 
@@ -128,10 +57,111 @@ impl BlockStore for FsBlockStore {
     }
 
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
-        let path = block_path(self.path.clone(), cid);
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Contains {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
 
-        // why doesn't this synchronize with the rest? Not sure if there is any use for this method
-        // actually. When does it matter if a block exists, except for testing.
+    async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Get {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::PutBlock {
+                block,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Remove {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn list(&self) -> Result<Vec<Cid>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::List { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn wipe(&self) {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Wipe { response: tx })
+            .await;
+        let _ = rx.await.map_err(anyhow::Error::from);
+    }
+}
+
+impl FsBlockStoreTask {
+    async fn start(&mut self) {
+        while let Some(command) = self.rx.next().await {
+            match command {
+                RepoBlockCommand::Contains { cid, response } => {
+                    let _ = response.send(self.contains(&cid).await);
+                }
+                RepoBlockCommand::Get { cid, response } => {
+                    let _ = response.send(self.get(&cid).await);
+                }
+                RepoBlockCommand::PutBlock { block, response } => {
+                    let _ = response.send(self.put(block).await);
+                }
+                RepoBlockCommand::Remove { cid, response } => {
+                    let _ = response.send(self.remove(&cid).await);
+                }
+                RepoBlockCommand::List { response } => {
+                    let _ = response.send(self.list().await);
+                }
+                RepoBlockCommand::Wipe { response } => {
+                    let _ = response.send({
+                        self.wipe().await;
+                        Ok(())
+                    });
+                }
+            }
+        }
+    }
+}
+
+impl FsBlockStoreTask {
+    async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
+        let path = block_path(self.path.clone(), cid);
 
         let metadata = match fs::metadata(path).await {
             Ok(m) => m,
@@ -143,277 +173,138 @@ impl BlockStore for FsBlockStore {
     }
 
     async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error> {
-        let span = tracing::trace_span!("get block", cid = %cid);
+        let path = block_path(self.path.clone(), cid);
 
-        async move {
-            if let WriteCompletion::KnownBad = self.write_completion(cid).await {
-                return Ok(None);
-            }
+        let cid = *cid;
 
-            let path = block_path(self.path.clone(), cid);
-
-            let cid = *cid;
-
-            // probably best to do everything in the blocking thread if we are to issue multiple
-            // syscalls
-            tokio::task::spawn_blocking(move || {
-                let mut file = match std::fs::File::open(path) {
-                    Ok(file) => file,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                    Err(e) => {
-                        return Err(e.into());
-                    }
-                };
-
-                let len = file.metadata()?.len();
-
-                let mut data = Vec::with_capacity(len as usize);
-                file.read_to_end(&mut data)?;
-                let block = Block::new(cid, data)?;
-                Ok(Some(block))
-            })
-            .await?
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
-        use std::collections::hash_map::Entry;
-
-        let span = tracing::trace_span!("put block", cid = %block.cid());
-
-        let target_path = block_path(self.path.clone(), block.cid());
-        let cid = *block.cid();
-
-        let inner_span = debug_span!(parent: &span, "blocking");
-
-        async move {
-            // why synchronize here? because when we lose the race we cant know if there was someone
-            // else interested in writing this block or not
-
-            // FIXME: allowing only the creator to cleanup means this is not forget safe. the forget
-            // doesn't result in memory unsafety but it will deadlock any other access to the cid.
-            let (tx, mut rx) = {
-                let mut g = self.writes.lock().expect("cant support poisoned");
-
-                match g.entry(*block.cid()) {
-                    Entry::Occupied(oe) => {
-                        // someone is already writing this, nice
-                        trace!("joining in on another already writing the block");
-                        (oe.get().clone(), oe.get().subscribe())
-                    }
-                    Entry::Vacant(ve) => {
-                        // we might be the first, or then the block exists already
-                        let (tx, rx) = broadcast::channel(1);
-                        ve.insert(tx.clone());
-                        (tx, rx)
-                    }
+        // probably best to do everything in the blocking thread if we are to issue multiple
+        // syscalls
+        tokio::task::spawn_blocking(move || {
+            let mut file = match std::fs::File::open(path) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(e) => {
+                    return Err(e.into());
                 }
             };
 
-            // create this in case the winner is dropped while awaiting
-            let cleanup = RemoveOnDrop(self.writes.clone(), Some(*block.cid()));
+            let len = file.metadata()?.len();
 
-            // launch a blocking task for the filesystem mutation.
-            let je = tokio::task::spawn_blocking(move || {
-                // pick winning writer with filesystem and create_new; this error will be the 1st
-                // nested level
-
-                // this is blocking context, use this instead of instrument
-                let _entered = inner_span.enter();
-
-                let sharded = target_path
-                    .parent()
-                    .expect("we already have at least the shard parent");
-
-                // FIXME: missing fsync on directories; for example after winning the race we could
-                // fsync the parent and parent.parent
-                std::fs::create_dir_all(sharded)?;
-
-                let target = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&target_path)?;
-
-                let temp_path = target_path.with_extension("tmp");
-
-                match write_through_tempfile(target, &target_path, temp_path, block.data()) {
-                    Ok(()) => {
-                        trace!("successfully wrote the block");
-                        Ok::<_, std::io::Error>(Ok(block.data().len()))
-                    }
-                    Err(e) => {
-                        match std::fs::remove_file(&target_path) {
-                            Ok(_) => debug!("removed partially written {:?}", target_path),
-                            Err(removal) => warn!(
-                                "failed to remove partially written {:?}: {}",
-                                target_path, removal
-                            ),
-                        }
-                        Ok(Err(e))
-                    }
-                }
-            })
-            .await;
-
-            // this is quite unfortunate but can't think of a way which would handle cleanup in drop
-            // and not waste much effort.
-            drop(cleanup);
-
-            match je {
-                Ok(Ok(Ok(written))) => {
-                    trace!(bytes = written, "block writing succeeded");
-                    let _ = tx
-                        .send(Ok(()))
-                        .expect("this cannot fail as we have at least one receiver on stack");
-
-                    drop(rx);
-                    drop(tx);
-
-                    self.written_bytes
-                        .fetch_add(written as u64, Ordering::SeqCst);
-
-                    Ok((cid, BlockPut::NewBlock))
-                }
-                Ok(Ok(Err(e))) => {
-                    trace!("write failed but hopefully the target was removed");
-                    let _ = tx
-                        .send(Err(()))
-                        .expect("this cannot fail as we have at least one receiver on the stack");
-
-                    drop(rx);
-                    drop(tx);
-
-                    Err(Error::new(e))
-                }
-                Ok(Err(e)) => {
-                    trace!("lost block writing race: {}", e);
-                    // At least the following cases:
-                    // - the block existed already
-                    // - the block is being written to and we should await for this to complete
-                    // - readonly or full filesystem prevents file creation
-
-                    drop(tx);
-
-                    let message = match rx.recv().await {
-                        Ok(message) => {
-                            trace!("synchronized with writer, write outcome: {:?}", message);
-                            message
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            // there was never any write intention by any party, and we may have just
-                            // closed the last sender above, or we were late for the one message.
-                            Ok(())
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            unreachable!("broadcast channel should only be messaged once here")
-                        }
-                    };
-
-                    drop(rx);
-
-                    if message.is_err() {
-                        // could loop, however if one write failed, the next should probably
-                        // fail as well (e.g. out of disk space)
-                        Err(anyhow::anyhow!("other concurrent write failed"))
-                    } else {
-                        Ok((cid, BlockPut::Existed))
-                    }
-                }
-                Err(e) if e.is_cancelled() => {
-                    trace!("runtime is shutting down: {}", e);
-                    Err(e.into())
-                }
-                Err(e) => {
-                    // as of writing this, we didn't have panicking inside the task
-                    error!("blocking put task panicked or something else: {}", e);
-                    Err(e.into())
-                }
-            }
-        }
-        .instrument(span)
-        .await
+            let mut data = Vec::with_capacity(len as usize);
+            file.read_to_end(&mut data)?;
+            let block = Block::new(cid, data)?;
+            Ok(Some(block))
+        })
+        .await?
     }
 
-    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
-        let path = block_path(self.path.clone(), cid);
+    async fn put(&mut self, block: Block) -> Result<(Cid, BlockPut), Error> {
+        let target_path = block_path(self.path.clone(), block.cid());
+        let cid = *block.cid();
 
-        let span = trace_span!("remove block", cid = %cid);
+        let je = tokio::task::spawn_blocking(move || {
+            let sharded = target_path
+                .parent()
+                .expect("we already have at least the shard parent");
 
-        match self.write_completion(cid).instrument(span).await {
-            WriteCompletion::KnownBad => Ok(Err(BlockRmError::NotFound(*cid))),
-            completion => {
-                trace!(cid = %cid, completion = ?completion, "removing block after synchronizing");
-                match fs::remove_file(path).await {
-                    // FIXME: not sure if theres any point in taking cid ownership here?
-                    Ok(()) => Ok(Ok(BlockRm::Removed(*cid))),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        Ok(Err(BlockRmError::NotFound(*cid)))
+            std::fs::create_dir_all(sharded)?;
+
+            let target = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target_path)?;
+
+            let temp_path = target_path.with_extension("tmp");
+
+            match write_through_tempfile(target, &target_path, temp_path, block.data()) {
+                Ok(()) => {
+                    trace!("successfully wrote the block");
+                    Ok::<_, std::io::Error>(Ok(block.data().len()))
+                }
+                Err(e) => {
+                    match std::fs::remove_file(&target_path) {
+                        Ok(_) => debug!("removed partially written {:?}", target_path),
+                        Err(removal) => warn!(
+                            "failed to remove partially written {:?}: {}",
+                            target_path, removal
+                        ),
                     }
-                    Err(e) => Err(e.into()),
+                    Ok(Err(e))
                 }
             }
+        })
+        .await
+        .map_err(|e| {
+            error!("blocking put task error: {}", e);
+            e
+        })?;
+
+        match je {
+            Ok(Ok(written)) => {
+                trace!(bytes = written, "block writing succeeded");
+
+                Ok((cid, BlockPut::NewBlock))
+            }
+            Ok(Err(e)) => {
+                trace!("write failed but hopefully the target was removed");
+
+                Err(Error::new(e))
+            }
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                trace!("block exist: {}", e);
+                Ok((cid, BlockPut::Existed))
+            }
+            Err(e) => Err(Error::new(e)),
+        }
+    }
+
+    async fn remove(&mut self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+        let path = block_path(self.path.clone(), cid);
+
+        trace!(cid = %cid, "removing block after synchronizing");
+        match fs::remove_file(path).await {
+            // FIXME: not sure if theres any point in taking cid ownership here?
+            Ok(()) => Ok(Ok(BlockRm::Removed(*cid))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Ok(Err(BlockRmError::NotFound(*cid)))
+            }
+            Err(e) => Err(e.into()),
         }
     }
 
     async fn list(&self) -> Result<Vec<Cid>, Error> {
-        /// Implementation moved in a separate function from the outer body. The `#[async_trait]`
-        /// used for the outer body generates two lifetime parameters for all of the trait
-        /// functions, and somehow the two lifetimes generated by `#[async_trait]` just don't work
-        /// leading to confusing error when `ipfs` is used as a dependency in an outside of
-        /// workspace crate.
-        ///
-        /// See [the first gist] for the standalone working workaround, error and an expanded
-        /// version of the original code. What's more, this was bisected to be because of changed
-        /// structure in async-trait version 0.1.42 to 0.1.43. See [the second gist] for expansion
-        /// difference between the two async-trait versions.
-        ///
-        /// [the first gist]: https://gist.github.com/koivunej/d6abccb4133839eeab8b36992f1a95fa
-        /// [the second gist]: https://gist.github.com/koivunej/cbcaae52b7242a73419ef62e4c606bd7
-        async fn list0(p: PathBuf) -> Result<Vec<Cid>, Error> {
-            use futures::future::ready;
-            use futures::stream::TryStreamExt;
-            use tokio_stream::wrappers::ReadDirStream;
+        let stream = ReadDirStream::new(fs::read_dir(&self.path).await?);
 
-            let span = tracing::trace_span!("listing blocks");
+        let vec = stream
+            .try_filter_map(|d| async move {
+                // map over the shard directories
+                Ok(if d.file_type().await?.is_dir() {
+                    Some(ReadDirStream::new(fs::read_dir(d.path()).await?))
+                } else {
+                    None
+                })
+            })
+            // flatten each; there could be unordered execution pre-flattening
+            .try_flatten()
+            // convert the paths ending in ".data" into cid
+            .try_filter_map(|d| {
+                let name = d.file_name();
+                let path: &std::path::Path = name.as_ref();
 
-            async move {
-                let stream = ReadDirStream::new(fs::read_dir(p).await?);
+                futures::future::ready(if path.extension() != Some("data".as_ref()) {
+                    Ok(None)
+                } else {
+                    let maybe_cid = filestem_to_block_cid(path.file_stem());
+                    Ok(maybe_cid)
+                })
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
 
-                let vec = stream
-                    .try_filter_map(|d| async move {
-                        // map over the shard directories
-                        Ok(if d.file_type().await?.is_dir() {
-                            Some(ReadDirStream::new(fs::read_dir(d.path()).await?))
-                        } else {
-                            None
-                        })
-                    })
-                    // flatten each; there could be unordered execution pre-flattening
-                    .try_flatten()
-                    // convert the paths ending in ".data" into cid
-                    .try_filter_map(|d| {
-                        let name = d.file_name();
-                        let path: &std::path::Path = name.as_ref();
-
-                        ready(if path.extension() != Some("data".as_ref()) {
-                            Ok(None)
-                        } else {
-                            let maybe_cid = filestem_to_block_cid(path.file_stem());
-                            Ok(maybe_cid)
-                        })
-                    })
-                    .try_collect::<Vec<_>>()
-                    .await?;
-
-                Ok(vec)
-            }
-            .instrument(span)
-            .await
-        }
-        list0(self.path.to_owned()).await
+        Ok(vec)
     }
+
+    async fn wipe(&mut self) {}
 }
 
 fn write_through_tempfile(
@@ -567,43 +458,8 @@ mod tests {
 
         let (writes, existing) = race_to_insert_scenario(count, block, &single).await;
 
-        let single = Arc::try_unwrap(single).unwrap();
-        assert_eq!(single.written_bytes.into_inner(), 15);
-
         assert_eq!(writes, 1);
         assert_eq!(existing, count - 1);
-    }
-
-    #[tokio::test]
-    async fn race_to_insert_with_existing() {
-        // FIXME: why not tempdir?
-        let mut tmp = temp_dir();
-        tmp.push("race_to_insert_existing");
-        std::fs::remove_dir_all(&tmp).ok();
-
-        let single = FsBlockStore::new(tmp.clone());
-        single.init().await.unwrap();
-
-        let single = Arc::new(single);
-
-        let cid = Cid::try_from("QmRgutAxd8t7oGkSm4wmeuByG6M51wcTso6cubDdQtuEfL").unwrap();
-        let data = hex!("0a0d08021207666f6f6261720a1807");
-
-        let block = Block::new(cid, data.to_vec()).unwrap();
-
-        single.put(block.clone()).await.unwrap();
-
-        assert_eq!(single.written_bytes.load(Ordering::SeqCst), 15);
-
-        let count = 10;
-
-        let (writes, existing) = race_to_insert_scenario(count, block, &single).await;
-
-        let single = Arc::try_unwrap(single).unwrap();
-        assert_eq!(single.written_bytes.into_inner(), 15);
-
-        assert_eq!(writes, 0);
-        assert_eq!(existing, count);
     }
 
     async fn race_to_insert_scenario(

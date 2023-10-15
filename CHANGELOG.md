@@ -1,3 +1,8 @@
+# 0.6.0
+- refactor: Move repo logic into a single task [PR 108]
+
+[PR 108]: https://github.com/dariusc93/rust-ipfs/pull/108
+
 # 0.5.0
 - feat: Implement timeout while resolving blocks [PR 106]
 
