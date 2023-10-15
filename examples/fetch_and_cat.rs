@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
     let ipfs: Ipfs = UninitializedIpfs::new()
         .with_bitswap(None)
-        .with_kademlia()
+        .with_kademlia(None, Default::default())
         .with_identify(None)
         .start()
         .await?;

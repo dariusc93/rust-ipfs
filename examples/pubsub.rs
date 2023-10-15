@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         .with_ping(None)
         .with_autonat()
         .with_identify(None)
-        .with_kademlia();
+        .with_kademlia(None, Default::default());
 
     if opt.use_mdns {
         uninitialized = uninitialized.with_mdns();

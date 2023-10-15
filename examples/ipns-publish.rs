@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
         .with_identify(None)
         .with_autonat()
         .with_bitswap(None)
-        .with_kademlia()
+        .with_kademlia(None, Default::default())
         .with_ping(None)
         .default_record_key_validator()
         .start()

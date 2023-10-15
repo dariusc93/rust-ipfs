@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
         .with_identify(None)
         .with_autonat()
         .with_bitswap(None)
-        .with_kademlia()
+        .with_kademlia(None, Default::default())
         .with_ping(None)
         .listen_as_external_addr()
         .fd_limit(rust_ipfs::FDLimit::Max)

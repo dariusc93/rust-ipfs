@@ -574,8 +574,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enables kademlia
-    pub fn with_kademlia(mut self) -> Self {
+    pub fn with_kademlia(mut self, config: Option<Either<KadConfig, KademliaConfig>>, store: KadStoreConfig) -> Self {
         self.options.protocols.kad = true;
+        self.options.kad_configuration = config;
+        self.options.kad_store_config = store;
         self
     }
 
@@ -683,13 +685,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Set swarm configuration
     pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
         self.options.swarm_configuration = Some(config);
-        self
-    }
-
-    /// Set kad configuration
-    pub fn set_kad_configuration(mut self, config: KadConfig, store: KadStoreConfig) -> Self {
-        self.options.kad_configuration = Some(Either::Left(config));
-        self.options.kad_store_config = store;
         self
     }
 
@@ -2448,7 +2443,7 @@ mod node {
             // given span
             let ipfs: Ipfs = UninitializedIpfsNoop::with_opt(opts)
                 .with_bitswap(None)
-                .with_kademlia()
+                .with_kademlia(None, Default::default())
                 .with_identify(None)
                 .with_ping(None)
                 .with_pubsub(None)

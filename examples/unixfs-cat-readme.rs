@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt;
 async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = UninitializedIpfs::new()
         .with_bitswap(None)
-        .with_kademlia()
+        .with_kademlia(None, Default::default())
         .with_identify(None)
         .with_ping(None)
         .with_autonat()
