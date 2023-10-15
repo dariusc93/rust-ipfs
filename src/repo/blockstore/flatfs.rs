@@ -163,9 +163,6 @@ impl FsBlockStoreTask {
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
         let path = block_path(self.path.clone(), cid);
 
-        // why doesn't this synchronize with the rest? Not sure if there is any use for this method
-        // actually. When does it matter if a block exists, except for testing.
-
         let metadata = match fs::metadata(path).await {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -206,9 +203,6 @@ impl FsBlockStoreTask {
         let cid = *block.cid();
 
         let je = tokio::task::spawn_blocking(move || {
-            // pick winning writer with filesystem and create_new; this error will be the 1st
-            // nested level
-
             let sharded = target_path
                 .parent()
                 .expect("we already have at least the shard parent");
