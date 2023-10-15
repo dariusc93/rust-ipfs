@@ -1,4 +1,4 @@
-# 0.6.0
+# 0.6.0 [unreleased]
 - refactor: Move repo logic into a single task [PR 108]
 
 [PR 108]: https://github.com/dariusc93/rust-ipfs/pull/108
