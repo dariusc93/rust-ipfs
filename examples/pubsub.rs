@@ -42,18 +42,18 @@ async fn main() -> anyhow::Result<()> {
     let topic = opt.topic.unwrap_or_else(|| String::from("ipfs-chat"));
 
     // Initialize the repo and start a daemon
-    let mut uninitialized = UninitializedIpfs::new();
+    let mut uninitialized = UninitializedIpfs::new().with_default();
 
     if opt.use_mdns {
-        uninitialized = uninitialized.enable_mdns();
+        uninitialized = uninitialized.with_mdns();
     }
 
     if opt.use_relay {
-        uninitialized = uninitialized.enable_relay(true);
+        uninitialized = uninitialized.with_relay(true);
     }
 
     if opt.use_upnp {
-        uninitialized = uninitialized.enable_upnp();
+        uninitialized = uninitialized.with_upnp();
     }
 
     let ipfs: Ipfs = uninitialized.start().await?;

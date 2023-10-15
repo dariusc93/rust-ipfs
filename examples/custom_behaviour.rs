@@ -8,8 +8,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
-        .enable_mdns()
-        .set_custom_behaviour(ext_behaviour::Behaviour)
+        .with_custom_behaviour(ext_behaviour::Behaviour)
         .start()
         .await?;
 

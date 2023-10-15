@@ -8,8 +8,9 @@ use either::Either;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
+use crate::IpfsOptions;
 
-use crate::p2p::{MultiaddrExt, SwarmOptions};
+use crate::p2p::MultiaddrExt;
 use crate::repo::Repo;
 
 use beetle_bitswap_next::{Bitswap, ProtocolId};
@@ -46,10 +47,10 @@ where
     pub mdns: Toggle<Mdns>,
     pub bitswap: Toggle<Bitswap<Repo>>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
-    pub ping: Ping,
-    pub identify: Identify,
-    pub pubsub: GossipsubStream,
-    pub autonat: autonat::Behaviour,
+    pub ping: Toggle<Ping>,
+    pub identify: Toggle<Identify>,
+    pub pubsub: Toggle<GossipsubStream>,
+    pub autonat: Toggle<autonat::Behaviour>,
     pub upnp: Toggle<libp2p_nat::Behaviour>,
     pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
     pub relay: Toggle<Relay>,
@@ -334,18 +335,19 @@ where
 {
     pub async fn new(
         keypair: &Keypair,
-        options: SwarmOptions,
+        options: &IpfsOptions,
         repo: Repo,
         limits: ConnectionLimits,
         custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
+        let protocols = options.protocols;
+
         let peer_id = keypair.public().to_peer_id();
 
         info!("net: starting with peer id {}", peer_id);
 
-        let mdns = if options.mdns {
+        let mdns = if protocols.mdns {
             let config = MdnsConfig {
-                enable_ipv6: options.mdns_ipv6,
                 ..Default::default()
             };
             Mdns::new(config, peer_id).ok()
@@ -357,13 +359,13 @@ where
         let store = {
             //TODO: Make customizable
             //TODO: Use persistent store for kad
-            let config = options.kad_store_config.memory.unwrap_or_default();
+            let config = options.kad_store_config.memory.clone().unwrap_or_default();
 
             MemoryStore::with_config(peer_id, config)
         };
 
         let kad_config = match options
-            .kad_config
+            .kad_configuration
             .clone()
             .unwrap_or(Either::Left(KadConfig::default()))
         {
@@ -371,8 +373,8 @@ where
             Either::Right(kad) => kad,
         };
 
-        let mut kademlia = Toggle::from(
-            (!options.disable_kad).then_some(Kademlia::with_config(peer_id, store, kad_config)),
+        let mut kademlia: Toggle<Kademlia<MemoryStore>> = Toggle::from(
+            (protocols.kad).then_some(Kademlia::with_config(peer_id, store, kad_config)),
         );
 
         if let Some(kad) = kademlia.as_mut() {
@@ -384,22 +386,35 @@ where
             }
         }
 
-        let autonat = autonat::Behaviour::new(peer_id, Default::default());
-        let bitswap = (!options.disable_bitswap)
+        let autonat = protocols
+            .autonat
+            .then_some(autonat::Behaviour::new(peer_id, Default::default()))
+            .into();
+
+        let bitswap = (protocols.bitswap)
             .then_some(Bitswap::new(peer_id, repo, Default::default()).await)
             .into();
 
-        let ping = Ping::new(options.ping_config.unwrap_or_default());
+        let ping = protocols
+            .ping
+            .then_some(Ping::new(
+                options.ping_configuration.clone().unwrap_or_default(),
+            ))
+            .into();
 
-        let identify = Identify::new(
-            options
-                .identify_config
-                .unwrap_or_default()
-                .into(keypair.public()),
-        );
+        let identify = protocols
+            .identify
+            .then_some(Identify::new(
+                options
+                    .identify_configuration
+                    .clone()
+                    .unwrap_or_default()
+                    .into(keypair.public()),
+            ))
+            .into();
 
         let pubsub = {
-            let pubsub_config = options.pubsub_config.unwrap_or_default();
+            let pubsub_config = options.pubsub_config.clone().unwrap_or_default();
             let mut builder = libp2p::gossipsub::ConfigBuilder::default();
 
             if let Some(protocol) = pubsub_config.custom_protocol_id {
@@ -422,29 +437,29 @@ where
             )
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-            GossipsubStream::from(gossipsub)
+            protocols
+                .pubsub
+                .then_some(GossipsubStream::from(gossipsub))
+                .into()
         };
 
         // Maybe have this enable in conjunction with RelayClient?
-        let dcutr = Toggle::from(options.dcutr.then_some(Dcutr::new(peer_id)));
+        let dcutr = Toggle::from(protocols.dcutr.then_some(Dcutr::new(peer_id)));
         let relay_config = options
             .relay_server_config
+            .clone()
             .map(|rc| rc.into())
             .unwrap_or_default();
 
         let relay = Toggle::from(
-            options
+            protocols
                 .relay_server
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
-        let upnp = Toggle::from(
-            options
-                .portmapping
-                .then_some(libp2p_nat::Behaviour::default()),
-        );
+        let upnp = Toggle::from(protocols.upnp.then_some(libp2p_nat::Behaviour::default()));
 
-        let (transport, relay_client, relay_manager) = match options.relay {
+        let (transport, relay_client, relay_manager) = match protocols.relay_client {
             true => {
                 let (transport, client) = client::new(peer_id);
                 let manager = libp2p_relay_manager::Behaviour::new(Default::default());
@@ -457,18 +472,18 @@ where
         peerbook.set_connection_limit(limits);
 
         let addressbook =
-            addressbook::Behaviour::with_config(options.addrbook_config.unwrap_or_default());
+            addressbook::Behaviour::with_config(options.addr_config.unwrap_or_default());
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
         let protocol = protocol::Behaviour::default();
         let custom = Toggle::from(custom);
 
-        let rendezvous_client = options
+        let rendezvous_client = protocols
             .rendezvous_client
             .then_some(libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
             .into();
 
-        let rendezvous_server = options
+        let rendezvous_server = protocols
             .rendezvous_server
             .then_some(libp2p::rendezvous::server::Behaviour::new(
                 Default::default(),
@@ -548,26 +563,11 @@ where
         }
     }
 
-    pub fn pubsub(&mut self) -> &mut GossipsubStream {
-        &mut self.pubsub
+    pub fn pubsub(&mut self) -> Option<&mut GossipsubStream> {
+        self.pubsub.as_mut()
     }
 
     pub fn bitswap(&mut self) -> Option<&mut Bitswap<Repo>> {
         self.bitswap.as_mut()
     }
-}
-
-/// Create a IPFS behaviour with the IPFS bootstrap nodes.
-pub async fn build_behaviour<C>(
-    keypair: &Keypair,
-    options: SwarmOptions,
-    repo: Repo,
-    limits: ConnectionLimits,
-    custom: Option<C>,
-) -> Result<(Behaviour<C>, Option<ClientTransport>), Error>
-where
-    C: NetworkBehaviour,
-    <C as NetworkBehaviour>::ToSwarm: Debug + Send,
-{
-    Behaviour::new(keypair, options, repo, limits, custom).await
 }

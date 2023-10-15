@@ -1,6 +1,8 @@
 # 0.6.0 [unreleased]
+- refactor: Disable primary protocols by default [PR 109]  
 - refactor: Move repo logic into a single task [PR 108]
 
+[PR 109]: https://github.com/dariusc93/rust-ipfs/pull/109
 [PR 108]: https://github.com/dariusc93/rust-ipfs/pull/108
 
 # 0.5.0

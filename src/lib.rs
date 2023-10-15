@@ -74,7 +74,7 @@ use std::{
 use self::{
     dag::IpldDag,
     ipns::Ipns,
-    p2p::{create_swarm, SwarmOptions, TSwarm},
+    p2p::{create_swarm, TSwarm},
     repo::Repo,
 };
 
@@ -165,29 +165,8 @@ pub struct IpfsOptions {
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
 
-    /// Enables mdns for peer discovery and announcement when true.
-    pub mdns: bool,
-
-    /// Enables ipv6 for mdns
-    pub mdns_ipv6: bool,
-
-    /// Enables dcutr
-    pub dcutr: bool,
-
-    /// Enables relay client.
-    pub relay: bool,
-
-    /// Disables kademlia protocol
-    pub disable_kad: bool,
-
-    /// Disables bitswap protocol
-    pub disable_bitswap: bool,
-
     /// Bitswap configuration
     pub bitswap_config: Option<BitswapConfig>,
-
-    /// Enables relay server
-    pub relay_server: bool,
 
     /// Relay server config
     pub relay_server_config: Option<RelayConfig>,
@@ -217,9 +196,6 @@ pub struct IpfsOptions {
     /// Ping Configuration
     pub ping_configuration: Option<PingConfig>,
 
-    /// Enables port mapping (aka UPnP)
-    pub port_mapping: bool,
-
     /// Address book configuration
     pub addr_config: Option<AddressBookConfig>,
 
@@ -231,18 +207,31 @@ pub struct IpfsOptions {
     /// Repo Provider option
     pub provider: RepoProvider,
 
-    /// Rendezvous Client
-    pub rendezvous_client: bool,
-
-    /// Rendezvous Server
-    pub rendezvous_server: bool,
-
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
     /// with this span or spans referring to this as their parent. Setting this other than `None`
     /// default is useful when running multiple nodes.
     pub span: Option<Span>,
+
+    pub(crate) protocols: Libp2pProtocol,
+}
+
+#[derive(Default, Clone, Copy)]
+pub(crate) struct Libp2pProtocol {
+    pub(crate) pubsub: bool,
+    pub(crate) kad: bool,
+    pub(crate) bitswap: bool,
+    pub(crate) relay_client: bool,
+    pub(crate) relay_server: bool,
+    pub(crate) dcutr: bool,
+    pub(crate) mdns: bool,
+    pub(crate) identify: bool,
+    pub(crate) autonat: bool,
+    pub(crate) rendezvous_client: bool,
+    pub(crate) rendezvous_server: bool,
+    pub(crate) upnp: bool,
+    pub(crate) ping: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -265,15 +254,8 @@ impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
             ipfs_path: StoragePath::Memory,
-            mdns: Default::default(),
-            mdns_ipv6: Default::default(),
-            dcutr: Default::default(),
             bootstrap: Default::default(),
-            relay: Default::default(),
-            disable_kad: Default::default(),
-            disable_bitswap: Default::default(),
             bitswap_config: Default::default(),
-            relay_server: Default::default(),
             relay_server_config: Default::default(),
             kad_configuration: Default::default(),
             kad_store_config: Default::default(),
@@ -284,13 +266,11 @@ impl Default for IpfsOptions {
             keystore: Keystore::in_memory(),
             connection_idle: Duration::from_secs(30),
             listening_addrs: vec![],
-            port_mapping: false,
             transport_configuration: None,
             pubsub_config: None,
             swarm_configuration: None,
             span: None,
-            rendezvous_client: false,
-            rendezvous_server: false,
+            protocols: Default::default(),
         }
     }
 }
@@ -302,8 +282,6 @@ impl fmt::Debug for IpfsOptions {
         fmt.debug_struct("IpfsOptions")
             .field("ipfs_path", &self.ipfs_path)
             .field("bootstrap", &self.bootstrap)
-            .field("mdns", &self.mdns)
-            .field("dcutr", &self.dcutr)
             .field("listening_addrs", &self.listening_addrs)
             .field("span", &self.span)
             .finish()
@@ -377,17 +355,13 @@ enum IpfsEvent {
     Ban(PeerId, Channel<()>),
     /// Unban peer
     Unban(PeerId, Channel<()>),
-    PubsubSubscribe(String, OneshotSender<Option<SubscriptionStream>>),
-    PubsubUnsubscribe(String, OneshotSender<Result<bool, Error>>),
-    PubsubPublish(
-        String,
-        Vec<u8>,
-        OneshotSender<Result<MessageId, PublishError>>,
-    ),
-    PubsubPeers(Option<String>, OneshotSender<Vec<PeerId>>),
-    GetBitswapPeers(OneshotSender<BoxFuture<'static, Vec<PeerId>>>),
-    WantList(Option<PeerId>, OneshotSender<BoxFuture<'static, Vec<Cid>>>),
-    PubsubSubscribed(OneshotSender<Vec<String>>),
+    PubsubSubscribe(String, Channel<Option<SubscriptionStream>>),
+    PubsubUnsubscribe(String, Channel<Result<bool, Error>>),
+    PubsubPublish(String, Vec<u8>, Channel<Result<MessageId, PublishError>>),
+    PubsubPeers(Option<String>, Channel<Vec<PeerId>>),
+    GetBitswapPeers(Channel<BoxFuture<'static, Vec<PeerId>>>),
+    WantList(Option<PeerId>, Channel<BoxFuture<'static, Vec<Cid>>>),
+    PubsubSubscribed(Channel<Vec<String>>),
     AddListeningAddress(
         Multiaddr,
         OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
@@ -509,7 +483,6 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     keys: Keypair,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
-    delay: bool,
     repo_handle: Option<Repo>,
     local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
@@ -555,12 +528,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     pub fn with_opt(options: IpfsOptions) -> Self {
         let keys = Keypair::generate_ed25519();
         let fdlimit = None;
-        let delay = true;
         UninitializedIpfs {
             keys,
             options,
             fdlimit,
-            delay,
             repo_handle: None,
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
@@ -602,16 +573,110 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Load default behaviour for basic functionality
+    pub fn with_default(self) -> Self {
+        self.with_identify(None)
+            .with_autonat()
+            .with_bitswap(None)
+            .with_kademlia(None, Default::default())
+            .with_ping(None)
+            .with_pubsub(None)
+    }
+
+    /// Enables kademlia
+    pub fn with_kademlia(
+        mut self,
+        config: Option<Either<KadConfig, KademliaConfig>>,
+        store: KadStoreConfig,
+    ) -> Self {
+        self.options.protocols.kad = true;
+        self.options.kad_configuration = config;
+        self.options.kad_store_config = store;
+        self
+    }
+
+    /// Enables bitswap
+    pub fn with_bitswap(mut self, config: Option<BitswapConfig>) -> Self {
+        self.options.protocols.bitswap = true;
+        self.options.bitswap_config = config;
+        self
+    }
+
+    /// Enable mdns
+    pub fn with_mdns(mut self) -> Self {
+        self.options.protocols.mdns = true;
+        self
+    }
+
+    /// Enable relay client
+    pub fn with_relay(mut self, with_dcutr: bool) -> Self {
+        self.options.protocols.relay_client = true;
+        self.options.protocols.dcutr = with_dcutr;
+        self
+    }
+
+    /// Enable relay server
+    pub fn with_relay_server(mut self, config: Option<RelayConfig>) -> Self {
+        self.options.protocols.relay_server = true;
+        self.options.relay_server_config = config;
+        self
+    }
+
+    /// Enable port mapping (AKA UPnP)
+    pub fn with_upnp(mut self) -> Self {
+        self.options.protocols.upnp = true;
+        self
+    }
+
+    /// Enables rendezvous server
+    pub fn with_rendezvous_server(mut self) -> Self {
+        self.options.protocols.rendezvous_server = true;
+        self
+    }
+
+    /// Enables rendezvous client
+    pub fn with_rendezvous_client(mut self) -> Self {
+        self.options.protocols.rendezvous_client = true;
+        self
+    }
+
+    /// Enables identify
+    pub fn with_identify(mut self, config: Option<crate::p2p::IdentifyConfiguration>) -> Self {
+        self.options.protocols.identify = true;
+        self.options.identify_configuration = config;
+        self
+    }
+
+    /// Enables pubsub
+    pub fn with_pubsub(mut self, config: Option<PubsubConfig>) -> Self {
+        self.options.protocols.pubsub = true;
+        self.options.pubsub_config = config;
+        self
+    }
+
+    /// Enables autonat
+    pub fn with_autonat(mut self) -> Self {
+        self.options.protocols.autonat = true;
+        self
+    }
+
+    /// Enables ping
+    pub fn with_ping(mut self, config: Option<PingConfig>) -> Self {
+        self.options.protocols.ping = true;
+        self.options.ping_configuration = config;
+        self
+    }
+
+    /// Set a custom behaviour
+    pub fn with_custom_behaviour(mut self, behaviour: C) -> Self {
+        self.custom_behaviour = Some(behaviour);
+        self
+    }
+
     /// Sets a path
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
         self.options.ipfs_path = StoragePath::Disk(path);
-        self
-    }
-
-    /// Set identify configuration
-    pub fn set_identify_configuration(mut self, config: crate::p2p::IdentifyConfiguration) -> Self {
-        self.options.identify_configuration = Some(config);
         self
     }
 
@@ -634,19 +699,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Set swarm configuration
     pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
         self.options.swarm_configuration = Some(config);
-        self
-    }
-
-    /// Set kad configuration
-    pub fn set_kad_configuration(mut self, config: KadConfig, store: KadStoreConfig) -> Self {
-        self.options.kad_configuration = Some(Either::Left(config));
-        self.options.kad_store_config = store;
-        self
-    }
-
-    /// Set ping configuration
-    pub fn set_ping_configuration(mut self, config: PingConfig) -> Self {
-        self.options.ping_configuration = Some(config);
         self
     }
 
@@ -676,12 +728,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Set pubsub configuration
-    pub fn set_pubsub_configuration(mut self, config: PubsubConfig) -> Self {
-        self.options.pubsub_config = Some(config);
-        self
-    }
-
     /// Set RepoProvider option to provide blocks automatically
     pub fn set_provider(mut self, opt: RepoProvider) -> Self {
         self.options.provider = opt;
@@ -700,59 +746,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Enable keep alive
-    #[deprecated(note = "use UninitializedIpfs::set_idle_connection(u64::MAX / 2)")]
-    pub fn enable_keepalive(self) -> Self {
-        self.set_idle_connection_timeout(u64::MAX / 2)
-    }
-
-    /// Disables kademlia
-    pub fn disable_kad(mut self) -> Self {
-        self.options.disable_kad = true;
-        self
-    }
-
-    /// Disable bitswap
-    pub fn disable_bitswap(mut self) -> Self {
-        self.options.disable_bitswap = true;
-        self
-    }
-
-    /// Set Bitswap configuration
-    pub fn set_bitswap_configuration(mut self, config: BitswapConfig) -> Self {
-        self.options.bitswap_config = Some(config);
-        self
-    }
-
     /// Set a keystore
     pub fn set_keystore(mut self, keystore: Keystore) -> Self {
         self.options.keystore = keystore;
-        self
-    }
-
-    /// Enable mdns
-    pub fn enable_mdns(mut self) -> Self {
-        self.options.mdns = true;
-        self
-    }
-
-    /// Enable relay client
-    pub fn enable_relay(mut self, with_dcutr: bool) -> Self {
-        self.options.relay = true;
-        self.options.dcutr = with_dcutr;
-        self
-    }
-
-    /// Enable relay server
-    pub fn enable_relay_server(mut self, config: Option<RelayConfig>) -> Self {
-        self.options.relay_server = true;
-        self.options.relay_server_config = config;
-        self
-    }
-
-    /// Enable port mapping (AKA UPnP)
-    pub fn enable_upnp(mut self) -> Self {
-        self.options.port_mapping = true;
         self
     }
 
@@ -762,25 +758,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    pub fn enable_rendezvous_server(mut self) -> Self {
-        self.options.rendezvous_server = true;
-        self
-    }
-
-    pub fn enable_rendezvous_client(mut self) -> Self {
-        self.options.rendezvous_client = true;
-        self
-    }
-
-    /// Set a custom behaviour
-    pub fn set_custom_behaviour(mut self, behaviour: C) -> Self {
-        self.custom_behaviour = Some(behaviour);
-        self
-    }
-
     #[allow(clippy::type_complexity)]
     /// Set a transport
-    pub fn set_custom_transport(mut self, transport: TTransportFn) -> Self {
+    pub fn with_custom_transport(mut self, transport: TTransportFn) -> Self {
         self.custom_transport = Some(transport);
         self
     }
@@ -788,13 +768,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Set file desc limit
     pub fn fd_limit(mut self, limit: FDLimit) -> Self {
         self.fdlimit = Some(limit);
-        self
-    }
-
-    /// Used to delay the loop
-    /// Note: This may be removed in future
-    pub fn disable_delay(mut self) -> Self {
-        self.delay = false;
         self
     }
 
@@ -812,7 +785,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         let UninitializedIpfs {
             keys,
             fdlimit,
-            delay,
             mut options,
             swarm_event,
             custom_behaviour,
@@ -937,13 +909,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
         // reordered for less error prone code.
-        let swarm_options = SwarmOptions::from(&options);
 
-        let swarm_config = options.swarm_configuration.unwrap_or_default();
+        let swarm_config = options.swarm_configuration.clone().unwrap_or_default();
         let transport_config = options.transport_configuration.unwrap_or_default();
         let swarm = create_swarm(
             &keys,
-            swarm_options,
+            &options,
             swarm_config,
             transport_config,
             repo.clone(),
@@ -1021,7 +992,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 if as_fut {
                     fut.instrument(swarm_span).await;
                 } else {
-                    fut.run(delay).instrument(swarm_span).await;
+                    fut.run().instrument(swarm_span).await;
                 }
             }
         });
@@ -1554,7 +1525,7 @@ impl Ipfs {
                 .send(IpfsEvent::PubsubSubscribe(topic.clone(), tx))
                 .await?;
 
-            rx.await?
+            rx.await??
                 .ok_or_else(|| format_err!("already subscribed to {:?}", topic))
         }
         .instrument(self.span.clone())
@@ -1603,7 +1574,7 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::PubsubPublish(topic, data, tx))
                 .await?;
-            Ok(rx.await??)
+            rx.await??.map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await
@@ -1622,7 +1593,7 @@ impl Ipfs {
                 .send(IpfsEvent::PubsubUnsubscribe(topic.into(), tx))
                 .await?;
 
-            rx.await?
+            rx.await??
         }
         .instrument(self.span.clone())
         .await
@@ -1638,7 +1609,7 @@ impl Ipfs {
                 .send(IpfsEvent::PubsubPeers(topic, tx))
                 .await?;
 
-            Ok(rx.await?)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1654,7 +1625,7 @@ impl Ipfs {
                 .send(IpfsEvent::PubsubSubscribed(tx))
                 .await?;
 
-            Ok(rx.await?)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1670,7 +1641,7 @@ impl Ipfs {
                 .send(IpfsEvent::WantList(peer, tx))
                 .await?;
 
-            Ok(rx.await?.await)
+            Ok(rx.await??.await)
         }
         .instrument(self.span.clone())
         .await
@@ -2337,7 +2308,7 @@ impl Ipfs {
             .send(IpfsEvent::GetBitswapPeers(tx))
             .await?;
 
-        Ok(rx.await.map_err(|e| anyhow!(e))?.await)
+        Ok(rx.await??.await)
     }
 
     /// Returns the keypair to the node
@@ -2485,7 +2456,7 @@ mod node {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
             let ipfs: Ipfs = UninitializedIpfsNoop::with_opt(opts)
-                .disable_delay()
+                .with_default()
                 .start()
                 .await
                 .unwrap();
