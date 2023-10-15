@@ -2456,11 +2456,7 @@ mod node {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
             let ipfs: Ipfs = UninitializedIpfsNoop::with_opt(opts)
-                .with_bitswap(None)
-                .with_kademlia(None, Default::default())
-                .with_identify(None)
-                .with_ping(None)
-                .with_pubsub(None)
+                .with_default()
                 .start()
                 .await
                 .unwrap();
