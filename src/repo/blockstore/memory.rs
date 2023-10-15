@@ -3,25 +3,42 @@ use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
 use async_trait::async_trait;
-use hash_hasher::HashedMap;
+use futures::{SinkExt, StreamExt};
 use libipld::Cid;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::sync::Mutex;
 
 use crate::repo::{BlockRm, BlockRmError};
+
+use super::RepoBlockCommand;
 
 /// Describes an in-memory block store.
 ///
 /// Blocks are stored as a `HashMap` of the `Cid` and `Block`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MemBlockStore {
-    blocks: Mutex<HashedMap<Cid, Block>>,
+    tx: futures::channel::mpsc::Sender<RepoBlockCommand>,
+}
+
+struct MemBlockTask {
+    blocks: HashMap<Cid, Block>,
+    rx: futures::channel::mpsc::Receiver<RepoBlockCommand>,
 }
 
 impl MemBlockStore {
     pub fn new(_: PathBuf) -> Self {
-        Default::default()
+        let (tx, rx) = futures::channel::mpsc::channel(1);
+        let mut task = MemBlockTask {
+            blocks: HashMap::new(),
+            rx,
+        };
+
+        tokio::spawn(async move {
+            task.start().await;
+        });
+
+        Self { tx }
     }
 }
 
@@ -36,24 +53,124 @@ impl BlockStore for MemBlockStore {
     }
 
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
-        let contains = self.blocks.lock().await.contains_key(cid);
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Contains {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Get {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::PutBlock {
+                block,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Remove {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn list(&self) -> Result<Vec<Cid>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::List { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn wipe(&self) {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Wipe { response: tx })
+            .await;
+        let _ = rx.await.map_err(anyhow::Error::from);
+    }
+}
+
+// Used for in memory repos, currently not implementing any true locking.
+
+impl MemBlockTask {
+    async fn start(&mut self) {
+        while let Some(command) = self.rx.next().await {
+            match command {
+                RepoBlockCommand::Contains { cid, response } => {
+                    let _ = response.send(self.contains(&cid).await);
+                }
+                RepoBlockCommand::Get { cid, response } => {
+                    let _ = response.send(self.get(&cid).await);
+                }
+                RepoBlockCommand::PutBlock { block, response } => {
+                    let _ = response.send(self.put(block).await);
+                }
+                RepoBlockCommand::Remove { cid, response } => {
+                    let _ = response.send(self.remove(&cid).await);
+                }
+                RepoBlockCommand::List { response } => {
+                    let _ = response.send(self.list().await);
+                }
+                RepoBlockCommand::Wipe { response } => {
+                    let _ = response.send({
+                        self.wipe().await;
+                        Ok(())
+                    });
+                }
+            }
+        }
+    }
+}
+
+impl MemBlockTask {
+    async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
+        let contains = self.blocks.contains_key(cid);
         Ok(contains)
     }
 
     async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error> {
-        let block = self
-            .blocks
-            .lock()
-            .await
-            .get(cid)
-            .map(|block| block.to_owned());
+        let block = self.blocks.get(cid).cloned();
         Ok(block)
     }
 
-    async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+    async fn put(&mut self, block: Block) -> Result<(Cid, BlockPut), Error> {
         use std::collections::hash_map::Entry;
-        let mut g = self.blocks.lock().await;
-        match g.entry(*block.cid()) {
+        match self.blocks.entry(*block.cid()) {
             Entry::Occupied(_) => {
                 trace!("already existing block");
                 Ok((*block.cid(), BlockPut::Existed))
@@ -67,25 +184,21 @@ impl BlockStore for MemBlockStore {
         }
     }
 
-    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
-        match self.blocks.lock().await.remove(cid) {
+    async fn remove(&mut self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+        match self.blocks.remove(cid) {
             Some(_block) => Ok(Ok(BlockRm::Removed(*cid))),
             None => Ok(Err(BlockRmError::NotFound(*cid))),
         }
     }
 
     async fn list(&self) -> Result<Vec<Cid>, Error> {
-        let guard = self.blocks.lock().await;
-        Ok(guard.iter().map(|(cid, _block)| *cid).collect())
+        Ok(self.blocks.keys().cloned().collect())
     }
 
-    async fn wipe(&self) {
-        self.blocks.lock().await.clear();
+    async fn wipe(&mut self) {
+        self.blocks.clear();
     }
 }
-
-// Used for in memory repos, currently not implementing any true locking.
-
 #[cfg(test)]
 mod tests {
     use super::*;

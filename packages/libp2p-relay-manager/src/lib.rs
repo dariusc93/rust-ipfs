@@ -236,6 +236,14 @@ impl Behaviour {
 
     pub fn select(&mut self, peer_id: PeerId) {
         if !self.relays.contains_key(&peer_id) {
+            self.events
+                .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
+                    peer_id,
+                    result: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Peer is not added in relay list",
+                    )),
+                }));
             return;
         }
 
@@ -571,12 +579,27 @@ impl Behaviour {
     fn on_dial_failure(
         &mut self,
         DialFailure {
-            peer_id: _,
-            error: _,
+            peer_id,
+            error,
             connection_id,
         }: DialFailure,
     ) {
-        self.pending_connection.remove(&connection_id);
+        if !self.pending_connection.remove(&connection_id) {
+            return;
+        }
+
+        let Some(peer_id) = peer_id else {
+            return;
+        };
+
+        self.events
+            .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
+                peer_id,
+                result: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    error.to_string(),
+                )),
+            }));
 
         //TODO: perform checks and do a reconnect attempt
 

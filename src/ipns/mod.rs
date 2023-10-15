@@ -9,12 +9,11 @@ mod dnslink;
 
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
-#[cfg_attr(not(feature = "experimental"), allow(dead_code))]
 pub struct Ipns {
     ipfs: Ipfs,
+    resolver: Option<DnsResolver>,
 }
 
-#[cfg(feature = "experimental")]
 #[derive(Clone, Copy, Debug, Default)]
 pub enum IpnsOption {
     Local,
@@ -24,17 +23,24 @@ pub enum IpnsOption {
 
 impl Ipns {
     pub fn new(ipfs: Ipfs) -> Self {
-        Ipns { ipfs }
+        Ipns {
+            ipfs,
+            resolver: None,
+        }
+    }
+
+    /// Set dns resolver
+    pub fn set_resolver(&mut self, resolver: DnsResolver) {
+        self.resolver = Some(resolver);
     }
 
     /// Resolves a ipns path to an ipld path.
     // TODO: Implement ipns pubsub
     // TODO: Maybe implement a check to the dht store itself too?
-    pub async fn resolve(&self, resolver: DnsResolver, path: &IpfsPath) -> Result<IpfsPath, Error> {
+    pub async fn resolve(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
         let path = path.to_owned();
         match path.root() {
             PathRoot::Ipld(_) => Ok(path),
-            #[cfg(feature = "experimental")]
             PathRoot::Ipns(peer) => {
                 use std::str::FromStr;
                 use std::time::Duration;
@@ -42,6 +48,8 @@ impl Ipns {
                 use futures::StreamExt;
                 use libipld::Cid;
                 use libp2p::PeerId;
+
+                let mut path_iter = path.iter();
 
                 let hash: libipld::multihash::Multihash =
                     libipld::multihash::Multihash::from_bytes(&peer.to_bytes())?;
@@ -64,7 +72,14 @@ impl Ipns {
                         //Although stored locally, we should verify the record anyway
                         record.verify(*peer)?;
                         let data = record.data()?;
-                        IpfsPath::from_str(&String::from_utf8_lossy(data.value()))
+                        let path = String::from_utf8_lossy(data.value());
+                        IpfsPath::from_str(&path)
+                            .and_then(|mut internal_path| {
+                                internal_path.path.push_split(path_iter.by_ref()).map_err(
+                                    |_| crate::path::IpfsPathError::InvalidPath(path.to_string()),
+                                )?;
+                                Ok(internal_path)
+                            })
                             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                     }) {
                         return Ok(path);
@@ -101,15 +116,23 @@ impl Ipns {
 
                 let path = String::from_utf8_lossy(data.value()).to_string();
 
-                IpfsPath::from_str(&path).map_err(anyhow::Error::from)
+                IpfsPath::from_str(&path)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|mut internal_path| {
+                        internal_path
+                            .path
+                            .push_split(path_iter)
+                            .map_err(|_| crate::path::IpfsPathError::InvalidPath(path))?;
+                        Ok(internal_path)
+                    })
             }
-            #[cfg(not(feature = "experimental"))]
-            PathRoot::Ipns(_) => Err(anyhow::anyhow!("unimplemented")),
-            PathRoot::Dns(domain) => Ok(dnslink::resolve(resolver, domain).await?),
+            PathRoot::Dns(domain) => {
+                let path_iter = path.iter();
+                Ok(dnslink::resolve(self.resolver.unwrap_or_default(), domain, path_iter).await?)
+            }
         }
     }
 
-    #[cfg(feature = "experimental")]
     pub async fn publish(
         &self,
         key: Option<&str>,

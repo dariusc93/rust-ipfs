@@ -3,12 +3,14 @@
 //! Adding files and directory structures is supported but not exposed via an API. See examples and
 //! `ipfs-http`.
 
-use std::{ops::Range, path::PathBuf};
+use std::{ops::Range, path::PathBuf, time::Duration};
 
 use anyhow::Error;
 use either::Either;
 use futures::{stream::BoxStream, Stream};
+use libipld::Cid;
 use libp2p::PeerId;
+use ll::file::FileReadFailed;
 pub use rust_unixfs as ll;
 
 mod add;
@@ -16,11 +18,14 @@ mod cat;
 mod get;
 mod ls;
 pub use add::{add, add_file, AddOption};
-pub use cat::{cat, StartingPoint, TraversalFailed};
+pub use cat::{cat, StartingPoint};
 pub use get::get;
 pub use ls::{ls, NodeItem};
 
-use crate::{Ipfs, IpfsPath};
+use crate::{
+    dag::{ResolveError, UnexpectedResolved},
+    Ipfs, IpfsPath,
+};
 
 pub struct IpfsUnixfs {
     ipfs: Ipfs,
@@ -84,11 +89,20 @@ impl IpfsUnixfs {
         range: Option<Range<u64>>,
         peers: &'a [PeerId],
         local: bool,
+        timeout: Option<Duration>,
     ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed>
     {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
-        cat(Either::Left(&self.ipfs), starting_point, range, peers, local).await
+        cat(
+            Either::Left(&self.ipfs),
+            starting_point,
+            range,
+            peers,
+            local,
+            timeout,
+        )
+        .await
     }
 
     /// Add a file from either a file or stream
@@ -120,8 +134,11 @@ impl IpfsUnixfs {
         dest: P,
         peers: &'a [PeerId],
         local: bool,
+        timeout: Option<Duration>,
     ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
-        get(Either::Left(&self.ipfs), path, dest, peers, local).await
+        get(Either::Left(&self.ipfs), path, dest, peers, local, timeout)
+            .await
+            .map_err(anyhow::Error::from)
     }
 
     /// List directory contents
@@ -130,8 +147,9 @@ impl IpfsUnixfs {
         path: IpfsPath,
         peers: &'a [PeerId],
         local: bool,
+        timeout: Option<Duration>,
     ) -> Result<BoxStream<'a, NodeItem>, Error> {
-        ls(Either::Left(&self.ipfs), path, peers, local).await
+        ls(Either::Left(&self.ipfs), path, peers, local, timeout).await
     }
 }
 
@@ -151,6 +169,33 @@ pub enum UnixfsStatus {
         total_size: Option<usize>,
         error: Option<anyhow::Error>,
     },
+}
+
+/// Types of failures which can occur while walking the UnixFS graph.
+#[derive(Debug, thiserror::Error)]
+pub enum TraversalFailed {
+    /// Failure to resolve the given path; does not happen when given a block.
+    #[error("path resolving failed")]
+    Resolving(#[source] ResolveError),
+
+    /// The given path was resolved to non dag-pb block, does not happen when starting the walk
+    /// from a block.
+    #[error("path resolved to unexpected")]
+    Path(#[source] UnexpectedResolved),
+
+    /// Loading of a block during walk failed
+    #[error("loading of {} failed", .0)]
+    Loading(Cid, #[source] Error),
+
+    #[error("Timeout while resolving {path}")]
+    Timeout { path: IpfsPath },
+
+    /// Processing of the block failed
+    #[error("walk failed on {}", .0)]
+    Walking(Cid, #[source] FileReadFailed),
+
+    #[error(transparent)]
+    Io(std::io::Error),
 }
 
 #[cfg(test)]

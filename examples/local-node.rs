@@ -8,11 +8,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
-        .enable_mdns()
-        .enable_relay(true)
-        .enable_relay_server(None)
-        .enable_upnp()
-        .enable_rendezvous_server()
+        .with_default()
+        .with_mdns()
+        .with_relay(true)
+        .with_relay_server(None)
+        .with_upnp()
+        .with_rendezvous_server()
         .listen_as_external_addr()
         .fd_limit(rust_ipfs::FDLimit::Max)
         .start()

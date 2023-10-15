@@ -1,16 +1,9 @@
-#[cfg(not(feature = "experimental"))]
-fn main() {
-    panic!("Enable \"experimental\" flag");
-}
-
-#[cfg(feature = "experimental")]
 #[derive(Debug, clap::Parser)]
 #[clap(name = "ipns")]
 struct Opt {
     key: String,
 }
 
-#[cfg(feature = "experimental")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use std::str::FromStr;
@@ -26,7 +19,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
-        .enable_mdns()
+        .with_default()
+        .with_mdns()
+        .with_relay(true)
         .default_record_key_validator()
         .start()
         .await?;

@@ -1,16 +1,13 @@
-use crate::{
-    dag::{IpldDag, ResolveError, UnexpectedResolved},
-    repo::Repo,
-    Block, Error, Ipfs,
-};
+use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::stream;
 use either::Either;
 use futures::stream::Stream;
-use libipld::Cid;
 use libp2p::PeerId;
-use rust_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
-use std::borrow::Borrow;
+use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
+use std::{borrow::Borrow, time::Duration};
+
+use super::TraversalFailed;
 
 /// IPFS cat operation, producing a stream of file bytes. This is generic over the different kinds
 /// of ways to own an `Ipfs` value in order to support both operating with borrowed `Ipfs` value
@@ -24,6 +21,7 @@ pub async fn cat<'a>(
     range: Option<Range<u64>>,
     providers: &'a [PeerId],
     local_only: bool,
+    timeout: Option<Duration>,
 ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
@@ -49,7 +47,7 @@ pub async fn cat<'a>(
     let block = match starting_point.into() {
         StartingPoint::Left(path) => {
             let (resolved, _) = dag
-                .resolve_with_session(session, path, true, providers, local_only)
+                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
                 .await
                 .map_err(TraversalFailed::Resolving)?;
             resolved
@@ -102,10 +100,10 @@ pub async fn cat<'a>(
             let (next, _) = visit.pending_links();
 
             let borrow = repo.borrow();
-            let block = match borrow.get_block_with_session(session, next, providers, local_only).await {
+            let block = match borrow.get_block_with_session(session, next, providers, local_only, timeout).await {
                 Ok(block) => block,
                 Err(e) => {
-                    yield Err(TraversalFailed::Loading(next.to_owned(), e));
+                    yield Err(TraversalFailed::Loading(*next, e));
                     return;
                 },
             };
@@ -148,25 +146,4 @@ impl From<Block> for StartingPoint {
     fn from(b: Block) -> Self {
         Self::Right(b)
     }
-}
-
-/// Types of failures which can occur while walking the UnixFS graph.
-#[derive(Debug, thiserror::Error)]
-pub enum TraversalFailed {
-    /// Failure to resolve the given path; does not happen when given a block.
-    #[error("path resolving failed")]
-    Resolving(#[source] ResolveError),
-
-    /// The given path was resolved to non dag-pb block, does not happen when starting the walk
-    /// from a block.
-    #[error("path resolved to unexpected")]
-    Path(#[source] UnexpectedResolved),
-
-    /// Loading of a block during walk failed
-    #[error("loading of {} failed", .0)]
-    Loading(Cid, #[source] Error),
-
-    /// Processing of the block failed
-    #[error("walk failed on {}", .0)]
-    Walking(Cid, #[source] FileReadFailed),
 }

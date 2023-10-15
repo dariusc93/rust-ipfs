@@ -175,7 +175,7 @@ impl Record {
         ttl: u64,
     ) -> std::io::Result<Self> {
         let value = value.as_ref().to_vec();
-        
+
         let validity = Utc::now()
             .add(duration)
             .to_rfc3339_opts(SecondsFormat::Nanos, false)

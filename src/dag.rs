@@ -21,6 +21,7 @@ use rust_unixfs::{
 use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::iter::Peekable;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -251,7 +252,7 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<Ipld, ResolveError> {
-        self.get_with_session(None, path, providers, local_only)
+        self.get_with_session(None, path, providers, local_only, None)
             .await
     }
 
@@ -261,6 +262,7 @@ impl IpldDag {
         path: IpfsPath,
         providers: &[PeerId],
         local_only: bool,
+        timeout: Option<Duration>,
     ) -> Result<Ipld, ResolveError> {
         let resolved_path = match &self.ipfs {
             Some(ipfs) => ipfs
@@ -283,7 +285,7 @@ impl IpldDag {
         let mut iter = resolved_path.iter().peekable();
 
         let (node, _) = match self
-            .resolve0(session, cid, &mut iter, true, providers, local_only)
+            .resolve0(session, cid, &mut iter, true, providers, local_only, timeout)
             .await
         {
             Ok(t) => t,
@@ -314,7 +316,7 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
-        self.resolve_with_session(None, path, follow_links, providers, local_only)
+        self.resolve_with_session(None, path, follow_links, providers, local_only, None)
             .await
     }
 
@@ -325,6 +327,7 @@ impl IpldDag {
         follow_links: bool,
         providers: &[PeerId],
         local_only: bool,
+        timeout: Option<Duration>,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
         let resolved_path = match &self.ipfs {
             Some(ipfs) => ipfs
@@ -347,7 +350,15 @@ impl IpldDag {
         let (node, matched_segments) = {
             let mut iter = resolved_path.iter().peekable();
             match self
-                .resolve0(session, cid, &mut iter, follow_links, providers, local_only)
+                .resolve0(
+                    session,
+                    cid,
+                    &mut iter,
+                    follow_links,
+                    providers,
+                    local_only,
+                    timeout,
+                )
                 .await
             {
                 Ok(t) => t,
@@ -367,6 +378,7 @@ impl IpldDag {
     }
 
     /// Return the node where the resolving ended, and the **count** of segments matched.
+    #[allow(clippy::too_many_arguments)]
     async fn resolve0<'a>(
         &self,
         session: Option<u64>,
@@ -375,6 +387,7 @@ impl IpldDag {
         follow_links: bool,
         providers: &[PeerId],
         local_only: bool,
+        timeout: Option<Duration>,
     ) -> Result<(ResolvedNode, usize), RawResolveLocalError> {
         use LocallyResolved::*;
 
@@ -386,7 +399,7 @@ impl IpldDag {
         loop {
             let block = match self
                 .repo
-                .get_block_with_session(session, &current, providers, local_only)
+                .get_block_with_session(session, &current, providers, local_only, timeout)
                 .await
             {
                 Ok(block) => block,

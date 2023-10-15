@@ -41,7 +41,6 @@ struct Opts {
     #[clap(long)]
     relay_addrs: Vec<Multiaddr>,
 
-
     /// Peer id of a specific relay. If none is provided, it will select at random
     #[clap(long)]
     select_relay: Vec<PeerId>,

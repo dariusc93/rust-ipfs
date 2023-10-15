@@ -50,7 +50,7 @@ fn main() -> std::io::Result<()> {
     if let Some(peer_id) = opt.key {
         match record.verify(peer_id).is_ok() {
             true => println!("Signature Verified"),
-            false => println!("Signature is Invalid")
+            false => println!("Signature is Invalid"),
         };
     } else {
         println!("Record has not been validated");

@@ -1,9 +1,35 @@
-# 0.4.3 [unreleased]
+# 0.6.0 [unreleased]
 - refactor: Use channels directly instead of broadcast [PR 99]
+- refactor: Disable primary protocols by default [PR 109]  
+- refactor: Move repo logic into a single task [PR 108]
+
+[PR 99]: https://github.com/dariusc93/rust-ipfs/pull/99
+[PR 109]: https://github.com/dariusc93/rust-ipfs/pull/109
+[PR 108]: https://github.com/dariusc93/rust-ipfs/pull/108
+
+# 0.5.0
+- feat: Implement timeout while resolving blocks [PR 106]
+
+[PR 106]: https://github.com/dariusc93/rust-ipfs/pull/106
+
+# 0.4.6
+- chore: Updated libp2p-relay-manager
+
+# 0.4.5
+- chore: Add json and cbor feature
+
+# 0.4.4
+- chore: Use new method over deprecated and internal behaviours [PR 104]
+- fix: Set dns resolver as a field, and fix resolved path [PR 103]
+- chore: Remove experimental feature flag
+
+[PR 104]: https://github.com/dariusc93/rust-ipfs/pull/104
+[PR 103]: https://github.com/dariusc93/rust-ipfs/pull/103
+
+# 0.4.3
 - feat: Implement rendezvous protocol [PR 101]
 - chore: Cleanup future task [PR 102]
 
-[PR 99]: https://github.com/dariusc93/rust-ipfs/pull/99
 [PR 101]: https://github.com/dariusc93/rust-ipfs/pull/101
 [PR 102]: https://github.com/dariusc93/rust-ipfs/pull/102
 
