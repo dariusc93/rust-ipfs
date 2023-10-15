@@ -17,7 +17,15 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let ipfs: Ipfs = UninitializedIpfs::new().enable_mdns().start().await?;
+    let ipfs: Ipfs = UninitializedIpfs::new()
+        .with_mdns()
+        .with_identify(None)
+        .with_autonat()
+        .with_bitswap(None)
+        .with_kademlia()
+        .with_ping(None)
+        .start()
+        .await?;
 
     let mut stream = ipfs.add_file_unixfs(opt.file).await?;
 

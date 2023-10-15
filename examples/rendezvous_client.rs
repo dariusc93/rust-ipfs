@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let ipfs: Ipfs = UninitializedIpfs::new()
-        .enable_rendezvous_client()
+        .with_rendezvous_client()
         .listen_as_external_addr()
         .start()
         .await?;

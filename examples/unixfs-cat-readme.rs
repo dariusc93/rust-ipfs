@@ -7,7 +7,14 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ipfs: Ipfs = UninitializedIpfs::new().start().await?;
+    let ipfs: Ipfs = UninitializedIpfs::new()
+        .with_bitswap(None)
+        .with_kademlia()
+        .with_identify(None)
+        .with_ping(None)
+        .with_autonat()
+        .start()
+        .await?;
     ipfs.default_bootstrap().await?;
 
     let mut stream = ipfs

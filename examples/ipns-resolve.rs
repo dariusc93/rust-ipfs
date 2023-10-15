@@ -19,7 +19,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
-        .enable_mdns()
+        .with_mdns()
+        .with_relay(true)
+        .with_identify(None)
+        .with_autonat()
+        .with_bitswap(None)
+        .with_kademlia()
+        .with_ping(None)
         .default_record_key_validator()
         .start()
         .await?;

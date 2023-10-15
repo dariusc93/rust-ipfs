@@ -211,7 +211,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
-    pub(crate) async fn run(&mut self, delay: bool) {
+    pub(crate) async fn run(&mut self) {
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
         let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
 
@@ -226,17 +226,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
-                    if delay {
-                        tokio::time::sleep(Duration::from_nanos(10)).await;
-                    }
                     self.handle_swarm_event(swarm);
                 },
                 Some(event) = self.from_facade.next() => {
                     if matches!(event, IpfsEvent::Exit) {
                         break;
-                    }
-                    if delay {
-                        tokio::time::sleep(Duration::from_nanos(10)).await;
                     }
                     self.handle_event(event);
                 },
@@ -918,11 +912,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         .iter()
                         .any(|p| libp2p::autonat::DEFAULT_PROTOCOL_NAME.eq(p))
                     {
-                        for addr in listen_addrs {
-                            self.swarm
-                                .behaviour_mut()
-                                .autonat
-                                .add_server(peer_id, Some(addr));
+                        if let Some(autonat) = self.swarm.behaviour_mut().autonat.as_mut() {
+                            for addr in listen_addrs {
+                                autonat.add_server(peer_id, Some(addr));
+                            }
                         }
                     }
                 }
@@ -1111,22 +1104,52 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let _ = ret.send(Ok(()));
             }
             IpfsEvent::PubsubSubscribe(topic, ret) => {
-                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribe(topic).ok());
+                let Some(pubsub) = self.swarm.behaviour_mut().pubsub.as_mut() else {
+                    let _ = ret.send(Err(anyhow!("pubsub protocol is disabled")));
+                    return;
+                };
+
+                let _ = ret.send(Ok(pubsub.subscribe(topic).ok()));
             }
             IpfsEvent::PubsubUnsubscribe(topic, ret) => {
-                let _ = ret.send(self.swarm.behaviour_mut().pubsub().unsubscribe(topic));
+                let Some(pubsub) = self.swarm.behaviour_mut().pubsub.as_mut() else {
+                    let _ = ret.send(Err(anyhow!("pubsub protocol is disabled")));
+                    return;
+                };
+
+                let _ = ret.send(Ok(pubsub.unsubscribe(topic)));
             }
             IpfsEvent::PubsubPublish(topic, data, ret) => {
-                let _ = ret.send(self.swarm.behaviour_mut().pubsub().publish(topic, data));
+                let Some(pubsub) = self.swarm.behaviour_mut().pubsub.as_mut() else {
+                    let _ = ret.send(Err(anyhow!("pubsub protocol is disabled")));
+                    return;
+                };
+
+                let _ = ret.send(Ok(pubsub.publish(topic, data)));
             }
             IpfsEvent::PubsubPeers(Some(topic), ret) => {
-                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_peers(&topic));
+                let Some(pubsub) = self.swarm.behaviour_mut().pubsub.as_mut() else {
+                    let _ = ret.send(Err(anyhow!("pubsub protocol is disabled")));
+                    return;
+                };
+
+                let _ = ret.send(Ok(pubsub.subscribed_peers(&topic)));
             }
             IpfsEvent::PubsubPeers(None, ret) => {
-                let _ = ret.send(self.swarm.behaviour_mut().pubsub().known_peers());
+                let Some(pubsub) = self.swarm.behaviour_mut().pubsub.as_mut() else {
+                    let _ = ret.send(Err(anyhow!("pubsub protocol is disabled")));
+                    return;
+                };
+
+                let _ = ret.send(Ok(pubsub.known_peers()));
             }
             IpfsEvent::PubsubSubscribed(ret) => {
-                let _ = ret.send(self.swarm.behaviour_mut().pubsub().subscribed_topics());
+                let Some(pubsub) = self.swarm.behaviour_mut().pubsub.as_mut() else {
+                    let _ = ret.send(Err(anyhow!("pubsub protocol is disabled")));
+                    return;
+                };
+
+                let _ = ret.send(Ok(pubsub.subscribed_topics()));
             }
             // IpfsEvent::WantList(peer, ret) => {
             //     let list = if let Some(peer) = peer {
@@ -1249,7 +1272,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let client = bitswap.client().clone();
                     let server = bitswap.server().cloned();
 
-                    let _ = ret.send(
+                    let _ = ret.send(Ok(
                         async move {
                             if let Some(peer) = peer {
                                 if let Some(server) = server {
@@ -1261,18 +1284,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 Vec::from_iter(client.get_wantlist().await)
                             }
                         }
-                        .boxed(),
+                        .boxed()),
                     );
                 } else {
-                    let _ = ret.send(futures::future::ready(vec![]).boxed());
+                    let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
             }
             IpfsEvent::GetBitswapPeers(ret) => {
                 if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
                     let client = bitswap.client().clone();
-                    let _ = ret.send(async move { client.get_peers().await }.boxed());
+                    let _ = ret.send(Ok(async move { client.get_peers().await }.boxed()));
                 } else {
-                    let _ = ret.send(futures::future::ready(vec![]).boxed());
+                    let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
             }
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
