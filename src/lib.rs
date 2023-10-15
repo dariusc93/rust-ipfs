@@ -612,33 +612,39 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Enables rendezvous server
     pub fn with_rendezvous_server(mut self) -> Self {
         self.options.protocols.rendezvous_server = true;
         self
     }
 
+    /// Enables rendezvous client
     pub fn with_rendezvous_client(mut self) -> Self {
         self.options.protocols.rendezvous_client = true;
         self
     }
 
+    /// Enables identify
     pub fn with_identify(mut self, config: Option<crate::p2p::IdentifyConfiguration>) -> Self {
         self.options.protocols.identify = true;
         self.options.identify_configuration = config;
         self
     }
 
+    /// Enables pubsub
     pub fn with_pubsub(mut self, config: Option<PubsubConfig>) -> Self {
         self.options.protocols.pubsub = true;
         self.options.pubsub_config = config;
         self
     }
 
+    /// Enables autonat
     pub fn with_autonat(mut self) -> Self {
         self.options.protocols.autonat = true;
         self
     }
 
+    /// Enables ping
     pub fn with_ping(mut self, config: Option<PingConfig>) -> Self {
         self.options.protocols.ping = true;
         self.options.ping_configuration = config;
