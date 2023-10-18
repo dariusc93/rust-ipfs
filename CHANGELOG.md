@@ -1,3 +1,6 @@
+# 0.5.1
+- chore: Update dep
+
 # 0.5.0
 - feat: Implement timeout while resolving blocks [PR 106]
 
