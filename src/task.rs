@@ -63,7 +63,7 @@ use libp2p::{
     kad::{
         AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
         GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-        KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
+        Event as KademliaEvent, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
     rendezvous::{Cookie, Namespace},
@@ -415,10 +415,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             },
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(event)) => {
                 match event {
-                    InboundRequest { request } => {
+                    KademliaEvent::InboundRequest { request } => {
                         trace!("kad: inbound {:?} request handled", request);
                     }
-                    OutboundQueryProgressed {
+                    KademliaEvent::OutboundQueryProgressed {
                         result, id, step, ..
                     } => {
                         // make sure the query is exhausted
@@ -757,7 +757,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             }
                         }
                     }
-                    RoutingUpdated {
+                    KademliaEvent::RoutingUpdated {
                         peer,
                         is_new_peer: _,
                         addresses,
@@ -766,13 +766,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     } => {
                         trace!("kad: routing updated; {}: {:?}", peer, addresses);
                     }
-                    UnroutablePeer { peer } => {
+                    KademliaEvent::UnroutablePeer { peer } => {
                         trace!("kad: peer {} is unroutable", peer);
                     }
-                    RoutablePeer { peer, address } => {
+                    KademliaEvent::RoutablePeer { peer, address } => {
                         trace!("kad: peer {} ({}) is routable", peer, address);
                     }
-                    PendingRoutablePeer { peer, address } => {
+                    KademliaEvent::PendingRoutablePeer { peer, address } => {
                         trace!("kad: pending routable peer {} ({})", peer, address);
                     }
                 }

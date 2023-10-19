@@ -64,7 +64,6 @@ type DialMap = AHashMap<
 pub struct Bitswap<S: Store> {
     network: Network,
     protocol_config: ProtocolConfig,
-    idle_timeout: Duration,
     peers: Arc<Mutex<AHashMap<PeerId, PeerState>>>,
     dials: Arc<Mutex<DialMap>>,
     /// Set to true when dialing should be disabled because we have reached the conn limit.
@@ -215,7 +214,6 @@ impl<S: Store> Bitswap<S> {
         Bitswap {
             network,
             protocol_config: config.protocol,
-            idle_timeout: config.idle_timeout,
             peers: Default::default(),
             dials: Default::default(),
             pause_dialing: false,
@@ -404,7 +402,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
         _: &Multiaddr,
     ) -> std::result::Result<THandler<Self>, ConnectionDenied> {
         let protocol_config = self.protocol_config.clone();
-        Ok(BitswapHandler::new(protocol_config, self.idle_timeout))
+        Ok(BitswapHandler::new(protocol_config))
     }
 
     fn handle_established_outbound_connection(
@@ -415,7 +413,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
         _: libp2p::core::Endpoint,
     ) -> std::result::Result<THandler<Self>, ConnectionDenied> {
         let protocol_config = self.protocol_config.clone();
-        Ok(BitswapHandler::new(protocol_config, self.idle_timeout))
+        Ok(BitswapHandler::new(protocol_config))
     }
 
     #[allow(clippy::collapsible_match)]
@@ -635,20 +633,14 @@ pub fn verify_hash(cid: &Cid, bytes: &[u8]) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Error, ErrorKind};
     use std::sync::Arc;
-    use std::time::Duration;
 
     use anyhow::anyhow;
     use futures::prelude::*;
-    use libp2p::core::muxing::StreamMuxerBox;
-    use libp2p::core::transport::upgrade::Version;
-    use libp2p::core::transport::Boxed;
     use libp2p::identity::Keypair;
-    use libp2p::swarm::{SwarmBuilder, SwarmEvent};
-    use libp2p::tcp::{tokio::Transport as TcpTransport, Config as TcpConfig};
-    use libp2p::yamux::Config as YamuxConfig;
-    use libp2p::{noise, PeerId, Swarm, Transport};
+    use libp2p::swarm::SwarmEvent;
+    use libp2p::Swarm;
+    use libp2p::SwarmBuilder;
     use tokio::sync::{mpsc, RwLock};
     use tracing::{info, trace};
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -678,23 +670,6 @@ mod tests {
     fn test_traits() {
         assert_send::<Bitswap<DummyStore>>();
         assert_send::<&Bitswap<DummyStore>>();
-    }
-
-    fn mk_transport() -> (PeerId, Boxed<(PeerId, StreamMuxerBox)>) {
-        let local_key = Keypair::generate_ed25519();
-
-        let auth_config = noise::Config::new(&local_key).expect("Noise key generation failed");
-
-        let peer_id = local_key.public().to_peer_id();
-        let transport = TcpTransport::new(TcpConfig::default().nodelay(true))
-            .upgrade(Version::V1)
-            .authenticate(auth_config)
-            .multiplex(YamuxConfig::default())
-            .timeout(Duration::from_secs(20))
-            .map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer)))
-            .map_err(|err| Error::new(ErrorKind::Other, err))
-            .boxed();
-        (peer_id, transport)
     }
 
     #[derive(Debug, Clone, Default)]
@@ -773,10 +748,23 @@ mod tests {
     }
 
     async fn get_block<const N: usize>() {
-        let (peer1_id, trans) = mk_transport();
+        let kp = Keypair::generate_ed25519();
         let store1 = TestStore::default();
-        let bs1 = Bitswap::new(peer1_id, store1.clone(), Config::default()).await;
-        let mut swarm1 = SwarmBuilder::with_tokio_executor(trans, bs1, peer1_id).build();
+        let bs1 = Bitswap::new(kp.public().to_peer_id(), store1.clone(), Config::default()).await;
+
+        let mut swarm1 = SwarmBuilder::with_existing_identity(kp)
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                libp2p::noise::Config::new,
+                libp2p::yamux::Config::default,
+            )
+            .unwrap()
+            .with_behaviour(|_| bs1)
+            .unwrap()
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            .build();
+
         let blocks = (0..N).map(|_| create_random_block_v1()).collect::<Vec<_>>();
 
         for block in &blocks {
@@ -805,11 +793,22 @@ mod tests {
         });
 
         info!("peer2: startup");
-        let (peer2_id, trans) = mk_transport();
+        let kp = Keypair::generate_ed25519();
         let store2 = TestStore::default();
-        let bs2 = Bitswap::new(peer2_id, store2.clone(), Config::default()).await;
+        let bs2 = Bitswap::new(kp.public().to_peer_id(), store2.clone(), Config::default()).await;
 
-        let mut swarm2 = SwarmBuilder::with_tokio_executor(trans, bs2, peer2_id).build();
+        let mut swarm2 = SwarmBuilder::with_existing_identity(kp)
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                libp2p::noise::Config::new,
+                libp2p::yamux::Config::default,
+            )
+            .unwrap()
+            .with_behaviour(|_| bs2)
+            .unwrap()
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            .build();
 
         let swarm2_bs = swarm2.behaviour().clone();
         let peer2 = tokio::task::spawn(async move {

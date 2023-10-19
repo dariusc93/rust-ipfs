@@ -177,6 +177,8 @@ impl Default for SwarmConfig {
 }
 
 #[allow(clippy::type_complexity)]
+#[allow(deprecated)]
+//TODO: use libp2p::SwarmBuilder
 /// Creates a new IPFS swarm.
 pub async fn create_swarm<C>(
     keypair: &Keypair,

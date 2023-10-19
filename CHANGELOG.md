@@ -1,7 +1,9 @@
 # 0.6.0 [unreleased]
+- chore: Update libp2p to 0.52.4 [PR XXX]
 - refactor: Disable primary protocols by default [PR 109]  
 - refactor: Move repo logic into a single task [PR 108]
 
+[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
 [PR 109]: https://github.com/dariusc93/rust-ipfs/pull/109
 [PR 108]: https://github.com/dariusc93/rust-ipfs/pull/108
 

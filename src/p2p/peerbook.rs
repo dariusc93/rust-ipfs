@@ -578,16 +578,13 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
-
     use super::Behaviour as PeerBook;
-    use crate::p2p::{peerbook::ConnectionLimits, transport::build_transport};
+    use crate::p2p::peerbook::ConnectionLimits;
     use futures::StreamExt;
     use libp2p::{
         identify::{self, Config},
-        identity::Keypair,
-        swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmBuilder, SwarmEvent},
-        Multiaddr, PeerId, Swarm,
+        swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmEvent},
+        Multiaddr, PeerId, Swarm, SwarmBuilder,
     };
 
     #[derive(NetworkBehaviour)]
@@ -806,28 +803,30 @@ mod test {
         assert!(list.contains(&peer2));
     }
 
-    async fn build_swarm(identify: bool) -> (PeerId, Multiaddr, libp2p::swarm::Swarm<Behaviour>) {
-        let key = Keypair::generate_ed25519();
-        let pubkey = key.public();
-        let peer_id = pubkey.to_peer_id();
-        let transport = build_transport(key, None, Default::default()).unwrap();
-
-        let behaviour = Behaviour {
-            peerbook: PeerBook::default(),
-            identify: Toggle::from(identify.then_some(identify::Behaviour::new(Config::new(
-                "/peerbook/0.1".into(),
-                pubkey,
-            )))),
-        };
-
-        let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id)
-            .idle_connection_timeout(Duration::from_secs(30))
+    async fn build_swarm(identify: bool) -> (PeerId, Multiaddr, Swarm<Behaviour>) {
+        let mut swarm = SwarmBuilder::with_new_identity()
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                libp2p::noise::Config::new,
+                libp2p::yamux::Config::default,
+            )
+            .expect("")
+            .with_behaviour(|kp| Behaviour {
+                peerbook: PeerBook::default(),
+                identify: Toggle::from(identify.then_some(identify::Behaviour::new(Config::new(
+                    "/peerbook/0.1".into(),
+                    kp.public(),
+                )))),
+            })
+            .expect("")
             .build();
 
         Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
 
         if let Some(SwarmEvent::NewListenAddr { address, .. }) = swarm.next().await {
-            return (peer_id, address, swarm);
+            let peer_id = swarm.local_peer_id();
+            return (*peer_id, address, swarm);
         }
 
         panic!("no new addrs")
