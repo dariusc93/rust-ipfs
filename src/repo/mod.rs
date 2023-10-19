@@ -622,9 +622,12 @@ impl Repo {
                 .ok();
 
             let timeout = timeout.unwrap_or(Duration::from_secs(60));
-            tokio::time::timeout(timeout, rx)
-                .await??
-                .map_err(|e| anyhow!("{e}"))
+            let block = tokio::time::timeout(timeout, rx)
+                .await
+                .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
+                .map_err(|e| anyhow!("{e}"))?;
+
+            Ok(block)
         }
     }
 
