@@ -238,6 +238,8 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use crate::p2p::peerbook;
     use futures::StreamExt;
     use libp2p::swarm::behaviour::toggle::Toggle;
@@ -408,6 +410,7 @@ mod test {
                 }),
             })
             .expect("")
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
         Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
