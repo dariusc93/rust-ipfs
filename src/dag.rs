@@ -285,7 +285,9 @@ impl IpldDag {
         let mut iter = resolved_path.iter().peekable();
 
         let (node, _) = match self
-            .resolve0(session, cid, &mut iter, true, providers, local_only, timeout)
+            .resolve0(
+                session, cid, &mut iter, true, providers, local_only, timeout,
+            )
             .await
         {
             Ok(t) => t,

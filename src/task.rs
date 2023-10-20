@@ -61,9 +61,9 @@ use libp2p::{
     autonat,
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
     kad::{
-        AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
-        GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-        Event as KademliaEvent, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
+        AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, Event as KademliaEvent,
+        GetClosestPeersError, GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError,
+        GetRecordOk, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
     rendezvous::{Cookie, Namespace},
@@ -1272,20 +1272,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let client = bitswap.client().clone();
                     let server = bitswap.server().cloned();
 
-                    let _ = ret.send(Ok(
-                        async move {
-                            if let Some(peer) = peer {
-                                if let Some(server) = server {
-                                    server.wantlist_for_peer(&peer).await
-                                } else {
-                                    Vec::new()
-                                }
+                    let _ = ret.send(Ok(async move {
+                        if let Some(peer) = peer {
+                            if let Some(server) = server {
+                                server.wantlist_for_peer(&peer).await
                             } else {
-                                Vec::from_iter(client.get_wantlist().await)
+                                Vec::new()
                             }
+                        } else {
+                            Vec::from_iter(client.get_wantlist().await)
                         }
-                        .boxed()),
-                    );
+                    }
+                    .boxed()));
                 } else {
                     let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
