@@ -1,7 +1,7 @@
 # 0.2.0 [unrelease]
-- chore: Update to 0.52.4 [PR XXX]
+- chore: Update to 0.52.4 [PR 110]
 
-[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
+[PR 110]: https://github.com/dariusc93/rust-ipfs/pull/110
 
 # 0.1.2
 - chore: Emit event when selected peer is not an explicit relay
