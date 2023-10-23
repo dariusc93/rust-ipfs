@@ -1,4 +1,4 @@
-# 0.6.0 [unreleased]
+# 0.6.0
 - chore: Update libp2p to 0.52.4 [PR 110]
 - refactor: Disable primary protocols by default [PR 109]  
 - refactor: Move repo logic into a single task [PR 108]

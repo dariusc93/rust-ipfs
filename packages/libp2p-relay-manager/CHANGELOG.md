@@ -1,4 +1,4 @@
-# 0.2.0 [unrelease]
+# 0.2.0
 - chore: Update to 0.52.4 [PR 110]
 
 [PR 110]: https://github.com/dariusc93/rust-ipfs/pull/110
