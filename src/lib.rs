@@ -107,7 +107,7 @@ pub use libp2p::{
 
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
-    kad::{store::MemoryStoreConfig, KademliaConfig, Mode, Record},
+    kad::{store::MemoryStoreConfig, Mode, Record},
     ping::Config as PingConfig,
     rendezvous::Namespace,
     swarm::dial_opts::DialOpts,
@@ -187,7 +187,7 @@ pub struct IpfsOptions {
     pub pubsub_config: Option<crate::p2p::PubsubConfig>,
 
     /// Kad configuration
-    pub kad_configuration: Option<Either<KadConfig, KademliaConfig>>,
+    pub kad_configuration: Option<Either<KadConfig, libp2p::kad::Config>>,
 
     /// Kad Store Config
     /// Note: Only supports MemoryStoreConfig at this time
@@ -586,7 +586,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Enables kademlia
     pub fn with_kademlia(
         mut self,
-        config: Option<Either<KadConfig, KademliaConfig>>,
+        config: Option<Either<KadConfig, libp2p::kad::Config>>,
         store: KadStoreConfig,
     ) -> Self {
         self.options.protocols.kad = true;

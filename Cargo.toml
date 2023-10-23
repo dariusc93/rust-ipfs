@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.5.0"
+version = "0.6.0"
 
 [features]
 
@@ -18,14 +18,14 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-libp2p = "0.52.3"
-beetle-bitswap-next = { version = "0.4.0", path = "packages/beetle-bitswap-next" }
+libp2p = "0.52.4"
+beetle-bitswap-next = { version = "0.5.0", path = "packages/beetle-bitswap-next" }
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
 libipld = "0.16"
 clap = { version = "4.3", features = ["derive"] }
 rust-ipns = { version = "0.1", path = "packages/rust-ipns" }
 chrono = { version = "0.4" }
-libp2p-relay-manager = { version = "0.1", path = "packages/libp2p-relay-manager" }
+libp2p-relay-manager = { version = "0.2", path = "packages/libp2p-relay-manager" }
 
 [dependencies]
 anyhow = "1.0"
@@ -36,7 +36,7 @@ beetle-bitswap-next = { workspace = true }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
 libipld.workspace = true
-trust-dns-resolver = "0.22"
+trust-dns-resolver = "0.23"
 either = { version = "1" }
 futures = { version = "0.3" }
 hash_hasher = "2.0.3"

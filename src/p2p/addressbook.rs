@@ -238,14 +238,14 @@ impl NetworkBehaviour for Behaviour {
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use crate::p2p::peerbook;
-    use crate::p2p::transport::build_transport;
     use futures::StreamExt;
     use libp2p::swarm::behaviour::toggle::Toggle;
     use libp2p::{
-        identity::Keypair,
-        swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmBuilder, SwarmEvent},
-        Multiaddr, PeerId, Swarm,
+        swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmEvent},
+        Multiaddr, PeerId, Swarm, SwarmBuilder,
     };
 
     #[derive(NetworkBehaviour)]
@@ -395,24 +395,29 @@ mod test {
         peerbook: bool,
         store_on_connection: bool,
     ) -> (PeerId, Multiaddr, Swarm<Behaviour>) {
-        let key = Keypair::generate_ed25519();
-        let pubkey = key.public();
-        let peer_id = pubkey.to_peer_id();
-        let transport = build_transport(key, None, Default::default()).unwrap();
-
-        let behaviour = Behaviour {
-            peer_book: peerbook.then_some(peerbook::Behaviour::default()).into(),
-            address_book: super::Behaviour::with_config(super::Config {
-                store_on_connection,
-            }),
-        };
-
-        let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build();
+        let mut swarm = SwarmBuilder::with_new_identity()
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                libp2p::noise::Config::new,
+                libp2p::yamux::Config::default,
+            )
+            .expect("")
+            .with_behaviour(|_| Behaviour {
+                peer_book: peerbook.then_some(peerbook::Behaviour::default()).into(),
+                address_book: super::Behaviour::with_config(super::Config {
+                    store_on_connection,
+                }),
+            })
+            .expect("")
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            .build();
 
         Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
 
         if let Some(SwarmEvent::NewListenAddr { address, .. }) = swarm.next().await {
-            return (peer_id, address, swarm);
+            let peer_id = swarm.local_peer_id();
+            return (*peer_id, address, swarm);
         }
 
         panic!("no new addrs")

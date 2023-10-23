@@ -61,9 +61,9 @@ use libp2p::{
     autonat,
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
     kad::{
-        AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, GetClosestPeersError,
-        GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError, GetRecordOk,
-        KademliaEvent::*, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
+        AddProviderError, AddProviderOk, BootstrapError, BootstrapOk, Event as KademliaEvent,
+        GetClosestPeersError, GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError,
+        GetRecordOk, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
     rendezvous::{Cookie, Namespace},
@@ -415,10 +415,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             },
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(event)) => {
                 match event {
-                    InboundRequest { request } => {
+                    KademliaEvent::InboundRequest { request } => {
                         trace!("kad: inbound {:?} request handled", request);
                     }
-                    OutboundQueryProgressed {
+                    KademliaEvent::OutboundQueryProgressed {
                         result, id, step, ..
                     } => {
                         // make sure the query is exhausted
@@ -757,7 +757,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             }
                         }
                     }
-                    RoutingUpdated {
+                    KademliaEvent::RoutingUpdated {
                         peer,
                         is_new_peer: _,
                         addresses,
@@ -766,13 +766,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     } => {
                         trace!("kad: routing updated; {}: {:?}", peer, addresses);
                     }
-                    UnroutablePeer { peer } => {
+                    KademliaEvent::UnroutablePeer { peer } => {
                         trace!("kad: peer {} is unroutable", peer);
                     }
-                    RoutablePeer { peer, address } => {
+                    KademliaEvent::RoutablePeer { peer, address } => {
                         trace!("kad: peer {} ({}) is routable", peer, address);
                     }
-                    PendingRoutablePeer { peer, address } => {
+                    KademliaEvent::PendingRoutablePeer { peer, address } => {
                         trace!("kad: pending routable peer {} ({})", peer, address);
                     }
                 }
@@ -1272,20 +1272,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let client = bitswap.client().clone();
                     let server = bitswap.server().cloned();
 
-                    let _ = ret.send(Ok(
-                        async move {
-                            if let Some(peer) = peer {
-                                if let Some(server) = server {
-                                    server.wantlist_for_peer(&peer).await
-                                } else {
-                                    Vec::new()
-                                }
+                    let _ = ret.send(Ok(async move {
+                        if let Some(peer) = peer {
+                            if let Some(server) = server {
+                                server.wantlist_for_peer(&peer).await
                             } else {
-                                Vec::from_iter(client.get_wantlist().await)
+                                Vec::new()
                             }
+                        } else {
+                            Vec::from_iter(client.get_wantlist().await)
                         }
-                        .boxed()),
-                    );
+                    }
+                    .boxed()));
                 } else {
                     let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }

@@ -34,7 +34,7 @@ pub async fn resolve<'a>(
         // when trust-dns support lands in future libp2p-dns investigate if we could share one, no need
         // to have multiple related caches.
         let (config, opt) = resolver.into();
-        let resolver = AsyncResolver::tokio(config, opt)?;
+        let resolver = AsyncResolver::tokio(config, opt);
 
         // previous implementation searched $domain and _dnslink.$domain concurrently. not sure did
         // `domain` assume fqdn names or not, but local suffices were not being searched on windows at

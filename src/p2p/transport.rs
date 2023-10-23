@@ -5,7 +5,7 @@ use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 use libp2p::core::upgrade::SelectUpgrade;
-use libp2p::dns::{ResolverConfig, ResolverOpts, TokioDnsConfig};
+use libp2p::dns::{tokio::Transport as TokioDnsConfig, ResolverConfig, ResolverOpts};
 use libp2p::quic::tokio::Transport as TokioQuicTransport;
 use libp2p::quic::Config as QuicConfig;
 use libp2p::relay::client::Transport as ClientTransport;

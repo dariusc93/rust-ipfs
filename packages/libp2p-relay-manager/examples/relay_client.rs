@@ -1,26 +1,16 @@
-use std::{io, time::Duration};
+use std::time::Duration;
 
 use clap::Parser;
-use futures::{future::Either, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt};
 use libp2p::{
-    core::{
-        muxing::StreamMuxerBox,
-        transport::{timeout::TransportTimeout, Boxed, OrTransport},
-        upgrade::Version,
-    },
-    dns::{DnsConfig, ResolverConfig},
     identify::{self, Behaviour as Identify},
     identity::{self, Keypair},
     multiaddr::Protocol,
-    noise,
     ping::{self, Behaviour as Ping},
-    relay::client::{Behaviour as RelayClient, Transport as ClientTransport},
-    swarm::{NetworkBehaviour, SwarmBuilder, SwarmEvent},
-    tcp::{async_io::Transport as AsyncTcpTransport, Config as GenTcpConfig},
-    Multiaddr, PeerId, Transport,
+    relay::client::Behaviour as RelayClient,
+    swarm::{NetworkBehaviour, SwarmEvent},
+    Multiaddr, PeerId, SwarmBuilder,
 };
-
-use libp2p::quic::{async_std::Transport as AsyncQuicTransport, Config as QuicConfig};
 
 #[derive(NetworkBehaviour)]
 pub struct Behaviour {
@@ -70,24 +60,28 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Local Node: {local_peer_id}");
 
-    let (relay_transport, relay_client) = libp2p::relay::client::new(local_peer_id);
-
-    let transport = build_transport(local_keypair.clone(), relay_transport).await?;
-
-    let behaviour = Behaviour {
-        ping: Ping::new(Default::default()),
-        identify: Identify::new({
-            let mut config =
-                identify::Config::new("/test/0.1.0".to_string(), local_keypair.public());
-            config.push_listen_addr_updates = true;
-            config
-        }),
-        relay_client,
-        relay_manager: libp2p_relay_manager::Behaviour::default(),
-    };
-
-    let mut swarm =
-        SwarmBuilder::with_async_std_executor(transport, behaviour, local_peer_id).build();
+    let mut swarm = SwarmBuilder::with_existing_identity(local_keypair)
+        .with_async_std()
+        .with_tcp(
+            libp2p::tcp::Config::default(),
+            libp2p::noise::Config::new,
+            libp2p::yamux::Config::default,
+        )?
+        .with_quic()
+        .with_dns()
+        .await?
+        .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
+        .with_behaviour(|kp, relay_client| Behaviour {
+            ping: Ping::new(Default::default()),
+            identify: Identify::new({
+                let mut config = identify::Config::new("/test/0.1.0".to_string(), kp.public());
+                config.push_listen_addr_updates = true;
+                config
+            }),
+            relay_client,
+            relay_manager: libp2p_relay_manager::Behaviour::default(),
+        })?
+        .build();
 
     if opts.listener {
         let addr = "/ip4/0.0.0.0/tcp/0".parse().unwrap();
@@ -181,45 +175,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn build_transport(
-    keypair: Keypair,
-    relay: ClientTransport,
-) -> io::Result<Boxed<(PeerId, StreamMuxerBox)>> {
-    let noise_config = noise::Config::new(&keypair).unwrap();
-
-    let multiplex_upgrade = libp2p::yamux::Config::default();
-
-    let quic_transport = AsyncQuicTransport::new(QuicConfig::new(&keypair));
-
-    let transport = AsyncTcpTransport::new(GenTcpConfig::default().nodelay(true).port_reuse(true));
-
-    let transport_timeout = TransportTimeout::new(transport, Duration::from_secs(30));
-
-    let transport = DnsConfig::custom(
-        transport_timeout,
-        ResolverConfig::cloudflare(),
-        Default::default(),
-    )
-    .await?;
-
-    let transport = OrTransport::new(relay, transport)
-        .upgrade(Version::V1)
-        .authenticate(noise_config)
-        .multiplex(multiplex_upgrade)
-        .timeout(Duration::from_secs(30))
-        .map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer)))
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
-        .boxed();
-
-    let transport = OrTransport::new(quic_transport, transport)
-        .map(|either_output, _| match either_output {
-            Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-            Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-        })
-        .boxed();
-
-    Ok(transport)
-}
 fn generate_ed25519(secret_key_seed: u8) -> identity::Keypair {
     let mut bytes = [0u8; 32];
     bytes[0] = secret_key_seed;

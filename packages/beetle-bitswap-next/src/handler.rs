@@ -2,7 +2,6 @@ use std::{
     collections::VecDeque,
     fmt::Debug,
     task::{Context, Poll},
-    time::{Duration, Instant},
 };
 
 use asynchronous_codec::Framed;
@@ -30,10 +29,6 @@ use crate::{
     network,
     protocol::{BitswapCodec, ProtocolConfig, ProtocolId},
 };
-
-/// The initial time (in seconds) we set the keep alive for protocol negotiations to occur.
-// TODO: configurable
-const INITIAL_KEEP_ALIVE: u64 = 30;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BitswapHandlerError {
@@ -110,9 +105,6 @@ pub struct BitswapHandler {
 
     protocol: Option<ProtocolId>,
 
-    /// The amount of time we allow idle connections before disconnecting.
-    idle_timeout: Duration,
-
     /// Collection of errors from attempting an upgrade.
     upgrade_errors: VecDeque<StreamUpgradeError<BitswapHandlerError>>,
 
@@ -135,7 +127,6 @@ impl Debug for BitswapHandler {
             .field("events", &self.events)
             .field("send_queue", &self.send_queue)
             .field("protocol", &self.protocol)
-            .field("idle_timeout", &self.idle_timeout)
             .field("upgrade_errors", &self.upgrade_errors)
             .field("keep_alive", &self.keep_alive)
             .finish()
@@ -144,16 +135,15 @@ impl Debug for BitswapHandler {
 
 impl BitswapHandler {
     /// Builds a new [`BitswapHandler`].
-    pub fn new(protocol_config: ProtocolConfig, idle_timeout: Duration) -> Self {
+    pub fn new(protocol_config: ProtocolConfig) -> Self {
         Self {
             listen_protocol: SubstreamProtocol::new(protocol_config, ()),
             inbound_substreams: Default::default(),
             outbound_substreams: Default::default(),
             send_queue: Default::default(),
             protocol: None,
-            idle_timeout,
             upgrade_errors: VecDeque::new(),
-            keep_alive: KeepAlive::Until(Instant::now() + Duration::from_secs(INITIAL_KEEP_ALIVE)),
+            keep_alive: KeepAlive::No,
             events: Default::default(),
         }
     }
@@ -176,16 +166,12 @@ impl ConnectionHandler for BitswapHandler {
         match message {
             BitswapHandlerIn::Message(m, response) => {
                 self.send_queue.push_back((m, response));
-
-                // sending a message, reset keepalive
-                self.keep_alive = KeepAlive::Until(Instant::now() + self.idle_timeout);
             }
             BitswapHandlerIn::Protect => {
                 self.keep_alive = KeepAlive::Yes;
             }
             BitswapHandlerIn::Unprotect => {
-                self.keep_alive =
-                    KeepAlive::Until(Instant::now() + Duration::from_secs(INITIAL_KEEP_ALIVE));
+                self.keep_alive = KeepAlive::No;
             }
         }
     }
@@ -273,11 +259,6 @@ impl ConnectionHandler for BitswapHandler {
         }
 
         if let Poll::Ready(Some(event)) = self.inbound_substreams.poll_next_unpin(cx) {
-            if let ConnectionHandlerEvent::NotifyBehaviour(HandlerEvent::Message { .. }) = event {
-                // Update keep alive as we have received a message
-                self.keep_alive = KeepAlive::Until(Instant::now() + self.idle_timeout);
-            }
-
             return Poll::Ready(event);
         }
 
