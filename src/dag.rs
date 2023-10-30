@@ -204,7 +204,8 @@ impl IpldDag {
     ///
     /// Returns Cid version 1 for the document
     pub async fn put_dag(&self, ipld: Ipld) -> Result<Cid, Error> {
-        self.put(IpldCodec::DagCbor, ipld, None).await
+        self.put(IpldCodec::DagCbor, ipld, Code::Sha2_256, None)
+            .await
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
@@ -221,10 +222,11 @@ impl IpldDag {
         &self,
         codec: IpldCodec,
         data: Ipld,
+        code: Code,
         opt: Option<DagPutOpt>,
     ) -> Result<Cid, Error> {
         let bytes = codec.encode(&data)?;
-        let hash = Code::Sha2_256.digest(&bytes);
+        let hash = code.digest(&bytes);
         let version = if codec == IpldCodec::DagPb {
             Version::V0
         } else {
@@ -742,7 +744,7 @@ mod tests {
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, 2, 3]);
         let cid = dag
-            .put(IpldCodec::DagCbor, data.clone(), None)
+            .put(IpldCodec::DagCbor, data.clone(), Code::Sha2_256, None)
             .await
             .unwrap();
         let res = dag.get(IpfsPath::from(cid), &[], true).await.unwrap();
@@ -755,7 +757,7 @@ mod tests {
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, 2, 3]);
         let cid = dag
-            .put(IpldCodec::DagCbor, data.clone(), None)
+            .put(IpldCodec::DagCbor, data.clone(), Code::Sha2_256, None)
             .await
             .unwrap();
         let res = dag
@@ -770,7 +772,10 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, [2], 3,]);
-        let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
+        let cid = dag
+            .put(IpldCodec::DagCbor, data, Code::Sha2_256, None)
+            .await
+            .unwrap();
         let res = dag
             .get(IpfsPath::from(cid).sub_path("1/0").unwrap(), &[], true)
             .await
@@ -785,7 +790,10 @@ mod tests {
         let data = ipld!({
             "key": false,
         });
-        let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
+        let cid = dag
+            .put(IpldCodec::DagCbor, data, Code::Sha2_256, None)
+            .await
+            .unwrap();
         let res = dag
             .get(IpfsPath::from(cid).sub_path("key").unwrap(), &[], true)
             .await
@@ -798,9 +806,15 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data1 = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, data1, None).await.unwrap();
+        let cid1 = dag
+            .put(IpldCodec::DagCbor, data1, Code::Sha2_256, None)
+            .await
+            .unwrap();
         let data2 = ipld!([cid1]);
-        let cid2 = dag.put(IpldCodec::DagCbor, data2, None).await.unwrap();
+        let cid2 = dag
+            .put(IpldCodec::DagCbor, data2, Code::Sha2_256, None)
+            .await
+            .unwrap();
         let res = dag
             .get(IpfsPath::from(cid2).sub_path("0/0").unwrap(), &[], true)
             .await
@@ -986,9 +1000,15 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid1 = dag
+            .put(IpldCodec::DagCbor, ipld, Code::Sha2_256, None)
+            .await
+            .unwrap();
         let ipld = ipld!([cid1]);
-        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid2 = dag
+            .put(IpldCodec::DagCbor, ipld, Code::Sha2_256, None)
+            .await
+            .unwrap();
 
         let prefix = IpfsPath::from(cid2);
 
@@ -1015,9 +1035,15 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid1 = dag
+            .put(IpldCodec::DagCbor, ipld, Code::Sha2_256, None)
+            .await
+            .unwrap();
         let ipld = ipld!({ "0": cid1 });
-        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid2 = dag
+            .put(IpldCodec::DagCbor, ipld, Code::Sha2_256, None)
+            .await
+            .unwrap();
 
         let path = IpfsPath::from(cid2).sub_path("1/a").unwrap();
 
@@ -1031,9 +1057,15 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid1 = dag
+            .put(IpldCodec::DagCbor, ipld, Code::Sha2_256, None)
+            .await
+            .unwrap();
         let ipld = ipld!([cid1]);
-        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid2 = dag
+            .put(IpldCodec::DagCbor, ipld, Code::Sha2_256, None)
+            .await
+            .unwrap();
 
         let path = IpfsPath::from(cid2).sub_path("0/a").unwrap();
 

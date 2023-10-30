@@ -1177,21 +1177,14 @@ impl Ipfs {
     ///
     /// Returns Cid version 1 for the document
     pub async fn put_dag(&self, ipld: Ipld) -> Result<Cid, Error> {
-        self.dag()
-            .put(IpldCodec::DagCbor, ipld, None)
-            .instrument(self.span.clone())
-            .await
+        self.dag().put_dag(ipld).instrument(self.span.clone()).await
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
     pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
-        self.dag()
-            .get(path, &[], false)
-            .instrument(self.span.clone())
-            .await
-            .map_err(Error::new)
+        self.dag().get_dag(path).instrument(self.span.clone()).await
     }
 
     /// Get an ipld path from the datastore.
