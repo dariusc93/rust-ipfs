@@ -1,3 +1,8 @@
+# 0.6.1 [unreleased]
+- refactor: Add `Code` to `IpldDag::put` [PR XXX]
+
+[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
+
 # 0.6.0
 - chore: Update libp2p to 0.52.4 [PR 110]
 - refactor: Disable primary protocols by default [PR 109]  
