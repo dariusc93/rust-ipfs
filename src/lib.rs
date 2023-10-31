@@ -59,7 +59,7 @@ use repo::{BlockStore, DataStore, Lock};
 use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{IpfsUnixfs, NodeItem, UnixfsStatus};
+use unixfs::{IpfsUnixfs, UnixfsAddFuture, UnixfsCatFuture, UnixfsGetFuture, UnixfsLsFuture};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -1226,67 +1226,42 @@ impl Ipfs {
     /// will end without producing any bytes.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::cat` directly.
-    pub async fn cat_unixfs(
+    pub fn cat_unixfs(
         &self,
         starting_point: impl Into<unixfs::StartingPoint>,
         range: Option<Range<u64>>,
-    ) -> Result<
-        impl Stream<Item = Result<Vec<u8>, unixfs::TraversalFailed>> + Send + '_,
-        unixfs::TraversalFailed,
-    > {
-        self.unixfs()
-            .cat(starting_point, range, &[], false, None)
-            .instrument(self.span.clone())
-            .await
+    ) -> UnixfsCatFuture<'_> {
+        self.unixfs().cat(starting_point, range, &[], false, None)
     }
 
     /// Add a file from a path to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
-    pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
-        &self,
-        path: P,
-    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
+    pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAddFuture<'_> {
         let path = path.as_ref();
-        self.unixfs()
-            .add(path, None)
-            .instrument(self.span.clone())
-            .await
+        self.unixfs().add(path, None)
     }
 
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
-    pub async fn add_unixfs<'a>(
+    pub fn add_unixfs<'a>(
         &self,
         stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
-    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
-        self.unixfs()
-            .add(stream, None)
-            .instrument(self.span.clone())
-            .await
+    ) -> UnixfsAddFuture<'a> {
+        self.unixfs().add(stream, None)
     }
 
     /// Retreive a file and saving it to a path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub async fn get_unixfs<P: AsRef<Path>>(
-        &self,
-        path: IpfsPath,
-        dest: P,
-    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        self.unixfs()
-            .get(path, dest, &[], false, None)
-            .instrument(self.span.clone())
-            .await
+    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGetFuture<'_> {
+        self.unixfs().get(path, dest, &[], false, None)
     }
 
     /// List directory contents
-    pub async fn ls_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'_, NodeItem>, Error> {
-        self.unixfs()
-            .ls(path, &[], false, None)
-            .instrument(self.span.clone())
-            .await
+    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLsFuture<'_> {
+        self.unixfs().ls(path, &[], false, None)
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.

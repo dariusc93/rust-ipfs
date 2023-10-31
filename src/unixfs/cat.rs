@@ -1,7 +1,9 @@
 use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::stream;
 use either::Either;
-use futures::stream::Stream;
+use futures::future::BoxFuture;
+use futures::stream::{BoxStream, Stream};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
@@ -15,14 +17,14 @@ use super::TraversalFailed;
 /// be helpful in some contexts, like the http.
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
-pub async fn cat<'a>(
+pub fn cat<'a>(
     which: Either<&Ipfs, &Repo>,
-    starting_point: impl Into<StartingPoint>,
+    starting_point: impl Into<StartingPoint> + Send + 'a,
     range: Option<Range<u64>>,
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
-) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed> {
+) -> UnixfsCatFuture<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
@@ -42,45 +44,47 @@ pub async fn cat<'a>(
         visit = visit.with_target_range(range);
     }
 
-    // Get the root block to start the traversal. The stream does not expose any of the file
-    // metadata. To get to it the user needs to create a Visitor over the first block.
-    let block = match starting_point.into() {
-        StartingPoint::Left(path) => {
-            let (resolved, _) = dag
-                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
-                .await
-                .map_err(TraversalFailed::Resolving)?;
-            resolved
-                .into_unixfs_block()
-                .map_err(TraversalFailed::Path)?
-        }
-        StartingPoint::Right(block) => block,
-    };
-
-    let mut cache = None;
-    // Start the visit from the root block. We need to move the both components as Options into the
-    // stream as we can't yet return them from this Future context.
-    let (visit, bytes) = match visit.start(block.data()) {
-        Ok((bytes, _, _, visit)) => {
-            let bytes = if !bytes.is_empty() {
-                Some(bytes.to_vec())
-            } else {
-                None
-            };
-
-            (visit, bytes)
-        }
-        Err(e) => {
-            return Err(TraversalFailed::Walking(*block.cid(), e));
-        }
-    };
-
-    // FIXME: we could use the above file_size to set the content-length ... but calculating it
-    // with the ranges is not ... trivial?
-
     // using async_stream here at least to get on faster; writing custom streams is not too easy
     // but this might be easy enough to write open.
-    Ok(stream! {
+    let stream = stream! {
+
+        // Get the root block to start the traversal. The stream does not expose any of the file
+        // metadata. To get to it the user needs to create a Visitor over the first block.
+        let block = match starting_point.into() {
+            StartingPoint::Left(path) => match dag
+                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
+                .await
+                .map_err(TraversalFailed::Resolving)
+                .and_then(|(resolved, _)| {
+                    resolved.into_unixfs_block().map_err(TraversalFailed::Path)
+                }) {
+                    Ok(block) => block,
+                    Err(e) => {
+                        yield Err(e);
+                        return;
+                    }
+                },
+            StartingPoint::Right(block) => block,
+        };
+
+        let mut cache = None;
+        // Start the visit from the root block. We need to move the both components as Options into the
+        // stream as we can't yet return them from this Future context.
+        let (visit, bytes) = match visit.start(block.data()) {
+            Ok((bytes, _, _, visit)) => {
+                let bytes = if !bytes.is_empty() {
+                    Some(bytes.to_vec())
+                } else {
+                    None
+                };
+
+                (visit, bytes)
+            }
+            Err(e) => {
+                yield Err(TraversalFailed::Walking(*block.cid(), e));
+                return;
+            }
+        };
 
         if let Some(bytes) = bytes {
             yield Ok(bytes);
@@ -126,7 +130,11 @@ pub async fn cat<'a>(
                 }
             }
         }
-    })
+    };
+
+    UnixfsCatFuture {
+        stream: stream.boxed(),
+    }
 }
 
 /// The starting point for unixfs walks. Can be converted from IpfsPath and Blocks, and Cids can be
@@ -145,5 +153,36 @@ impl<T: Into<crate::IpfsPath>> From<T> for StartingPoint {
 impl From<Block> for StartingPoint {
     fn from(b: Block) -> Self {
         Self::Right(b)
+    }
+}
+
+pub struct UnixfsCatFuture<'a> {
+    stream: BoxStream<'a, Result<Vec<u8>, TraversalFailed>>,
+}
+
+impl<'a> Stream for UnixfsCatFuture<'a> {
+    type Item = Result<Vec<u8>, TraversalFailed>;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.stream.poll_next_unpin(cx)
+    }
+}
+
+impl<'a> std::future::IntoFuture for UnixfsCatFuture<'a> {
+    type Output = Result<Vec<u8>, TraversalFailed>;
+
+    type IntoFuture = BoxFuture<'a, Self::Output>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        async move {
+            let mut data = vec![];
+            while let Some(bytes) = self.stream.try_next().await? {
+                data.extend(bytes);
+            }
+            Ok(data)
+        }
+        .boxed()
     }
 }

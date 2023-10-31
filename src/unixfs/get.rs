@@ -1,7 +1,7 @@
 use std::{path::Path, time::Duration};
 
 use either::Either;
-use futures::{stream::BoxStream, StreamExt};
+use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt};
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
@@ -10,18 +10,14 @@ use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 use super::{TraversalFailed, UnixfsStatus};
 
-pub async fn get<'a, P: AsRef<Path>>(
+pub fn get<'a, P: AsRef<Path>>(
     which: Either<&Ipfs, &Repo>,
     path: IpfsPath,
     dest: P,
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
-) -> Result<BoxStream<'a, UnixfsStatus>, TraversalFailed> {
-    let mut file = tokio::fs::File::create(dest)
-        .await
-        .map_err(TraversalFailed::Io)?;
-
+) -> UnixfsGetFuture<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
@@ -36,24 +32,41 @@ pub async fn get<'a, P: AsRef<Path>>(
         }
     };
 
-    let (resolved, _) = dag
-        .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
-        .await
-        .map_err(TraversalFailed::Resolving)?;
-
-    let block = resolved
-        .into_unixfs_block()
-        .map_err(TraversalFailed::Path)?;
-
-    let cid = block.cid();
-    let root_name = block.cid().to_string();
-
-    let mut walker = Walker::new(*cid, root_name);
+    let dest = dest.as_ref().to_path_buf();
 
     let stream = async_stream::stream! {
+
         let mut cache = None;
         let mut total_size = None;
         let mut written = 0;
+
+        let mut file = match tokio::fs::File::create(dest)
+            .await
+            .map_err(TraversalFailed::Io) {
+                Ok(f) => f,
+                Err(e) => {
+                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
+                    return;
+                }
+            };
+
+        let block  = match dag
+            .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
+            .await
+            .map_err(TraversalFailed::Resolving)
+            .and_then(|(resolved, _)| resolved.into_unixfs_block().map_err(TraversalFailed::Path)) {
+                Ok(block) => block,
+                Err(e) => {
+                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
+                    return;
+                }
+        };
+
+        let cid = block.cid();
+        let root_name = block.cid().to_string();
+
+        let mut walker = Walker::new(*cid, root_name);
+
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
             let block = match repo.get_block_with_session(session, next, providers, local_only, timeout).await {
@@ -113,5 +126,45 @@ pub async fn get<'a, P: AsRef<Path>>(
         yield UnixfsStatus::CompletedStatus { path, written, total_size };
     };
 
-    Ok(stream.boxed())
+    UnixfsGetFuture {
+        stream: stream.boxed(),
+    }
+}
+
+pub struct UnixfsGetFuture<'a> {
+    stream: BoxStream<'a, UnixfsStatus>,
+}
+
+impl<'a> Stream for UnixfsGetFuture<'a> {
+    type Item = UnixfsStatus;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.stream.poll_next_unpin(cx)
+    }
+}
+
+impl<'a> std::future::IntoFuture for UnixfsGetFuture<'a> {
+    type Output = Result<(), anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'a, Self::Output>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        async move {
+            while let Some(status) = self.stream.next().await {
+                match status {
+                    UnixfsStatus::FailedStatus { error, .. } => {
+                        let error = error
+                            .unwrap_or(anyhow::anyhow!("Unknown error while writting to disk"));
+                        return Err(error);
+                    }
+                    UnixfsStatus::CompletedStatus { .. } => return Ok(()),
+                    _ => {}
+                }
+            }
+            Err::<_, anyhow::Error>(anyhow::anyhow!("Unable to get file"))
+        }
+        .boxed()
+    }
 }
