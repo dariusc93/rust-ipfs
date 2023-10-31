@@ -1,5 +1,5 @@
 # 0.6.1 [unreleased]
-- refactor: Add `Code` to `IpldDag::put` [PR XXX]
+- feat: Add `Code` to `IpldDag::put` [PR XXX]
 
 [PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
 
