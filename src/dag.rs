@@ -4,6 +4,9 @@ use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
 use crate::repo::Repo;
 use crate::{Block, Ipfs};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use libipld::serde::{from_ipld, to_ipld};
 use libipld::{
     cid::{
         multihash::{Code, MultihashDigest},
@@ -18,9 +21,11 @@ use rust_unixfs::{
     dir::{Cache, ShardedLookup},
     resolve, MaybeResolved,
 };
+use serde::de::DeserializeOwned;
 use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::iter::Peekable;
+use std::marker::PhantomData;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -63,6 +68,9 @@ pub enum ResolveError {
     /// Couldn't resolve a path via IPNS.
     #[error("can't resolve an IPNS path")]
     IpnsResolutionFailed(IpfsPath),
+
+    #[error("path is not provided or is invalid")]
+    PathNotProvided,
 }
 
 #[derive(Debug, Error)]
@@ -203,57 +211,29 @@ impl IpldDag {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub async fn put_dag(&self, ipld: Ipld) -> Result<Cid, Error> {
-        self.put(IpldCodec::DagCbor, ipld, None).await
+    pub fn put_dag(&self, ipld: Ipld) -> DagPut {
+        self.put().ipld(ipld)
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
-        self.get(path, &[], false).await.map_err(Error::new)
+    pub fn get_dag(&self, path: IpfsPath) -> DagGet {
+        self.get().path(path)
     }
 
     /// Returns the `Cid` of a newly inserted block.
     ///
     /// The block is created from the `data`, encoded with the `codec` and inserted into the repo.
-    pub async fn put(
-        &self,
-        codec: IpldCodec,
-        data: Ipld,
-        opt: Option<DagPutOpt>,
-    ) -> Result<Cid, Error> {
-        let bytes = codec.encode(&data)?;
-        let hash = Code::Sha2_256.digest(&bytes);
-        let version = if codec == IpldCodec::DagPb {
-            Version::V0
-        } else {
-            Version::V1
-        };
-        let cid = Cid::new(version, codec.into(), hash)?;
-        let block = Block::new(cid, bytes)?;
-        let (cid, _) = self.repo.put_block(block).await?;
-        if let Some(opt) = opt {
-            if let Some(opt) = opt.pin {
-                if !self.repo.is_pinned(&cid).await? {
-                    self.repo.insert_pin(&cid, opt.recursive, true).await?;
-                }
-            }
-        }
-        Ok(cid)
+    pub fn put(&self) -> DagPut {
+        DagPut::new(self.clone())
     }
 
     /// Resolves a `Cid`-rooted path to a document "node."
     ///
     /// Returns the resolved node as `Ipld`.
-    pub async fn get(
-        &self,
-        path: IpfsPath,
-        providers: &[PeerId],
-        local_only: bool,
-    ) -> Result<Ipld, ResolveError> {
-        self.get_with_session(None, path, providers, local_only, None)
-            .await
+    pub fn get(&self) -> DagGet {
+        DagGet::new(self.clone())
     }
 
     pub(crate) async fn get_with_session(
@@ -466,6 +446,206 @@ impl IpldDag {
                 NotFound => return Err(anyhow::anyhow!("key not found: ???")),
             }
         }
+    }
+}
+
+pub struct DagGet {
+    dag_ipld: IpldDag,
+    session: Option<u64>,
+    path: Option<IpfsPath>,
+    providers: Vec<PeerId>,
+    local: bool,
+    timeout: Option<Duration>,
+}
+
+impl DagGet {
+    pub fn new(dag: IpldDag) -> Self {
+        Self {
+            dag_ipld: dag,
+            session: None,
+            path: None,
+            providers: vec![],
+            local: false,
+            timeout: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn session(mut self, session: u64) -> Self {
+        self.session = Some(session);
+        self
+    }
+
+    pub fn path<P: Into<IpfsPath>>(mut self, path: P) -> Self {
+        let path = path.into();
+        self.path = Some(path);
+        self
+    }
+
+    pub fn provider(mut self, peer_id: PeerId) -> Self {
+        self.providers.push(peer_id);
+        self
+    }
+
+    pub fn local(mut self) -> Self {
+        self.local = true;
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn deserialized<D: DeserializeOwned>(self) -> DagGetDeserialize<D> {
+        DagGetDeserialize {
+            dag_get: self,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl std::future::IntoFuture for DagGet {
+    type Output = Result<Ipld, ResolveError>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move {
+            let path = self.path.ok_or(ResolveError::PathNotProvided)?;
+            self.dag_ipld
+                .get_with_session(
+                    self.session,
+                    path,
+                    &self.providers,
+                    self.local,
+                    self.timeout,
+                )
+                .await
+        }
+        .boxed()
+    }
+}
+
+pub struct DagGetDeserialize<D> {
+    dag_get: DagGet,
+    _marker: PhantomData<D>,
+}
+
+impl<D> std::future::IntoFuture for DagGetDeserialize<D>
+where
+    D: DeserializeOwned,
+{
+    type Output = Result<D, anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let fut = self.dag_get.into_future();
+        async move {
+            let document = fut.await?;
+            let data = from_ipld(document)?;
+            Ok(data)
+        }
+        .boxed()
+    }
+}
+
+pub struct DagPut {
+    dag_ipld: IpldDag,
+    codec: IpldCodec,
+    data: Option<Ipld>,
+    hash: Option<Code>,
+    pinned: Option<bool>,
+    provide: bool,
+}
+
+impl DagPut {
+    pub fn new(dag: IpldDag) -> Self {
+        Self {
+            dag_ipld: dag,
+            codec: IpldCodec::DagCbor,
+            data: None,
+            hash: None,
+            pinned: None,
+            provide: false,
+        }
+    }
+
+    pub fn ipld(mut self, data: Ipld) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Result<Self, Error> {
+        let data = to_ipld(data)?;
+        self.data = Some(data);
+        Ok(self)
+    }
+
+    pub fn pin(mut self, recursive: bool) -> Self {
+        self.pinned = Some(recursive);
+        self
+    }
+
+    pub fn provide(mut self) -> Self {
+        self.provide = true;
+        self
+    }
+
+    pub fn hash(mut self, code: Code) -> Self {
+        self.hash = Some(code);
+        self
+    }
+
+    pub fn codec(mut self, codec: IpldCodec) -> Self {
+        self.codec = codec;
+        self
+    }
+}
+
+impl std::future::IntoFuture for DagPut {
+    type Output = Result<Cid, anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move {
+            if self.provide && self.dag_ipld.ipfs.is_none() {
+                anyhow::bail!("Ipfs is offline");
+            }
+
+            let data = self.data.ok_or(anyhow::anyhow!("Ipld was not provided"))?;
+
+            let bytes = self.codec.encode(&data)?;
+            let code = self.hash.unwrap_or(Code::Sha2_256);
+            let hash = code.digest(&bytes);
+            let version = if self.codec == IpldCodec::DagPb {
+                Version::V0
+            } else {
+                Version::V1
+            };
+            let cid = Cid::new(version, self.codec.into(), hash)?;
+            let block = Block::new(cid, bytes)?;
+            let (cid, _) = self.dag_ipld.repo.put_block(block).await?;
+
+            if let Some(opt) = self.pinned {
+                if !self.dag_ipld.repo.is_pinned(&cid).await? {
+                    self.dag_ipld.repo.insert_pin(&cid, opt, true).await?;
+                }
+            }
+
+            if self.provide {
+                if let Some(ipfs) = &self.dag_ipld.ipfs {
+                    if let Err(e) = ipfs.provide(cid).await {
+                        error!("Failed to provide content over DHT: {e}")
+                    }
+                }
+            }
+
+            Ok(cid)
+        }
+        .boxed()
     }
 }
 
@@ -741,11 +921,8 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, 2, 3]);
-        let cid = dag
-            .put(IpldCodec::DagCbor, data.clone(), None)
-            .await
-            .unwrap();
-        let res = dag.get(IpfsPath::from(cid), &[], true).await.unwrap();
+        let cid = dag.put_dag(data.clone()).await.unwrap();
+        let res = dag.get_dag(IpfsPath::from(cid)).await.unwrap();
         assert_eq!(res, data);
     }
 
@@ -754,12 +931,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, 2, 3]);
-        let cid = dag
-            .put(IpldCodec::DagCbor, data.clone(), None)
-            .await
-            .unwrap();
+        let cid = dag.put_dag(data.clone()).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("1").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid).sub_path("1").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(2));
@@ -770,9 +944,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, [2], 3,]);
-        let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
+        let cid = dag.put_dag(data).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("1/0").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid).sub_path("1/0").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(2));
@@ -785,9 +959,9 @@ mod tests {
         let data = ipld!({
             "key": false,
         });
-        let cid = dag.put(IpldCodec::DagCbor, data, None).await.unwrap();
+        let cid = dag.put_dag(data).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("key").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid).sub_path("key").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(false));
@@ -798,11 +972,11 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let data1 = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, data1, None).await.unwrap();
+        let cid1 = dag.put_dag(data1).await.unwrap();
         let data2 = ipld!([cid1]);
-        let cid2 = dag.put(IpldCodec::DagCbor, data2, None).await.unwrap();
+        let cid2 = dag.put_dag(data2).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid2).sub_path("0/0").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid2).sub_path("0/0").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(1));
@@ -986,9 +1160,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid1 = dag.put_dag(ipld).await.unwrap();
         let ipld = ipld!([cid1]);
-        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid2 = dag.put_dag(ipld).await.unwrap();
 
         let prefix = IpfsPath::from(cid2);
 
@@ -1015,9 +1189,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid1 = dag.put_dag(ipld).await.unwrap();
         let ipld = ipld!({ "0": cid1 });
-        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid2 = dag.put_dag(ipld).await.unwrap();
 
         let path = IpfsPath::from(cid2).sub_path("1/a").unwrap();
 
@@ -1031,9 +1205,9 @@ mod tests {
         let Node { ipfs, .. } = Node::new("test_node").await;
         let dag = IpldDag::new(ipfs);
         let ipld = ipld!([1]);
-        let cid1 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid1 = dag.put_dag(ipld).await.unwrap();
         let ipld = ipld!([cid1]);
-        let cid2 = dag.put(IpldCodec::DagCbor, ipld, None).await.unwrap();
+        let cid2 = dag.put_dag(ipld).await.unwrap();
 
         let path = IpfsPath::from(cid2).sub_path("0/a").unwrap();
 

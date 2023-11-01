@@ -38,6 +38,7 @@ pub mod unixfs;
 extern crate tracing;
 
 use anyhow::{anyhow, format_err};
+use dag::{DagGet, DagPut};
 use either::Either;
 use futures::{
     channel::{
@@ -59,7 +60,7 @@ use repo::{BlockStore, DataStore, Lock};
 use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{IpfsUnixfs, NodeItem, UnixfsStatus};
+use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -1176,22 +1177,15 @@ impl Ipfs {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub async fn put_dag(&self, ipld: Ipld) -> Result<Cid, Error> {
-        self.dag()
-            .put(IpldCodec::DagCbor, ipld, None)
-            .instrument(self.span.clone())
-            .await
+    pub fn put_dag(&self, ipld: Ipld) -> DagPut {
+        self.dag().put_dag(ipld)
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
-        self.dag()
-            .get(path, &[], false)
-            .instrument(self.span.clone())
-            .await
-            .map_err(Error::new)
+    pub fn get_dag(&self, path: IpfsPath) -> DagGet {
+        self.dag().get_dag(path)
     }
 
     /// Get an ipld path from the datastore.
@@ -1226,67 +1220,39 @@ impl Ipfs {
     /// will end without producing any bytes.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::cat` directly.
-    pub async fn cat_unixfs(
+    pub fn cat_unixfs(
         &self,
         starting_point: impl Into<unixfs::StartingPoint>,
         range: Option<Range<u64>>,
-    ) -> Result<
-        impl Stream<Item = Result<Vec<u8>, unixfs::TraversalFailed>> + Send + '_,
-        unixfs::TraversalFailed,
-    > {
-        self.unixfs()
-            .cat(starting_point, range, &[], false, None)
-            .instrument(self.span.clone())
-            .await
+    ) -> UnixfsCat<'_> {
+        self.unixfs().cat(starting_point, range, &[], false, None)
     }
 
     /// Add a file from a path to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
-    pub async fn add_file_unixfs<P: AsRef<std::path::Path>>(
-        &self,
-        path: P,
-    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
+    pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
         let path = path.as_ref();
-        self.unixfs()
-            .add(path, None)
-            .instrument(self.span.clone())
-            .await
+        self.unixfs().add(path, None)
     }
 
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
-    pub async fn add_unixfs<'a>(
-        &self,
-        stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
-    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
-        self.unixfs()
-            .add(stream, None)
-            .instrument(self.span.clone())
-            .await
+    pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> UnixfsAdd<'a> {
+        self.unixfs().add(stream, None)
     }
 
     /// Retreive a file and saving it to a path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub async fn get_unixfs<P: AsRef<Path>>(
-        &self,
-        path: IpfsPath,
-        dest: P,
-    ) -> Result<BoxStream<'_, UnixfsStatus>, Error> {
-        self.unixfs()
-            .get(path, dest, &[], false, None)
-            .instrument(self.span.clone())
-            .await
+    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet<'_> {
+        self.unixfs().get(path, dest, &[], false, None)
     }
 
     /// List directory contents
-    pub async fn ls_unixfs(&self, path: IpfsPath) -> Result<BoxStream<'_, NodeItem>, Error> {
-        self.unixfs()
-            .ls(path, &[], false, None)
-            .instrument(self.span.clone())
-            .await
+    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs<'_> {
+        self.unixfs().ls(path, &[], false, None)
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.
@@ -2561,9 +2527,8 @@ mod tests {
         let ipfs = Node::new("test_node").await;
 
         let data = ipld!([-1, -2, -3]);
-        let cid = ipfs.put_dag(data.clone()).await.unwrap();
+        let cid = ipfs.put_dag(data.clone()).pin(false).await.unwrap();
 
-        ipfs.insert_pin(&cid, false).await.unwrap();
         assert!(ipfs.is_pinned(&cid).await.unwrap());
         ipfs.remove_pin(&cid, false).await.unwrap();
         assert!(!ipfs.is_pinned(&cid).await.unwrap());

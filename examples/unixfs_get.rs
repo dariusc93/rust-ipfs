@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
 
     let dest = opt.dest;
 
-    let mut stream = ipfs.get_unixfs(opt.path, &dest).await?;
+    let mut stream = ipfs.get_unixfs(opt.path, &dest);
 
     while let Some(status) = stream.next().await {
         match status {

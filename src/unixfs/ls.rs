@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use either::Either;
-use futures::{stream::BoxStream, StreamExt};
+use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt};
 use libipld::Cid;
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
@@ -16,13 +16,13 @@ pub enum NodeItem {
     File { cid: Cid, file: String, size: usize },
 }
 
-pub async fn ls<'a>(
+pub fn ls<'a>(
     which: Either<&Ipfs, &Repo>,
     path: IpfsPath,
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
-) -> anyhow::Result<BoxStream<'a, NodeItem>> {
+) -> UnixfsLs<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
@@ -37,18 +37,30 @@ pub async fn ls<'a>(
         }
     };
 
-    let (resolved, _) = dag
-        .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
-        .await?;
-
-    let block = resolved.into_unixfs_block()?;
-
-    let cid = block.cid();
-    let root_name = block.cid().to_string();
-
-    let mut walker = Walker::new(*cid, root_name);
-
     let stream = async_stream::stream! {
+
+        let resolved = match dag
+            .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
+            .await {
+                Ok((resolved, _)) => resolved,
+                Err(e) => {
+                    yield NodeItem::Error { error: e.into() };
+                    return;
+                }
+            };
+
+        let block = match resolved.into_unixfs_block() {
+            Ok(block) => block,
+            Err(e) => {
+                yield NodeItem::Error { error: e.into() };
+                return;
+            }
+        };
+
+        let cid = block.cid();
+        let root_name = cid.to_string();
+
+        let mut walker = Walker::new(*cid, root_name);
         let mut cache = None;
         let mut root_directory = String::new();
         while walker.should_continue() {
@@ -87,5 +99,41 @@ pub async fn ls<'a>(
 
     };
 
-    Ok(stream.boxed())
+    UnixfsLs {
+        stream: stream.boxed(),
+    }
+}
+
+pub struct UnixfsLs<'a> {
+    stream: BoxStream<'a, NodeItem>,
+}
+
+impl<'a> Stream for UnixfsLs<'a> {
+    type Item = NodeItem;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.stream.poll_next_unpin(cx)
+    }
+}
+
+impl<'a> std::future::IntoFuture for UnixfsLs<'a> {
+    type Output = Result<Vec<NodeItem>, anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'a, Self::Output>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        async move {
+            let mut items = vec![];
+            while let Some(status) = self.stream.next().await {
+                match status {
+                    NodeItem::Error { error } => return Err(error),
+                    item => items.push(item),
+                }
+            }
+            Ok(items)
+        }
+        .boxed()
+    }
 }

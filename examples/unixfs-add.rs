@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
 
-    let mut stream = ipfs.add_file_unixfs(opt.file).await?;
+    let mut stream = ipfs.add_file_unixfs(opt.file);
 
     while let Some(status) = stream.next().await {
         match status {

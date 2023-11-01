@@ -7,7 +7,7 @@ use std::{ops::Range, path::PathBuf, time::Duration};
 
 use anyhow::Error;
 use either::Either;
-use futures::{stream::BoxStream, Stream};
+use futures::stream::BoxStream;
 use libipld::Cid;
 use libp2p::PeerId;
 use ll::file::FileReadFailed;
@@ -17,10 +17,10 @@ mod add;
 mod cat;
 mod get;
 mod ls;
-pub use add::{add, add_file, AddOption};
-pub use cat::{cat, StartingPoint};
-pub use get::get;
-pub use ls::{ls, NodeItem};
+pub use add::{add, add_file, AddOption, UnixfsAdd};
+pub use cat::{cat, StartingPoint, UnixfsCat};
+pub use get::{get, UnixfsGet};
+pub use ls::{ls, NodeItem, UnixfsLs};
 
 use crate::{
     dag::{ResolveError, UnexpectedResolved},
@@ -83,15 +83,14 @@ impl IpfsUnixfs {
     /// will end without producing any bytes.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::cat` directly.
-    pub async fn cat<'a>(
+    pub fn cat<'a>(
         &self,
         starting_point: impl Into<StartingPoint>,
         range: Option<Range<u64>>,
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
-    ) -> Result<impl Stream<Item = Result<Vec<u8>, TraversalFailed>> + Send + 'a, TraversalFailed>
-    {
+    ) -> UnixfsCat<'a> {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
         cat(
@@ -102,54 +101,63 @@ impl IpfsUnixfs {
             local,
             timeout,
         )
-        .await
     }
 
     /// Add a file from either a file or stream
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` or `ipfs::unixfs::add_file` directly.
-    pub async fn add<'a, I: Into<AddOpt<'a>>>(
+    pub fn add<'a, I: Into<AddOpt<'a>>>(
         &self,
         item: I,
         option: Option<AddOption>,
-    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
+    ) -> UnixfsAdd<'a> {
         let item = item.into();
         match item {
-            AddOpt::Path(path) => add_file(Either::Left(&self.ipfs), path, option).await,
-            AddOpt::Stream(stream) => {
-                add(Either::Left(&self.ipfs), None, None, stream, option).await
-            }
-            AddOpt::StreamWithName(name, stream) => {
-                add(Either::Left(&self.ipfs), Some(name), None, stream, option).await
-            }
+            AddOpt::Path(path) => add_file(Either::Left(&self.ipfs), path, option),
+            AddOpt::Stream(stream) => add(
+                Either::Left(&self.ipfs),
+                add::AddOpt::Stream {
+                    name: None,
+                    total: None,
+                    stream,
+                },
+                option,
+            ),
+            AddOpt::StreamWithName(name, stream) => add(
+                Either::Left(&self.ipfs),
+                add::AddOpt::Stream {
+                    name: Some(name),
+                    total: None,
+                    stream,
+                },
+                option,
+            ),
         }
     }
 
     /// Retreive a file and saving it to a local path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub async fn get<'a, P: AsRef<std::path::Path>>(
+    pub fn get<'a, P: AsRef<std::path::Path>>(
         &self,
         path: IpfsPath,
         dest: P,
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
-    ) -> Result<BoxStream<'a, UnixfsStatus>, Error> {
+    ) -> UnixfsGet<'a> {
         get(Either::Left(&self.ipfs), path, dest, peers, local, timeout)
-            .await
-            .map_err(anyhow::Error::from)
     }
 
     /// List directory contents
-    pub async fn ls<'a>(
+    pub fn ls<'a>(
         &self,
         path: IpfsPath,
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
-    ) -> Result<BoxStream<'a, NodeItem>, Error> {
-        ls(Either::Left(&self.ipfs), path, peers, local, timeout).await
+    ) -> UnixfsLs<'a> {
+        ls(Either::Left(&self.ipfs), path, peers, local, timeout)
     }
 }
 

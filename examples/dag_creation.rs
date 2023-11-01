@@ -1,3 +1,5 @@
+use std::future::IntoFuture;
+
 use futures::join;
 use libipld::ipld;
 use rust_ipfs::{Ipfs, IpfsPath};
@@ -12,8 +14,8 @@ async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = UninitializedIpfs::new().start().await?;
 
     // Create a DAG
-    let f1 = ipfs.put_dag(ipld!("block1"));
-    let f2 = ipfs.put_dag(ipld!("block2"));
+    let f1 = ipfs.put_dag(ipld!("block1")).into_future();
+    let f2 = ipfs.put_dag(ipld!("block2")).into_future();
     let (res1, res2) = join!(f1, f2);
     let root = ipld!([res1?, res2?]);
     let cid = ipfs.put_dag(root).await?;
@@ -22,8 +24,8 @@ async fn main() -> anyhow::Result<()> {
     // Query the DAG
     let path1 = path.sub_path("0")?;
     let path2 = path.sub_path("1")?;
-    let f1 = ipfs.get_dag(path1);
-    let f2 = ipfs.get_dag(path2);
+    let f1 = ipfs.get_dag(path1).into_future();
+    let f2 = ipfs.get_dag(path2).into_future();
     let (res1, res2) = join!(f1, f2);
     println!("Received block with contents: {:?}", res1?);
     println!("Received block with contents: {:?}", res2?);

@@ -1,3 +1,8 @@
+# 0.7.0 [unrelease]
+- feat: Implement custom future for unixfs and dag functions [PR 111]
+
+[PR 111]: https://github.com/dariusc93/rust-ipfs/pull/111
+
 # 0.6.0
 - chore: Update libp2p to 0.52.4 [PR 110]
 - refactor: Disable primary protocols by default [PR 109]  

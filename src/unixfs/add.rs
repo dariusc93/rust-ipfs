@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{repo::Repo, Block};
 use either::Either;
-use futures::{stream::BoxStream, Stream, StreamExt};
+use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt, TryFutureExt};
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use tokio_util::io::ReaderStream;
 
@@ -18,6 +18,21 @@ pub struct AddOption {
     pub wrap: bool,
 }
 
+pub enum AddOpt<'a> {
+    File(PathBuf),
+    Stream {
+        name: Option<String>,
+        total: Option<usize>,
+        stream: BoxStream<'a, std::result::Result<Vec<u8>, std::io::Error>>,
+    },
+}
+
+impl<'a> From<PathBuf> for AddOpt<'a> {
+    fn from(path: PathBuf) -> Self {
+        AddOpt::File(path)
+    }
+}
+
 impl Default for AddOption {
     fn default() -> Self {
         Self {
@@ -29,33 +44,26 @@ impl Default for AddOption {
     }
 }
 
-pub async fn add_file<'a, P: AsRef<Path>>(
+pub struct UnixfsAdd<'a> {
+    stream: BoxStream<'a, UnixfsStatus>,
+}
+
+pub fn add_file<'a, P: AsRef<Path>>(
     which: Either<&Ipfs, &Repo>,
     path: P,
     opt: Option<AddOption>,
-) -> anyhow::Result<BoxStream<'a, UnixfsStatus>>
+) -> UnixfsAdd<'a>
 where
 {
     let path = path.as_ref().to_path_buf();
-
-    let file = tokio::fs::File::open(&path).await?;
-
-    let size = file.metadata().await?.len() as usize;
-
-    let stream = ReaderStream::new(file).map(|x| x.map(|x| x.into()));
-
-    let name = path.file_name().map(|f| f.to_string_lossy().to_string());
-
-    add(which, name, Some(size), stream.boxed(), opt).await
+    add(which, path.into(), opt)
 }
 
-pub async fn add<'a>(
+pub fn add<'a>(
     which: Either<&Ipfs, &Repo>,
-    name: Option<String>,
-    total_size: Option<usize>,
-    mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
+    options: AddOpt<'a>,
     opt: Option<AddOption>,
-) -> anyhow::Result<BoxStream<'a, UnixfsStatus>> {
+) -> UnixfsAdd<'a> {
     let (ipfs, repo) = match which {
         Either::Left(ipfs) => {
             let repo = ipfs.repo().clone();
@@ -67,11 +75,32 @@ pub async fn add<'a>(
 
     let stream = async_stream::stream! {
 
+        let mut written = 0;
+
+        let (name, total_size, mut stream) = match options {
+            AddOpt::File(path) => match tokio::fs::File::open(path.clone())
+                .and_then(|file| async move {
+                    let size = file.metadata().await?.len() as usize;
+
+                    let stream = ReaderStream::new(file).map(|x| x.map(|x| x.into()));
+
+                    let name: Option<String> = path.file_name().map(|f| f.to_string_lossy().to_string());
+
+                    Ok((name, Some(size), stream.boxed()))
+                }).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::anyhow!("{e}")) };
+                        return;
+                    }
+                },
+            AddOpt::Stream { name, total, stream } => (name, total, stream),
+        };
+
         let mut adder = FileAdderBuilder::default()
             .with_chunker(opt.map(|o| o.chunk.unwrap_or_default()).unwrap_or_default())
             .build();
 
-        let mut written = 0;
         yield UnixfsStatus::ProgressStatus { written, total_size };
 
         while let Some(buffer) = stream.next().await {
@@ -206,5 +235,39 @@ pub async fn add<'a>(
         yield UnixfsStatus::CompletedStatus { path, written, total_size }
     };
 
-    Ok(stream.boxed())
+    UnixfsAdd {
+        stream: stream.boxed(),
+    }
+}
+
+impl<'a> Stream for UnixfsAdd<'a> {
+    type Item = UnixfsStatus;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.stream.poll_next_unpin(cx)
+    }
+}
+
+impl<'a> std::future::IntoFuture for UnixfsAdd<'a> {
+    type Output = Result<IpfsPath, anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'a, Self::Output>;
+
+    fn into_future(mut self) -> Self::IntoFuture {
+        async move {
+            while let Some(status) = self.stream.next().await {
+                match status {
+                    UnixfsStatus::CompletedStatus { path, .. } => return Ok(path),
+                    UnixfsStatus::FailedStatus { error, .. } => {
+                        return Err(error.unwrap_or(anyhow::anyhow!("Unable to add file")));
+                    }
+                    _ => {}
+                }
+            }
+            Err::<_, anyhow::Error>(anyhow::anyhow!("Unable to add file"))
+        }
+        .boxed()
+    }
 }

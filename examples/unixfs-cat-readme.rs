@@ -10,13 +10,10 @@ async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = UninitializedIpfs::new().with_default().start().await?;
     ipfs.default_bootstrap().await?;
 
-    let mut stream = ipfs
-        .cat_unixfs(
-            IpfsPath::from_str("/ipfs/QmS4ustL54uo8FzR9455qaxZwuMiUhyvMcX9Ba8nUH4uVv/readme")?,
-            None,
-        )
-        .await?
-        .boxed();
+    let mut stream = ipfs.cat_unixfs(
+        IpfsPath::from_str("/ipfs/QmS4ustL54uo8FzR9455qaxZwuMiUhyvMcX9Ba8nUH4uVv/readme")?,
+        None,
+    );
 
     let mut stdout = tokio::io::stdout();
 

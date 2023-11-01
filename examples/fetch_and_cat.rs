@@ -66,10 +66,7 @@ async fn main() -> anyhow::Result<()> {
     // Calling Ipfs::cat_unixfs returns a future of a stream, because the path resolving
     // and the initial block loading will require at least one async call before any actual file
     // content can be *streamed*.
-    let stream = ipfs.cat_unixfs(opt.path, None).await.unwrap_or_else(|e| {
-        eprintln!("Error: {e}");
-        exit(1);
-    });
+    let stream = ipfs.cat_unixfs(opt.path, None);
 
     // The stream needs to be pinned on the stack to be used with StreamExt::next
     pin_mut!(stream);
