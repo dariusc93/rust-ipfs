@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -60,12 +60,12 @@ type DialMap = AHashMap<
     )>,
 >;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Bitswap<S: Store> {
     network: Network,
     protocol_config: ProtocolConfig,
-    peers: Arc<Mutex<AHashMap<PeerId, PeerState>>>,
-    dials: Arc<Mutex<DialMap>>,
+    peers: AHashMap<PeerId, PeerState>,
+    dials: DialMap,
     /// Set to true when dialing should be disabled because we have reached the conn limit.
     pause_dialing: bool,
     client: Client<S>,
@@ -258,7 +258,7 @@ impl<S: Store> Bitswap<S> {
     /// TODO: Check within handler after updating to libp2p 0.52 instead of checking identify
     ///       If peer does not contain the protocol, emit an event from the handler to notify
     ///       the behaviour and make sure to set `keep_alive` to `KeepAlive::No`
-    pub fn on_identify(&self, peer: &PeerId, protocols: &[StreamProtocol]) {
+    pub fn on_identify(&mut self, peer: &PeerId, protocols: &[StreamProtocol]) {
         if let Some(PeerState::Connected(conn_id)) = self.get_peer_state(peer) {
             let mut protocols: Vec<ProtocolId> =
                 protocols.iter().filter_map(ProtocolId::try_from).collect();
@@ -310,13 +310,12 @@ impl<S: Store> Bitswap<S> {
     }
 
     fn get_peer_state(&self, peer: &PeerId) -> Option<PeerState> {
-        self.peers.lock().unwrap().get(peer).copied()
+        self.peers.get(peer).copied()
     }
 
-    fn set_peer_state(&self, peer: &PeerId, new_state: PeerState) {
-        let peers = &mut *self.peers.lock().unwrap();
+    fn set_peer_state(&mut self, peer: &PeerId, new_state: PeerState) {
         let peer = *peer;
-        match peers.entry(peer) {
+        match self.peers.entry(peer) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 let old_state = *entry.get();
                 // skip non state changes
@@ -450,7 +449,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                     }
 
                     trace!("inject_dial_failure {}, {:?}", peer_id, error);
-                    let dials = &mut self.dials.lock().unwrap();
+                    let dials = &mut self.dials;
                     if let Some(mut dials) = dials.remove(&peer_id) {
                         while let Some((_id, sender)) = dials.pop() {
                             let _ = sender.send(Err(error.to_string()));
@@ -473,7 +472,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
             HandlerEvent::Connected { protocol } => {
                 self.set_peer_state(&peer_id, PeerState::Responsive(connection, protocol));
                 {
-                    let dials = &mut *self.dials.lock().unwrap();
+                    let dials = &mut self.dials;
                     if let Some(mut dials) = dials.remove(&peer_id) {
                         while let Some((id, sender)) = dials.pop() {
                             if let Err(err) = sender.send(Ok((connection, Some(protocol)))) {
@@ -486,7 +485,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
             HandlerEvent::ProtocolNotSuppported => {
                 self.set_peer_state(&peer_id, PeerState::Unresponsive);
 
-                let dials = &mut *self.dials.lock().unwrap();
+                let dials = &mut self.dials;
                 if let Some(mut dials) = dials.remove(&peer_id) {
                     while let Some((id, sender)) = dials.pop() {
                         if let Err(err) = sender.send(Err("protocol not supported".into())) {
@@ -564,12 +563,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                                     continue;
                                 }
 
-                                self.dials
-                                    .lock()
-                                    .unwrap()
-                                    .entry(peer)
-                                    .or_default()
-                                    .push((id, response));
+                                self.dials.entry(peer).or_default().push((id, response));
 
                                 return Poll::Ready(ToSwarm::Dial {
                                     opts: DialOpts::peer_id(peer).build(),
@@ -808,7 +802,7 @@ mod tests {
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
-        let swarm2_bs = swarm2.behaviour().clone();
+        let swarm2_bs_client = swarm2.behaviour().client().clone();
         let peer2 = tokio::task::spawn(async move {
             let addr = rx.recv().await.unwrap();
             info!("peer2: dialing peer1 at {}", addr);
@@ -819,7 +813,7 @@ mod tests {
                     Some(SwarmEvent::ConnectionEstablished { peer_id, .. }) => {
                         trace!("peer2: connected to {}", peer_id);
                         // simulate identify to inform bitswap about the protocols
-                        swarm2.behaviour().on_identify(
+                        swarm2.behaviour_mut().on_identify(
                             &peer_id,
                             &[
                                 StreamProtocol::new("/ipfs/bitswap/1.2.0"),
@@ -837,7 +831,7 @@ mod tests {
             let blocks = blocks.clone();
             let mut futs = Vec::new();
             for block in &blocks {
-                let client = swarm2_bs.client().clone();
+                let client = swarm2_bs_client.clone();
                 futs.push(async move {
                     // Should work, because retrieved
                     let received_block = client.get_block(block.cid()).await?;
@@ -859,7 +853,7 @@ mod tests {
             let mut blocks = blocks.clone();
             let futs = futures::stream::FuturesUnordered::new();
             for block in &blocks {
-                let client = swarm2_bs.client().clone();
+                let client = swarm2_bs_client.clone();
                 futs.push(async move {
                     // Should work, because retrieved
                     let received_block = client.get_block(block.cid()).await?;
@@ -881,7 +875,7 @@ mod tests {
             info!("peer2: fetching block - session");
             let mut blocks = blocks.clone();
             let ids: Vec<_> = blocks.iter().map(|b| *b.cid()).collect();
-            let session = swarm2_bs.client().new_session().await;
+            let session = swarm2_bs_client.new_session().await;
             let (blocks_receiver, _guard) = session.get_blocks(&ids).await.unwrap().into_parts();
             let mut results: Vec<_> = blocks_receiver.collect().await;
 
