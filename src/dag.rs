@@ -453,7 +453,7 @@ impl IpldDag {
 pub struct DagPut {
     dag_ipld: IpldDag,
     codec: IpldCodec,
-    data: Ipld,
+    data: Option<Ipld>,
     hash: Option<Code>,
     pinned: Option<bool>,
     provide: bool,
@@ -464,7 +464,7 @@ impl DagPut {
         Self {
             dag_ipld: dag,
             codec: IpldCodec::DagCbor,
-            data: Ipld::Null,
+            data: None,
             hash: None,
             pinned: None,
             provide: false,
@@ -472,13 +472,13 @@ impl DagPut {
     }
 
     pub fn ipld(mut self, data: Ipld) -> Self {
-        self.data = data;
+        self.data = Some(data);
         self
     }
 
     pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Result<Self, Error> {
         let data = to_ipld(data)?;
-        self.data = data;
+        self.data = Some(data);
         Ok(self)
     }
 
@@ -513,7 +513,10 @@ impl std::future::IntoFuture for DagPut {
             if self.provide && self.dag_ipld.ipfs.is_none() {
                 anyhow::bail!("Ipfs is offline");
             }
-            let bytes = self.codec.encode(&self.data)?;
+            
+            let data = self.data.ok_or(anyhow::anyhow!("Ipld was not provided"))?;
+
+            let bytes = self.codec.encode(&data)?;
             let code = self.hash.unwrap_or(Code::Sha2_256);
             let hash = code.digest(&bytes);
             let version = if self.codec == IpldCodec::DagPb {
