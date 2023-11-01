@@ -1,7 +1,7 @@
-# next [unrelease]
-- feat: Implement custom future for unixfs and dag functions [PR XXX]
+# 0.7.0 [unrelease]
+- feat: Implement custom future for unixfs and dag functions [PR 111]
 
-[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
+[PR 111]: https://github.com/dariusc93/rust-ipfs/pull/111
 
 # 0.6.0
 - chore: Update libp2p to 0.52.4 [PR 110]
