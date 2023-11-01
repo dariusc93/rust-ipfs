@@ -38,7 +38,7 @@ pub mod unixfs;
 extern crate tracing;
 
 use anyhow::{anyhow, format_err};
-use dag::DagPut;
+use dag::{DagGet, DagPut};
 use either::Either;
 use futures::{
     channel::{
@@ -1184,12 +1184,8 @@ impl Ipfs {
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
-        self.dag()
-            .get(path, &[], false)
-            .instrument(self.span.clone())
-            .await
-            .map_err(Error::new)
+    pub fn get_dag(&self, path: IpfsPath) -> DagGet {
+        self.dag().get_dag(path)
     }
 
     /// Get an ipld path from the datastore.

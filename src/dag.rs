@@ -6,7 +6,7 @@ use crate::repo::Repo;
 use crate::{Block, Ipfs};
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use libipld::serde::to_ipld;
+use libipld::serde::{from_ipld, to_ipld};
 use libipld::{
     cid::{
         multihash::{Code, MultihashDigest},
@@ -21,9 +21,11 @@ use rust_unixfs::{
     dir::{Cache, ShardedLookup},
     resolve, MaybeResolved,
 };
+use serde::de::DeserializeOwned;
 use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::iter::Peekable;
+use std::marker::PhantomData;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -66,6 +68,9 @@ pub enum ResolveError {
     /// Couldn't resolve a path via IPNS.
     #[error("can't resolve an IPNS path")]
     IpnsResolutionFailed(IpfsPath),
+
+    #[error("path is not provided or is invalid")]
+    PathNotProvided,
 }
 
 #[derive(Debug, Error)]
@@ -213,8 +218,8 @@ impl IpldDag {
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub async fn get_dag(&self, path: IpfsPath) -> Result<Ipld, Error> {
-        self.get(path, &[], false).await.map_err(Error::new)
+    pub fn get_dag(&self, path: IpfsPath) -> DagGet {
+        self.get().path(path)
     }
 
     /// Returns the `Cid` of a newly inserted block.
@@ -227,14 +232,8 @@ impl IpldDag {
     /// Resolves a `Cid`-rooted path to a document "node."
     ///
     /// Returns the resolved node as `Ipld`.
-    pub async fn get(
-        &self,
-        path: IpfsPath,
-        providers: &[PeerId],
-        local_only: bool,
-    ) -> Result<Ipld, ResolveError> {
-        self.get_with_session(None, path, providers, local_only, None)
-            .await
+    pub fn get(&self) -> DagGet {
+        DagGet::new(self.clone())
     }
 
     pub(crate) async fn get_with_session(
@@ -450,6 +449,107 @@ impl IpldDag {
     }
 }
 
+pub struct DagGet {
+    dag_ipld: IpldDag,
+    session: Option<u64>,
+    path: Option<IpfsPath>,
+    providers: Vec<PeerId>,
+    local: bool,
+    timeout: Option<Duration>,
+}
+
+impl DagGet {
+    pub fn new(dag: IpldDag) -> Self {
+        Self {
+            dag_ipld: dag,
+            session: None,
+            path: None,
+            providers: vec![],
+            local: false,
+            timeout: None,
+        }
+    }
+
+    pub(crate) fn session(mut self, session: u64) -> Self {
+        self.session = Some(session);
+        self
+    }
+
+    pub fn path<P: Into<IpfsPath>>(mut self, path: P) -> Self {
+        let path = path.into();
+        self.path = Some(path);
+        self
+    }
+
+    pub fn provider(mut self, peer_id: PeerId) -> Self {
+        self.providers.push(peer_id);
+        self
+    }
+
+    pub fn local(mut self) -> Self {
+        self.local = true;
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn deserialized<D: DeserializeOwned>(self) -> DagGetDeserialize<D> {
+        DagGetDeserialize {
+            dag_get: self,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl std::future::IntoFuture for DagGet {
+    type Output = Result<Ipld, ResolveError>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move {
+            let path = self.path.ok_or(ResolveError::PathNotProvided)?;
+            self.dag_ipld
+                .get_with_session(
+                    self.session,
+                    path,
+                    &self.providers,
+                    self.local,
+                    self.timeout,
+                )
+                .await
+        }
+        .boxed()
+    }
+}
+
+pub struct DagGetDeserialize<D> {
+    dag_get: DagGet,
+    _marker: PhantomData<D>,
+}
+
+impl<D> std::future::IntoFuture for DagGetDeserialize<D>
+where
+    D: DeserializeOwned,
+{
+    type Output = Result<D, anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let fut = self.dag_get.into_future();
+        async move {
+            let document = fut.await?;
+            let data = from_ipld(document)?;
+            Ok(data)
+        }
+        .boxed()
+    }
+}
+
 pub struct DagPut {
     dag_ipld: IpldDag,
     codec: IpldCodec,
@@ -513,7 +613,7 @@ impl std::future::IntoFuture for DagPut {
             if self.provide && self.dag_ipld.ipfs.is_none() {
                 anyhow::bail!("Ipfs is offline");
             }
-            
+
             let data = self.data.ok_or(anyhow::anyhow!("Ipld was not provided"))?;
 
             let bytes = self.codec.encode(&data)?;
@@ -821,7 +921,7 @@ mod tests {
         let dag = IpldDag::new(ipfs);
         let data = ipld!([1, 2, 3]);
         let cid = dag.put_dag(data.clone()).await.unwrap();
-        let res = dag.get(IpfsPath::from(cid), &[], true).await.unwrap();
+        let res = dag.get_dag(IpfsPath::from(cid)).await.unwrap();
         assert_eq!(res, data);
     }
 
@@ -832,7 +932,7 @@ mod tests {
         let data = ipld!([1, 2, 3]);
         let cid = dag.put_dag(data.clone()).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("1").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid).sub_path("1").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(2));
@@ -845,7 +945,7 @@ mod tests {
         let data = ipld!([1, [2], 3,]);
         let cid = dag.put_dag(data).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("1/0").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid).sub_path("1/0").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(2));
@@ -860,7 +960,7 @@ mod tests {
         });
         let cid = dag.put_dag(data).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid).sub_path("key").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid).sub_path("key").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(false));
@@ -875,7 +975,7 @@ mod tests {
         let data2 = ipld!([cid1]);
         let cid2 = dag.put_dag(data2).await.unwrap();
         let res = dag
-            .get(IpfsPath::from(cid2).sub_path("0/0").unwrap(), &[], true)
+            .get_dag(IpfsPath::from(cid2).sub_path("0/0").unwrap())
             .await
             .unwrap();
         assert_eq!(res, ipld!(1));
