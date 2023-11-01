@@ -584,7 +584,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                         response,
                         connection_id,
                     } => {
-                        tracing::debug!("send message {}", peer);
+                        tracing::debug!("send message to {}", peer);
                         return Poll::Ready(ToSwarm::NotifyHandler {
                             peer_id: peer,
                             handler: NotifyHandler::One(connection_id),
