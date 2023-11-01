@@ -38,6 +38,7 @@ pub mod unixfs;
 extern crate tracing;
 
 use anyhow::{anyhow, format_err};
+use dag::DagPut;
 use either::Either;
 use futures::{
     channel::{
@@ -1176,11 +1177,8 @@ impl Ipfs {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub async fn put_dag(&self, ipld: Ipld) -> Result<Cid, Error> {
-        self.dag()
-            .put(IpldCodec::DagCbor, ipld, None)
-            .instrument(self.span.clone())
-            .await
+    pub fn put_dag(&self, ipld: Ipld) -> DagPut {
+        self.dag().put_dag(ipld)
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
