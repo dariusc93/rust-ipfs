@@ -2531,9 +2531,8 @@ mod tests {
         let ipfs = Node::new("test_node").await;
 
         let data = ipld!([-1, -2, -3]);
-        let cid = ipfs.put_dag(data.clone()).await.unwrap();
+        let cid = ipfs.put_dag(data.clone()).pin(false).await.unwrap();
 
-        ipfs.insert_pin(&cid, false).await.unwrap();
         assert!(ipfs.is_pinned(&cid).await.unwrap());
         ipfs.remove_pin(&cid, false).await.unwrap();
         assert!(!ipfs.is_pinned(&cid).await.unwrap());
