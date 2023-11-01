@@ -17,10 +17,10 @@ mod add;
 mod cat;
 mod get;
 mod ls;
-pub use add::{add, add_file, AddOption, UnixfsAddFuture};
-pub use cat::{cat, StartingPoint, UnixfsCatFuture};
-pub use get::{get, UnixfsGetFuture};
-pub use ls::{ls, NodeItem, UnixfsLsFuture};
+pub use add::{add, add_file, AddOption, UnixfsAdd};
+pub use cat::{cat, StartingPoint, UnixfsCat};
+pub use get::{get, UnixfsGet};
+pub use ls::{ls, NodeItem, UnixfsLs};
 
 use crate::{
     dag::{ResolveError, UnexpectedResolved},
@@ -90,7 +90,7 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
-    ) -> UnixfsCatFuture<'a> {
+    ) -> UnixfsCat<'a> {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
         cat(
@@ -110,7 +110,7 @@ impl IpfsUnixfs {
         &self,
         item: I,
         option: Option<AddOption>,
-    ) -> UnixfsAddFuture<'a> {
+    ) -> UnixfsAdd<'a> {
         let item = item.into();
         match item {
             AddOpt::Path(path) => add_file(Either::Left(&self.ipfs), path, option),
@@ -145,7 +145,7 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
-    ) -> UnixfsGetFuture<'a> {
+    ) -> UnixfsGet<'a> {
         get(Either::Left(&self.ipfs), path, dest, peers, local, timeout)
     }
 
@@ -156,7 +156,7 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
-    ) -> UnixfsLsFuture<'a> {
+    ) -> UnixfsLs<'a> {
         ls(Either::Left(&self.ipfs), path, peers, local, timeout)
     }
 }

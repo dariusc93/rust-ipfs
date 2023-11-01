@@ -44,7 +44,7 @@ impl Default for AddOption {
     }
 }
 
-pub struct UnixfsAddFuture<'a> {
+pub struct UnixfsAdd<'a> {
     stream: BoxStream<'a, UnixfsStatus>,
 }
 
@@ -52,7 +52,7 @@ pub fn add_file<'a, P: AsRef<Path>>(
     which: Either<&Ipfs, &Repo>,
     path: P,
     opt: Option<AddOption>,
-) -> UnixfsAddFuture<'a>
+) -> UnixfsAdd<'a>
 where
 {
     let path = path.as_ref().to_path_buf();
@@ -63,7 +63,7 @@ pub fn add<'a>(
     which: Either<&Ipfs, &Repo>,
     options: AddOpt<'a>,
     opt: Option<AddOption>,
-) -> UnixfsAddFuture<'a> {
+) -> UnixfsAdd<'a> {
     let (ipfs, repo) = match which {
         Either::Left(ipfs) => {
             let repo = ipfs.repo().clone();
@@ -235,12 +235,12 @@ pub fn add<'a>(
         yield UnixfsStatus::CompletedStatus { path, written, total_size }
     };
 
-    UnixfsAddFuture {
+    UnixfsAdd {
         stream: stream.boxed(),
     }
 }
 
-impl<'a> Stream for UnixfsAddFuture<'a> {
+impl<'a> Stream for UnixfsAdd<'a> {
     type Item = UnixfsStatus;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -250,7 +250,7 @@ impl<'a> Stream for UnixfsAddFuture<'a> {
     }
 }
 
-impl<'a> std::future::IntoFuture for UnixfsAddFuture<'a> {
+impl<'a> std::future::IntoFuture for UnixfsAdd<'a> {
     type Output = Result<IpfsPath, anyhow::Error>;
 
     type IntoFuture = BoxFuture<'a, Self::Output>;

@@ -59,7 +59,7 @@ use repo::{BlockStore, DataStore, Lock};
 use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{IpfsUnixfs, UnixfsAddFuture, UnixfsCatFuture, UnixfsGetFuture, UnixfsLsFuture};
+use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -1230,14 +1230,14 @@ impl Ipfs {
         &self,
         starting_point: impl Into<unixfs::StartingPoint>,
         range: Option<Range<u64>>,
-    ) -> UnixfsCatFuture<'_> {
+    ) -> UnixfsCat<'_> {
         self.unixfs().cat(starting_point, range, &[], false, None)
     }
 
     /// Add a file from a path to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
-    pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAddFuture<'_> {
+    pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
         let path = path.as_ref();
         self.unixfs().add(path, None)
     }
@@ -1245,22 +1245,19 @@ impl Ipfs {
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
-    pub fn add_unixfs<'a>(
-        &self,
-        stream: BoxStream<'a, std::io::Result<Vec<u8>>>,
-    ) -> UnixfsAddFuture<'a> {
+    pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> UnixfsAdd<'a> {
         self.unixfs().add(stream, None)
     }
 
     /// Retreive a file and saving it to a path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGetFuture<'_> {
+    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet<'_> {
         self.unixfs().get(path, dest, &[], false, None)
     }
 
     /// List directory contents
-    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLsFuture<'_> {
+    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs<'_> {
         self.unixfs().ls(path, &[], false, None)
     }
 

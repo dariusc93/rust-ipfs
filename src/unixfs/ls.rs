@@ -22,7 +22,7 @@ pub fn ls<'a>(
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
-) -> UnixfsLsFuture<'a> {
+) -> UnixfsLs<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
@@ -99,16 +99,16 @@ pub fn ls<'a>(
 
     };
 
-    UnixfsLsFuture {
+    UnixfsLs {
         stream: stream.boxed(),
     }
 }
 
-pub struct UnixfsLsFuture<'a> {
+pub struct UnixfsLs<'a> {
     stream: BoxStream<'a, NodeItem>,
 }
 
-impl<'a> Stream for UnixfsLsFuture<'a> {
+impl<'a> Stream for UnixfsLs<'a> {
     type Item = NodeItem;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -118,7 +118,7 @@ impl<'a> Stream for UnixfsLsFuture<'a> {
     }
 }
 
-impl<'a> std::future::IntoFuture for UnixfsLsFuture<'a> {
+impl<'a> std::future::IntoFuture for UnixfsLs<'a> {
     type Output = Result<Vec<NodeItem>, anyhow::Error>;
 
     type IntoFuture = BoxFuture<'a, Self::Output>;

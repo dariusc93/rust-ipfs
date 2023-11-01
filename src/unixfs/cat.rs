@@ -24,7 +24,7 @@ pub fn cat<'a>(
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
-) -> UnixfsCatFuture<'a> {
+) -> UnixfsCat<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
@@ -132,7 +132,7 @@ pub fn cat<'a>(
         }
     };
 
-    UnixfsCatFuture {
+    UnixfsCat {
         stream: stream.boxed(),
     }
 }
@@ -156,11 +156,11 @@ impl From<Block> for StartingPoint {
     }
 }
 
-pub struct UnixfsCatFuture<'a> {
+pub struct UnixfsCat<'a> {
     stream: BoxStream<'a, Result<Vec<u8>, TraversalFailed>>,
 }
 
-impl<'a> Stream for UnixfsCatFuture<'a> {
+impl<'a> Stream for UnixfsCat<'a> {
     type Item = Result<Vec<u8>, TraversalFailed>;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -170,7 +170,7 @@ impl<'a> Stream for UnixfsCatFuture<'a> {
     }
 }
 
-impl<'a> std::future::IntoFuture for UnixfsCatFuture<'a> {
+impl<'a> std::future::IntoFuture for UnixfsCat<'a> {
     type Output = Result<Vec<u8>, TraversalFailed>;
 
     type IntoFuture = BoxFuture<'a, Self::Output>;

@@ -17,7 +17,7 @@ pub fn get<'a, P: AsRef<Path>>(
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
-) -> UnixfsGetFuture<'a> {
+) -> UnixfsGet<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
             ipfs.repo().clone(),
@@ -126,16 +126,16 @@ pub fn get<'a, P: AsRef<Path>>(
         yield UnixfsStatus::CompletedStatus { path, written, total_size };
     };
 
-    UnixfsGetFuture {
+    UnixfsGet {
         stream: stream.boxed(),
     }
 }
 
-pub struct UnixfsGetFuture<'a> {
+pub struct UnixfsGet<'a> {
     stream: BoxStream<'a, UnixfsStatus>,
 }
 
-impl<'a> Stream for UnixfsGetFuture<'a> {
+impl<'a> Stream for UnixfsGet<'a> {
     type Item = UnixfsStatus;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -145,7 +145,7 @@ impl<'a> Stream for UnixfsGetFuture<'a> {
     }
 }
 
-impl<'a> std::future::IntoFuture for UnixfsGetFuture<'a> {
+impl<'a> std::future::IntoFuture for UnixfsGet<'a> {
     type Output = Result<(), anyhow::Error>;
 
     type IntoFuture = BoxFuture<'a, Self::Output>;
