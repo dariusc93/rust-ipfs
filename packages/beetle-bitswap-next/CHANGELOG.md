@@ -1,3 +1,8 @@
+# 0.5.1 [unrelease]
+- chore: Remove `ConnectionHandlerEvent::Close` [PR XXX]
+
+[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
+
 # 0.5.0
 - chore: Update to 0.52.4 and remove KeepAlive::Until [PR 110]
 
