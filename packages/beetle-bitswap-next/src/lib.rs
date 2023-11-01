@@ -17,11 +17,11 @@ use handler::{BitswapHandler, HandlerEvent};
 
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
-use libp2p::swarm::{
-    CloseConnection, ConnectionDenied, DialError, NetworkBehaviour, NotifyHandler, PollParameters,
-    THandler, THandlerInEvent, ToSwarm,
-};
 use libp2p::swarm::{ConnectionClosed, ConnectionId, DialFailure, FromSwarm};
+use libp2p::swarm::{
+    ConnectionDenied, DialError, NetworkBehaviour, NotifyHandler, PollParameters, THandler,
+    THandlerInEvent, ToSwarm,
+};
 use libp2p::{Multiaddr, PeerId, StreamProtocol};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -516,15 +516,6 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
             match Pin::new(&mut self.network).poll(cx) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(ev) => match ev {
-                    OutEvent::Disconnect(peer_id, response) => {
-                        if let Err(err) = response.send(()) {
-                            warn!("failed to send disconnect response {:?}", err)
-                        }
-                        return Poll::Ready(ToSwarm::CloseConnection {
-                            peer_id,
-                            connection: CloseConnection::All,
-                        });
-                    }
                     OutEvent::Dial { peer, response, id } => {
                         match self.get_peer_state(&peer) {
                             Some(PeerState::Responsive(conn, protocol_id)) => {
