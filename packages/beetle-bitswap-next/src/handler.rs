@@ -214,7 +214,6 @@ impl ConnectionHandler for BitswapHandler {
             ConnectionEvent::AddressChange(_) => todo!(),
             ConnectionEvent::DialUpgradeError(DialUpgradeError { error, .. }) => {
                 warn!("Dial upgrade error {:?}", error);
-                self.upgrade_errors.push_back(error);
             }
             ConnectionEvent::ListenUpgradeError(_) => {}
             //TODO: Cover protocol change
@@ -229,20 +228,6 @@ impl ConnectionHandler for BitswapHandler {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BitswapConnectionHandlerEvent> {
         if !self.events.is_empty() {
             return Poll::Ready(self.events.remove(0));
-        }
-
-        // Handle any upgrade errors
-        if let Some(error) = self.upgrade_errors.pop_front() {
-            let reported_error = match error {
-                StreamUpgradeError::Timeout | StreamUpgradeError::NegotiationFailed => {
-                    BitswapHandlerError::NegotiationTimeout
-                }
-                StreamUpgradeError::Io(e) => BitswapHandlerError::Io(e),
-                StreamUpgradeError::Apply(negotiation_error) => negotiation_error,
-            };
-
-            // Close the connection
-            return Poll::Ready(ConnectionHandlerEvent::Close(reported_error));
         }
 
         // determine if we need to create the stream
@@ -282,10 +267,6 @@ fn inbound_substream(
                     }
                     _ => {
                         warn!("Inbound stream error: {}", error);
-                        // More serious errors, close this side of the stream. If the
-                        // peer is still around, they will re-establish their connection
-
-                        yield ConnectionHandlerEvent::Close(error);
                         break;
                     }
                 }

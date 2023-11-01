@@ -572,9 +572,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                                     .push((id, response));
 
                                 return Poll::Ready(ToSwarm::Dial {
-                                    opts: DialOpts::peer_id(peer)
-                                        .condition(libp2p::swarm::dial_opts::PeerCondition::Always)
-                                        .build(),
+                                    opts: DialOpts::peer_id(peer).build(),
                                 });
                             }
                         }
