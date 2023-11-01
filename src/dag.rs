@@ -470,6 +470,7 @@ impl DagGet {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn session(mut self, session: u64) -> Self {
         self.session = Some(session);
         self
