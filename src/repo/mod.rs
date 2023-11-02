@@ -11,6 +11,7 @@ use futures::channel::{
     oneshot,
 };
 use futures::sink::SinkExt;
+use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
@@ -598,7 +599,7 @@ impl Repo {
         cids: &[Cid],
         peers: &[PeerId],
         local_only: bool,
-    ) -> Result<Vec<Block>, Error> {
+    ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
         self.get_blocks_with_session(None, cids, peers, local_only, None)
             .await
     }
@@ -610,7 +611,7 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
         timeout: Option<Duration>,
-    ) -> Result<Vec<Block>, Error> {
+    ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
         let mut blocks = vec![];
         let mut missing = cids.to_vec();
         for cid in cids {
@@ -626,7 +627,8 @@ impl Repo {
         }
 
         if missing.is_empty() {
-            return Ok(blocks);
+            let blocks = blocks.iter().cloned().map(Ok);
+            return Ok(futures::stream::iter(blocks.collect::<Vec<_>>()).boxed());
         }
 
         if local_only || !self.is_online() {
@@ -664,10 +666,7 @@ impl Repo {
             .await
             .ok();
 
-        let blocks = futures::stream::FuturesOrdered::from_iter(receivers)
-            .try_collect::<Vec<_>>()
-            .await?;
-
+        let blocks = futures::stream::FuturesOrdered::from_iter(receivers).boxed();
         Ok(blocks)
     }
 
@@ -680,14 +679,14 @@ impl Repo {
         timeout: Option<Duration>,
     ) -> Result<Block, Error> {
         let cids = vec![*cid];
-        let blocks = self
+        let mut blocks = self
             .get_blocks_with_session(session, &cids, peers, local_only, timeout)
             .await?;
 
         blocks
-            .first()
-            .cloned()
-            .ok_or(anyhow::anyhow!("Unable to locate {} block", *cid))
+            .next()
+            .await
+            .ok_or(anyhow::anyhow!("Unable to locate {} block", *cid))?
     }
 
     /// Retrieves a block from the block store if it's available locally.
