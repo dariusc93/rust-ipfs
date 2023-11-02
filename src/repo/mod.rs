@@ -11,7 +11,7 @@ use futures::channel::{
     oneshot,
 };
 use futures::sink::SinkExt;
-use futures::{StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
@@ -590,6 +590,87 @@ impl Repo {
             .await
     }
 
+    /// Retrives a set of blocks from the block store, or starts fetching them from the network and awaits
+    /// until it has been fetched.
+    #[inline]
+    pub async fn get_blocks(
+        &self,
+        cids: &[Cid],
+        peers: &[PeerId],
+        local_only: bool,
+    ) -> Result<Vec<Block>, Error> {
+        self.get_blocks_with_session(None, cids, peers, local_only, None)
+            .await
+    }
+
+    pub(crate) async fn get_blocks_with_session(
+        &self,
+        session: Option<u64>,
+        cids: &[Cid],
+        peers: &[PeerId],
+        local_only: bool,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<Block>, Error> {
+        let mut blocks = vec![];
+        let mut missing = cids.to_vec();
+        for cid in cids {
+            match self.get_block_now(cid).await {
+                Ok(Some(block)) => {
+                    blocks.push(block);
+                    if let Some(index) = missing.iter().position(|c| c == cid) {
+                        missing.remove(index);
+                    }
+                }
+                Ok(None) | Err(_) => {}
+            }
+        }
+
+        if missing.is_empty() {
+            return Ok(blocks);
+        }
+
+        if local_only || !self.is_online() {
+            anyhow::bail!("Unable to locate missing blocks {missing:?}");
+        }
+
+        let mut receivers = vec![];
+
+        for cid in &missing {
+            let cid = *cid;
+            let (tx, rx) = futures::channel::oneshot::channel();
+            self.subscriptions.lock().entry(cid).or_default().push(tx);
+
+            let timeout = timeout.unwrap_or(Duration::from_secs(60));
+            let task = async move {
+                let block = tokio::time::timeout(timeout, rx)
+                    .await
+                    .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
+                    .map_err(|e| anyhow!("{e}"))?;
+                Ok::<_, anyhow::Error>(block)
+            }
+            .boxed();
+            receivers.push(task);
+        }
+
+        // sending only fails if no one is listening anymore
+        // and that is okay with us.
+
+        let mut events = self
+            .repo_channel()
+            .ok_or(anyhow::anyhow!("Channel is not available"))?;
+
+        events
+            .send(RepoEvent::WantBlock(session, cids.to_vec(), peers.to_vec()))
+            .await
+            .ok();
+
+        let blocks = futures::stream::FuturesOrdered::from_iter(receivers)
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(blocks)
+    }
+
     pub(crate) async fn get_block_with_session(
         &self,
         session: Option<u64>,
@@ -598,37 +679,15 @@ impl Repo {
         local_only: bool,
         timeout: Option<Duration>,
     ) -> Result<Block, Error> {
-        if let Some(block) = self.get_block_now(cid).await? {
-            Ok(block)
-        } else {
-            if local_only || !self.is_online() {
-                anyhow::bail!("Unable to locate block {cid}");
-            }
+        let cids = vec![*cid];
+        let blocks = self
+            .get_blocks_with_session(session, &cids, peers, local_only, timeout)
+            .await?;
 
-            let (tx, rx) = futures::channel::oneshot::channel();
-
-            self.subscriptions.lock().entry(*cid).or_default().push(tx);
-
-            // sending only fails if no one is listening anymore
-            // and that is okay with us.
-
-            let mut events = self
-                .repo_channel()
-                .ok_or(anyhow::anyhow!("Channel is not available"))?;
-
-            events
-                .send(RepoEvent::WantBlock(session, vec![*cid], peers.to_vec()))
-                .await
-                .ok();
-
-            let timeout = timeout.unwrap_or(Duration::from_secs(60));
-            let block = tokio::time::timeout(timeout, rx)
-                .await
-                .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
-                .map_err(|e| anyhow!("{e}"))?;
-
-            Ok(block)
-        }
+        blocks
+            .first()
+            .cloned()
+            .ok_or(anyhow::anyhow!("Unable to locate {} block", *cid))
     }
 
     /// Retrieves a block from the block store if it's available locally.

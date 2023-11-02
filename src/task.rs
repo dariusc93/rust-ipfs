@@ -1700,7 +1700,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
                     let client = bitswap.client().clone();
                     let repo = self.repo.clone();
-                    let (closer_s, closer_r) = oneshot::channel();
+                    let (closer_s, mut closer_r) = oneshot::channel();
                     //If there is no session context defined, we will use 0 as its root context
                     let ctx = session.unwrap_or(0);
                     let entry = self.bitswap_sessions.entry(ctx).or_default();
@@ -1724,26 +1724,33 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             };
 
                         let (mut blocks, _guard) = block_stream.into_parts();
+                        
+                        loop {
+                            tokio::select! {
+                                biased;
+                                Some(block) = blocks.next() => {
+                                    let block = match libipld::Block::new(block.cid, block.data.to_vec()) {
+                                        Ok(block) => block,
+                                        Err(e) => {
+                                            error!("Got block {} but failed to validate: {}", block.cid, e);
+                                            continue;
+                                        }
+                                    };
 
-                        tokio::select! {
-                            biased;
-                            _ = closer_r => {
-                                // Explicit sesssion stop.
-                                debug!("session {}: stopped: closed", ctx);
-                                drop(_guard);
-                            }
-                            Some(block) = blocks.next() => {
-                                let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
-
-                                let cid = *block.cid();
-
-                                info!("Found {}", cid);
-
-                                let res = repo.put_block(block).await;
-                                if let Err(e) = res {
-                                    error!("Got block {} but failed to store it: {}", cid, e);
+                                    let cid = *block.cid();
+                                    info!("Found {}", cid);
+                                    let res = repo.put_block(block).await;
+                                    if let Err(e) = res {
+                                        error!("Got block {} but failed to store it: {}", cid, e);
+                                    }
+                                },
+                                _ = &mut closer_r => {
+                                    // Explicit sesssion stop.
+                                    debug!("session {}: stopped: closed", ctx);
+                                    drop(_guard);
+                                    break;
                                 }
-                            },
+                            }
                         }
 
                         // tokio::select! {
