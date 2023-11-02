@@ -11,7 +11,7 @@ use futures::{
     stream::{BoxStream, SelectAll},
 };
 use libp2p::swarm::{
-    ConnectionHandler, ConnectionHandlerEvent, KeepAlive, StreamUpgradeError, SubstreamProtocol,
+    ConnectionHandler, ConnectionHandlerEvent, KeepAlive, SubstreamProtocol,
 };
 use libp2p::{
     core::upgrade::NegotiationError,
@@ -105,9 +105,6 @@ pub struct BitswapHandler {
 
     protocol: Option<ProtocolId>,
 
-    /// Collection of errors from attempting an upgrade.
-    upgrade_errors: VecDeque<StreamUpgradeError<BitswapHandlerError>>,
-
     /// Flag determining whether to maintain the connection to the peer.
     protected: bool,
 }
@@ -127,7 +124,6 @@ impl Debug for BitswapHandler {
             .field("events", &self.events)
             .field("send_queue", &self.send_queue)
             .field("protocol", &self.protocol)
-            .field("upgrade_errors", &self.upgrade_errors)
             .field("protected", &self.protected)
             .finish()
     }
@@ -142,7 +138,6 @@ impl BitswapHandler {
             outbound_substreams: Default::default(),
             send_queue: Default::default(),
             protocol: None,
-            upgrade_errors: VecDeque::new(),
             events: Default::default(),
             protected: false,
         }
