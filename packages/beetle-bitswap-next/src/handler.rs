@@ -11,7 +11,7 @@ use futures::{
     stream::{BoxStream, SelectAll},
 };
 use libp2p::swarm::{
-    ConnectionHandler, ConnectionHandlerEvent, KeepAlive, StreamUpgradeError, SubstreamProtocol,
+    ConnectionHandler, ConnectionHandlerEvent, KeepAlive, SubstreamProtocol,
 };
 use libp2p::{
     core::upgrade::NegotiationError,
@@ -105,11 +105,8 @@ pub struct BitswapHandler {
 
     protocol: Option<ProtocolId>,
 
-    /// Collection of errors from attempting an upgrade.
-    upgrade_errors: VecDeque<StreamUpgradeError<BitswapHandlerError>>,
-
     /// Flag determining whether to maintain the connection to the peer.
-    keep_alive: KeepAlive,
+    protected: bool,
 }
 
 impl Debug for BitswapHandler {
@@ -127,8 +124,7 @@ impl Debug for BitswapHandler {
             .field("events", &self.events)
             .field("send_queue", &self.send_queue)
             .field("protocol", &self.protocol)
-            .field("upgrade_errors", &self.upgrade_errors)
-            .field("keep_alive", &self.keep_alive)
+            .field("protected", &self.protected)
             .finish()
     }
 }
@@ -142,9 +138,8 @@ impl BitswapHandler {
             outbound_substreams: Default::default(),
             send_queue: Default::default(),
             protocol: None,
-            upgrade_errors: VecDeque::new(),
-            keep_alive: KeepAlive::No,
             events: Default::default(),
+            protected: false,
         }
     }
 }
@@ -168,10 +163,10 @@ impl ConnectionHandler for BitswapHandler {
                 self.send_queue.push_back((m, response));
             }
             BitswapHandlerIn::Protect => {
-                self.keep_alive = KeepAlive::Yes;
+                self.protected = true;
             }
             BitswapHandlerIn::Unprotect => {
-                self.keep_alive = KeepAlive::No;
+                self.protected = false;
             }
         }
     }
@@ -214,7 +209,6 @@ impl ConnectionHandler for BitswapHandler {
             ConnectionEvent::AddressChange(_) => todo!(),
             ConnectionEvent::DialUpgradeError(DialUpgradeError { error, .. }) => {
                 warn!("Dial upgrade error {:?}", error);
-                self.upgrade_errors.push_back(error);
             }
             ConnectionEvent::ListenUpgradeError(_) => {}
             //TODO: Cover protocol change
@@ -223,26 +217,25 @@ impl ConnectionHandler for BitswapHandler {
     }
 
     fn connection_keep_alive(&self) -> KeepAlive {
-        self.keep_alive
+
+        if !self.send_queue.is_empty() {
+            return KeepAlive::Yes;
+        }
+
+        if !self.outbound_substreams.is_empty() || !self.inbound_substreams.is_empty() {
+            return KeepAlive::Yes;
+        }
+
+        if self.protected {
+            return KeepAlive::Yes;
+        }
+
+        KeepAlive::No
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BitswapConnectionHandlerEvent> {
         if !self.events.is_empty() {
             return Poll::Ready(self.events.remove(0));
-        }
-
-        // Handle any upgrade errors
-        if let Some(error) = self.upgrade_errors.pop_front() {
-            let reported_error = match error {
-                StreamUpgradeError::Timeout | StreamUpgradeError::NegotiationFailed => {
-                    BitswapHandlerError::NegotiationTimeout
-                }
-                StreamUpgradeError::Io(e) => BitswapHandlerError::Io(e),
-                StreamUpgradeError::Apply(negotiation_error) => negotiation_error,
-            };
-
-            // Close the connection
-            return Poll::Ready(ConnectionHandlerEvent::Close(reported_error));
         }
 
         // determine if we need to create the stream
@@ -282,10 +275,6 @@ fn inbound_substream(
                     }
                     _ => {
                         warn!("Inbound stream error: {}", error);
-                        // More serious errors, close this side of the stream. If the
-                        // peer is still around, they will re-establish their connection
-
-                        yield ConnectionHandlerEvent::Close(error);
                         break;
                     }
                 }

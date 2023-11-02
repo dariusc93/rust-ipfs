@@ -38,7 +38,6 @@ pub enum OutEvent {
         response: oneshot::Sender<std::result::Result<(ConnectionId, Option<ProtocolId>), String>>,
         id: usize,
     },
-    Disconnect(PeerId, oneshot::Sender<()>),
     SendMessage {
         peer: PeerId,
         message: BitswapMessage,
@@ -138,7 +137,6 @@ impl Network {
                     }
                     Ok(Err(SendError::ProtocolNotSupported)) => {
                         // No point in using this peer if they don't speak our protocol.
-                        self.disconnect(peer).await?;
                         return Err(SendError::ProtocolNotSupported.into());
                     }
                     Err(channel_err) => {
@@ -253,17 +251,6 @@ impl Network {
         .await
     }
 
-    pub async fn disconnect(&self, peer: PeerId) -> Result<()> {
-        let (s, r) = oneshot::channel();
-        self.network_out_sender
-            .send(OutEvent::Disconnect(peer, s))
-            .await
-            .map_err(|e| anyhow!("channel send: {:?}", e))?;
-        r.await?;
-
-        Ok(())
-    }
-
     pub async fn provide(&self, key: Cid) -> Result<()> {
         self.network_out_sender
             .send(OutEvent::GenerateEvent(BitswapEvent::Provide { key }))
@@ -271,16 +258,6 @@ impl Network {
             .map_err(|e| anyhow!("channel send: {:?}", e))?;
 
         Ok(())
-    }
-
-    pub fn tag_peer(&self, peer: &PeerId, tag: &str, value: usize) {
-        // TODO: is this needed?
-        trace!("tag {}: {} - {}", peer, tag, value);
-    }
-
-    pub fn untag_peer(&self, peer: &PeerId, tag: &str) {
-        // TODO: is this needed?
-        trace!("untag {}: {}", peer, tag);
     }
 
     pub async fn protect_peer(&self, peer: PeerId) -> Result<()> {
@@ -363,9 +340,5 @@ impl MessageSender {
                 self.config.send_error_backoff,
             )
             .await
-    }
-
-    pub async fn disconnect(&self) -> Result<()> {
-        self.network.disconnect(self.to).await
     }
 }

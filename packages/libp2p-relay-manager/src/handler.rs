@@ -13,6 +13,7 @@ use libp2p::{
 use void::Void;
 
 #[allow(clippy::type_complexity)]
+#[allow(deprecated)]
 #[derive(Default, Debug)]
 pub struct Handler {
     events: VecDeque<
@@ -35,6 +36,7 @@ pub enum Out {
     Unsupported,
 }
 
+#[allow(deprecated)]
 impl ConnectionHandler for Handler {
     type FromBehaviour = Void;
     type ToBehaviour = Out;
