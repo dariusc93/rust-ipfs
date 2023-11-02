@@ -109,7 +109,7 @@ pub struct BitswapHandler {
     upgrade_errors: VecDeque<StreamUpgradeError<BitswapHandlerError>>,
 
     /// Flag determining whether to maintain the connection to the peer.
-    keep_alive: KeepAlive,
+    protected: bool,
 }
 
 impl Debug for BitswapHandler {
@@ -128,7 +128,7 @@ impl Debug for BitswapHandler {
             .field("send_queue", &self.send_queue)
             .field("protocol", &self.protocol)
             .field("upgrade_errors", &self.upgrade_errors)
-            .field("keep_alive", &self.keep_alive)
+            .field("protected", &self.protected)
             .finish()
     }
 }
@@ -143,8 +143,8 @@ impl BitswapHandler {
             send_queue: Default::default(),
             protocol: None,
             upgrade_errors: VecDeque::new(),
-            keep_alive: KeepAlive::No,
             events: Default::default(),
+            protected: false,
         }
     }
 }
@@ -168,10 +168,10 @@ impl ConnectionHandler for BitswapHandler {
                 self.send_queue.push_back((m, response));
             }
             BitswapHandlerIn::Protect => {
-                self.keep_alive = KeepAlive::Yes;
+                self.protected = true;
             }
             BitswapHandlerIn::Unprotect => {
-                self.keep_alive = KeepAlive::No;
+                self.protected = false;
             }
         }
     }
@@ -222,7 +222,15 @@ impl ConnectionHandler for BitswapHandler {
     }
 
     fn connection_keep_alive(&self) -> KeepAlive {
-        self.keep_alive
+        if !self.outbound_substreams.is_empty() || !self.inbound_substreams.is_empty() {
+            return KeepAlive::Yes;
+        }
+
+        if self.protected {
+            return KeepAlive::Yes;
+        }
+
+        KeepAlive::No
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BitswapConnectionHandlerEvent> {
