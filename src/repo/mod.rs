@@ -321,7 +321,7 @@ impl beetle_bitswap_next::Store for Repo {
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Option<u64>, Cid, Vec<PeerId>),
+    WantBlock(Option<u64>, Vec<Cid>, Vec<PeerId>),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
@@ -617,7 +617,7 @@ impl Repo {
                 .ok_or(anyhow::anyhow!("Channel is not available"))?;
 
             events
-                .send(RepoEvent::WantBlock(session, *cid, peers.to_vec()))
+                .send(RepoEvent::WantBlock(session, vec![*cid], peers.to_vec()))
                 .await
                 .ok();
 

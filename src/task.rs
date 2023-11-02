@@ -212,7 +212,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self) {
-        let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
+        let mut session_cleanup = tokio::time::interval(Duration::from_secs(5 * 60));
         let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
 
         let mut external_check = tokio::time::interval_at(
@@ -1696,7 +1696,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(session, cid, peers) => {
+            RepoEvent::WantBlock(session, cids, peers) => {
                 if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
                     let client = bitswap.client().clone();
                     let repo = self.repo.clone();
@@ -1706,26 +1706,66 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let entry = self.bitswap_sessions.entry(ctx).or_default();
 
                     let worker = tokio::task::spawn(async move {
+                        let session: beetle_bitswap_next::session::Session =
+                            client.get_or_create_session(ctx).await;
+                        for cid in &cids {
+                            for peer in &peers {
+                                session.add_provider(cid, *peer).await;
+                            }
+                        }
+
+                        let block_stream: beetle_bitswap_next::session::BlockReceiver =
+                            match session.get_blocks(&cids).await {
+                                Ok(bs) => bs,
+                                Err(e) => {
+                                    warn!("Unable to create a block stream for {cids:?}: {e}. Dropping task");
+                                    return;
+                                }
+                            };
+
+                        let (mut blocks, _guard) = block_stream.into_parts();
+
                         tokio::select! {
+                            biased;
                             _ = closer_r => {
                                 // Explicit sesssion stop.
                                 debug!("session {}: stopped: closed", ctx);
+                                drop(_guard);
                             }
-                            block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
-                                Ok(block) => {
-                                    info!("Found {cid}");
-                                    let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
-                                    let res = repo.put_block(block).await;
-                                    if let Err(e) = res {
-                                        error!("Got block {} but failed to store it: {}", cid, e);
-                                    }
+                            Some(block) = blocks.next() => {
+                                let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
 
-                                }
-                                Err(err) => {
-                                    error!("Failed to get {}: {}", cid, err);
+                                let cid = *block.cid();
+
+                                info!("Found {}", cid);
+
+                                let res = repo.put_block(block).await;
+                                if let Err(e) = res {
+                                    error!("Got block {} but failed to store it: {}", cid, e);
                                 }
                             },
                         }
+
+                        // tokio::select! {
+                        //     _ = closer_r => {
+                        //         // Explicit sesssion stop.
+                        //         debug!("session {}: stopped: closed", ctx);
+                        //     }
+                        //     block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
+                        //         Ok(block) => {
+                        //             info!("Found {cid}");
+                        //             let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
+                        //             let res = repo.put_block(block).await;
+                        //             if let Err(e) = res {
+                        //                 error!("Got block {} but failed to store it: {}", cid, e);
+                        //             }
+
+                        //         }
+                        //         Err(err) => {
+                        //             error!("Failed to get {}: {}", cid, err);
+                        //         }
+                        //     },
+                        // }
                     });
                     entry.push((closer_s, worker));
                 }

@@ -17,7 +17,7 @@ mod block_presence_manager;
 mod message_queue;
 mod peer_manager;
 mod peer_want_manager;
-mod session;
+pub mod session;
 mod session_interest_manager;
 mod session_manager;
 pub(crate) mod wantlist;

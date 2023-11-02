@@ -33,6 +33,7 @@ use self::network::Network;
 use self::network::OutEvent;
 pub use self::protocol::ProtocolConfig;
 pub use self::server::{Config as ServerConfig, Server};
+pub use self::client::session;
 
 mod block;
 mod client;
