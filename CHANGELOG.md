@@ -1,8 +1,8 @@
 # 0.7.0 [unrelease]
-- chore: Ignore deprecation warnings [PR XXX]
+- chore: Ignore deprecation warnings [PR 112]
 - feat: Implement custom future for unixfs and dag functions [PR 111]
 
-[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
+[PR 112]: https://github.com/dariusc93/rust-ipfs/pull/112
 [PR 111]: https://github.com/dariusc93/rust-ipfs/pull/111
 
 # 0.6.0

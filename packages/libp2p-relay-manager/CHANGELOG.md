@@ -1,7 +1,7 @@
-# 0.2.1
-- chore: Ignore deprecation warnings [PR XXX]
+# 0.2.1 [unreleased]
+- chore: Ignore deprecation warnings [PR 112]
 
-[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
+[PR 112]: https://github.com/dariusc93/rust-ipfs/pull/112
 
 # 0.2.0
 - chore: Update to 0.52.4 [PR 110]
