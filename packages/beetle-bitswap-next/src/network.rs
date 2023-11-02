@@ -260,16 +260,6 @@ impl Network {
         Ok(())
     }
 
-    pub fn tag_peer(&self, peer: &PeerId, tag: &str, value: usize) {
-        // TODO: is this needed?
-        trace!("tag {}: {} - {}", peer, tag, value);
-    }
-
-    pub fn untag_peer(&self, peer: &PeerId, tag: &str) {
-        // TODO: is this needed?
-        trace!("untag {}: {}", peer, tag);
-    }
-
     pub async fn protect_peer(&self, peer: PeerId) -> Result<()> {
         trace!("protect {}", peer);
         self.network_out_sender
