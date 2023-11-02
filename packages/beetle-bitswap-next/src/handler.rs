@@ -217,6 +217,11 @@ impl ConnectionHandler for BitswapHandler {
     }
 
     fn connection_keep_alive(&self) -> KeepAlive {
+
+        if !self.send_queue.is_empty() {
+            return KeepAlive::Yes;
+        }
+
         if !self.outbound_substreams.is_empty() || !self.inbound_substreams.is_empty() {
             return KeepAlive::Yes;
         }
