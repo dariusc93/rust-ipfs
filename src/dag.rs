@@ -181,17 +181,6 @@ pub struct IpldDag {
     repo: Repo,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct DagPutOpt {
-    pub pin: Option<DagPinOpt>,
-    pub provided: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct DagPinOpt {
-    pub recursive: bool,
-}
-
 impl From<Repo> for IpldDag {
     fn from(repo: Repo) -> Self {
         IpldDag { ipfs: None, repo }
