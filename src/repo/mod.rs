@@ -12,7 +12,7 @@ use futures::channel::{
 };
 use futures::future::BoxFuture;
 use futures::sink::SinkExt;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
@@ -613,12 +613,12 @@ impl Repo {
         local_only: bool,
         timeout: Option<Duration>,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
-        let mut blocks = vec![];
+        let mut blocks = FuturesOrdered::new();
         let mut missing = cids.to_vec();
         for cid in cids {
             match self.get_block_now(cid).await {
                 Ok(Some(block)) => {
-                    blocks.push(block);
+                    blocks.push_back(async { Ok(block) }.boxed());
                     if let Some(index) = missing.iter().position(|c| c == cid) {
                         missing.remove(index);
                     }
@@ -628,15 +628,12 @@ impl Repo {
         }
 
         if missing.is_empty() {
-            let blocks = blocks.iter().cloned().map(Ok);
-            return Ok(futures::stream::iter(blocks.collect::<Vec<_>>()).boxed());
+            return Ok(blocks.boxed());
         }
 
         if local_only || !self.is_online() {
             anyhow::bail!("Unable to locate missing blocks {missing:?}");
         }
-
-        let mut receivers = vec![];
 
         for cid in &missing {
             let cid = *cid;
@@ -652,7 +649,7 @@ impl Repo {
                 Ok::<_, anyhow::Error>(block)
             }
             .boxed();
-            receivers.push(task);
+            blocks.push_back(task);
         }
 
         // sending only fails if no one is listening anymore
@@ -667,8 +664,7 @@ impl Repo {
             .await
             .ok();
 
-        let blocks = futures::stream::FuturesOrdered::from_iter(receivers).boxed();
-        Ok(blocks)
+        Ok(blocks.boxed())
     }
 
     pub(crate) async fn get_block_with_session(
