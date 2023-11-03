@@ -690,7 +690,11 @@ impl Repo {
 
     fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, anyhow::Result<BTreeSet<Cid>>> {
         async move {
-            let block = self.get_block(&cid, &[], true).await?;
+            let block = self
+                .get_block_now(&cid)
+                .await?
+                .ok_or(anyhow::anyhow!("Block does not exist"))?;
+
             let mut references: BTreeSet<Cid> = BTreeSet::new();
             block.references(&mut references)?;
 
