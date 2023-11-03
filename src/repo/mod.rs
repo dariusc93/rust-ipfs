@@ -801,7 +801,7 @@ impl Repo {
         let blocks = self.list_blocks().await?;
         for cid in blocks {
             if !self.is_pinned(&cid).await? {
-                if let Ok(cid) = self.remove_block(&cid, true).await {
+                if let Ok(cid) = self.remove_block(&cid, false).await {
                     removed_blocks.extend(cid.iter());
                 }
             }
