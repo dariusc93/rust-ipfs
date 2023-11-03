@@ -63,7 +63,7 @@ use tracing_futures::Instrument;
 use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt, io,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
@@ -1045,9 +1045,9 @@ impl Ipfs {
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
-    pub async fn remove_block(&self, cid: Cid) -> Result<Cid, Error> {
+    pub async fn remove_block(&self, cid: Cid, recursive: bool) -> Result<Vec<Cid>, Error> {
         self.repo
-            .remove_block(&cid)
+            .remove_block(&cid, recursive)
             .instrument(self.span.clone())
             .await
     }
@@ -1055,7 +1055,7 @@ impl Ipfs {
     /// Cleans up of all unpinned blocks
     /// Note: This is extremely basic and should not be relied on completely
     ///       until there is additional or extended implementation for a gc
-    pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
+    pub async fn gc(&self) -> Result<BTreeSet<Cid>, Error> {
         self.repo.cleanup().instrument(self.span.clone()).await
     }
 
