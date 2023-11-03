@@ -691,9 +691,7 @@ impl Repo {
         async move {
             let block = self.get_block(&cid, &[], true).await?;
             let mut references: BTreeSet<Cid> = BTreeSet::new();
-            block
-                .references(&mut references)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            block.references(&mut references)?;
 
             let mut list = BTreeSet::new();
 
