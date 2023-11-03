@@ -10,6 +10,7 @@ use futures::channel::{
     mpsc::{channel, Receiver, Sender},
     oneshot,
 };
+use futures::future::BoxFuture;
 use futures::sink::SinkExt;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt, TryStreamExt};
@@ -18,7 +19,7 @@ use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -705,29 +706,67 @@ impl Repo {
     }
 
     /// Remove block from the block store.
-    pub async fn remove_block(&self, cid: &Cid) -> Result<Cid, Error> {
+    pub async fn remove_block(&self, cid: &Cid, recursive: bool) -> Result<Vec<Cid>, Error> {
         if self.is_pinned(cid).await? {
             return Err(anyhow::anyhow!("block to remove is pinned"));
         }
 
-        // FIXME: Need to change location of pinning logic.
-        // I like this pattern of the repo abstraction being some sort of
-        // "clearing house" for the underlying result enums, but this
-        // could potentially be pushed out out of here up to Ipfs, idk
-        match self.block_store.remove(cid).await? {
-            Ok(success) => match success {
-                BlockRm::Removed(_cid) => {
-                    // sending only fails if the background task has exited
-                    if let Some(mut events) = self.repo_channel() {
-                        events.send(RepoEvent::RemovedBlock(*cid)).await.ok();
+        let mut removed = vec![];
+
+        let list = match recursive {
+            true => {
+                let mut list = self.recursive_collections(*cid).await?;
+                // ensure the first root block is apart of the list
+                list.insert(*cid);
+                list
+            }
+            false => BTreeSet::from_iter(std::iter::once(*cid)),
+        };
+
+        for cid in list {
+            if self.is_pinned(&cid).await? {
+                continue;
+            }
+
+            match self.block_store.remove(&cid).await? {
+                Ok(success) => match success {
+                    BlockRm::Removed(_cid) => {
+                        // sending only fails if the background task has exited
+                        if let Some(mut events) = self.repo_channel() {
+                            let _ = events.send(RepoEvent::RemovedBlock(cid)).await;
+                        }
+                        removed.push(cid);
                     }
-                    Ok(*cid)
-                }
-            },
-            Err(err) => match err {
-                BlockRmError::NotFound(_cid) => Err(anyhow::anyhow!("block not found")),
-            },
+                },
+                Err(err) => match err {
+                    BlockRmError::NotFound(cid) => warn!("{cid} is not found to be removed"),
+                },
+            }
         }
+        Ok(removed)
+    }
+
+    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, anyhow::Result<BTreeSet<Cid>>> {
+        async move {
+            let block = self
+                .get_block_now(&cid)
+                .await?
+                .ok_or(anyhow::anyhow!("Block does not exist"))?;
+
+            let mut references: BTreeSet<Cid> = BTreeSet::new();
+            block.references(&mut references)?;
+
+            let mut list = BTreeSet::new();
+
+            for cid in &references {
+                let mut inner_list = self.recursive_collections(*cid).await?;
+                list.append(&mut inner_list);
+            }
+
+            references.append(&mut list);
+            Ok(references)
+        }
+        .boxed()
     }
 
     /// Get an ipld path from the datastore.
@@ -815,13 +854,13 @@ impl Repo {
     }
 
     /// Function to perform a basic cleanup of unpinned blocks
-    pub async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
-        let mut removed_blocks = vec![];
+    pub async fn cleanup(&self) -> Result<BTreeSet<Cid>, Error> {
+        let mut removed_blocks = BTreeSet::new();
         let blocks = self.list_blocks().await?;
         for cid in blocks {
             if !self.is_pinned(&cid).await? {
-                if let Ok(cid) = self.remove_block(&cid).await {
-                    removed_blocks.push(cid);
+                if let Ok(cid) = self.remove_block(&cid, false).await {
+                    removed_blocks.extend(cid.iter());
                 }
             }
         }
