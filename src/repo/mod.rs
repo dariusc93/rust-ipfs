@@ -658,6 +658,7 @@ impl Repo {
         let list = match recursive {
             true => {
                 let mut list = self.recursive_collections(*cid).await?;
+                // ensure the first root block is apart of the list
                 list.insert(*cid);
                 list
             }
