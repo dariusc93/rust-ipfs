@@ -1696,7 +1696,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(session, cids, peers) => {
+            RepoEvent::WantBlock(session, mut cids, peers) => {
                 if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
                     let client = bitswap.client().clone();
                     let repo = self.repo.clone();
@@ -1724,7 +1724,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             };
 
                         let (mut blocks, _guard) = block_stream.into_parts();
-                        
+
                         loop {
                             tokio::select! {
                                 biased;
@@ -1743,6 +1743,15 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                     if let Err(e) = res {
                                         error!("Got block {} but failed to store it: {}", cid, e);
                                     }
+
+                                    cids.retain(|c| c != &cid);
+
+                                    if cids.is_empty() {
+                                        tracing::info!("Resolved all blocks in session {ctx}. Terminating task.");
+                                        drop(_guard);
+                                        break;
+                                    }
+                                    
                                 },
                                 _ = &mut closer_r => {
                                     // Explicit sesssion stop.
@@ -1752,27 +1761,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 }
                             }
                         }
-
-                        // tokio::select! {
-                        //     _ = closer_r => {
-                        //         // Explicit sesssion stop.
-                        //         debug!("session {}: stopped: closed", ctx);
-                        //     }
-                        //     block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
-                        //         Ok(block) => {
-                        //             info!("Found {cid}");
-                        //             let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
-                        //             let res = repo.put_block(block).await;
-                        //             if let Err(e) = res {
-                        //                 error!("Got block {} but failed to store it: {}", cid, e);
-                        //             }
-
-                        //         }
-                        //         Err(err) => {
-                        //             error!("Failed to get {}: {}", cid, err);
-                        //         }
-                        //     },
-                        // }
                     });
                     entry.push((closer_s, worker));
                 }
