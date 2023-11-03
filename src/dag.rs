@@ -181,17 +181,6 @@ pub struct IpldDag {
     repo: Repo,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct DagPutOpt {
-    pub pin: Option<DagPinOpt>,
-    pub provided: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct DagPinOpt {
-    pub recursive: bool,
-}
-
 impl From<Repo> for IpldDag {
     fn from(repo: Repo) -> Self {
         IpldDag { ipfs: None, repo }
@@ -470,33 +459,45 @@ impl DagGet {
         }
     }
 
+    /// Bitswap session
     #[allow(dead_code)]
     pub(crate) fn session(mut self, session: u64) -> Self {
         self.session = Some(session);
         self
     }
 
+    /// Path to object
     pub fn path<P: Into<IpfsPath>>(mut self, path: P) -> Self {
         let path = path.into();
         self.path = Some(path);
         self
     }
 
+    /// Peer that may contain the block
     pub fn provider(mut self, peer_id: PeerId) -> Self {
         self.providers.push(peer_id);
         self
     }
 
+    /// List of peers that may contain the block
+    pub fn providers(mut self, providers: &[PeerId]) -> Self {
+        self.providers = providers.to_vec();
+        self
+    }
+
+    /// Resolve local block
     pub fn local(mut self) -> Self {
         self.local = true;
         self
     }
 
+    /// Timeout duration 
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
+    /// Deserialize to a serde-compatible object
     pub fn deserialized<D: DeserializeOwned>(self) -> DagGetDeserialize<D> {
         DagGetDeserialize {
             dag_get: self,
@@ -572,32 +573,38 @@ impl DagPut {
         }
     }
 
+    /// Set a ipld object
     pub fn ipld(mut self, data: Ipld) -> Self {
         self.data = Some(data);
         self
     }
 
+    /// Set a serde-compatible object
     pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Result<Self, Error> {
         let data = to_ipld(data)?;
         self.data = Some(data);
         Ok(self)
     }
 
+    /// Pin block
     pub fn pin(mut self, recursive: bool) -> Self {
         self.pinned = Some(recursive);
         self
     }
 
+    /// Provide block over DHT
     pub fn provide(mut self) -> Self {
         self.provide = true;
         self
     }
 
+    /// Set direct type for multihash
     pub fn hash(mut self, code: Code) -> Self {
         self.hash = Some(code);
         self
     }
 
+    /// Set codec for ipld
     pub fn codec(mut self, codec: IpldCodec) -> Self {
         self.codec = codec;
         self

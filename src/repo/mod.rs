@@ -12,6 +12,7 @@ use futures::channel::{
 };
 use futures::future::BoxFuture;
 use futures::sink::SinkExt;
+use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
@@ -322,7 +323,7 @@ impl beetle_bitswap_next::Store for Repo {
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Option<u64>, Cid, Vec<PeerId>),
+    WantBlock(Option<u64>, Vec<Cid>, Vec<PeerId>),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
@@ -591,6 +592,81 @@ impl Repo {
             .await
     }
 
+    /// Retrives a set of blocks from the block store, or starts fetching them from the network and awaits
+    /// until it has been fetched.
+    #[inline]
+    pub async fn get_blocks(
+        &self,
+        cids: &[Cid],
+        peers: &[PeerId],
+        local_only: bool,
+    ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
+        self.get_blocks_with_session(None, cids, peers, local_only, None)
+            .await
+    }
+
+    pub(crate) async fn get_blocks_with_session(
+        &self,
+        session: Option<u64>,
+        cids: &[Cid],
+        peers: &[PeerId],
+        local_only: bool,
+        timeout: Option<Duration>,
+    ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
+        let mut blocks = FuturesOrdered::new();
+        let mut missing = cids.to_vec();
+        for cid in cids {
+            match self.get_block_now(cid).await {
+                Ok(Some(block)) => {
+                    blocks.push_back(async { Ok(block) }.boxed());
+                    if let Some(index) = missing.iter().position(|c| c == cid) {
+                        missing.remove(index);
+                    }
+                }
+                Ok(None) | Err(_) => {}
+            }
+        }
+
+        if missing.is_empty() {
+            return Ok(blocks.boxed());
+        }
+
+        if local_only || !self.is_online() {
+            anyhow::bail!("Unable to locate missing blocks {missing:?}");
+        }
+
+        for cid in &missing {
+            let cid = *cid;
+            let (tx, rx) = futures::channel::oneshot::channel();
+            self.subscriptions.lock().entry(cid).or_default().push(tx);
+
+            let timeout = timeout.unwrap_or(Duration::from_secs(60));
+            let task = async move {
+                let block = tokio::time::timeout(timeout, rx)
+                    .await
+                    .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
+                    .map_err(|e| anyhow!("{e}"))?;
+                Ok::<_, anyhow::Error>(block)
+            }
+            .boxed();
+            blocks.push_back(task);
+        }
+
+        // sending only fails if no one is listening anymore
+        // and that is okay with us.
+
+        let mut events = self
+            .repo_channel()
+            .ok_or(anyhow::anyhow!("Channel is not available"))?;
+
+        events
+            .send(RepoEvent::WantBlock(session, cids.to_vec(), peers.to_vec()))
+            .await
+            .ok();
+
+        Ok(blocks.boxed())
+    }
+
     pub(crate) async fn get_block_with_session(
         &self,
         session: Option<u64>,
@@ -599,37 +675,15 @@ impl Repo {
         local_only: bool,
         timeout: Option<Duration>,
     ) -> Result<Block, Error> {
-        if let Some(block) = self.get_block_now(cid).await? {
-            Ok(block)
-        } else {
-            if local_only || !self.is_online() {
-                anyhow::bail!("Unable to locate block {cid}");
-            }
+        let cids = vec![*cid];
+        let mut blocks = self
+            .get_blocks_with_session(session, &cids, peers, local_only, timeout)
+            .await?;
 
-            let (tx, rx) = futures::channel::oneshot::channel();
-
-            self.subscriptions.lock().entry(*cid).or_default().push(tx);
-
-            // sending only fails if no one is listening anymore
-            // and that is okay with us.
-
-            let mut events = self
-                .repo_channel()
-                .ok_or(anyhow::anyhow!("Channel is not available"))?;
-
-            events
-                .send(RepoEvent::WantBlock(session, *cid, peers.to_vec()))
-                .await
-                .ok();
-
-            let timeout = timeout.unwrap_or(Duration::from_secs(60));
-            let block = tokio::time::timeout(timeout, rx)
-                .await
-                .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
-                .map_err(|e| anyhow!("{e}"))?;
-
-            Ok(block)
-        }
+        blocks
+            .next()
+            .await
+            .ok_or(anyhow::anyhow!("Unable to locate {} block", *cid))?
     }
 
     /// Retrieves a block from the block store if it's available locally.

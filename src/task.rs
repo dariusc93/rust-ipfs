@@ -212,7 +212,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self) {
-        let mut session_cleanup = tokio::time::interval(Duration::from_secs(5));
+        let mut session_cleanup = tokio::time::interval(Duration::from_secs(5 * 60));
         let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
 
         let mut external_check = tokio::time::interval_at(
@@ -1696,35 +1696,70 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(session, cid, peers) => {
+            RepoEvent::WantBlock(session, mut cids, peers) => {
                 if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
                     let client = bitswap.client().clone();
                     let repo = self.repo.clone();
-                    let (closer_s, closer_r) = oneshot::channel();
+                    let (closer_s, mut closer_r) = oneshot::channel();
                     //If there is no session context defined, we will use 0 as its root context
                     let ctx = session.unwrap_or(0);
                     let entry = self.bitswap_sessions.entry(ctx).or_default();
 
                     let worker = tokio::task::spawn(async move {
-                        tokio::select! {
-                            _ = closer_r => {
-                                // Explicit sesssion stop.
-                                debug!("session {}: stopped: closed", ctx);
+                        let session: beetle_bitswap_next::session::Session =
+                            client.get_or_create_session(ctx).await;
+                        for cid in &cids {
+                            for peer in &peers {
+                                session.add_provider(cid, *peer).await;
                             }
-                            block = client.get_block_with_session_id(ctx, &cid, &peers) => match block {
-                                Ok(block) => {
-                                    info!("Found {cid}");
-                                    let block = libipld::Block::new_unchecked(block.cid, block.data.to_vec());
+                        }
+
+                        let block_stream: beetle_bitswap_next::session::BlockReceiver =
+                            match session.get_blocks(&cids).await {
+                                Ok(bs) => bs,
+                                Err(e) => {
+                                    warn!("Unable to create a block stream for {cids:?}: {e}. Dropping task");
+                                    return;
+                                }
+                            };
+
+                        let (mut blocks, _guard) = block_stream.into_parts();
+
+                        loop {
+                            tokio::select! {
+                                biased;
+                                Some(block) = blocks.next() => {
+                                    let block = match libipld::Block::new(block.cid, block.data.to_vec()) {
+                                        Ok(block) => block,
+                                        Err(e) => {
+                                            error!("Got block {} but failed to validate: {}", block.cid, e);
+                                            continue;
+                                        }
+                                    };
+
+                                    let cid = *block.cid();
+                                    info!("Found {}", cid);
                                     let res = repo.put_block(block).await;
                                     if let Err(e) = res {
                                         error!("Got block {} but failed to store it: {}", cid, e);
                                     }
 
+                                    cids.retain(|c| c != &cid);
+
+                                    if cids.is_empty() {
+                                        tracing::info!("Resolved all blocks in session {ctx}. Terminating task.");
+                                        drop(_guard);
+                                        break;
+                                    }
+                                    
+                                },
+                                _ = &mut closer_r => {
+                                    // Explicit sesssion stop.
+                                    debug!("session {}: stopped: closed", ctx);
+                                    drop(_guard);
+                                    break;
                                 }
-                                Err(err) => {
-                                    error!("Failed to get {}: {}", cid, err);
-                                }
-                            },
+                            }
                         }
                     });
                     entry.push((closer_s, worker));
