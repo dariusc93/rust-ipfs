@@ -50,7 +50,7 @@ pub use libp2p::{
     gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
-    kad::{RecordKey as Key, Quorum},
+    kad::{Quorum, RecordKey as Key},
     multiaddr::multiaddr,
     multiaddr::Protocol,
     swarm::NetworkBehaviour,
@@ -777,7 +777,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                     KademliaEvent::ModeChanged { new_mode } => {
                         _ = new_mode;
-                    },
+                    }
                 }
             }
             SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
@@ -1754,7 +1754,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                         drop(_guard);
                                         break;
                                     }
-                                    
+
                                 },
                                 _ = &mut closer_r => {
                                     // Explicit sesssion stop.
@@ -1769,7 +1769,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
             }
             RepoEvent::UnwantBlock(_cid) => {}
-            RepoEvent::NewBlock(block, ret) => {
+            RepoEvent::NewBlock(block) => {
                 if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
                     let client = bitswap.client().clone();
                     let server = bitswap.server().cloned();
@@ -1788,7 +1788,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         }
                     });
                 }
-                let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
+                // let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
             }
             RepoEvent::RemovedBlock(cid) => self.swarm.behaviour_mut().stop_providing_block(&cid),
         }
