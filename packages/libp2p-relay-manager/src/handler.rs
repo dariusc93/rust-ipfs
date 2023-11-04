@@ -92,7 +92,7 @@ impl ConnectionHandler for Handler {
                     }
                 }
             }
-            _ => todo!(),
+            _ => {},
         }
     }
 
