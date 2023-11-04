@@ -1,10 +1,9 @@
-use either::Either;
 use futures::future::Either as FutureEither;
+use hickory_resolver::system_conf;
 use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
-use libp2p::core::upgrade::SelectUpgrade;
 use libp2p::dns::{tokio::Transport as TokioDnsConfig, ResolverConfig, ResolverOpts};
 use libp2p::quic::tokio::Transport as TokioQuicTransport;
 use libp2p::quic::Config as QuicConfig;
@@ -13,10 +12,8 @@ use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig}
 use libp2p::yamux::{Config as YamuxConfig, WindowUpdateMode};
 use libp2p::{identity, noise};
 use libp2p::{PeerId, Transport};
-use libp2p_mplex::MplexConfig;
 use std::io::{self, ErrorKind};
 use std::time::Duration;
-use trust_dns_resolver::system_conf;
 
 /// Transport type.
 pub(crate) type TTransport = Boxed<(PeerId, StreamMuxerBox)>;
@@ -26,8 +23,6 @@ pub struct TransportConfig {
     pub yamux_max_buffer_size: usize,
     pub yamux_receive_window_size: u32,
     pub yamux_update_mode: UpdateMode,
-    pub multiplex_option: MultiPlexOption,
-    pub mplex_max_buffer_size: usize,
     pub no_delay: bool,
     pub port_reuse: bool,
     pub timeout: Duration,
@@ -40,20 +35,12 @@ pub struct TransportConfig {
     pub enable_webrtc: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum MultiPlexOption {
-    Yamux,
-    YmuxAndMplex,
-}
-
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
             yamux_max_buffer_size: 16 * 1024 * 1024,
             yamux_receive_window_size: 16 * 1024 * 1024,
             yamux_update_mode: UpdateMode::default(),
-            multiplex_option: MultiPlexOption::Yamux,
-            mplex_max_buffer_size: 1024,
             no_delay: true,
             port_reuse: true,
             enable_quic: false,
@@ -140,11 +127,9 @@ pub(crate) fn build_transport(
         no_delay,
         port_reuse,
         timeout,
-        multiplex_option,
         yamux_max_buffer_size,
         yamux_receive_window_size,
         yamux_update_mode,
-        mplex_max_buffer_size,
         dns_resolver,
         version,
         enable_quic,
@@ -163,18 +148,7 @@ pub(crate) fn build_transport(
         config
     };
 
-    let mplex_config = {
-        let mut config = MplexConfig::default();
-        config.set_max_buffer_size(mplex_max_buffer_size);
-        config
-    };
-
-    let multiplex_upgrade = match multiplex_option {
-        MultiPlexOption::Yamux => Either::Left(yamux_config),
-        MultiPlexOption::YmuxAndMplex => {
-            Either::Right(SelectUpgrade::new(yamux_config, mplex_config))
-        }
-    };
+    let multiplex_upgrade = yamux_config;
 
     //TODO: Cleanup
     let tcp_config = GenTcpConfig::default()
@@ -192,20 +166,18 @@ pub(crate) fn build_transport(
 
     let (cfg, opts) = dns_resolver.unwrap_or_default().into();
 
-    let transport = TokioDnsConfig::custom(transport_timeout, cfg, opts)?;
+    let transport = TokioDnsConfig::custom(transport_timeout, cfg, opts);
 
     let version = version.unwrap_or_default();
 
     let transport = match relay {
         Some(relay) => {
             let transport = OrTransport::new(relay, transport);
-
             transport
                 .upgrade(version.into())
                 .authenticate(noise_config)
                 .multiplex(multiplex_upgrade)
                 .timeout(timeout)
-                .map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer)))
                 .boxed()
         }
         None => transport
@@ -213,7 +185,6 @@ pub(crate) fn build_transport(
             .authenticate(noise_config)
             .multiplex(multiplex_upgrade)
             .timeout(timeout)
-            .map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer)))
             .boxed(),
     };
 

@@ -23,7 +23,7 @@ void = "1.0"
 rand = "0.8"
 
 [dev-dependencies]
-libp2p = { version = "0.52", features = ["full"] }
+libp2p = { workspace = true, features = ["full"] }
 async-std = { version = "1", features = ["attributes"] }
 clap = { version = "4.0", features = ["derive"] }
 env_logger = "0.10"

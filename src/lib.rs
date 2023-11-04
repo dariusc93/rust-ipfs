@@ -99,7 +99,7 @@ pub use libp2p::{
     gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
-    kad::{record::Key, Quorum},
+    kad::{RecordKey as Key, Quorum},
     multiaddr::multiaddr,
     multiaddr::Protocol,
     swarm::NetworkBehaviour,

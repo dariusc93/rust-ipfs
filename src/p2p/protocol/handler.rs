@@ -6,8 +6,8 @@ use std::{
 use libp2p::{
     core::upgrade::DeniedUpgrade,
     swarm::{
-        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, KeepAlive,
-        SubstreamProtocol, SupportedProtocols,
+        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
+        SupportedProtocols,
     },
     StreamProtocol,
 };
@@ -22,7 +22,6 @@ pub struct Handler {
             <Self as ConnectionHandler>::OutboundProtocol,
             <Self as ConnectionHandler>::OutboundOpenInfo,
             <Self as ConnectionHandler>::ToBehaviour,
-            <Self as ConnectionHandler>::Error,
         >,
     >,
     supported_protocol: SupportedProtocols,
@@ -37,7 +36,6 @@ pub enum Out {
 impl ConnectionHandler for Handler {
     type FromBehaviour = Void;
     type ToBehaviour = Out;
-    type Error = Void;
     type InboundProtocol = DeniedUpgrade;
     type OutboundProtocol = DeniedUpgrade;
     type InboundOpenInfo = ();
@@ -47,8 +45,8 @@ impl ConnectionHandler for Handler {
         SubstreamProtocol::new(DeniedUpgrade, ())
     }
 
-    fn connection_keep_alive(&self) -> KeepAlive {
-        KeepAlive::No
+    fn connection_keep_alive(&self) -> bool {
+        false
     }
 
     fn on_behaviour_event(&mut self, _: Self::FromBehaviour) {}
@@ -62,22 +60,14 @@ impl ConnectionHandler for Handler {
             Self::OutboundOpenInfo,
         >,
     ) {
-        match event {
-            ConnectionEvent::LocalProtocolsChange(protocol) => {
-                let change = self.supported_protocol.on_protocols_change(protocol);
-                if change {
-                    self.events
-                        .push_back(ConnectionHandlerEvent::NotifyBehaviour(Out::Protocol(
-                            self.supported_protocol.iter().cloned().collect(),
-                        )));
-                }
+        if let ConnectionEvent::LocalProtocolsChange(protocol) = event {
+            let change = self.supported_protocol.on_protocols_change(protocol);
+            if change {
+                self.events
+                    .push_back(ConnectionHandlerEvent::NotifyBehaviour(Out::Protocol(
+                        self.supported_protocol.iter().cloned().collect(),
+                    )));
             }
-            ConnectionEvent::RemoteProtocolsChange(_)
-            | ConnectionEvent::FullyNegotiatedInbound(_)
-            | ConnectionEvent::FullyNegotiatedOutbound(_)
-            | ConnectionEvent::AddressChange(_)
-            | ConnectionEvent::DialUpgradeError(_)
-            | ConnectionEvent::ListenUpgradeError(_) => {}
         }
     }
 
@@ -85,12 +75,7 @@ impl ConnectionHandler for Handler {
         &mut self,
         _: &mut Context<'_>,
     ) -> Poll<
-        ConnectionHandlerEvent<
-            Self::OutboundProtocol,
-            Self::OutboundOpenInfo,
-            Self::ToBehaviour,
-            Self::Error,
-        >,
+        ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
     > {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);

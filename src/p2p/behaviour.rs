@@ -19,13 +19,10 @@ use libp2p::core::Multiaddr;
 use libp2p::dcutr::Behaviour as Dcutr;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig};
 use libp2p::identity::{Keypair, PeerId};
-use libp2p::kad::record::{
-    store::{MemoryStore, MemoryStoreConfig},
-    Record,
-};
+use libp2p::kad::store::{MemoryStore, MemoryStoreConfig};
 use libp2p::kad::{
     Behaviour as Kademlia, BucketInserts as KademliaBucketInserts, Config as KademliaConfig,
-    StoreInserts as KademliaStoreInserts,
+    Record, StoreInserts as KademliaStoreInserts,
 };
 use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig};
 use libp2p::ping::Behaviour as Ping;

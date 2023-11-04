@@ -19,21 +19,21 @@ use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{ConnectionClosed, ConnectionId, DialFailure, FromSwarm};
 use libp2p::swarm::{
-    ConnectionDenied, DialError, NetworkBehaviour, NotifyHandler, PollParameters, THandler,
-    THandlerInEvent, ToSwarm,
+    ConnectionDenied, DialError, NetworkBehaviour, NotifyHandler, THandler, THandlerInEvent,
+    ToSwarm,
 };
 use libp2p::{Multiaddr, PeerId, StreamProtocol};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, trace, warn};
 
+pub use self::client::session;
 use self::client::{Client, Config as ClientConfig};
 use self::message::BitswapMessage;
 use self::network::Network;
 use self::network::OutEvent;
 pub use self::protocol::ProtocolConfig;
 pub use self::server::{Config as ServerConfig, Server};
-pub use self::client::session;
 
 mod block;
 mod client;
@@ -417,7 +417,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
     }
 
     #[allow(clippy::collapsible_match)]
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
@@ -507,11 +507,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
     }
 
     #[allow(clippy::type_complexity)]
-    fn poll(
-        &mut self,
-        cx: &mut Context,
-        _: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         // limit work
         for _ in 0..50 {
             match Pin::new(&mut self.network).poll(cx) {
