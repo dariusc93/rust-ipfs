@@ -569,9 +569,7 @@ impl Repo {
             if let Some(mut list) = list {
                 for ch in list.drain(..) {
                     let block = block.clone();
-                    tokio::spawn(async move {
-                        let _ = ch.send(Ok(block));
-                    });
+                    let _ = ch.send(Ok(block));
                 }
             }
         }
