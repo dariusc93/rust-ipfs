@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ahash::{AHashMap, AHashSet};
 use anyhow::Result;
@@ -20,10 +20,10 @@ use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{ConnectionClosed, ConnectionId, DialFailure, FromSwarm};
 use libp2p::swarm::{
-    ConnectionDenied, DialError, NetworkBehaviour, NotifyHandler, PollParameters, THandler,
-    THandlerInEvent, ToSwarm,
+    ConnectionDenied, NetworkBehaviour, NotifyHandler, PollParameters, THandler, THandlerInEvent,
+    ToSwarm,
 };
-use libp2p::{Multiaddr, PeerId, StreamProtocol};
+use libp2p::{Multiaddr, PeerId};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, trace, warn};
@@ -52,7 +52,7 @@ pub mod peer_task_queue;
 pub use self::block::{tests::*, Block};
 pub use self::protocol::ProtocolId;
 
-const DIAL_BACK_OFF: Duration = Duration::from_secs(10 * 60);
+// const DIAL_BACK_OFF: Duration = Duration::from_secs(10 * 60);
 
 type DialMap = AHashMap<
     PeerId,
@@ -71,7 +71,7 @@ pub struct Bitswap<S: Store> {
     connection_state: AHashMap<ConnectionId, ConnectionState>,
     dials: DialMap,
     /// Set to true when dialing should be disabled because we have reached the conn limit.
-    pause_dialing: bool,
+    _pause_dialing: bool,
     client: Client<S>,
     server: Option<Server<S>>,
     incoming_messages: mpsc::Sender<(PeerId, BitswapMessage)>,
@@ -85,22 +85,6 @@ enum ConnectionState {
     Pending,
     Responsive(ProtocolId),
     Unresponsive,
-}
-
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-enum PeerState {
-    Connected,
-    Responsive(ProtocolId),
-    Unresponsive,
-    #[default]
-    Disconnected,
-    DialFailure(Instant),
-}
-
-impl PeerState {
-    fn is_connected(self) -> bool {
-        matches!(self, PeerState::Connected | PeerState::Responsive(_))
-    }
 }
 
 #[derive(Debug)]
@@ -228,7 +212,7 @@ impl<S: Store> Bitswap<S> {
             connected_peers: Default::default(),
             connection_state: Default::default(),
             dials: Default::default(),
-            pause_dialing: false,
+            _pause_dialing: false,
             server,
             client,
             incoming_messages: sender_msg,
@@ -326,23 +310,6 @@ impl<S: Store> Bitswap<S> {
             );
         }
     }
-
-    fn get_peer_state(
-        &self,
-        peer: &PeerId,
-        connection_id: Option<ConnectionId>,
-    ) -> Option<Vec<ConnectionState>> {
-        self.connected_peers
-            .get(peer)
-            .map(|connections| match connection_id {
-                Some(conn) => self
-                    .connection_state
-                    .get(&conn)
-                    .map(|s| vec![*s])
-                    .unwrap_or_default(),
-                None => vec![],
-            })
-    }
 }
 
 #[derive(Debug)]
@@ -430,7 +397,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
             FromSwarm::DialFailure(DialFailure {
                 peer_id,
                 error,
-                connection_id,
+                connection_id: _,
                 ..
             }) => {
                 let Some(peer_id) = peer_id else {
@@ -455,12 +422,16 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
         connection: ConnectionId,
         event: HandlerEvent,
     ) {
-        // trace!("inject_event from {}, event: {:?}", peer_id, event);
+        trace!(
+            "on_connection_handler_event from {}, event: {:?}",
+            peer_id,
+            event
+        );
         match event {
             HandlerEvent::Connected { protocol } => {
                 if let Entry::Occupied(mut entry) = self.connection_state.entry(connection) {
                     let state = entry.get_mut();
-                    let old_state = *state;
+                    let _old_state = *state;
                     *state = ConnectionState::Responsive(protocol);
 
                     self.peer_connected(peer_id);
@@ -531,7 +502,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                     let first_responseive = self
                         .connection_state
                         .iter()
-                        .filter(|(k, v)| connections.contains(k))
+                        .filter(|(k, _)| connections.contains(k))
                         .collect::<Vec<_>>();
 
                     if let Some((conn, state)) = first_responseive
@@ -546,7 +517,7 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                         continue;
                     }
 
-                    if let Some((conn, state)) = first_responseive.iter().find(|(_, state)| {
+                    if let Some((conn, _)) = first_responseive.iter().find(|(_, state)| {
                         matches!(
                             state,
                             ConnectionState::Pending | ConnectionState::Unresponsive
@@ -680,6 +651,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_1_block() {
+        tracing_subscriber::registry()
+            .with(fmt::layer().pretty())
+            .with(EnvFilter::from_default_env())
+            .init();
+
         get_block::<1>().await;
     }
 
@@ -728,6 +704,8 @@ mod tests {
         let store1 = TestStore::default();
         let bs1 = Bitswap::new(kp.public().to_peer_id(), store1.clone(), Config::default()).await;
 
+        trace!("peer1: {}", kp.public().to_peer_id());
+
         let mut swarm1 = SwarmBuilder::with_existing_identity(kp)
             .with_tokio()
             .with_tcp(
@@ -772,7 +750,7 @@ mod tests {
         let kp = Keypair::generate_ed25519();
         let store2 = TestStore::default();
         let bs2 = Bitswap::new(kp.public().to_peer_id(), store2.clone(), Config::default()).await;
-
+        trace!("peer2: {}", kp.public().to_peer_id());
         let mut swarm2 = SwarmBuilder::with_existing_identity(kp)
             .with_tokio()
             .with_tcp(
@@ -794,16 +772,12 @@ mod tests {
 
             loop {
                 match swarm2.next().await {
-                    Some(SwarmEvent::ConnectionEstablished { peer_id, .. }) => {
-                        trace!("peer2: connected to {}", peer_id);
-                        // simulate identify to inform bitswap about the protocols
-                        // swarm2.behaviour_mut().on_identify(
-                        //     &peer_id,
-                        //     &[
-                        //         StreamProtocol::new("/ipfs/bitswap/1.2.0"),
-                        //         StreamProtocol::new("/ipfs/bitswap/1.1.0"),
-                        //     ],
-                        // );
+                    Some(SwarmEvent::ConnectionEstablished {
+                        connection_id,
+                        peer_id,
+                        ..
+                    }) => {
+                        trace!("peer2: connected to {} to {connection_id}", peer_id);
                     }
                     ev => trace!("peer2: {:?}", ev),
                 }

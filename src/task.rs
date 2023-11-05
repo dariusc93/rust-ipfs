@@ -896,9 +896,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         ..
                     } = info;
 
-                    if let Some(bitswap) = self.swarm.behaviour_mut().bitswap() {
-                        bitswap.on_identify(&peer_id, &protocols)
-                    }
+                    // if let Some(bitswap) = self.swarm.behaviour_mut().bitswap() {
+                    //     bitswap.on_identify(&peer_id, &protocols)
+                    // }
 
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
                         if protocols.iter().any(|p| libp2p::kad::PROTOCOL_NAME.eq(p)) {
@@ -1751,7 +1751,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                         drop(_guard);
                                         break;
                                     }
-                                    
+
                                 },
                                 _ = &mut closer_r => {
                                     // Explicit sesssion stop.
