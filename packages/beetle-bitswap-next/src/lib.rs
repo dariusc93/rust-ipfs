@@ -14,9 +14,10 @@ use ahash::{AHashMap, AHashSet};
 use anyhow::Result;
 use async_trait::async_trait;
 use cid::Cid;
+use futures_util::StreamExt;
 use handler::{BitswapHandler, HandlerEvent};
 
-use futures::channel::oneshot;
+use futures::channel::{mpsc, oneshot};
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{ConnectionClosed, ConnectionId, DialFailure, FromSwarm};
@@ -25,7 +26,6 @@ use libp2p::swarm::{
     ToSwarm,
 };
 use libp2p::{Multiaddr, PeerId};
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, trace, warn};
 
@@ -151,7 +151,7 @@ impl<S: Store> Bitswap<S> {
 
             async move {
                 // process messages serially but without blocking the p2p loop
-                while let Some((peer, mut message)) = receiver_msg.recv().await {
+                while let Some((peer, mut message)) = receiver_msg.next().await {
                     let message = tokio::task::spawn_blocking(move || {
                         message.verify_blocks();
                         message
@@ -177,7 +177,7 @@ impl<S: Store> Bitswap<S> {
 
             async move {
                 // process messages serially but without blocking the p2p loop
-                while let Some(peer) = receiver_con.recv().await {
+                while let Some(peer) = receiver_con.next().await {
                     if let Some(ref server) = server {
                         futures::future::join(
                             client.peer_connected(&peer),
@@ -197,7 +197,7 @@ impl<S: Store> Bitswap<S> {
 
             async move {
                 // process messages serially but without blocking the p2p loop
-                while let Some(peer) = receiver_dis.recv().await {
+                while let Some(peer) = receiver_dis.next().await {
                     if let Some(ref server) = server {
                         futures::future::join(
                             client.peer_disconnected(&peer),
@@ -291,7 +291,7 @@ impl<S: Store> Bitswap<S> {
     }
 
     fn peer_connected(&self, peer: PeerId) {
-        if let Err(err) = self.peers_connected.try_send(peer) {
+        if let Err(err) = self.peers_connected.clone().try_send(peer) {
             warn!(
                 "failed to process peer connection from {}: {:?}, dropping",
                 peer, err
@@ -300,7 +300,7 @@ impl<S: Store> Bitswap<S> {
     }
 
     fn peer_disconnected(&self, peer: PeerId) {
-        if let Err(err) = self.peers_disconnected.try_send(peer) {
+        if let Err(err) = self.peers_disconnected.clone().try_send(peer) {
             warn!(
                 "failed to process peer disconnection from {}: {:?}, dropping",
                 peer, err
@@ -310,7 +310,7 @@ impl<S: Store> Bitswap<S> {
 
     fn receive_message(&self, peer: PeerId, message: BitswapMessage) {
         // TODO: Handle backpressure properly
-        if let Err(err) = self.incoming_messages.try_send((peer, message)) {
+        if let Err(err) = self.incoming_messages.clone().try_send((peer, message)) {
             warn!(
                 "failed to receive message from {}: {:?}, dropping",
                 peer, err
@@ -325,7 +325,7 @@ pub enum BitswapEvent {
     Provide { key: Cid },
     FindProviders {
         key: Cid,
-        response: tokio::sync::mpsc::Sender<std::result::Result<HashSet<PeerId>, String>>,
+        response: mpsc::Sender<std::result::Result<HashSet<PeerId>, String>>,
         limit: usize,
     },
     Ping {
