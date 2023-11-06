@@ -98,7 +98,7 @@ async-broadcast = "0.5"
 void = { default-features = false, version = "1.0" }
 fs2 = "0.4"
 sled = "0.34"
-libp2p-nat = { git = "https://github.com/dariusc93/libp2p-nat", rev = "53aaf0a952fee5276051eef15e11b6498a79a335" }
+libp2p-nat = "0.4"
 
 rlimit = "0.10"
 

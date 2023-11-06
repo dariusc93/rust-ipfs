@@ -2693,7 +2693,8 @@ dependencies = [
 [[package]]
 name = "libp2p-nat"
 version = "0.4.0"
-source = "git+https://github.com/dariusc93/libp2p-nat?rev=53aaf0a952fee5276051eef15e11b6498a79a335#53aaf0a952fee5276051eef15e11b6498a79a335"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca76c3243804e69554e3c0f441d31add3b7a076de1ed1a931386229430711a8f"
 dependencies = [
  "anyhow",
  "futures",
