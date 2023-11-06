@@ -3,7 +3,7 @@
 //! Supports the versions `1.0.0`, `1.1.0` and `1.2.0`.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -28,8 +28,6 @@ use libp2p::swarm::{
 use libp2p::{Multiaddr, PeerId};
 use tokio::task::JoinHandle;
 use tracing::{debug, trace, warn};
-
-use crate::handler::BitswapHandlerIn;
 
 pub use self::client::session;
 use self::client::{Client, Config as ClientConfig};
@@ -67,7 +65,6 @@ type DialMap = AHashMap<
 
 #[derive(Debug)]
 pub struct Bitswap<S: Store> {
-    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     network: Network,
     protocol_config: ProtocolConfig,
     // peers: AHashMap<PeerId, Vec<(ConnectionId, PeerState)>>,
@@ -79,7 +76,6 @@ pub struct Bitswap<S: Store> {
     client: Client<S>,
     server: Option<Server<S>>,
     incoming_messages: mpsc::Sender<(PeerId, BitswapMessage)>,
-    pending_messages: AHashMap<ConnectionId, Vec<handler::BitswapHandlerIn>>,
     peers_connected: mpsc::Sender<PeerId>,
     peers_disconnected: mpsc::Sender<PeerId>,
     _workers: Arc<Vec<JoinHandle<()>>>,
@@ -212,7 +208,6 @@ impl<S: Store> Bitswap<S> {
         }));
 
         Bitswap {
-            events: Default::default(),
             network,
             protocol_config: config.protocol,
             connected_peers: Default::default(),
@@ -222,7 +217,6 @@ impl<S: Store> Bitswap<S> {
             server,
             client,
             incoming_messages: sender_msg,
-            pending_messages: Default::default(),
             peers_connected: sender_con,
             peers_disconnected: sender_dis,
             _workers: Arc::new(workers),
@@ -451,16 +445,6 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                             }
                         }
                     }
-
-                    if let Some(messages) = self.pending_messages.remove(&connection) {
-                        for message in messages {
-                            self.events.push_back(ToSwarm::NotifyHandler {
-                                peer_id,
-                                handler: NotifyHandler::One(connection),
-                                event: message,
-                            });
-                        }
-                    }
                 }
             }
             HandlerEvent::ProtocolNotSuppported => {
@@ -475,14 +459,6 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                             }
                         }
                     }
-
-                    if let Some(messages) = self.pending_messages.remove(&connection) {
-                        for message in messages {
-                            if let BitswapHandlerIn::Message(_, response) = message {
-                                _ = response.send(Err(network::SendError::ProtocolNotSupported));
-                            }
-                        }
-                    }
                 }
             }
             HandlerEvent::Message { message, protocol } => {
@@ -493,15 +469,6 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                     if !matches!(old_state, ConnectionState::Responsive(_)) {
                         *state = ConnectionState::Responsive(protocol);
                         self.peer_connected(peer_id);
-                        if let Some(messages) = self.pending_messages.remove(&connection) {
-                            for message in messages {
-                                self.events.push_back(ToSwarm::NotifyHandler {
-                                    peer_id,
-                                    handler: NotifyHandler::One(connection),
-                                    event: message,
-                                });
-                            }
-                        }
                     }
                 }
                 self.receive_message(peer_id, message);
@@ -518,9 +485,6 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
         cx: &mut Context,
         _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        if let Some(event) = self.events.pop_front() {
-            return Poll::Ready(event);
-        }
         // limit work
         for _ in 0..50 {
             match futures::ready!(Pin::new(&mut self.network).poll(cx)) {
@@ -574,32 +538,11 @@ impl<S: Store> NetworkBehaviour for Bitswap<S> {
                     connection_id,
                 } => {
                     tracing::debug!("send message to {}", peer);
-                    match self.connection_state.get(&connection_id) {
-                        Some(ConnectionState::Responsive(_)) => {
-                            return Poll::Ready(ToSwarm::NotifyHandler {
-                                peer_id: peer,
-                                handler: NotifyHandler::One(connection_id),
-                                event: handler::BitswapHandlerIn::Message(message, response),
-                            });
-                        }
-                        Some(ConnectionState::Unresponsive) => {
-                            tracing::warn!(
-                                "peer {peer} connection {connection_id:?} is not unresponsive"
-                            );
-                            _ = response.send(Err(network::SendError::Other(
-                                "Connection is unresponsive".into(),
-                            )));
-                            continue;
-                        }
-                        Some(ConnectionState::Pending) => {
-                            tracing::warn!("peer {peer} connection {connection_id:?} is pending protocol confirmation");
-                            self.pending_messages
-                                .entry(connection_id)
-                                .or_default()
-                                .push(handler::BitswapHandlerIn::Message(message, response));
-                        }
-                        _ => {}
-                    }
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id: peer,
+                        handler: NotifyHandler::One(connection_id),
+                        event: handler::BitswapHandlerIn::Message(message, response),
+                    });
                 }
                 OutEvent::ProtectPeer { peer } => {
                     if self.connected_peers.contains_key(&peer) {
@@ -709,75 +652,51 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_1_block() {
-        _ = tracing_subscriber::registry()
+        tracing_subscriber::registry()
             .with(fmt::layer().pretty())
             .with(EnvFilter::from_default_env())
-            .try_init();
+            .init();
 
         get_block::<1>().await;
     }
 
     #[tokio::test]
     async fn test_get_2_block() {
-        _ = tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .try_init();
         get_block::<2>().await;
     }
 
     #[tokio::test]
     async fn test_get_4_block() {
-        _ = tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .try_init();
         get_block::<4>().await;
     }
 
     #[tokio::test]
     async fn test_get_64_block() {
-        _ = tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .try_init();
         get_block::<64>().await;
     }
 
     #[tokio::test]
     async fn test_get_65_block() {
-        _ = tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .try_init();
         get_block::<65>().await;
     }
 
     #[tokio::test]
     async fn test_get_66_block() {
-        _ = tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .try_init();
         get_block::<66>().await;
     }
 
     #[tokio::test]
     async fn test_get_128_block() {
-        _ = tracing_subscriber::registry()
+        tracing_subscriber::registry()
             .with(fmt::layer().pretty())
             .with(EnvFilter::from_default_env())
-            .try_init();
+            .init();
 
         get_block::<128>().await;
     }
 
     #[tokio::test]
     async fn test_get_1024_block() {
-        _ = tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .try_init();
         get_block::<1024>().await;
     }
 
