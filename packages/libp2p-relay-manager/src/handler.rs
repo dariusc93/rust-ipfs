@@ -56,6 +56,7 @@ impl ConnectionHandler for Handler {
         void::unreachable(event)
     }
 
+    #[allow(clippy::wildcard_in_or_patterns)]
     fn on_connection_event(
         &mut self,
         event: ConnectionEvent<
