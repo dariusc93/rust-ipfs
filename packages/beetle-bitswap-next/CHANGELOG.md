@@ -1,4 +1,4 @@
-# 0.5.1 [unrelease]
+# 0.5.1
 - chore: Update libp2p to 0.53 [PR 116]
 - refactor: Verify protocol in handler and optimize connection state [PR 115]
 - chore: Remove `ConnectionHandlerEvent::Close` [PR 112]

@@ -1,4 +1,4 @@
-# 0.7.0 [unrelease]
+# 0.7.0
 - chore: Update libp2p to 0.53 [PR 116]
 - feat: Implement Repo::get_blocks [PR 113]
 - feat: Allow recursive removal of blocks [PR 114]

@@ -1,4 +1,4 @@
-# 0.2.1 [unreleased]
+# 0.2.1
 - chore: Update libp2p to 0.53 [PR 116]
 - chore: Ignore deprecation warnings [PR 112]
 
