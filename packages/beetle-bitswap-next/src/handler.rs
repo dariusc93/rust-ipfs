@@ -218,9 +218,9 @@ impl ConnectionHandler for BitswapHandler {
             }
             ConnectionEvent::ListenUpgradeError(_) => {}
             //Use both protocol events due to local test calling `LocalProtocolsChange`
-            //TODO: Investigate
-            ConnectionEvent::RemoteProtocolsChange(protocol)
-            | ConnectionEvent::LocalProtocolsChange(protocol) => {
+            //TODO: Investigate cause of LocalProtocolsChange in test
+            ConnectionEvent::RemoteProtocolsChange(protocol) => {
+                // | ConnectionEvent::LocalProtocolsChange(protocol)
                 let change = self.supported_protocols.on_protocols_change(protocol);
                 if change {
                     let protocols = self
@@ -259,7 +259,8 @@ impl ConnectionHandler for BitswapHandler {
                         )),
                     }
                 }
-            } // _ => {}
+            }
+            _ => {}
         }
     }
 
