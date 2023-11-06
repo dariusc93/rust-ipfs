@@ -1,9 +1,11 @@
 # 0.7.0 [unrelease]
+- chore: Update libp2p to 0.53 [PR 116]
 - feat: Implement Repo::get_blocks [PR 113]
 - feat: Allow recursive removal of blocks [PR 114]
 - chore: Ignore deprecation warnings [PR 112]
 - feat: Implement custom future for unixfs and dag functions [PR 111]
 
+[PR 116]: https://github.com/dariusc93/rust-ipfs/pull/116
 [PR 113]: https://github.com/dariusc93/rust-ipfs/pull/113
 [PR 114]: https://github.com/dariusc93/rust-ipfs/pull/114
 [PR 112]: https://github.com/dariusc93/rust-ipfs/pull/112

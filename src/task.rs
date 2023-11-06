@@ -50,7 +50,7 @@ pub use libp2p::{
     gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
-    kad::{record::Key, Quorum},
+    kad::{Quorum, RecordKey as Key},
     multiaddr::multiaddr,
     multiaddr::Protocol,
     swarm::NetworkBehaviour,
@@ -406,7 +406,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 MdnsEvent::Expired(list) => {
                     for (peer, _) in list {
                         if let Some(mdns) = self.swarm.behaviour().mdns.as_ref() {
-                            if !mdns.has_node(&peer) {
+                            if !mdns.discovered_nodes().any(|p| p == &peer) {
                                 trace!("mdns: Expired peer {}", peer.to_base58());
                             }
                         }
@@ -774,6 +774,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                     KademliaEvent::PendingRoutablePeer { peer, address } => {
                         trace!("kad: pending routable peer {} ({})", peer, address);
+                    }
+                    KademliaEvent::ModeChanged { new_mode } => {
+                        _ = new_mode;
                     }
                 }
             }
@@ -1766,7 +1769,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
             }
             RepoEvent::UnwantBlock(_cid) => {}
-            RepoEvent::NewBlock(block, ret) => {
+            RepoEvent::NewBlock(block) => {
                 if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
                     let client = bitswap.client().clone();
                     let server = bitswap.server().cloned();
@@ -1785,7 +1788,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         }
                     });
                 }
-                let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
+                // let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
             }
             RepoEvent::RemovedBlock(cid) => self.swarm.behaviour_mut().stop_providing_block(&cid),
         }

@@ -3,12 +3,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use either::Either;
 use libp2p::{
     core::Endpoint,
     swarm::{
-        self, dummy, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, PollParameters,
-        THandler, THandlerInEvent, ToSwarm,
+        self, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
+        THandlerInEvent, ToSwarm,
     },
     Multiaddr, PeerId, StreamProtocol,
 };
@@ -19,7 +18,6 @@ mod handler;
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     protocol: Vec<StreamProtocol>,
-    use_deprecated: bool,
 }
 
 impl Behaviour {
@@ -29,7 +27,7 @@ impl Behaviour {
 }
 
 impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = Either<handler::Handler, dummy::ConnectionHandler>;
+    type ConnectionHandler = handler::Handler;
     type ToSwarm = void::Void;
 
     fn handle_pending_inbound_connection(
@@ -58,11 +56,7 @@ impl NetworkBehaviour for Behaviour {
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        let handler = match self.use_deprecated {
-            true => Either::Right(dummy::ConnectionHandler),
-            false => Either::Left(handler::Handler::default()),
-        };
-        Ok(handler)
+        Ok(handler::Handler::default())
     }
 
     fn handle_established_outbound_connection(
@@ -72,11 +66,7 @@ impl NetworkBehaviour for Behaviour {
         _: &Multiaddr,
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        let handler = match self.use_deprecated {
-            true => Either::Right(dummy::ConnectionHandler),
-            false => Either::Left(handler::Handler::default()),
-        };
-        Ok(handler)
+        Ok(handler::Handler::default())
     }
 
     fn on_connection_handler_event(
@@ -86,51 +76,20 @@ impl NetworkBehaviour for Behaviour {
         event: swarm::THandlerOutEvent<Self>,
     ) {
         match event {
-            Either::Left(handler::Out::Protocol(protocol)) => {
+            handler::Out::Protocol(protocol) => {
                 if self.protocol.ne(&protocol) {
                     self.protocol = protocol;
                 }
             }
-            Either::Right(v) => void::unreachable(v),
         }
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
-        match event {
-            FromSwarm::AddressChange(_)
-            | FromSwarm::ConnectionEstablished(_)
-            | FromSwarm::ConnectionClosed(_)
-            | FromSwarm::DialFailure(_)
-            | FromSwarm::ListenFailure(_)
-            | FromSwarm::NewListener(_)
-            | FromSwarm::NewListenAddr(_)
-            | FromSwarm::ExpiredListenAddr(_)
-            | FromSwarm::ListenerError(_)
-            | FromSwarm::ListenerClosed(_)
-            | FromSwarm::ExternalAddrConfirmed(_)
-            | FromSwarm::ExternalAddrExpired(_)
-            | FromSwarm::NewExternalAddrCandidate(_) => {}
-        }
+    fn on_swarm_event(&mut self, event: FromSwarm) {
+        _ = event;
     }
 
     #[allow(deprecated)]
-    fn poll(
-        &mut self,
-        _: &mut Context,
-        params: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        if self.use_deprecated {
-            let supported_protocols = params
-                .supported_protocols()
-                .filter_map(|b| {
-                    StreamProtocol::try_from_owned(String::from_utf8_lossy(&b).to_string()).ok()
-                })
-                .collect::<Vec<_>>();
-
-            if supported_protocols.len() != self.protocol.len() {
-                self.protocol = supported_protocols;
-            }
-        }
+    fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }

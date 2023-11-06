@@ -18,8 +18,7 @@ use libp2p::gossipsub::{
     Message as GossipsubMessage, MessageId, TopicHash,
 };
 use libp2p::swarm::{
-    ConnectionDenied, ConnectionId, NetworkBehaviour, PollParameters, THandler, THandlerInEvent,
-    ToSwarm,
+    ConnectionDenied, ConnectionId, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
 };
 
 /// Currently a thin wrapper around Gossipsub.
@@ -261,7 +260,7 @@ impl NetworkBehaviour for GossipsubStream {
         )
     }
 
-    fn on_swarm_event(&mut self, event: libp2p::swarm::FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: libp2p::swarm::FromSwarm) {
         self.gossipsub.on_swarm_event(event)
     }
 
@@ -308,7 +307,6 @@ impl NetworkBehaviour for GossipsubStream {
     fn poll(
         &mut self,
         ctx: &mut Context,
-        poll: &mut impl PollParameters,
     ) -> Poll<ToSwarm<libp2p::gossipsub::Event, THandlerInEvent<Self>>> {
         use futures::stream::StreamExt;
         use std::collections::hash_map::Entry;
@@ -334,7 +332,7 @@ impl NetworkBehaviour for GossipsubStream {
         }
 
         loop {
-            match futures::ready!(self.gossipsub.poll(ctx, poll)) {
+            match futures::ready!(self.gossipsub.poll(ctx)) {
                 ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
                     let topic = message.topic.clone();
                     if let Entry::Occupied(oe) = self.streams.entry(topic) {

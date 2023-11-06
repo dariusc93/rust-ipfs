@@ -25,8 +25,8 @@ mod ext_behaviour {
     use libp2p::{
         core::Endpoint,
         swarm::{
-            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, PollParameters, THandler,
-            THandlerInEvent, THandlerOutEvent, ToSwarm,
+            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
+            THandlerOutEvent, ToSwarm,
         },
         Multiaddr, PeerId,
     };
@@ -86,31 +86,13 @@ mod ext_behaviour {
         ) {
         }
 
-        fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
-            match event {
-                FromSwarm::NewListenAddr(NewListenAddr { addr, .. }) => {
-                    println!("Listening on {addr}");
-                }
-                FromSwarm::AddressChange(_)
-                | FromSwarm::ConnectionEstablished(_)
-                | FromSwarm::ConnectionClosed(_)
-                | FromSwarm::DialFailure(_)
-                | FromSwarm::ListenFailure(_)
-                | FromSwarm::NewListener(_)
-                | FromSwarm::ExpiredListenAddr(_)
-                | FromSwarm::ListenerError(_)
-                | FromSwarm::ListenerClosed(_)
-                | FromSwarm::ExternalAddrConfirmed(_)
-                | FromSwarm::ExternalAddrExpired(_)
-                | FromSwarm::NewExternalAddrCandidate(_) => {}
+        fn on_swarm_event(&mut self, event: FromSwarm) {
+            if let FromSwarm::NewListenAddr(NewListenAddr { addr, .. }) = event {
+                println!("Listening on {addr}");
             }
         }
 
-        fn poll(
-            &mut self,
-            _: &mut Context,
-            _: &mut impl PollParameters,
-        ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+        fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
             Poll::Pending
         }
     }

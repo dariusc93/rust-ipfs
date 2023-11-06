@@ -6,8 +6,8 @@ use std::{
 use libp2p::{
     core::upgrade::DeniedUpgrade,
     swarm::{
-        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, KeepAlive,
-        SubstreamProtocol, SupportedProtocols,
+        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
+        SupportedProtocols,
     },
 };
 use void::Void;
@@ -21,7 +21,6 @@ pub struct Handler {
             <Self as ConnectionHandler>::OutboundProtocol,
             <Self as ConnectionHandler>::OutboundOpenInfo,
             <Self as ConnectionHandler>::ToBehaviour,
-            <Self as ConnectionHandler>::Error,
         >,
     >,
 
@@ -40,7 +39,6 @@ pub enum Out {
 impl ConnectionHandler for Handler {
     type FromBehaviour = Void;
     type ToBehaviour = Out;
-    type Error = Void;
     type InboundProtocol = DeniedUpgrade;
     type OutboundProtocol = DeniedUpgrade;
     type InboundOpenInfo = ();
@@ -50,14 +48,15 @@ impl ConnectionHandler for Handler {
         SubstreamProtocol::new(DeniedUpgrade, ())
     }
 
-    fn connection_keep_alive(&self) -> KeepAlive {
-        KeepAlive::No
+    fn connection_keep_alive(&self) -> bool {
+        false
     }
 
     fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
         void::unreachable(event)
     }
 
+    #[allow(clippy::wildcard_in_or_patterns)]
     fn on_connection_event(
         &mut self,
         event: ConnectionEvent<
@@ -99,7 +98,8 @@ impl ConnectionHandler for Handler {
             | ConnectionEvent::AddressChange(_)
             | ConnectionEvent::DialUpgradeError(_)
             | ConnectionEvent::ListenUpgradeError(_)
-            | ConnectionEvent::LocalProtocolsChange(_) => {}
+            | ConnectionEvent::LocalProtocolsChange(_)
+            | _ => {}
         }
     }
 
@@ -107,12 +107,7 @@ impl ConnectionHandler for Handler {
         &mut self,
         _: &mut Context<'_>,
     ) -> Poll<
-        ConnectionHandlerEvent<
-            Self::OutboundProtocol,
-            Self::OutboundOpenInfo,
-            Self::ToBehaviour,
-            Self::Error,
-        >,
+        ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
     > {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);

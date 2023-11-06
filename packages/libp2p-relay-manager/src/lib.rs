@@ -18,7 +18,7 @@ use libp2p::{
         dial_opts::DialOpts,
         AddressChange, ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure,
         ExpiredListenAddr, FromSwarm, ListenOpts, ListenerClosed, ListenerError, NetworkBehaviour,
-        NewListenAddr, PollParameters, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
+        NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -675,7 +675,7 @@ impl Behaviour {
             peer_id,
             connection_id,
             ..
-        }: ConnectionClosed<'_, <Self as NetworkBehaviour>::ConnectionHandler>,
+        }: ConnectionClosed<'_>,
     ) {
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let connections = entry.get_mut();
@@ -718,18 +718,17 @@ impl Behaviour {
         }
     }
 
-    pub fn process_relay_event(&mut self, event: libp2p::relay::client::Event) {
+    pub fn process_relay_event(&mut self, _: libp2p::relay::client::Event) {
         //TODO: Perform checks on limit reported from the reservation and either accept it or
         //      disconnect and attempt a different connection to a relay with a higher
         //      limit requirement
         //NOTE: This is helpful if one knows that the relays will have a higher limit, otherwise
         //      this may cause long waits when attempting to find relays with higher limits
         //      for the reservation
-        match event {
-            libp2p::relay::client::Event::ReservationReqAccepted { .. } => {}
-            libp2p::relay::client::Event::ReservationReqFailed { .. } => {}
-            _ => {}
-        }
+        // match event {
+        //     libp2p::relay::client::Event::ReservationReqAccepted { .. } => {}
+        //     _ => {}
+        // }
     }
 }
 
@@ -772,7 +771,7 @@ impl NetworkBehaviour for Behaviour {
         Ok(addrs)
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::ConnectionEstablished(event) => self.on_connection_established(event),
             FromSwarm::ConnectionClosed(event) => self.on_connection_closed(event),
@@ -782,11 +781,7 @@ impl NetworkBehaviour for Behaviour {
             FromSwarm::ListenerError(event) => self.on_listener_error(event),
             FromSwarm::ExpiredListenAddr(event) => self.on_listener_expired(event),
             FromSwarm::AddressChange(event) => self.on_address_change(event),
-            FromSwarm::ExternalAddrConfirmed(_)
-            | FromSwarm::NewExternalAddrCandidate(_)
-            | FromSwarm::ExternalAddrExpired(_)
-            | FromSwarm::ListenFailure(_)
-            | FromSwarm::NewListener(_) => {}
+            _ => {}
         }
     }
 
@@ -847,7 +842,6 @@ impl NetworkBehaviour for Behaviour {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);

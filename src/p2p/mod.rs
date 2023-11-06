@@ -28,7 +28,7 @@ pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
 pub use self::transport::{
-    DnsResolver, MultiPlexOption, TransportConfig, UpdateMode, UpgradeVersion,
+    DnsResolver, TransportConfig, UpdateMode, UpgradeVersion,
 };
 pub(crate) mod gossipsub;
 mod transport;
@@ -207,19 +207,17 @@ where
         None => transport::build_transport(keypair, relay_transport, transport_config)?,
     };
 
-    // Create a Swarm
-    let swarm = libp2p::swarm::SwarmBuilder::with_executor(
+    let swarm = libp2p::Swarm::new(
         transport,
         behaviour,
         peer_id,
-        SpannedExecutor(span),
-    )
-    .notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
-    .per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
-    .dial_concurrency_factor(swarm_config.dial_concurrency_factor)
-    .max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
-    .idle_connection_timeout(idle)
-    .build();
+        libp2p::swarm::Config::with_executor(SpannedExecutor(span))
+            .with_notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
+            .with_per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
+            .with_dial_concurrency_factor(swarm_config.dial_concurrency_factor)
+            .with_max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
+            .with_idle_connection_timeout(idle),
+    );
 
     Ok(swarm)
 }

@@ -1,7 +1,9 @@
 # 0.5.1 [unrelease]
+- chore: Update libp2p to 0.53 [PR 116]
 - refactor: Verify protocol in handler and optimize connection state [PR 115]
 - chore: Remove `ConnectionHandlerEvent::Close` [PR 112]
 
+[PR 116]: https://github.com/dariusc93/rust-ipfs/pull/116
 [PR 115]: https://github.com/dariusc93/rust-ipfs/pull/115
 [PR 112]: https://github.com/dariusc93/rust-ipfs/pull/112
 

@@ -8,8 +8,7 @@ use libp2p::{
     multiaddr::Protocol,
     swarm::{
         self, dummy::ConnectionHandler as DummyConnectionHandler, AddressChange, ConnectionDenied,
-        ConnectionId, FromSwarm, NetworkBehaviour, PollParameters, THandler, THandlerInEvent,
-        ToSwarm,
+        ConnectionId, FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -175,7 +174,7 @@ impl NetworkBehaviour for Behaviour {
     ) {
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::AddressChange(AddressChange {
                 peer_id, old, new, ..
@@ -209,26 +208,23 @@ impl NetworkBehaviour for Behaviour {
                     }
                 }
             }
-            FromSwarm::ConnectionEstablished(_)
-            | FromSwarm::ConnectionClosed(_)
-            | FromSwarm::DialFailure(_)
-            | FromSwarm::ListenFailure(_)
-            | FromSwarm::NewListener(_)
-            | FromSwarm::NewListenAddr(_)
-            | FromSwarm::ExpiredListenAddr(_)
-            | FromSwarm::ListenerError(_)
-            | FromSwarm::ListenerClosed(_)
-            | FromSwarm::ExternalAddrConfirmed(_)
-            | FromSwarm::ExternalAddrExpired(_)
-            | FromSwarm::NewExternalAddrCandidate(_) => {}
+            FromSwarm::ConnectionEstablished(_) => {},
+            FromSwarm::ConnectionClosed(_) => {},
+            FromSwarm::DialFailure(_) => {},
+            FromSwarm::ListenFailure(_) => {},
+            FromSwarm::NewListener(_) => {},
+            FromSwarm::NewListenAddr(_) => {},
+            FromSwarm::ExpiredListenAddr(_) => {},
+            FromSwarm::ListenerError(_) => {},
+            FromSwarm::ListenerClosed(_) => {},
+            FromSwarm::NewExternalAddrCandidate(_) => {},
+            FromSwarm::ExternalAddrConfirmed(_) => {},
+            FromSwarm::ExternalAddrExpired(_) => {},
+            _ => {},
         }
     }
 
-    fn poll(
-        &mut self,
-        _: &mut Context,
-        _: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+    fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }

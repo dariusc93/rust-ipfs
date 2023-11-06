@@ -9,7 +9,6 @@ use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::ListenFailure;
 use libp2p::swarm::{
     self, dummy::ConnectionHandler as DummyConnectionHandler, CloseConnection, NetworkBehaviour,
-    PollParameters,
 };
 #[allow(deprecated)]
 use libp2p::swarm::{
@@ -436,7 +435,7 @@ impl NetworkBehaviour for Behaviour {
     }
 
     #[allow(clippy::single_match)]
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
@@ -542,7 +541,6 @@ impl NetworkBehaviour for Behaviour {
     fn poll(
         &mut self,
         cx: &mut Context,
-        _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);

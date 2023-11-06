@@ -18,14 +18,14 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-libp2p = "0.52.4"
-beetle-bitswap-next = { version = "0.5.0", path = "packages/beetle-bitswap-next" }
+libp2p = { version = "0.53" }
+beetle-bitswap-next = { version = "0.5.1", path = "packages/beetle-bitswap-next" }
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
 libipld = "0.16"
 clap = { version = "4.3", features = ["derive"] }
-rust-ipns = { version = "0.1", path = "packages/rust-ipns" }
+rust-ipns = { version = "0.2", path = "packages/rust-ipns" }
 chrono = { version = "0.4" }
-libp2p-relay-manager = { version = "0.2", path = "packages/libp2p-relay-manager" }
+libp2p-relay-manager = { version = "0.2.1", path = "packages/libp2p-relay-manager" }
 
 [dependencies]
 anyhow = "1.0"
@@ -36,7 +36,7 @@ beetle-bitswap-next = { workspace = true }
 byteorder = { default-features = false, version = "1" }
 bytes = { default-features = false, version = "1" }
 libipld.workspace = true
-trust-dns-resolver = "0.23"
+hickory-resolver = "0.24.0"
 either = { version = "1" }
 futures = { version = "0.3" }
 hash_hasher = "2.0.3"
@@ -76,20 +76,14 @@ libp2p = { features = [
     "quic",
 ], workspace = true }
 
-libp2p-mplex = "0.40"
-libp2p-allow-block-list = "0.2"
+libp2p-allow-block-list = "0.3"
 
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
 serde_json = { default-features = false, features = ["std"], version = "1.0" }
 
 thiserror = { default-features = false, version = "1.0" }
-tokio = { default-features = false, features = [
-    "fs",
-    "macros",
-    "rt-multi-thread",
-    "sync",
-], version = "1" }
+tokio = { features = ["full"], version = "1" }
 tokio-stream = { version = "0.1", features = ["fs"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tracing = { default-features = false, features = ["log"], version = "0.1" }
@@ -104,7 +98,7 @@ async-broadcast = "0.5"
 void = { default-features = false, version = "1.0" }
 fs2 = "0.4"
 sled = "0.34"
-libp2p-nat = { version = "0.3" }
+libp2p-nat = "0.4"
 
 rlimit = "0.10"
 
@@ -120,11 +114,7 @@ bs58 = "0.4"
 criterion = { default-features = false, version = "0.4" }
 hex-literal = { default-features = false, version = "0.3" }
 sha2 = { default-features = false, version = "0.10" }
-tokio = { default-features = false, features = [
-    "io-std",
-    "io-util",
-    "time",
-], version = "1" }
+tokio = { features = ["full"], version = "1" }
 rustyline-async = { version = "0.3" }
 tracing-subscriber = { default-features = false, features = [
     "fmt",

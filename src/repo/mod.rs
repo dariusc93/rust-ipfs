@@ -1,15 +1,11 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
-use crate::p2p::KadResult;
 use crate::path::IpfsPath;
-use crate::{Block, ReceiverChannel, StoragePath};
+use crate::{Block, StoragePath};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use core::fmt::Debug;
-use futures::channel::{
-    mpsc::{channel, Receiver, Sender},
-    oneshot,
-};
+use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::sink::SinkExt;
 use futures::stream::{BoxStream, FuturesOrdered};
@@ -327,10 +323,7 @@ pub enum RepoEvent {
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
-    NewBlock(
-        Block,
-        oneshot::Sender<Result<ReceiverChannel<KadResult>, anyhow::Error>>,
-    ),
+    NewBlock(Block),
     /// Signals the removal of a block.
     RemovedBlock(Cid),
 }
@@ -565,6 +558,9 @@ impl Repo {
         let (cid, res) = self.block_store.put(block.clone()).await?;
 
         if let BlockPut::NewBlock = res {
+            if let Some(mut event) = self.repo_channel() {
+                _ = event.send(RepoEvent::NewBlock(block.clone())).await;
+            }
             let list = self.subscriptions.lock().remove(&cid);
             if let Some(mut list) = list {
                 for ch in list.drain(..) {

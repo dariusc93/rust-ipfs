@@ -11,6 +11,7 @@ use futures::{
     prelude::*,
     stream::{BoxStream, SelectAll},
 };
+
 use libp2p::{
     core::upgrade::NegotiationError,
     swarm::handler::{
@@ -18,9 +19,7 @@ use libp2p::{
     },
 };
 use libp2p::{
-    swarm::{
-        ConnectionHandler, ConnectionHandlerEvent, KeepAlive, SubstreamProtocol, SupportedProtocols,
-    },
+    swarm::{ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, SupportedProtocols},
     StreamProtocol,
 };
 use smallvec::SmallVec;
@@ -83,12 +82,8 @@ pub enum BitswapHandlerIn {
     Unprotect,
 }
 
-type BitswapConnectionHandlerEvent = ConnectionHandlerEvent<
-    ProtocolConfig,
-    (BitswapMessage, BitswapMessageResponse),
-    HandlerEvent,
-    BitswapHandlerError,
->;
+type BitswapConnectionHandlerEvent =
+    ConnectionHandlerEvent<ProtocolConfig, (BitswapMessage, BitswapMessageResponse), HandlerEvent>;
 
 /// Protocol Handler that manages a single long-lived substream with a peer.
 pub struct BitswapHandler {
@@ -153,7 +148,6 @@ impl BitswapHandler {
 impl ConnectionHandler for BitswapHandler {
     type FromBehaviour = BitswapHandlerIn;
     type ToBehaviour = HandlerEvent;
-    type Error = BitswapHandlerError;
     type InboundOpenInfo = ();
     type InboundProtocol = ProtocolConfig;
     type OutboundOpenInfo = (BitswapMessage, BitswapMessageResponse);
@@ -264,20 +258,20 @@ impl ConnectionHandler for BitswapHandler {
         }
     }
 
-    fn connection_keep_alive(&self) -> KeepAlive {
+    fn connection_keep_alive(&self) -> bool {
         if !self.send_queue.is_empty() {
-            return KeepAlive::Yes;
+            return true;
         }
 
         if !self.outbound_substreams.is_empty() || !self.inbound_substreams.is_empty() {
-            return KeepAlive::Yes;
+            return true;
         }
 
         if self.protected {
-            return KeepAlive::Yes;
+            return true;
         }
 
-        KeepAlive::No
+        false
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BitswapConnectionHandlerEvent> {
