@@ -7,6 +7,7 @@ use std::{
 use asynchronous_codec::Framed;
 use futures::StreamExt;
 use futures::{
+    channel::oneshot,
     prelude::*,
     stream::{BoxStream, SelectAll},
 };
@@ -23,7 +24,6 @@ use libp2p::{
     StreamProtocol,
 };
 use smallvec::SmallVec;
-use tokio::sync::oneshot;
 use tracing::{error, trace, warn};
 
 use crate::{
@@ -259,9 +259,7 @@ impl ConnectionHandler for BitswapHandler {
                         )),
                     }
                 }
-            }
-
-            // _ => {}
+            } // _ => {}
         }
     }
 
