@@ -18,7 +18,7 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-libp2p = { git = "https://github.com/libp2p/rust-libp2p", rev = "32c945ccc05ac60f2daf305b21d78f4534e5500f" }
+libp2p = { version = "0.53" }
 beetle-bitswap-next = { version = "0.5.0", path = "packages/beetle-bitswap-next" }
 rust-unixfs = { version = "0.4.0", path = "unixfs" }
 libipld = "0.16"
@@ -74,10 +74,10 @@ libp2p = { features = [
     "cbor",
     "rendezvous",
     "quic",
+    "upnp",
 ], workspace = true }
 
-libp2p-mplex = { git = "https://github.com/libp2p/rust-libp2p", rev = "32c945ccc05ac60f2daf305b21d78f4534e5500f" }
-libp2p-allow-block-list = { git = "https://github.com/libp2p/rust-libp2p", rev = "32c945ccc05ac60f2daf305b21d78f4534e5500f" }
+libp2p-allow-block-list = "0.3"
 
 parking_lot = "0.12"
 serde = { default-features = false, features = ["derive"], version = "1.0" }
@@ -104,7 +104,7 @@ async-broadcast = "0.5"
 void = { default-features = false, version = "1.0" }
 fs2 = "0.4"
 sled = "0.34"
-libp2p-nat = { git = "https://github.com/dariusc93/libp2p-nat", rev = "4eed34075e02aff96d9f744bfaa1ebb19d8c01b8" }
+# libp2p-nat = { git = "https://github.com/dariusc93/libp2p-nat", rev = "4eed34075e02aff96d9f744bfaa1ebb19d8c01b8" }
 
 rlimit = "0.10"
 

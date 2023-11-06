@@ -92,7 +92,13 @@ impl ConnectionHandler for Handler {
                     }
                 }
             }
-            _ => {},
+            ConnectionEvent::FullyNegotiatedInbound(_)
+            | ConnectionEvent::FullyNegotiatedOutbound(_)
+            | ConnectionEvent::AddressChange(_)
+            | ConnectionEvent::DialUpgradeError(_)
+            | ConnectionEvent::ListenUpgradeError(_)
+            | ConnectionEvent::LocalProtocolsChange(_)
+            | _ => {}
         }
     }
 
