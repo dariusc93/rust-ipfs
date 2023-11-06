@@ -5,8 +5,10 @@ use cid::Cid;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 
+use futures::channel::{mpsc, oneshot};
+use futures_util::{StreamExt, SinkExt};
 use libp2p::PeerId;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, trace, warn};
 
@@ -134,7 +136,7 @@ impl<S: Store> Server<S> {
             {
                 let (closer_s, mut closer_r) = oneshot::channel();
                 let mut new_blocks = new_blocks.1;
-                let provide_keys = provide_keys.0;
+                let mut provide_keys = provide_keys.0;
 
                 // worker managing sending out provide messages
                 let handle = rt.spawn(async move {
@@ -145,7 +147,7 @@ impl<S: Store> Server<S> {
                                 // shutdown
                                 break;
                             }
-                            block_key = new_blocks.recv() => {
+                            block_key = new_blocks.next() => {
                                 match block_key {
                                     Some(block_key) => {
                                         if let Err(err) = provide_keys.send(block_key).await {
@@ -177,7 +179,7 @@ impl<S: Store> Server<S> {
                                 // shutdown
                                 break;
                             }
-                            key = provide_keys.recv() => {
+                            key = provide_keys.next() => {
                                 match key {
                                     Some(key) => {
                                         // TODO: timeout
@@ -278,7 +280,7 @@ impl<S: Store> Server<S> {
         self.engine.notify_new_blocks(blocks).await;
         if self.inner.provide_enabled {
             for block in blocks {
-                if let Err(err) = self.inner.new_blocks.send(*block.cid()).await {
+                if let Err(err) = self.inner.new_blocks.clone().send(*block.cid()).await {
                     warn!("failed to send new blocks: {:?}", err);
                 }
             }

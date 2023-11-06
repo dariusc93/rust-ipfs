@@ -1,15 +1,11 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
-use crate::p2p::KadResult;
 use crate::path::IpfsPath;
-use crate::{Block, ReceiverChannel, StoragePath};
+use crate::{Block, StoragePath};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use core::fmt::Debug;
-use futures::channel::{
-    mpsc::{channel, Receiver, Sender},
-    oneshot,
-};
+use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::sink::SinkExt;
 use futures::stream::{BoxStream, FuturesOrdered};
@@ -569,9 +565,7 @@ impl Repo {
             if let Some(mut list) = list {
                 for ch in list.drain(..) {
                     let block = block.clone();
-                    tokio::spawn(async move {
-                        let _ = ch.send(Ok(block));
-                    });
+                    let _ = ch.send(Ok(block));
                 }
             }
         }
