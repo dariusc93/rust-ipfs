@@ -251,27 +251,6 @@ impl<S: Store> Bitswap<S> {
         Ok(())
     }
 
-    /// Called on identify events from swarm, informing us about available protocols of this peer.
-    /// TODO: Check within handler after updating to libp2p 0.52 instead of checking identify
-    ///       If peer does not contain the protocol, emit an event from the handler to notify
-    ///       the behaviour and make sure to set `keep_alive` to `KeepAlive::No`
-    // pub fn on_identify(&mut self, peer: &PeerId, protocols: &[StreamProtocol]) {
-    //     let mut protocols: Vec<ProtocolId> =
-    //         protocols.iter().filter_map(ProtocolId::try_from).collect();
-    //     protocols.sort();
-
-    //     if let Some(list) = self.get_peer_state(peer) {
-    //         for (conn_id, state) in list
-    //             .iter()
-    //             .filter(|(_, state)| matches!(state, PeerState::Connected))
-    //         {
-    //             if let Some(best_protocol) = protocols.last() {
-    //                 self.set_peer_state(peer, *conn_id, PeerState::Responsive(*best_protocol));
-    //             }
-    //         }
-    //     }
-    // }
-
     pub async fn wantlist_for_peer(&self, peer: &PeerId) -> Vec<Cid> {
         if peer == self.network.self_id() {
             return self.client.get_wantlist().await.into_iter().collect();
