@@ -6,12 +6,10 @@ use std::{
 
 use ahash::AHashMap;
 use anyhow::{anyhow, Result};
+use futures::channel::oneshot;
 
 use libp2p::PeerId;
-use tokio::{
-    sync::{oneshot, RwLock},
-    task::JoinHandle,
-};
+use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::error;
 
 use crate::server::ewma::ewma;

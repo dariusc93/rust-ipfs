@@ -3,11 +3,10 @@ use std::{ops::Deref, pin::Pin, sync::Arc, time::Duration};
 use ahash::AHashSet;
 use anyhow::{anyhow, ensure, Result};
 use cid::Cid;
-use futures::{future, stream, StreamExt};
+use futures::{channel::oneshot, future, stream, StreamExt};
 
 use libp2p::PeerId;
 use tokio::{
-    sync::oneshot,
     task::JoinHandle,
     time::{Instant, Sleep},
 };
@@ -408,7 +407,7 @@ impl LoopState {
                 loop {
                     let cid = queue.pop().await;
                     if let Ok(chan) = network.find_providers(cid, MAX_PROVIDERS).await {
-                        let stream = tokio_stream::wrappers::ReceiverStream::new(chan);
+                        let stream = chan;
                         stream
                             // Remove intermitten failures.
                             .filter_map(|providers_result| future::ready(providers_result.ok()))

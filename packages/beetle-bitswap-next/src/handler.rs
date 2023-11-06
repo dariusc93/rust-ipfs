@@ -7,11 +7,9 @@ use std::{
 use asynchronous_codec::Framed;
 use futures::StreamExt;
 use futures::{
+    channel::oneshot,
     prelude::*,
     stream::{BoxStream, SelectAll},
-};
-use libp2p::swarm::{
-    ConnectionHandler, ConnectionHandlerEvent, KeepAlive, SubstreamProtocol,
 };
 use libp2p::{
     core::upgrade::NegotiationError,
@@ -19,8 +17,13 @@ use libp2p::{
         ConnectionEvent, DialUpgradeError, FullyNegotiatedInbound, FullyNegotiatedOutbound,
     },
 };
+use libp2p::{
+    swarm::{
+        ConnectionHandler, ConnectionHandlerEvent, KeepAlive, SubstreamProtocol, SupportedProtocols,
+    },
+    StreamProtocol,
+};
 use smallvec::SmallVec;
-use tokio::sync::oneshot;
 use tracing::{error, trace, warn};
 
 use crate::{
@@ -107,6 +110,8 @@ pub struct BitswapHandler {
 
     /// Flag determining whether to maintain the connection to the peer.
     protected: bool,
+
+    supported_protocols: SupportedProtocols,
 }
 
 impl Debug for BitswapHandler {
@@ -140,6 +145,7 @@ impl BitswapHandler {
             protocol: None,
             events: Default::default(),
             protected: false,
+            supported_protocols: Default::default(),
         }
     }
 }
@@ -211,13 +217,54 @@ impl ConnectionHandler for BitswapHandler {
                 warn!("Dial upgrade error {:?}", error);
             }
             ConnectionEvent::ListenUpgradeError(_) => {}
-            //TODO: Cover protocol change
+            //Use both protocol events due to local test calling `LocalProtocolsChange`
+            //TODO: Investigate cause of LocalProtocolsChange in test
+            ConnectionEvent::RemoteProtocolsChange(protocol) => {
+                // | ConnectionEvent::LocalProtocolsChange(protocol)
+                let change = self.supported_protocols.on_protocols_change(protocol);
+                if change {
+                    let protocols = self
+                        .listen_protocol
+                        .upgrade()
+                        .protocol_ids
+                        .clone()
+                        .iter()
+                        .map(|e| StreamProtocol::from(*e))
+                        .collect::<Vec<_>>();
+
+                    let mut supported = vec![];
+
+                    for p in self.supported_protocols.iter() {
+                        if protocols.contains(p) {
+                            supported.push(p);
+                        }
+                    }
+
+                    match !supported.is_empty() {
+                        true => {
+                            let mut protocols: Vec<ProtocolId> =
+                                supported.iter().filter_map(ProtocolId::try_from).collect();
+                            protocols.sort();
+
+                            let best_protocol = protocols.last().expect("protocols not empty");
+                            tracing::debug!("Best protocol found: {best_protocol:?}");
+                            self.events.push(ConnectionHandlerEvent::NotifyBehaviour(
+                                HandlerEvent::Connected {
+                                    protocol: *best_protocol,
+                                },
+                            ))
+                        }
+                        false => self.events.push(ConnectionHandlerEvent::NotifyBehaviour(
+                            HandlerEvent::ProtocolNotSuppported,
+                        )),
+                    }
+                }
+            }
             _ => {}
         }
     }
 
     fn connection_keep_alive(&self) -> KeepAlive {
-
         if !self.send_queue.is_empty() {
             return KeepAlive::Yes;
         }

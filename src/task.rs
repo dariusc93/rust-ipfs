@@ -6,7 +6,7 @@ use futures::{
         oneshot,
     },
     stream::Fuse,
-    FutureExt, StreamExt,
+    FutureExt, SinkExt, StreamExt,
 };
 
 use crate::TSwarmEvent;
@@ -81,7 +81,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) listeners: HashSet<ListenerId>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) bitswap_provider_stream:
-        HashMap<QueryId, tokio::sync::mpsc::Sender<Result<HashSet<PeerId>, String>>>,
+        HashMap<QueryId, futures::channel::mpsc::Sender<Result<HashSet<PeerId>, String>>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
@@ -538,7 +538,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                         self.bitswap_provider_stream.entry(id)
                                     {
                                         let providers = providers.clone();
-                                        let tx = entry.get().clone();
+                                        let mut tx = entry.get().clone();
                                         tokio::spawn(async move {
                                             let _ = tx.send(Ok(providers)).await;
                                         });
@@ -896,9 +896,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         ..
                     } = info;
 
-                    if let Some(bitswap) = self.swarm.behaviour_mut().bitswap() {
-                        bitswap.on_identify(&peer_id, &protocols)
-                    }
+                    // if let Some(bitswap) = self.swarm.behaviour_mut().bitswap() {
+                    //     bitswap.on_identify(&peer_id, &protocols)
+                    // }
 
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
                         if protocols.iter().any(|p| libp2p::kad::PROTOCOL_NAME.eq(p)) {
@@ -1751,7 +1751,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                         drop(_guard);
                                         break;
                                     }
-                                    
+
                                 },
                                 _ = &mut closer_r => {
                                     // Explicit sesssion stop.

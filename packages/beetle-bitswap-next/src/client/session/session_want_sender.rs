@@ -4,8 +4,9 @@ use ahash::{AHashMap, AHashSet};
 use anyhow::Result;
 use cid::Cid;
 
+use futures::channel::oneshot;
 use libp2p::PeerId;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use crate::client::{
