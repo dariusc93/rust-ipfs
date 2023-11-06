@@ -9,11 +9,9 @@ use anyhow::Result;
 use cid::Cid;
 use derivative::Derivative;
 
+use futures::channel::oneshot;
 use libp2p::PeerId;
-use tokio::{
-    sync::{oneshot, Mutex},
-    task::JoinHandle,
-};
+use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::debug;
 
 use crate::{client::peer_manager::DontHaveTimeout, network::Network};

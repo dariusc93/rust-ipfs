@@ -4,10 +4,11 @@ use ahash::{AHashMap, AHashSet};
 use anyhow::{Context, Result};
 use cid::Cid;
 use derivative::Derivative;
+use futures::channel::oneshot;
 use futures::{future::BoxFuture, FutureExt};
 
 use libp2p::PeerId;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tracing::{debug, error, trace, warn};
 
 use crate::network::Network;
