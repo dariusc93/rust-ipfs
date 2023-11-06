@@ -1,6 +1,8 @@
 # 0.5.1 [unrelease]
+- refactor: Verify protocol in handler and optimize connection state [PR XXX]
 - chore: Remove `ConnectionHandlerEvent::Close` [PR 112]
 
+[PR XXX]: https://github.com/dariusc93/rust-ipfs/pull/XXX
 [PR 112]: https://github.com/dariusc93/rust-ipfs/pull/112
 
 # 0.5.0
