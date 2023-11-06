@@ -1,6 +1,8 @@
 # 0.2.1 [unreleased]
+- chore: Update libp2p to 0.53 [PR XXX]
 - chore: Ignore deprecation warnings [PR 112]
 
+[PR XXX]:  https://github.com/dariusc93/rust-ipfs/pull/XXX
 [PR 112]: https://github.com/dariusc93/rust-ipfs/pull/112
 
 # 0.2.0
