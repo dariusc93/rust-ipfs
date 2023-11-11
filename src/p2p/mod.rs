@@ -27,9 +27,7 @@ pub use self::behaviour::{BitswapConfig, BitswapProtocol};
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::peerbook::ConnectionLimits;
-pub use self::transport::{
-    DnsResolver, TransportConfig, UpdateMode, UpgradeVersion,
-};
+pub use self::transport::{DnsResolver, TransportConfig, UpdateMode, UpgradeVersion};
 pub(crate) mod gossipsub;
 mod transport;
 

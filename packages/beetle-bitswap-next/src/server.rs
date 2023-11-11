@@ -6,7 +6,7 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 
 use futures::channel::{mpsc, oneshot};
-use futures_util::{StreamExt, SinkExt};
+use futures_util::{SinkExt, StreamExt};
 use libp2p::PeerId;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;

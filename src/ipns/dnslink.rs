@@ -9,8 +9,8 @@ pub async fn resolve<'a>(
     domain: &str,
     mut path: impl Iterator<Item = &'a str>,
 ) -> Result<IpfsPath, Error> {
-    use std::borrow::Cow;
     use hickory_resolver::AsyncResolver;
+    use std::borrow::Cow;
 
     let span = tracing::trace_span!("dnslink", %domain);
 

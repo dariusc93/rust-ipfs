@@ -208,19 +208,19 @@ impl NetworkBehaviour for Behaviour {
                     }
                 }
             }
-            FromSwarm::ConnectionEstablished(_) => {},
-            FromSwarm::ConnectionClosed(_) => {},
-            FromSwarm::DialFailure(_) => {},
-            FromSwarm::ListenFailure(_) => {},
-            FromSwarm::NewListener(_) => {},
-            FromSwarm::NewListenAddr(_) => {},
-            FromSwarm::ExpiredListenAddr(_) => {},
-            FromSwarm::ListenerError(_) => {},
-            FromSwarm::ListenerClosed(_) => {},
-            FromSwarm::NewExternalAddrCandidate(_) => {},
-            FromSwarm::ExternalAddrConfirmed(_) => {},
-            FromSwarm::ExternalAddrExpired(_) => {},
-            _ => {},
+            FromSwarm::ConnectionEstablished(_) => {}
+            FromSwarm::ConnectionClosed(_) => {}
+            FromSwarm::DialFailure(_) => {}
+            FromSwarm::ListenFailure(_) => {}
+            FromSwarm::NewListener(_) => {}
+            FromSwarm::NewListenAddr(_) => {}
+            FromSwarm::ExpiredListenAddr(_) => {}
+            FromSwarm::ListenerError(_) => {}
+            FromSwarm::ListenerClosed(_) => {}
+            FromSwarm::NewExternalAddrCandidate(_) => {}
+            FromSwarm::ExternalAddrConfirmed(_) => {}
+            FromSwarm::ExternalAddrExpired(_) => {}
+            _ => {}
         }
     }
 

@@ -538,10 +538,7 @@ impl NetworkBehaviour for Behaviour {
         }
     }
 
-    fn poll(
-        &mut self,
-        cx: &mut Context,
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
