@@ -1,4 +1,5 @@
 # 0.7.1 [unrelease]
+- feat: Implement redb datastore backend [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 - chore: Implement conversion for IpfsPath
 
 # 0.7.0
