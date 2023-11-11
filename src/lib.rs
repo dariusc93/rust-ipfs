@@ -1184,7 +1184,7 @@ impl Ipfs {
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub fn get_dag(&self, path: IpfsPath) -> DagGet {
+    pub fn get_dag<I: Into<IpfsPath>>(&self, path: I) -> DagGet {
         self.dag().get_dag(path)
     }
 

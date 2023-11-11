@@ -1,3 +1,6 @@
+# 0.7.1 [unrelease]
+- chore: Implement conversion for IpfsPath
+
 # 0.7.0
 - chore: Update libp2p to 0.53 [PR 116]
 - feat: Implement Repo::get_blocks [PR 113]
