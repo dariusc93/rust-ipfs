@@ -123,7 +123,42 @@ impl DataStore for RedbDataStore {
     }
 
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)> {
-        unimplemented!()
+        use tokio_stream::wrappers::UnboundedReceiverStream;
+        let span = tracing::Span::current();
+        let db = self.get_db();
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        
+        let _t = tokio::task::spawn_blocking(move || {
+            let span = tracing::trace_span!(parent: &span, "blocking");
+            let _g = span.enter();
+            let read_tx = match db.begin_read() {
+                Ok(r) => r,
+                Err(_) => {
+                    return;
+                }
+            };
+            let table = match read_tx.open_table(DATATABLE) {
+                Ok(r) => r,
+                Err(_) => {
+                    return;
+                }
+            };
+
+            let iter = match table.iter() {
+                Ok(r) => r,
+                Err(_) => {
+                    return;
+                }
+            };
+
+            for (k, v) in iter.filter_map(|res| res.ok()) {
+                let (key, val) = (k.value(), v.value());
+                _ = tx.send((key.to_vec(), val.to_vec()));
+            }
+        });
+
+        UnboundedReceiverStream::new(rx).boxed()
     }
 
     /// Wipes the datastore.
@@ -346,8 +381,6 @@ impl PinStore for RedbDataStore {
                 }
             };
 
-            // this probably doesn't need to be transactional? well, perhaps transactional reads would
-            // be the best, not sure what is the guaratee for in-sequence key reads.
             let iter = match table.iter() {
                 Ok(r) => r,
                 Err(e) => {
