@@ -30,14 +30,15 @@ impl RedbDataStore {
     }
 
     fn get_db(&self) -> Arc<Database> {
-        self.db.get().unwrap().clone()
+        let db = self.db.get().cloned();
+        db.expect("Datastore to be initialized")
     }
 }
 
 #[async_trait]
 impl DataStore for RedbDataStore {
     async fn init(&self) -> Result<(), Error> {
-        let db = Arc::new(Database::create(self.path.join("store.db"))?);
+        let db = Arc::new(Database::create(self.path.join("ipfs_datastore.db"))?);
         tokio::task::spawn_blocking({
             let db = db.clone();
             move || {
@@ -128,7 +129,7 @@ impl DataStore for RedbDataStore {
         let db = self.get_db();
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        
+
         let _t = tokio::task::spawn_blocking(move || {
             let span = tracing::trace_span!(parent: &span, "blocking");
             let _g = span.enter();
