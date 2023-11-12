@@ -1,16 +1,15 @@
 use std::time::Duration;
 
 use libp2p::swarm::SwarmEvent;
+use rust_ipfs::Ipfs;
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
-use rust_ipfs::{Ipfs, IpfsOptions};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Initialize the repo and start a daemon
-    let opts = IpfsOptions::inmemory_with_generated_keys();
-    let ipfs: Ipfs = UninitializedIpfs::with_opt(opts)
+    let ipfs: Ipfs = UninitializedIpfs::new()
+        .set_default_listener()
         .swarm_events(|_, event| {
             if let SwarmEvent::NewListenAddr { address, .. } = event {
                 println!("Listening on {address}");
