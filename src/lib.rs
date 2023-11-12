@@ -2518,7 +2518,7 @@ mod tests {
 
         let data = ipld!([-1, -2, -3]);
         let cid = ipfs.put_dag(data.clone()).await.unwrap();
-        let new_data = ipfs.get_dag(cid.into()).await.unwrap();
+        let new_data = ipfs.get_dag(cid).await.unwrap();
         assert_eq!(data, new_data);
     }
 
