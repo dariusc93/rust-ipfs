@@ -236,6 +236,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-broadcast"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "334d75cf09b33bede6cbc20e52515853ae7bee3d4eadd9540e13ce92af983d34"
+dependencies = [
+ "event-listener 3.0.1",
+ "event-listener-strategy 0.1.0",
+ "futures-core",
+]
+
+[[package]]
 name = "async-channel"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -343,7 +354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45e900cdcd39bb94a14487d3f7ef92ca222162e6c7c3fe7cb3550ea75fb486ed"
 dependencies = [
  "event-listener 3.0.1",
- "event-listener-strategy",
+ "event-listener-strategy 0.3.0",
  "pin-project-lite",
 ]
 
@@ -586,14 +597,14 @@ version = "0.5.1"
 dependencies = [
  "ahash",
  "anyhow",
- "async-broadcast",
+ "async-broadcast 0.5.1",
  "async-channel",
  "async-stream",
  "async-trait",
  "asynchronous-codec 0.6.2",
  "bytes",
  "cid",
- "criterion",
+ "criterion 0.4.0",
  "deadqueue",
  "derivative",
  "futures",
@@ -713,12 +724,6 @@ dependencies = [
  "piper",
  "tracing",
 ]
-
-[[package]]
-name = "bs58"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "771fe0050b883fcc3ea2359b1a96bcfbc090b7116eae7c3c512c7a083fdf23d3"
 
 [[package]]
 name = "bs58"
@@ -1025,6 +1030,30 @@ dependencies = [
  "oorandom",
  "plotters",
  "rayon",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tinytemplate",
+ "walkdir",
+]
+
+[[package]]
+name = "criterion"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
+dependencies = [
+ "anes",
+ "cast",
+ "ciborium",
+ "clap 4.4.8",
+ "criterion-plot",
+ "is-terminal",
+ "itertools",
+ "num-traits",
+ "once_cell",
+ "oorandom",
  "regex",
  "serde",
  "serde_derive",
@@ -1449,6 +1478,16 @@ dependencies = [
 
 [[package]]
 name = "event-listener-strategy"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15c97b4e30ea7e4b7e7b429d6e2d8510433ba8cee4e70dfb3243794e539d29fd"
+dependencies = [
+ "event-listener 3.0.1",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d96b852f1345da36d551b9473fa1e2b1eb5c5195585c6c018118bc92a8d91160"
@@ -1843,6 +1882,12 @@ name = "hex-literal"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ebdb29d2ea9ed0083cd8cece49bbd968021bd99b0849edb4a9a7ee0fdf6a4e0"
+
+[[package]]
+name = "hex-literal"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
 name = "hex_fmt"
@@ -2564,7 +2609,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdd6317441f361babc74c2989c6484eb0726045399b6648de039e1805ea96972"
 dependencies = [
  "asn1_der",
- "bs58 0.5.0",
+ "bs58",
  "ed25519-dalek",
  "hkdf",
  "libsecp256k1",
@@ -4244,22 +4289,21 @@ name = "rust-ipfs"
 version = "0.7.0"
 dependencies = [
  "anyhow",
- "async-broadcast",
+ "async-broadcast 0.6.0",
  "async-stream",
  "async-trait",
  "base64 0.21.5",
  "beetle-bitswap-next",
- "bs58 0.4.0",
  "byteorder",
  "bytes",
  "chrono",
  "clap 4.4.8",
- "criterion",
+ "criterion 0.5.1",
  "either",
  "fs2",
  "futures",
  "hash_hasher",
- "hex-literal",
+ "hex-literal 0.4.1",
  "hickory-resolver",
  "libipld",
  "libp2p",
@@ -4310,11 +4354,11 @@ dependencies = [
 name = "rust-unixfs"
 version = "0.4.0"
 dependencies = [
- "criterion",
+ "criterion 0.4.0",
  "either",
  "filetime",
  "hash_hasher",
- "hex-literal",
+ "hex-literal 0.3.4",
  "libc",
  "libipld",
  "multibase",
@@ -4404,9 +4448,9 @@ dependencies = [
 
 [[package]]
 name = "rustyline-async"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7f926625c5ac0363ed5e081c7fc8c000d44b09df4602aacf01bece2a8d357dd"
+checksum = "57770220614fcaf88a7585f0fa4ceeb3b45f1052dc2cb76da5f400cd9065fa12"
 dependencies = [
  "crossterm",
  "futures",
