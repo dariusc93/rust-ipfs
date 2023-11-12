@@ -1,4 +1,4 @@
-use rust_ipfs::{p2p::PeerInfo, Ipfs};
+use rust_ipfs::Ipfs;
 
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
@@ -22,22 +22,11 @@ async fn main() -> anyhow::Result<()> {
     ipfs.default_bootstrap().await?;
     ipfs.bootstrap().await?;
 
-    let PeerInfo {
-        public_key: key,
-        listen_addrs: addresses,
-        ..
-    } = ipfs.identity(None).await?;
+    let info = ipfs.identity(None).await?;
 
-    if let Ok(publickey) = key.clone().try_into_ed25519() {
-        println!(
-            "Public Key: {}",
-            bs58::encode(publickey.to_bytes()).into_string()
-        );
-    }
+    println!("PeerID: {}", info.public_key.to_peer_id());
 
-    println!("PeerID: {}", key.to_peer_id());
-
-    for address in addresses {
+    for address in info.listen_addrs {
         println!("Listening on: {address}");
     }
 
