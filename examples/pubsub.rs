@@ -42,7 +42,9 @@ async fn main() -> anyhow::Result<()> {
     let topic = opt.topic.unwrap_or_else(|| String::from("ipfs-chat"));
 
     // Initialize the repo and start a daemon
-    let mut uninitialized = UninitializedIpfs::new().with_default();
+    let mut uninitialized = UninitializedIpfs::new()
+        .with_default()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?);
 
     if opt.use_mdns {
         uninitialized = uninitialized.with_mdns();

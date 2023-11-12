@@ -5,8 +5,16 @@ use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let node_a = UninitializedIpfs::new().with_default().start().await?;
-    let node_b = UninitializedIpfs::new().with_default().start().await?;
+    let node_a = UninitializedIpfs::new()
+        .with_default()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .start()
+        .await?;
+    let node_b = UninitializedIpfs::new()
+        .with_default()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .start()
+        .await?;
 
     let peer_id = node_a.keypair().map(|kp| kp.public().to_peer_id())?;
 

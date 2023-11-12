@@ -7,7 +7,11 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ipfs: Ipfs = UninitializedIpfs::new().with_default().start().await?;
+    let ipfs: Ipfs = UninitializedIpfs::new()
+        .with_default()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .start()
+        .await?;
     ipfs.default_bootstrap().await?;
 
     let mut stream = ipfs.cat_unixfs(
