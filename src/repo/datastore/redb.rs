@@ -38,6 +38,8 @@ impl RedbDataStore {
 #[async_trait]
 impl DataStore for RedbDataStore {
     async fn init(&self) -> Result<(), Error> {
+        tokio::fs::create_dir_all(&self.path).await?;
+
         let db = Arc::new(Database::create(self.path.join("ipfs_datastore.db"))?);
         tokio::task::spawn_blocking({
             let db = db.clone();
