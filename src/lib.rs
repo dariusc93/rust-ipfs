@@ -1434,17 +1434,20 @@ impl Ipfs {
                     rx.await??.await?.map(PeerInfo::from)
                 }
                 None => {
+                    let mut addresses = HashSet::new();
+
                     let (local_result, external_result) =
                         futures::join!(self.listening_addresses(), self.external_addresses());
 
-                    let external = external_result.unwrap_or_default();
-                    let local = local_result.unwrap_or_default();
+                    let external: HashSet<Multiaddr> =
+                        HashSet::from_iter(external_result.unwrap_or_default());
+                    let local: HashSet<Multiaddr> =
+                        HashSet::from_iter(local_result.unwrap_or_default());
 
-                    let mut addresses = local
-                        .iter()
-                        .chain(external.iter())
-                        .cloned()
-                        .collect::<Vec<_>>();
+                    addresses.extend(external.iter().cloned());
+                    addresses.extend(local.iter().cloned());
+
+                    let mut addresses = Vec::from_iter(addresses);
 
                     let (tx, rx) = oneshot_channel();
                     self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
