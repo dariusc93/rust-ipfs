@@ -1180,14 +1180,14 @@ impl Ipfs {
     ///
     /// Returns Cid version 1 for the document
     pub fn put_dag(&self, ipld: Ipld) -> DagPut {
-        self.dag().put_dag(ipld)
+        self.dag().put_dag(ipld).span(self.span.clone())
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
     pub fn get_dag<I: Into<IpfsPath>>(&self, path: I) -> DagGet {
-        self.dag().get_dag(path)
+        self.dag().get_dag(path).span(self.span.clone())
     }
 
     /// Get an ipld path from the datastore.
@@ -1227,7 +1227,9 @@ impl Ipfs {
         starting_point: impl Into<unixfs::StartingPoint>,
         range: Option<Range<u64>>,
     ) -> UnixfsCat<'_> {
-        self.unixfs().cat(starting_point, range, &[], false, None)
+        self.unixfs()
+            .cat(starting_point, range, &[], false, None)
+            .span(self.span.clone())
     }
 
     /// Add a file from a path to the blockstore
@@ -1235,26 +1237,30 @@ impl Ipfs {
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
         let path = path.as_ref();
-        self.unixfs().add(path, None)
+        self.unixfs().add(path, None).span(self.span.clone())
     }
 
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
     pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> UnixfsAdd<'a> {
-        self.unixfs().add(stream, None)
+        self.unixfs().add(stream, None).span(self.span.clone())
     }
 
     /// Retreive a file and saving it to a path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet<'_> {
-        self.unixfs().get(path, dest, &[], false, None)
+        self.unixfs()
+            .get(path, dest, &[], false, None)
+            .span(self.span.clone())
     }
 
     /// List directory contents
     pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs<'_> {
-        self.unixfs().ls(path, &[], false, None)
+        self.unixfs()
+            .ls(path, &[], false, None)
+            .span(self.span.clone())
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.

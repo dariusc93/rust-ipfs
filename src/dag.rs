@@ -28,6 +28,7 @@ use std::iter::Peekable;
 use std::marker::PhantomData;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::{Instrument, Span};
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -445,6 +446,7 @@ pub struct DagGet {
     providers: Vec<PeerId>,
     local: bool,
     timeout: Option<Duration>,
+    span: Option<Span>,
 }
 
 impl DagGet {
@@ -456,6 +458,7 @@ impl DagGet {
             providers: vec![],
             local: false,
             timeout: None,
+            span: None,
         }
     }
 
@@ -504,6 +507,12 @@ impl DagGet {
             _marker: PhantomData,
         }
     }
+
+    /// Set tracing span
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
 }
 
 impl std::future::IntoFuture for DagGet {
@@ -512,6 +521,7 @@ impl std::future::IntoFuture for DagGet {
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
+        let span = self.span.unwrap_or(Span::current());
         async move {
             let path = self.path.ok_or(ResolveError::PathNotProvided)?;
             self.dag_ipld
@@ -524,6 +534,7 @@ impl std::future::IntoFuture for DagGet {
                 )
                 .await
         }
+        .instrument(span)
         .boxed()
     }
 }
@@ -558,6 +569,7 @@ pub struct DagPut {
     data: Option<Ipld>,
     hash: Option<Code>,
     pinned: Option<bool>,
+    span: Option<Span>,
     provide: bool,
 }
 
@@ -569,6 +581,7 @@ impl DagPut {
             data: None,
             hash: None,
             pinned: None,
+            span: None,
             provide: false,
         }
     }
@@ -609,6 +622,12 @@ impl DagPut {
         self.codec = codec;
         self
     }
+
+    /// Set tracing span
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
 }
 
 impl std::future::IntoFuture for DagPut {
@@ -617,6 +636,7 @@ impl std::future::IntoFuture for DagPut {
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
+        let span = self.span.unwrap_or(Span::current());
         async move {
             if self.provide && self.dag_ipld.ipfs.is_none() {
                 anyhow::bail!("Ipfs is offline");
@@ -652,6 +672,7 @@ impl std::future::IntoFuture for DagPut {
 
             Ok(cid)
         }
+        .instrument(span)
         .boxed()
     }
 }

@@ -5,6 +5,7 @@ use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt, TryFutureExt};
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use tokio_util::io::ReaderStream;
+use tracing::{Instrument, Span};
 
 use crate::{Ipfs, IpfsPath};
 
@@ -45,7 +46,15 @@ impl Default for AddOption {
 }
 
 pub struct UnixfsAdd<'a> {
+    span: Option<Span>,
     stream: BoxStream<'a, UnixfsStatus>,
+}
+
+impl<'a> UnixfsAdd<'a> {
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
 }
 
 pub fn add_file<'a, P: AsRef<Path>>(
@@ -237,6 +246,7 @@ pub fn add<'a>(
 
     UnixfsAdd {
         stream: stream.boxed(),
+        span: None,
     }
 }
 
@@ -256,6 +266,7 @@ impl<'a> std::future::IntoFuture for UnixfsAdd<'a> {
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(mut self) -> Self::IntoFuture {
+        let span = self.span.unwrap_or(Span::current());
         async move {
             while let Some(status) = self.stream.next().await {
                 match status {
@@ -268,6 +279,7 @@ impl<'a> std::future::IntoFuture for UnixfsAdd<'a> {
             }
             Err::<_, anyhow::Error>(anyhow::anyhow!("Unable to add file"))
         }
+        .instrument(span)
         .boxed()
     }
 }
