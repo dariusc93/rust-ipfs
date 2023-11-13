@@ -5,6 +5,7 @@ use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
+use tracing::{Instrument, Span};
 
 use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
@@ -128,11 +129,20 @@ pub fn get<'a, P: AsRef<Path>>(
 
     UnixfsGet {
         stream: stream.boxed(),
+        span: None,
     }
 }
 
 pub struct UnixfsGet<'a> {
     stream: BoxStream<'a, UnixfsStatus>,
+    span: Option<Span>,
+}
+
+impl<'a> UnixfsGet<'a> {
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
 }
 
 impl<'a> Stream for UnixfsGet<'a> {
@@ -151,6 +161,7 @@ impl<'a> std::future::IntoFuture for UnixfsGet<'a> {
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(mut self) -> Self::IntoFuture {
+        let span = self.span.unwrap_or(Span::current());
         async move {
             while let Some(status) = self.stream.next().await {
                 match status {
@@ -165,6 +176,7 @@ impl<'a> std::future::IntoFuture for UnixfsGet<'a> {
             }
             Err::<_, anyhow::Error>(anyhow::anyhow!("Unable to get file"))
         }
+        .instrument(span)
         .boxed()
     }
 }

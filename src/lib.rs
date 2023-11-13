@@ -117,9 +117,10 @@ use libp2p::{
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum StoragePath {
     Disk(PathBuf),
+    #[default]
     Memory,
     Custom {
         blockstore: Arc<dyn BlockStore>,
@@ -286,18 +287,6 @@ impl fmt::Debug for IpfsOptions {
             .field("listening_addrs", &self.listening_addrs)
             .field("span", &self.span)
             .finish()
-    }
-}
-
-impl IpfsOptions {
-    /// Creates an in-memory store backed configuration useful for any testing purposes.
-    ///
-    /// Also used from examples.
-    pub fn inmemory_with_generated_keys() -> Self {
-        IpfsOptions {
-            listening_addrs: vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()],
-            ..Default::default()
-        }
     }
 }
 
@@ -481,7 +470,7 @@ pub enum FDLimit {
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
 pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
-    keys: Keypair,
+    keys: Option<Keypair>,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
     repo_handle: Option<Repo>,
@@ -504,35 +493,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> Default for Uninitialized
 impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// New uninitualized instance
     pub fn new() -> Self {
-        Self::with_opt(IpfsOptions {
-            listening_addrs: vec![
-                "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
-                "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
-                "/ip6/::/tcp/0".parse().unwrap(),
-                "/ip6/::/udp/0/quic-v1".parse().unwrap(),
-            ],
-            ..Default::default()
-        })
-    }
-
-    /// New uninitualized instance without any listener addresses
-    pub fn empty() -> Self {
-        Self::with_opt(Default::default())
-    }
-
-    /// Configures a new UninitializedIpfs with from the given options and optionally a span.
-    /// If the span is not given, it is defaulted to `tracing::trace_span!("ipfs")`.
-    ///
-    /// The span is attached to all operations called on the later created `Ipfs` along with all
-    /// operations done in the background task as well as tasks spawned by the underlying
-    /// `libp2p::Swarm`.
-    pub fn with_opt(options: IpfsOptions) -> Self {
-        let keys = Keypair::generate_ed25519();
-        let fdlimit = None;
         UninitializedIpfs {
-            keys,
-            options,
-            fdlimit,
+            keys: None,
+            options: Default::default(),
+            fdlimit: None,
             repo_handle: None,
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
@@ -541,6 +505,39 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             custom_behaviour: None,
             custom_transport: None,
         }
+    }
+
+    /// New uninitualized instance without any listener addresses
+    #[deprecated(
+        note = "UninitializedIpfs::empty will be removed in the future. Use UninitializedIpfs::new()"
+    )]
+    pub fn empty() -> Self {
+        Self::new()
+    }
+
+    /// Configures a new UninitializedIpfs with from the given options and optionally a span.
+    /// If the span is not given, it is defaulted to `tracing::trace_span!("ipfs")`.
+    ///
+    /// The span is attached to all operations called on the later created `Ipfs` along with all
+    /// operations done in the background task as well as tasks spawned by the underlying
+    /// `libp2p::Swarm`.
+    #[deprecated(
+        note = "UninitializedIpfs::with_opt will be removed in the future. Use UninitializedIpfs::new()"
+    )]
+    pub fn with_opt(options: IpfsOptions) -> Self {
+        let mut opt = Self::new();
+        opt.options = options;
+        opt
+    }
+
+    /// Set default listening unspecified ipv4 and ipv6 addresseses for tcp and udp/quic
+    pub fn set_default_listener(self) -> Self {
+        self.add_listening_addrs(vec![
+            "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+            "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+            "/ip6/::/tcp/0".parse().unwrap(),
+            "/ip6/::/udp/0/quic-v1".parse().unwrap(),
+        ])
     }
 
     /// Adds a listening address
@@ -553,10 +550,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
     /// Adds a listening addresses
     pub fn add_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
-        if !addrs.is_empty() {
-            self.options.listening_addrs = addrs;
-        }
-
+        self.options.listening_addrs.extend(addrs);
         self
     }
 
@@ -737,7 +731,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
     /// Set keypair
     pub fn set_keypair(mut self, keypair: Keypair) -> Self {
-        self.keys = keypair;
+        self.keys = Some(keypair);
         self
     }
 
@@ -772,6 +766,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Set tracing span
+    pub fn set_span(mut self, span: Span) -> Self {
+        self.options.span = Some(span);
+        self
+    }
+
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
     where
@@ -795,6 +795,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             repo_handle,
             ..
         } = self;
+
+        let keys = keys.unwrap_or(Keypair::generate_ed25519());
 
         let root_span = Option::take(&mut options.span)
             // not sure what would be the best practice with tracing and spans
@@ -1178,14 +1180,14 @@ impl Ipfs {
     ///
     /// Returns Cid version 1 for the document
     pub fn put_dag(&self, ipld: Ipld) -> DagPut {
-        self.dag().put_dag(ipld)
+        self.dag().put_dag(ipld).span(self.span.clone())
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
     pub fn get_dag<I: Into<IpfsPath>>(&self, path: I) -> DagGet {
-        self.dag().get_dag(path)
+        self.dag().get_dag(path).span(self.span.clone())
     }
 
     /// Get an ipld path from the datastore.
@@ -1225,7 +1227,9 @@ impl Ipfs {
         starting_point: impl Into<unixfs::StartingPoint>,
         range: Option<Range<u64>>,
     ) -> UnixfsCat<'_> {
-        self.unixfs().cat(starting_point, range, &[], false, None)
+        self.unixfs()
+            .cat(starting_point, range, &[], false, None)
+            .span(self.span.clone())
     }
 
     /// Add a file from a path to the blockstore
@@ -1233,26 +1237,30 @@ impl Ipfs {
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
         let path = path.as_ref();
-        self.unixfs().add(path, None)
+        self.unixfs().add(path, None).span(self.span.clone())
     }
 
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
     pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> UnixfsAdd<'a> {
-        self.unixfs().add(stream, None)
+        self.unixfs().add(stream, None).span(self.span.clone())
     }
 
     /// Retreive a file and saving it to a path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet<'_> {
-        self.unixfs().get(path, dest, &[], false, None)
+        self.unixfs()
+            .get(path, dest, &[], false, None)
+            .span(self.span.clone())
     }
 
     /// List directory contents
     pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs<'_> {
-        self.unixfs().ls(path, &[], false, None)
+        self.unixfs()
+            .ls(path, &[], false, None)
+            .span(self.span.clone())
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.
@@ -2401,9 +2409,7 @@ mod node {
         /// This will use the testing defaults for the `IpfsOptions`. If `IpfsOptions` has been
         /// initialised manually, use `Node::with_options` instead.
         pub async fn new<T: AsRef<str>>(name: T) -> Self {
-            let mut opts = IpfsOptions::inmemory_with_generated_keys();
-            opts.span = Some(trace_span!("ipfs", node = name.as_ref()));
-            Self::with_options(opts).await
+            Self::with_options(Some(trace_span!("ipfs", node = name.as_ref())), None).await
         }
 
         /// Connects to a peer at the given address.
@@ -2418,14 +2424,22 @@ mod node {
         }
 
         /// Returns a new `Node` based on `IpfsOptions`.
-        pub async fn with_options(opts: IpfsOptions) -> Self {
+        pub async fn with_options(span: Option<Span>, addr: Option<Vec<Multiaddr>>) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let ipfs: Ipfs = UninitializedIpfsNoop::with_opt(opts)
-                .with_default()
-                .start()
-                .await
-                .unwrap();
+            let mut uninit = UninitializedIpfsNoop::new().with_default();
+
+            if let Some(span) = span {
+                uninit = uninit.set_span(span);
+            }
+
+            uninit = match addr {
+                Some(addr) => uninit.set_listening_addrs(addr),
+                None => uninit.set_default_listener(),
+            };
+
+            let ipfs = uninit.start().await.unwrap();
+
             let id = ipfs.keypair().map(|kp| kp.public().to_peer_id()).unwrap();
             let mut addrs = ipfs.listening_addresses().await.unwrap();
 

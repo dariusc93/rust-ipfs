@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     let ipfs: Ipfs = UninitializedIpfs::new()
         .with_default()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
         .start()
         .await?;

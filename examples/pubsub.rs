@@ -8,7 +8,7 @@ use rust_ipfs::{Ipfs, PubsubEvent};
 
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 
-use rustyline_async::{Readline, ReadlineError};
+use rustyline_async::Readline;
 use std::time::Duration;
 use std::{io::Write, sync::Arc};
 use tokio::sync::Notify;
@@ -42,7 +42,9 @@ async fn main() -> anyhow::Result<()> {
     let topic = opt.topic.unwrap_or_else(|| String::from("ipfs-chat"));
 
     // Initialize the repo and start a daemon
-    let mut uninitialized = UninitializedIpfs::new().with_default();
+    let mut uninitialized = UninitializedIpfs::new()
+        .with_default()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?);
 
     if opt.use_mdns {
         uninitialized = uninitialized.with_mdns();
@@ -113,18 +115,18 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             line = rl.readline().fuse() => match line {
-                Ok(line) => {
+                Ok(rustyline_async::ReadlineEvent::Line(line)) => {
                     if let Err(e) = ipfs.pubsub_publish(topic.clone(), line.as_bytes().to_vec()).await {
                         writeln!(stdout, "Error publishing message: {e}")?;
                         continue;
                     }
                     writeln!(stdout, "{peer_id}: {line}")?;
                 }
-                Err(ReadlineError::Eof) => {
+                Ok(rustyline_async::ReadlineEvent::Eof) => {
                     cancel.notify_one();
                     break
                 },
-                Err(ReadlineError::Interrupted) => {
+                Ok(rustyline_async::ReadlineEvent::Interrupted) => {
                     cancel.notify_one();
                     break
                 },

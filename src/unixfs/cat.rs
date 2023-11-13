@@ -8,6 +8,7 @@ use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
 use std::{borrow::Borrow, time::Duration};
+use tracing::{Span, Instrument};
 
 use super::TraversalFailed;
 
@@ -134,6 +135,7 @@ pub fn cat<'a>(
 
     UnixfsCat {
         stream: stream.boxed(),
+        span: None,
     }
 }
 
@@ -158,6 +160,14 @@ impl From<Block> for StartingPoint {
 
 pub struct UnixfsCat<'a> {
     stream: BoxStream<'a, Result<Vec<u8>, TraversalFailed>>,
+    span: Option<Span>,
+}
+
+impl<'a> UnixfsCat<'a> {
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
 }
 
 impl<'a> Stream for UnixfsCat<'a> {
@@ -176,6 +186,7 @@ impl<'a> std::future::IntoFuture for UnixfsCat<'a> {
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(mut self) -> Self::IntoFuture {
+        let span = self.span.unwrap_or(Span::current());
         async move {
             let mut data = vec![];
             while let Some(bytes) = self.stream.try_next().await? {
@@ -183,6 +194,7 @@ impl<'a> std::future::IntoFuture for UnixfsCat<'a> {
             }
             Ok(data)
         }
+        .instrument(span)
         .boxed()
     }
 }

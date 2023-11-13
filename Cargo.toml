@@ -95,7 +95,7 @@ tracing-futures = { default-features = false, features = [
     "futures-03",
 ], version = "0.2" }
 
-async-broadcast = "0.5"
+async-broadcast = "0.6"
 
 void = { default-features = false, version = "1.0" }
 fs2 = "0.4"
@@ -111,13 +111,11 @@ rand = "0.8"
 zeroize = "1"
 
 [dev-dependencies]
-rust-ipns.workspace = true
-bs58 = "0.4"
-criterion = { default-features = false, version = "0.4" }
-hex-literal = { default-features = false, version = "0.3" }
+criterion = { default-features = false, version = "0.5" }
+hex-literal = { default-features = false, version = "0.4" }
 sha2 = { default-features = false, version = "0.10" }
 tokio = { features = ["full"], version = "1" }
-rustyline-async = { version = "0.3" }
+rustyline-async = { version = "0.4" }
 tracing-subscriber = { default-features = false, features = [
     "fmt",
     "tracing-log",

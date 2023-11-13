@@ -106,24 +106,14 @@ async fn remove_listening_address() {
     node.remove_listening_address(first).await.unwrap();
 }
 
-#[test]
-#[ignore]
-fn remove_listening_address_before_completing() {
-    // TODO: cannot test this before we have a way of getting between the queue used to communicate
-    // with the IpfsFuture (or better yet, construct one ourselves here in the test) to make sure
-    // we can push a IpfsEvent::AddListenerAddress followed by an IpfsEvent::RemoveListenerAddress
-    // "immediatedly".
-}
-
 #[tokio::test]
 async fn pre_configured_listening_addrs() {
     use libp2p::Multiaddr;
-    use rust_ipfs::{IpfsOptions, Node};
+    use rust_ipfs::Node;
 
-    let mut opts = IpfsOptions::inmemory_with_generated_keys();
     let addr: Multiaddr = "/ip4/127.0.0.1/tcp/4001".parse().unwrap();
-    opts.listening_addrs.push(addr.clone());
-    let ipfs = Node::with_options(opts).await;
+
+    let ipfs = Node::with_options(None, Some(vec![addr.clone()])).await;
 
     let addrs = ipfs.identity(None).await.unwrap().listen_addrs;
     let addrs: Vec<Multiaddr> = addrs

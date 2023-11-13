@@ -9,6 +9,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
         .with_custom_behaviour(ext_behaviour::Behaviour)
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .start()
         .await?;
 

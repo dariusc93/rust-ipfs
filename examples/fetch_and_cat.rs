@@ -39,7 +39,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the repo and start a daemon.
     // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
-    let ipfs: Ipfs = UninitializedIpfs::new().with_default().start().await?;
+    let ipfs: Ipfs = UninitializedIpfs::new()
+        .with_default()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .start()
+        .await?;
 
     if opt.default_bootstrappers {
         // applications wishing to find content on the global IPFS swarm should restore the latest

@@ -11,7 +11,10 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new().start().await?;
+    let ipfs: Ipfs = UninitializedIpfs::new()
+        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .start()
+        .await?;
 
     // Create a DAG
     let f1 = ipfs.put_dag(ipld!("block1")).into_future();
