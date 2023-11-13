@@ -8,7 +8,7 @@ use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
 use std::{borrow::Borrow, time::Duration};
-use tracing::{Span, Instrument};
+use tracing::{Instrument, Span};
 
 use super::TraversalFailed;
 
