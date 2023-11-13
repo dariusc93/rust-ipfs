@@ -682,10 +682,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
     /// Set timeout for idle connections
     pub fn set_idle_connection_timeout(mut self, duration: u64) -> Self {
-        let duration = match duration > 0 {
-            true => duration,
-            false => 30,
-        };
         self.options.connection_idle = Duration::from_secs(duration);
         self
     }
