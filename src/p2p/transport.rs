@@ -23,16 +23,14 @@ pub struct TransportConfig {
     pub yamux_max_buffer_size: usize,
     pub yamux_receive_window_size: u32,
     pub yamux_update_mode: UpdateMode,
-    pub no_delay: bool,
-    pub port_reuse: bool,
     pub timeout: Duration,
     pub dns_resolver: Option<DnsResolver>,
     pub version: Option<UpgradeVersion>,
     pub enable_quic: bool,
-    pub enable_websocket: bool,
-    pub enable_secure_websocket: bool,
+    // pub enable_websocket: bool,
+    // pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
-    pub enable_webrtc: bool,
+    // pub enable_webrtc: bool,
 }
 
 impl Default for TransportConfig {
@@ -41,13 +39,11 @@ impl Default for TransportConfig {
             yamux_max_buffer_size: 16 * 1024 * 1024,
             yamux_receive_window_size: 16 * 1024 * 1024,
             yamux_update_mode: UpdateMode::default(),
-            no_delay: true,
-            port_reuse: true,
             enable_quic: false,
-            enable_websocket: false,
-            enable_secure_websocket: false,
+            // enable_websocket: false,
+            // enable_secure_websocket: false,
             support_quic_draft_29: false,
-            enable_webrtc: false,
+            // enable_webrtc: false,
             timeout: Duration::from_secs(30),
             dns_resolver: None,
             version: None,
@@ -124,8 +120,6 @@ pub(crate) fn build_transport(
     keypair: identity::Keypair,
     relay: Option<ClientTransport>,
     TransportConfig {
-        no_delay,
-        port_reuse,
         timeout,
         yamux_max_buffer_size,
         yamux_receive_window_size,
@@ -150,17 +144,12 @@ pub(crate) fn build_transport(
 
     let multiplex_upgrade = yamux_config;
 
-    //TODO: Cleanup
-    let tcp_config = GenTcpConfig::default()
-        .nodelay(no_delay)
-        .port_reuse(port_reuse);
+    let tcp_config = GenTcpConfig::default().nodelay(true).port_reuse(true);
 
-    let tcp_transport = TokioTcpTransport::new(tcp_config.clone());
+    let transport = TokioTcpTransport::new(tcp_config);
 
     //TODO: Make togglable by flag in config
-    let ws_transport = libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
-
-    let transport = tcp_transport.or_transport(ws_transport);
+    // let ws_transport = libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
 
     let transport_timeout = TransportTimeout::new(transport, timeout);
 
