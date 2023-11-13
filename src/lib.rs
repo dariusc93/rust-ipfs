@@ -535,8 +535,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self.add_listening_addrs(vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
-            "/ip6/::/tcp/0".parse().unwrap(),
-            "/ip6/::/udp/0/quic-v1".parse().unwrap(),
         ])
     }
 
@@ -576,6 +574,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             .with_kademlia(None, Default::default())
             .with_ping(None)
             .with_pubsub(None)
+            .set_default_listener()
     }
 
     /// Enables kademlia
