@@ -2,11 +2,10 @@
 use core::task::{Context, Poll};
 use futures::channel::oneshot;
 use futures::StreamExt;
-use libp2p::core::{ConnectedPoint, Endpoint, Multiaddr};
+use libp2p::core::{Endpoint, Multiaddr};
 use libp2p::identify::Info;
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
 use libp2p::swarm::dial_opts::DialOpts;
-use libp2p::swarm::ListenFailure;
 use libp2p::swarm::{
     self, dummy::ConnectionHandler as DummyConnectionHandler, CloseConnection, NetworkBehaviour,
 };
@@ -21,114 +20,11 @@ use std::time::Duration;
 use tracing::log;
 use wasm_timer::Interval;
 
-use std::collections::{HashMap, HashSet, VecDeque};
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ConnectionLimits {
-    max_pending_incoming: Option<u32>,
-    max_pending_outgoing: Option<u32>,
-    max_established_incoming: Option<u32>,
-    max_established_outgoing: Option<u32>,
-    max_established_per_peer: Option<u32>,
-    max_established_total: Option<u32>,
-}
-
-impl ConnectionLimits {
-    pub fn max_pending_incoming(&self) -> Option<u32> {
-        self.max_pending_incoming
-    }
-
-    pub fn max_pending_outgoing(&self) -> Option<u32> {
-        self.max_pending_outgoing
-    }
-
-    pub fn max_established_incoming(&self) -> Option<u32> {
-        self.max_established_incoming
-    }
-
-    pub fn max_established_outgoing(&self) -> Option<u32> {
-        self.max_established_outgoing
-    }
-
-    pub fn max_established(&self) -> Option<u32> {
-        self.max_established_total
-    }
-
-    pub fn max_established_per_peer(&self) -> Option<u32> {
-        self.max_established_per_peer
-    }
-}
-
-impl ConnectionLimits {
-    pub fn set_max_pending_incoming(&mut self, limit: Option<u32>) {
-        self.max_pending_incoming = limit;
-    }
-
-    pub fn set_max_pending_outgoing(&mut self, limit: Option<u32>) {
-        self.max_pending_outgoing = limit;
-    }
-
-    pub fn set_max_established_incoming(&mut self, limit: Option<u32>) {
-        self.max_established_incoming = limit;
-    }
-
-    pub fn set_max_established_outgoing(&mut self, limit: Option<u32>) {
-        self.max_established_outgoing = limit;
-    }
-
-    pub fn set_max_established(&mut self, limit: Option<u32>) {
-        self.max_established_total = limit;
-    }
-
-    pub fn set_max_established_per_peer(&mut self, limit: Option<u32>) {
-        self.max_established_per_peer = limit;
-    }
-}
-
-impl ConnectionLimits {
-    pub fn with_max_pending_incoming(mut self, limit: Option<u32>) -> Self {
-        self.max_pending_incoming = limit;
-        self
-    }
-
-    pub fn with_max_pending_outgoing(mut self, limit: Option<u32>) -> Self {
-        self.max_pending_outgoing = limit;
-        self
-    }
-
-    pub fn with_max_established_incoming(mut self, limit: Option<u32>) -> Self {
-        self.max_established_incoming = limit;
-        self
-    }
-
-    pub fn with_max_established_outgoing(mut self, limit: Option<u32>) -> Self {
-        self.max_established_outgoing = limit;
-        self
-    }
-
-    pub fn with_max_established(mut self, limit: Option<u32>) -> Self {
-        self.max_established_total = limit;
-        self
-    }
-
-    pub fn with_max_established_per_peer(mut self, limit: Option<u32>) -> Self {
-        self.max_established_per_peer = limit;
-        self
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Limit: {limit}, Current: {current}")]
-pub struct ConnectionLimitError {
-    limit: u32,
-    current: u32,
-}
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct Behaviour {
-    limits: ConnectionLimits,
-
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     cleanup_interval: Interval,
 
@@ -143,22 +39,12 @@ pub struct Behaviour {
     peer_rtt: HashMap<PeerId, [Duration; 3]>,
     peer_connections: HashMap<PeerId, Vec<(ConnectionId, Multiaddr)>>,
 
-    whitelist: HashSet<PeerId>,
-
-    // For connection limits (took from libp2p pr)
-    pending_inbound_connections: HashSet<ConnectionId>,
-    pending_outbound_connections: HashSet<ConnectionId>,
-    established_inbound_connections: HashSet<ConnectionId>,
-    established_outbound_connections: HashSet<ConnectionId>,
-    established_per_peer: HashMap<PeerId, HashSet<ConnectionId>>,
-
     config: Config,
 }
 
 impl Default for Behaviour {
     fn default() -> Self {
         Self {
-            limits: Default::default(),
             events: Default::default(),
             cleanup_interval: Interval::new_at(
                 std::time::Instant::now() + Duration::from_secs(60),
@@ -171,12 +57,6 @@ impl Default for Behaviour {
             peer_info: Default::default(),
             peer_rtt: Default::default(),
             peer_connections: Default::default(),
-            whitelist: Default::default(),
-            pending_inbound_connections: Default::default(),
-            pending_outbound_connections: Default::default(),
-            established_inbound_connections: Default::default(),
-            established_outbound_connections: Default::default(),
-            established_per_peer: Default::default(),
             config: Config::default(),
         }
     }
@@ -232,18 +112,6 @@ impl Behaviour {
         self.pending_disconnection.insert(peer_id, tx);
 
         rx
-    }
-
-    pub fn set_connection_limit(&mut self, limit: ConnectionLimits) {
-        self.limits = limit;
-    }
-
-    pub fn add(&mut self, peer_id: PeerId) {
-        self.whitelist.insert(peer_id);
-    }
-
-    pub fn remove(&mut self, peer_id: PeerId) {
-        self.whitelist.remove(&peer_id);
     }
 
     pub fn inject_peer_info(&mut self, info: Info) {
@@ -303,20 +171,6 @@ impl Behaviour {
             .get(&peer_id)
             .map(|list| list.iter().map(|(_, addr)| addr).cloned().collect())
     }
-
-    fn check_limit(&mut self, limit: Option<u32>, current: usize) -> Result<(), ConnectionDenied> {
-        let limit = limit.unwrap_or(u32::MAX);
-        let current = current as u32;
-
-        if current >= limit {
-            return Err(ConnectionDenied::new(ConnectionLimitError {
-                limit,
-                current,
-            }));
-        }
-
-        Ok(())
-    }
 }
 
 impl NetworkBehaviour for Behaviour {
@@ -325,104 +179,40 @@ impl NetworkBehaviour for Behaviour {
 
     fn handle_pending_inbound_connection(
         &mut self,
-        connection_id: ConnectionId,
+        _: ConnectionId,
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<(), ConnectionDenied> {
-        self.check_limit(
-            self.limits.max_pending_incoming,
-            self.pending_inbound_connections.len(),
-        )?;
-
-        self.pending_inbound_connections.insert(connection_id);
-
         Ok(())
     }
 
     fn handle_pending_outbound_connection(
         &mut self,
-        connection_id: ConnectionId,
-        peer_id: Option<PeerId>,
+        _: ConnectionId,
+        _: Option<PeerId>,
         _: &[Multiaddr],
         _: Endpoint,
     ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
-        let mut is_whitelisted = false;
-
-        if let Some(peer_id) = peer_id {
-            is_whitelisted = self.whitelist.contains(&peer_id);
-        }
-
-        if !is_whitelisted {
-            self.check_limit(
-                self.limits.max_pending_outgoing,
-                self.pending_outbound_connections.len(),
-            )?;
-        }
-
-        self.pending_outbound_connections.insert(connection_id);
-
         Ok(vec![])
     }
 
     fn handle_established_inbound_connection(
         &mut self,
-        connection_id: ConnectionId,
-        peer_id: PeerId,
+        _: ConnectionId,
+        _: PeerId,
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        self.pending_inbound_connections.remove(&connection_id);
-
-        if !self.whitelist.contains(&peer_id) {
-            self.check_limit(
-                self.limits.max_established_incoming,
-                self.established_inbound_connections.len(),
-            )?;
-            self.check_limit(
-                self.limits.max_established_per_peer,
-                self.established_per_peer
-                    .get(&peer_id)
-                    .map(|connections| connections.len())
-                    .unwrap_or(0),
-            )?;
-            self.check_limit(
-                self.limits.max_established_total,
-                self.established_inbound_connections.len()
-                    + self.established_outbound_connections.len(),
-            )?;
-        }
-
         Ok(DummyConnectionHandler)
     }
 
     fn handle_established_outbound_connection(
         &mut self,
-        connection_id: ConnectionId,
-        peer_id: PeerId,
+        _: ConnectionId,
+        _: PeerId,
         _: &Multiaddr,
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        self.pending_outbound_connections.remove(&connection_id);
-
-        if !self.whitelist.contains(&peer_id) {
-            self.check_limit(
-                self.limits.max_established_outgoing,
-                self.established_outbound_connections.len(),
-            )?;
-            self.check_limit(
-                self.limits.max_established_per_peer,
-                self.established_per_peer
-                    .get(&peer_id)
-                    .map(|connections| connections.len())
-                    .unwrap_or(0),
-            )?;
-            self.check_limit(
-                self.limits.max_established_total,
-                self.established_inbound_connections.len()
-                    + self.established_outbound_connections.len(),
-            )?;
-        }
-
         Ok(DummyConnectionHandler)
     }
 
@@ -463,33 +253,18 @@ impl NetworkBehaviour for Behaviour {
                         }
                     }
                 }
-                let multiaddr = match endpoint {
-                    ConnectedPoint::Dialer { address, .. } => {
-                        self.established_outbound_connections.insert(connection_id);
-                        address.clone()
-                    }
-                    ConnectedPoint::Listener { send_back_addr, .. } => {
-                        self.established_inbound_connections.insert(connection_id);
-                        send_back_addr.clone()
-                    }
-                };
+                let multiaddr = endpoint.get_remote_address().clone();
 
                 self.peer_connections
                     .entry(peer_id)
                     .or_default()
                     .push((connection_id, multiaddr));
-
-                self.established_per_peer
-                    .entry(peer_id)
-                    .or_default()
-                    .insert(connection_id);
             }
             FromSwarm::DialFailure(DialFailure {
                 error,
                 connection_id,
                 ..
             }) => {
-                self.pending_outbound_connections.remove(&connection_id);
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
                     let _ = ch.send(Err(anyhow::anyhow!("{error}")));
                 }
@@ -499,13 +274,6 @@ impl NetworkBehaviour for Behaviour {
                 connection_id,
                 ..
             }) => {
-                self.established_inbound_connections.remove(&connection_id);
-                self.established_outbound_connections.remove(&connection_id);
-                self.established_per_peer
-                    .entry(peer_id)
-                    .or_default()
-                    .remove(&connection_id);
-
                 self.peer_rtt.remove(&peer_id);
 
                 if let Entry::Occupied(mut entry) = self.peer_connections.entry(peer_id) {
@@ -517,12 +285,7 @@ impl NetworkBehaviour for Behaviour {
                         entry.remove();
                     }
                 }
-                if let Entry::Occupied(mut entry) = self.established_per_peer.entry(peer_id) {
-                    entry.get_mut().remove(&connection_id);
-                    if entry.get().is_empty() {
-                        entry.remove();
-                    }
-                }
+
                 //Note: This is in case we receive a connection close before it was ever established
                 if let Some(ch) = self.pending_connections.remove(&connection_id) {
                     let _ = ch.send(Ok(()));
@@ -531,9 +294,7 @@ impl NetworkBehaviour for Behaviour {
                     let _ = ch.send(Ok(()));
                 }
             }
-            FromSwarm::ListenFailure(ListenFailure { connection_id, .. }) => {
-                self.pending_inbound_connections.remove(&connection_id);
-            }
+
             _ => {}
         }
     }
@@ -558,15 +319,6 @@ impl NetworkBehaviour for Behaviour {
                 Poll::Pending => true,
             });
 
-        // Used to cleanup any info that may be left behind after a peer is no longer connected while giving time to all
-        // Note: If a peer is whitelisted, this will retain the info as a cache, although this may change in the future
-        while let Poll::Ready(Some(_)) = self.cleanup_interval.poll_next_unpin(cx) {
-            self.peer_info.retain(|peer_id, _| {
-                !self.established_per_peer.contains_key(peer_id)
-                    && !self.whitelist.contains(peer_id)
-            });
-        }
-
         Poll::Pending
     }
 }
@@ -576,7 +328,6 @@ mod test {
     use std::time::Duration;
 
     use super::Behaviour as PeerBook;
-    use crate::p2p::peerbook::ConnectionLimits;
     use futures::StreamExt;
     use libp2p::{
         identify::{self, Config},
@@ -588,75 +339,6 @@ mod test {
     struct Behaviour {
         peerbook: PeerBook,
         identify: Toggle<identify::Behaviour>,
-    }
-
-    //TODO: Expand test out
-    #[tokio::test]
-    async fn connection_limits() {
-        let (_, addr1, mut swarm1) = build_swarm(false).await;
-        let (peer2, _, mut swarm2) = build_swarm(false).await;
-        let (peer3, _, mut swarm3) = build_swarm(false).await;
-        let (peer4, _, mut swarm4) = build_swarm(false).await;
-
-        swarm1
-            .behaviour_mut()
-            .peerbook
-            .set_connection_limit(ConnectionLimits {
-                max_established_incoming: Some(1),
-                ..Default::default()
-            });
-
-        let mut oneshot = swarm2.behaviour_mut().peerbook.connect(addr1.clone());
-
-        loop {
-            tokio::select! {
-                biased;
-                _ = swarm1.next() => {},
-                _ = swarm2.next() => {},
-                conn_res = (&mut oneshot) => {
-                    conn_res.unwrap().unwrap();
-                    break;
-                }
-            }
-        }
-        swarm1.behaviour_mut().peerbook.add(peer3);
-        let mut oneshot = swarm3.behaviour_mut().peerbook.connect(addr1.clone());
-
-        loop {
-            tokio::select! {
-                biased;
-                _ = swarm1.next() => {},
-                _ = swarm3.next() => {},
-                conn_res = (&mut oneshot) => {
-                    conn_res.unwrap().unwrap();
-                    break;
-                }
-            }
-        }
-
-        let mut oneshot = swarm4.behaviour_mut().peerbook.connect(addr1.clone());
-
-        loop {
-            tokio::select! {
-                biased;
-                e = swarm1.select_next_some() => {
-                    if matches!(e, SwarmEvent::IncomingConnectionError { .. }) {
-                        break;
-                    }
-                },
-                _ = swarm4.next() => {},
-                conn_res = (&mut oneshot) => {
-                    assert!(conn_res.unwrap().is_err());
-                    break;
-                }
-            }
-        }
-
-        let list = swarm1.connected_peers().copied().collect::<Vec<_>>();
-
-        assert!(list.contains(&peer2));
-        assert!(list.contains(&peer3));
-        assert!(!list.contains(&peer4));
     }
 
     #[tokio::test]

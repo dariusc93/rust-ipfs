@@ -1360,14 +1360,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 };
                 let _ = ret.send(Ok(addrs));
             }
-            IpfsEvent::WhitelistPeer(peer_id, ret) => {
-                self.swarm.behaviour_mut().peerbook.add(peer_id);
-                let _ = ret.send(Ok(()));
-            }
-            IpfsEvent::RemoveWhitelistPeer(peer_id, ret) => {
-                self.swarm.behaviour_mut().peerbook.remove(peer_id);
-                let _ = ret.send(Ok(()));
-            }
             IpfsEvent::GetProviders(cid, ret) => {
                 let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() else {
                     let _ = ret.send(Err(anyhow!("kad protocol is disabled")));

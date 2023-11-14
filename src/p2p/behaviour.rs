@@ -3,7 +3,7 @@ use super::{addressbook, protocol};
 use bytes::Bytes;
 use libp2p_allow_block_list::BlockedPeers;
 
-use super::peerbook::{self, ConnectionLimits};
+use super::peerbook::{self};
 use either::Either;
 use serde::{Deserialize, Serialize};
 
@@ -337,7 +337,6 @@ where
         keypair: &Keypair,
         options: &IpfsOptions,
         repo: Repo,
-        limits: ConnectionLimits,
         custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let protocols = options.protocols;
@@ -468,8 +467,7 @@ where
             false => (None, None.into(), None.into()),
         };
 
-        let mut peerbook = peerbook::Behaviour::default();
-        peerbook.set_connection_limit(limits);
+        let peerbook = peerbook::Behaviour::default();
 
         let addressbook =
             addressbook::Behaviour::with_config(options.addr_config.unwrap_or_default());

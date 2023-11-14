@@ -370,8 +370,6 @@ enum IpfsEvent {
         bool,
         Channel<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
     ),
-    WhitelistPeer(PeerId, Channel<()>),
-    RemoveWhitelistPeer(PeerId, Channel<()>),
     GetProviders(Cid, Channel<Option<BoxStream<'static, PeerId>>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
@@ -905,9 +903,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
-        // reordered for less error prone code.
-
         let swarm_config = options.swarm_configuration.clone().unwrap_or_default();
         let transport_config = options.transport_configuration.unwrap_or_default();
         let swarm = create_swarm(
@@ -1302,36 +1297,6 @@ impl Ipfs {
             let subscription = rx.await?;
 
             subscription.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Whitelist a peer
-    pub async fn whitelist(&self, peer_id: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::WhitelistPeer(peer_id, tx))
-                .await?;
-
-            rx.await?.map_err(anyhow::Error::from)
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Remove peer from whitelist
-    pub async fn remove_whitelisted_peer(&self, peer_id: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RemoveWhitelistPeer(peer_id, tx))
-                .await?;
-
-            rx.await?.map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await
