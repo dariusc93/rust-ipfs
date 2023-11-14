@@ -563,7 +563,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             .with_kademlia(None, Default::default())
             .with_ping(None)
             .with_pubsub(None)
-            .set_default_listener()
     }
 
     /// Enables kademlia
@@ -2339,7 +2338,7 @@ mod node {
 
             uninit = match addr {
                 Some(addr) => uninit.set_listening_addrs(addr),
-                None => uninit.set_default_listener(),
+                None => uninit.add_listening_addr("/ip4/127.0.0.1/tcp/0".parse().unwrap()),
             };
 
             let ipfs = uninit.start().await.unwrap();
