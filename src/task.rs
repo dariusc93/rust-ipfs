@@ -76,7 +76,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) swarm: TSwarm<C>,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
-    pub(crate) listening_addresses: HashMap<Multiaddr, ListenerId>,
+    pub(crate) listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub(crate) listeners: HashSet<ListenerId>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) bitswap_provider_stream:
@@ -116,7 +116,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             repo_events,
             from_facade,
             swarm,
-            listening_addresses: HashMap::new(),
+
             listeners: Default::default(),
             provider_stream: HashMap::new(),
             bitswap_provider_stream: Default::default(),
@@ -136,6 +136,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             rzv_register_pending: Default::default(),
             rzv_discover_pending: Default::default(),
             rzv_cookie: Default::default(),
+            listening_addresses: HashMap::new(),
             pending_disconnection: Default::default(),
             pending_connection: Default::default(),
             pending_add_listener: Default::default(),
@@ -368,9 +369,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 listener_id,
                 address,
             } => {
-                self.listening_addresses
-                    .insert(address.clone(), listener_id);
-
                 for ch in self.local_listener.drain(..) {
                     let addr = address.clone();
                     let _ = ch.send(vec![addr]);
@@ -387,6 +385,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     // We will assume that the address is global and reachable externally
                     self.swarm.add_external_address(address.clone());
                 }
+
+                self.listening_addresses
+                    .entry(listener_id)
+                    .or_default()
+                    .push(address.clone());
 
                 if let Some(ret) = self.pending_add_listener.remove(&listener_id) {
                     let _ = ret.send(Ok(address));
@@ -418,11 +421,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 address,
             } => {
                 self.listeners.remove(&listener_id);
-                self.listening_addresses.remove(&address);
-
-                if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
-                    self.swarm.remove_external_address(&address);
+                if let Some(list) = self.listening_addresses.get_mut(&listener_id) {
+                    list.retain(|addr| &address != addr);
                 }
+
+                self.swarm.remove_external_address(&address);
             }
             SwarmEvent::ListenerClosed {
                 listener_id,
@@ -431,11 +434,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             } => {
                 self.listeners.remove(&listener_id);
                 for address in addresses {
-                    self.listening_addresses.remove(&address);
-                    if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
-                        self.swarm.remove_external_address(&address);
-                    }
+                    self.listening_addresses.remove(&listener_id);
+                    self.swarm.remove_external_address(&address);
                 }
+
                 if let Some(ret) = self.pending_remove_listener.remove(&listener_id) {
                     let _ = ret.send(reason.map_err(anyhow::Error::from));
                 }
@@ -1237,24 +1239,31 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
             },
             IpfsEvent::RemoveListeningAddress(addr, ret) => {
-                if let Some(id) = self.listening_addresses.remove(&addr) {
-                    match self.swarm.remove_listener(id) {
-                        true => {
-                            self.listeners.remove(&id);
-                            self.pending_remove_listener.insert(id, ret);
-                        }
-                        false => {
-                            let _ = ret.send(Err(anyhow::anyhow!(
-                                "Failed to remove previously added listening address: {}",
-                                addr
-                            )));
-                        }
+                let Some(listener_id) = self.listening_addresses.iter().find_map(|(id, list)| {
+                    if list.contains(&addr) {
+                        return Some(id);
                     }
-                } else {
+
+                    None
+                }) else {
                     let _ = ret.send(Err(format_err!(
                         "Address was not listened to before: {}",
                         addr
                     )));
+                    return;
+                };
+
+                match self.swarm.remove_listener(*listener_id) {
+                    true => {
+                        self.listeners.remove(&listener_id);
+                        self.pending_remove_listener.insert(*listener_id, ret);
+                    }
+                    false => {
+                        let _ = ret.send(Err(anyhow::anyhow!(
+                            "Failed to remove previously added listening address: {}",
+                            addr
+                        )));
+                    }
                 }
             }
             IpfsEvent::Bootstrap(ret) => {
