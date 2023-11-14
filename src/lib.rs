@@ -917,42 +917,14 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
         .await?;
 
-        let kad_subscriptions = Default::default();
-        let listener_subscriptions = Default::default();
-        let listeners = Default::default();
-        let bootstraps = Default::default();
-
         let IpfsOptions {
             listening_addrs, ..
         } = options;
 
-        let mut fut = task::IpfsTask {
-            repo_events: repo_events.fuse(),
-            from_facade: receiver.fuse(),
-            swarm,
-            listening_addresses: HashMap::with_capacity(listening_addrs.len()),
-            listeners,
-            provider_stream: HashMap::new(),
-            bitswap_provider_stream: Default::default(),
-            record_stream: HashMap::new(),
-            dht_peer_lookup: Default::default(),
-            bitswap_sessions: Default::default(),
-            disconnect_confirmation: Default::default(),
-            pubsub_event_stream: Default::default(),
-            kad_subscriptions,
-            listener_subscriptions,
-            repo,
-            bootstraps,
-            swarm_event,
-            external_listener: Default::default(),
-            local_listener: Default::default(),
-            timer: Default::default(),
-            relay_listener: Default::default(),
-            local_external_addr,
-            rzv_register_pending: Default::default(),
-            rzv_discover_pending: Default::default(),
-            rzv_cookie: Default::default(),
-        };
+        let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), repo);
+        fut.swarm_event = swarm_event;
+        fut.local_external_addr = local_external_addr;
+    
 
         for addr in listening_addrs.into_iter() {
             match fut.swarm.listen_on(addr) {

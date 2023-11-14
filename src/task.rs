@@ -104,6 +104,39 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) rzv_cookie: HashMap<PeerId, Option<Cookie>>,
 }
 
+impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
+    pub fn new(swarm: TSwarm<C>, repo_events: Fuse<Receiver<RepoEvent>>, from_facade: Fuse<Receiver<IpfsEvent>>, repo: Repo) -> Self{
+        IpfsTask {
+            repo_events,
+            from_facade,
+            swarm,
+            listening_addresses: HashMap::new(),
+            listeners: Default::default(),
+            provider_stream: HashMap::new(),
+            bitswap_provider_stream: Default::default(),
+            record_stream: HashMap::new(),
+            dht_peer_lookup: Default::default(),
+            bitswap_sessions: Default::default(),
+            disconnect_confirmation: Default::default(),
+            pubsub_event_stream: Default::default(),
+            kad_subscriptions: Default::default(),
+            listener_subscriptions: Default::default(),
+            repo,
+            bootstraps: Default::default(),
+            swarm_event: Default::default(),
+            external_listener: Default::default(),
+            local_listener: Default::default(),
+            timer: Default::default(),
+            relay_listener: Default::default(),
+            local_external_addr: false,
+            rzv_register_pending: Default::default(),
+            rzv_discover_pending: Default::default(),
+            rzv_cookie: Default::default(),
+        }
+    }
+}
+
+
 pub(crate) struct TaskTimer {
     pub(crate) session_cleanup: Interval,
     pub(crate) event_cleanup: Interval,
