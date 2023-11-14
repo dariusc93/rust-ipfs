@@ -64,7 +64,7 @@ use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
-    fmt, io,
+    fmt,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
     sync::atomic::AtomicU64,
@@ -323,7 +323,7 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 #[allow(clippy::type_complexity)]
 enum IpfsEvent {
     /// Connect
-    Connect(DialOpts, OneshotSender<ReceiverChannel<()>>),
+    Connect(DialOpts, Channel<()>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     /// Addresses
@@ -337,10 +337,7 @@ enum IpfsEvent {
     /// Is Connected
     IsConnected(PeerId, Channel<bool>),
     /// Disconnect
-    Disconnect(
-        PeerId,
-        OneshotSender<(ReceiverChannel<()>, ReceiverChannel<()>)>,
-    ),
+    Disconnect(PeerId, Channel<()>),
     /// Ban Peer
     Ban(PeerId, Channel<()>),
     /// Unban peer
@@ -352,14 +349,8 @@ enum IpfsEvent {
     GetBitswapPeers(Channel<BoxFuture<'static, Vec<PeerId>>>),
     WantList(Option<PeerId>, Channel<BoxFuture<'static, Vec<Cid>>>),
     PubsubSubscribed(Channel<Vec<String>>),
-    AddListeningAddress(
-        Multiaddr,
-        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
-    ),
-    RemoveListeningAddress(
-        Multiaddr,
-        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
-    ),
+    AddListeningAddress(Multiaddr, Channel<Multiaddr>),
+    RemoveListeningAddress(Multiaddr, Channel<()>),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Multiaddr, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
@@ -924,7 +915,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), repo);
         fut.swarm_event = swarm_event;
         fut.local_external_addr = local_external_addr;
-    
 
         for addr in listening_addrs.into_iter() {
             match fut.swarm.listen_on(addr) {
@@ -1266,9 +1256,7 @@ impl Ipfs {
                 .send(IpfsEvent::Connect(target, tx))
                 .await?;
 
-            let subscription = rx.await?;
-
-            subscription.await?
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1318,11 +1306,8 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::Disconnect(target, tx))
                 .await?;
-            let (rx_nb, rx_swarm) = rx.await?;
-            let (result_nb, result_swarm) = futures::join!(rx_nb, rx_swarm);
 
-            result_nb??;
-            result_swarm?
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1620,25 +1605,14 @@ impl Ipfs {
     /// has now been changed.
     pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
-            //Note: This is due to a possible race when doing an initial dial out to a relay
-            //      Without this delay, the listener may close, resulting in an error here
-            if addr.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
                 .send(IpfsEvent::AddListeningAddress(addr, tx))
                 .await?;
-            let rx = rx.await??;
-            match rx.await? {
-                Either::Left(addr) => Ok(addr),
-                Either::Right(result) => {
-                    result?;
-                    Err(anyhow::anyhow!("No multiaddr provided"))
-                }
-            }
+
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1656,13 +1630,8 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::RemoveListeningAddress(addr, tx))
                 .await?;
-            let rx = rx.await??;
-            match rx.await? {
-                Either::Left(addr) => Err(anyhow::anyhow!(
-                    "Error: Address {addr} was returned while removing listener"
-                )),
-                Either::Right(result) => result.map_err(anyhow::Error::from),
-            }
+
+            rx.await?
         }
         .instrument(self.span.clone())
         .await

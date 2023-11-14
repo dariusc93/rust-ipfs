@@ -21,7 +21,6 @@ use wasm_timer::Interval;
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    io,
     time::Duration,
 };
 
@@ -67,7 +66,7 @@ use libp2p::{
     },
     mdns::Event as MdnsEvent,
     rendezvous::{Cookie, Namespace},
-    swarm::SwarmEvent,
+    swarm::{ConnectionId, SwarmEvent},
 };
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
@@ -86,12 +85,9 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
-    pub(crate) listener_subscriptions:
-        HashMap<ListenerId, oneshot::Sender<Either<Multiaddr, Result<(), io::Error>>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
-    pub(crate) disconnect_confirmation: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
@@ -102,10 +98,20 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) rzv_discover_pending:
         HashMap<(PeerId, Namespace), Vec<Channel<HashMap<PeerId, Vec<Multiaddr>>>>>,
     pub(crate) rzv_cookie: HashMap<PeerId, Option<Cookie>>,
+
+    pub(crate) pending_connection: HashMap<ConnectionId, Channel<()>>,
+    pub(crate) pending_disconnection: HashMap<PeerId, Vec<Channel<()>>>,
+    pub(crate) pending_add_listener: HashMap<ListenerId, Channel<Multiaddr>>,
+    pub(crate) pending_remove_listener: HashMap<ListenerId, Channel<()>>,
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
-    pub fn new(swarm: TSwarm<C>, repo_events: Fuse<Receiver<RepoEvent>>, from_facade: Fuse<Receiver<IpfsEvent>>, repo: Repo) -> Self{
+    pub fn new(
+        swarm: TSwarm<C>,
+        repo_events: Fuse<Receiver<RepoEvent>>,
+        from_facade: Fuse<Receiver<IpfsEvent>>,
+        repo: Repo,
+    ) -> Self {
         IpfsTask {
             repo_events,
             from_facade,
@@ -117,10 +123,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
             bitswap_sessions: Default::default(),
-            disconnect_confirmation: Default::default(),
             pubsub_event_stream: Default::default(),
             kad_subscriptions: Default::default(),
-            listener_subscriptions: Default::default(),
             repo,
             bootstraps: Default::default(),
             swarm_event: Default::default(),
@@ -132,10 +136,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             rzv_register_pending: Default::default(),
             rzv_discover_pending: Default::default(),
             rzv_cookie: Default::default(),
+            pending_disconnection: Default::default(),
+            pending_connection: Default::default(),
+            pending_add_listener: Default::default(),
+            pending_remove_listener: Default::default(),
         }
     }
 }
-
 
 pub(crate) struct TaskTimer {
     pub(crate) session_cleanup: Interval,
@@ -381,12 +388,26 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     self.swarm.add_external_address(address.clone());
                 }
 
-                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Either::Left(address));
+                if let Some(ret) = self.pending_add_listener.remove(&listener_id) {
+                    let _ = ret.send(Ok(address));
+                }
+            }
+            SwarmEvent::ConnectionEstablished { connection_id, .. } => {
+                if let Some(ch) = self.pending_connection.remove(&connection_id) {
+                    _ = ch.send(Ok(()));
+                }
+            }
+            SwarmEvent::OutgoingConnectionError {
+                connection_id,
+                error,
+                ..
+            } => {
+                if let Some(ch) = self.pending_connection.remove(&connection_id) {
+                    _ = ch.send(Err(anyhow::Error::from(error)));
                 }
             }
             SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                if let Some(ch) = self.disconnect_confirmation.remove(&peer_id) {
+                if let Some(ch) = self.pending_disconnection.remove(&peer_id) {
                     for ch in ch {
                         let _ = ch.send(Ok(()));
                     }
@@ -402,11 +423,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 if self.swarm.external_addresses().any(|addr| address.eq(addr)) {
                     self.swarm.remove_external_address(&address);
                 }
-
-                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    //TODO: Determine if we want to return the address or use the right side and return an error?
-                    let _ = ret.send(Either::Left(address));
-                }
             }
             SwarmEvent::ListenerClosed {
                 listener_id,
@@ -420,14 +436,15 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         self.swarm.remove_external_address(&address);
                     }
                 }
-                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Either::Right(reason));
+                if let Some(ret) = self.pending_remove_listener.remove(&listener_id) {
+                    let _ = ret.send(reason.map_err(anyhow::Error::from));
                 }
             }
             SwarmEvent::ListenerError { listener_id, error } => {
                 self.listeners.remove(&listener_id);
-                if let Some(ret) = self.listener_subscriptions.remove(&listener_id) {
-                    let _ = ret.send(Either::Right(Err(error)));
+
+                if let Some(ret) = self.pending_add_listener.remove(&listener_id) {
+                    let _ = ret.send(Err(error.into()));
                 }
             }
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
@@ -857,6 +874,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         rtt.as_millis()
                     );
                     self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
+
                     if let Some(m) = self.swarm.behaviour_mut().relay_manager.as_mut() {
                         m.set_peer_rtt(peer, connection, rtt)
                     }
@@ -1066,8 +1084,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     fn handle_event(&mut self, event: IpfsEvent) {
         match event {
             IpfsEvent::Connect(target, ret) => {
-                let rx = self.swarm.behaviour_mut().peerbook.connect(target);
-                let _ = ret.send(rx);
+                let connection_id = target.connection_id();
+
+                if let Err(e) = self.swarm.dial(target) {
+                    _ = ret.send(Err(anyhow::Error::from(e)));
+                    return;
+                }
+                self.pending_connection.insert(connection_id, ret);
             }
             IpfsEvent::Protocol(ret) => {
                 let info = self.swarm.behaviour().supported_protocols();
@@ -1115,17 +1138,15 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 ret.send(Ok(connections.collect())).ok();
             }
             IpfsEvent::Disconnect(peer, ret) => {
-                let recv = self.swarm.behaviour_mut().peerbook.disconnect(peer);
-                let (tx, rx) = oneshot::channel();
-                if !self.swarm.is_connected(&peer) {
-                    let _ = tx.send(Err(anyhow::anyhow!("Peer not connected")));
-                } else {
-                    self.disconnect_confirmation
-                        .entry(peer)
-                        .or_default()
-                        .push(tx);
+                if self.swarm.disconnect_peer_id(peer).is_err() {
+                    _ = ret.send(Err(anyhow::anyhow!("Peer is not connected")));
+                    return;
                 }
-                let _ = ret.send((recv, rx));
+
+                self.pending_disconnection
+                    .entry(peer)
+                    .or_default()
+                    .push(ret);
             }
             IpfsEvent::Ban(peer, ret) => {
                 self.swarm.behaviour_mut().block_list.block_peer(peer);
@@ -1209,9 +1230,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
                 Ok(id) => {
                     self.listeners.insert(id);
-                    let (tx, rx) = oneshot::channel();
-                    self.listener_subscriptions.insert(id, tx);
-                    let _ = ret.send(Ok(rx));
+                    self.pending_add_listener.insert(id, ret);
                 }
                 Err(e) => {
                     let _ = ret.send(Err(anyhow::anyhow!(e)));
@@ -1222,9 +1241,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     match self.swarm.remove_listener(id) {
                         true => {
                             self.listeners.remove(&id);
-                            let (tx, rx) = oneshot::channel();
-                            self.listener_subscriptions.insert(id, tx);
-                            let _ = ret.send(Ok(rx));
+                            self.pending_remove_listener.insert(id, ret);
                         }
                         false => {
                             let _ = ret.send(Err(anyhow::anyhow!(

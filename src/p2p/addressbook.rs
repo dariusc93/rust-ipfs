@@ -236,29 +236,18 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use crate::p2p::peerbook;
     use futures::StreamExt;
-    use libp2p::swarm::behaviour::toggle::Toggle;
     use libp2p::{
-        swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmEvent},
+        swarm::{dial_opts::DialOpts, SwarmEvent},
         Multiaddr, PeerId, Swarm, SwarmBuilder,
     };
 
-    #[derive(NetworkBehaviour)]
-    struct Behaviour {
-        peer_book: Toggle<peerbook::Behaviour>,
-        address_book: super::Behaviour,
-    }
-
     #[tokio::test]
     async fn dial_with_peer_id() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm(false, false).await;
-        let (peer2, addr2, mut swarm2) = build_swarm(false, false).await;
+        let (_, _, mut swarm1) = build_swarm(false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
 
-        swarm1
-            .behaviour_mut()
-            .address_book
-            .add_address(peer2, addr2);
+        swarm1.behaviour_mut().add_address(peer2, addr2);
 
         swarm1.dial(peer2)?;
 
@@ -278,13 +267,10 @@ mod test {
 
     #[tokio::test]
     async fn remove_peer_address() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm(false, false).await;
-        let (peer2, addr2, mut swarm2) = build_swarm(false, false).await;
+        let (_, _, mut swarm1) = build_swarm(false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
 
-        swarm1
-            .behaviour_mut()
-            .address_book
-            .add_address(peer2, addr2);
+        swarm1.behaviour_mut().add_address(peer2, addr2);
 
         swarm1.dial(peer2)?;
 
@@ -314,7 +300,7 @@ mod test {
             }
         }
 
-        swarm1.behaviour_mut().address_book.remove_peer(&peer2);
+        swarm1.behaviour_mut().remove_peer(&peer2);
 
         assert!(swarm1.dial(peer2).is_err());
 
@@ -322,39 +308,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn dial_with_peer_id_from_peerbook() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm(true, false).await;
-        let (peer2, addr2, mut swarm2) = build_swarm(true, false).await;
-
-        swarm1
-            .behaviour_mut()
-            .address_book
-            .add_address(peer2, addr2);
-
-        let mut connection = swarm1
-            .behaviour_mut()
-            .peer_book
-            .as_mut()
-            .map(|pb| pb.connect(peer2))
-            .expect("peerbook enabled");
-
-        loop {
-            futures::select! {
-                _ = swarm1.next() => {}
-                _ = swarm2.next() => {}
-                res = &mut connection => {
-                    res.unwrap().unwrap();
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn store_address() -> anyhow::Result<()> {
-        let (_, _, mut swarm1) = build_swarm(false, true).await;
-        let (peer2, addr2, mut swarm2) = build_swarm(false, true).await;
+        let (_, _, mut swarm1) = build_swarm(true).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(true).await;
 
         let opt = DialOpts::peer_id(peer2)
             .addresses(vec![addr2.clone()])
@@ -376,7 +332,6 @@ mod test {
 
         let addrs = swarm1
             .behaviour()
-            .address_book
             .get_peer_addresses(&peer2)
             .cloned()
             .expect("Exist");
@@ -388,9 +343,8 @@ mod test {
     }
 
     async fn build_swarm(
-        peerbook: bool,
         store_on_connection: bool,
-    ) -> (PeerId, Multiaddr, Swarm<Behaviour>) {
+    ) -> (PeerId, Multiaddr, Swarm<super::Behaviour>) {
         let mut swarm = SwarmBuilder::with_new_identity()
             .with_tokio()
             .with_tcp(
@@ -399,11 +353,10 @@ mod test {
                 libp2p::yamux::Config::default,
             )
             .expect("")
-            .with_behaviour(|_| Behaviour {
-                peer_book: peerbook.then_some(peerbook::Behaviour::default()).into(),
-                address_book: super::Behaviour::with_config(super::Config {
+            .with_behaviour(|_| {
+                super::Behaviour::with_config(super::Config {
                     store_on_connection,
-                }),
+                })
             })
             .expect("")
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
