@@ -2325,14 +2325,18 @@ mod node {
                 uninit = uninit.set_span(span);
             }
 
-            uninit = match addr {
-                Some(addr) => uninit.set_listening_addrs(addr),
-                None => uninit.add_listening_addr("/ip4/127.0.0.1/tcp/0".parse().unwrap()),
+            let list = match addr {
+                Some(addr) => addr,
+                None => vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()],
             };
 
             let ipfs = uninit.start().await.unwrap();
 
             let id = ipfs.keypair().map(|kp| kp.public().to_peer_id()).unwrap();
+            for addr in list {
+                ipfs.add_listening_address(addr).await.expect("To succeed");
+            }
+
             let mut addrs = ipfs.listening_addresses().await.unwrap();
 
             for addr in &mut addrs {
