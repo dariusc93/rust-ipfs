@@ -25,7 +25,7 @@ pub struct TransportConfig {
     pub yamux_update_mode: UpdateMode,
     pub timeout: Duration,
     pub dns_resolver: Option<DnsResolver>,
-    pub version: Option<UpgradeVersion>,
+    pub version: UpgradeVersion,
     pub enable_quic: bool,
     // pub enable_websocket: bool,
     // pub enable_secure_websocket: bool,
@@ -39,14 +39,14 @@ impl Default for TransportConfig {
             yamux_max_buffer_size: 16 * 1024 * 1024,
             yamux_receive_window_size: 16 * 1024 * 1024,
             yamux_update_mode: UpdateMode::default(),
-            enable_quic: false,
+            enable_quic: true,
             // enable_websocket: false,
             // enable_secure_websocket: false,
             support_quic_draft_29: false,
             // enable_webrtc: false,
             timeout: Duration::from_secs(30),
             dns_resolver: None,
-            version: None,
+            version: UpgradeVersion::default(),
         }
     }
 }
@@ -78,10 +78,10 @@ impl From<DnsResolver> for (ResolverConfig, ResolverOpts) {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UpdateMode {
     /// See [`WindowUpdateMode::on_receive`]
-    #[default]
     Receive,
 
     /// See [`WindowUpdateMode::on_read`]
+    #[default]
     Read,
 }
 
@@ -97,10 +97,10 @@ impl From<UpdateMode> for WindowUpdateMode {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UpgradeVersion {
     /// See [`Version::V1`]
-    #[default]
     Standard,
 
     /// See [`Version::V1Lazy`]
+    #[default]
     Lazy,
 }
 
@@ -156,8 +156,6 @@ pub(crate) fn build_transport(
     let (cfg, opts) = dns_resolver.unwrap_or_default().into();
 
     let transport = TokioDnsConfig::custom(transport_timeout, cfg, opts);
-
-    let version = version.unwrap_or_default();
 
     let transport = match relay {
         Some(relay) => {
