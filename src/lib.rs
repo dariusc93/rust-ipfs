@@ -917,7 +917,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         for addr in listening_addrs.into_iter() {
             match fut.swarm.listen_on(addr) {
-                Ok(id) => fut.listeners.insert(id),
+                Ok(id) => {
+                    let (tx, _rx) = oneshot_channel();
+                    fut.pending_add_listener.insert(id, tx);
+                },
                 _ => continue,
             };
         }

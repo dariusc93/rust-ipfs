@@ -77,7 +77,6 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
     pub(crate) listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
-    pub(crate) listeners: HashSet<ListenerId>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) bitswap_provider_stream:
         HashMap<QueryId, futures::channel::mpsc::Sender<Result<HashSet<PeerId>, String>>>,
@@ -116,8 +115,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             repo_events,
             from_facade,
             swarm,
-
-            listeners: Default::default(),
             provider_stream: HashMap::new(),
             bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
@@ -420,7 +417,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 listener_id,
                 address,
             } => {
-                self.listeners.remove(&listener_id);
                 if let Some(list) = self.listening_addresses.get_mut(&listener_id) {
                     list.retain(|addr| &address != addr);
                 }
@@ -432,7 +428,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 reason,
                 addresses,
             } => {
-                self.listeners.remove(&listener_id);
                 for address in addresses {
                     self.listening_addresses.remove(&listener_id);
                     self.swarm.remove_external_address(&address);
@@ -443,8 +438,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
             }
             SwarmEvent::ListenerError { listener_id, error } => {
-                self.listeners.remove(&listener_id);
-
                 if let Some(ret) = self.pending_add_listener.remove(&listener_id) {
                     let _ = ret.send(Err(error.into()));
                 }
@@ -1231,7 +1224,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             }
             IpfsEvent::AddListeningAddress(addr, ret) => match self.swarm.listen_on(addr) {
                 Ok(id) => {
-                    self.listeners.insert(id);
                     self.pending_add_listener.insert(id, ret);
                 }
                 Err(e) => {
@@ -1255,7 +1247,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                 match self.swarm.remove_listener(*listener_id) {
                     true => {
-                        self.listeners.remove(&listener_id);
                         self.pending_remove_listener.insert(*listener_id, ret);
                     }
                     false => {
