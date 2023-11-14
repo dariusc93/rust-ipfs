@@ -346,10 +346,7 @@ where
         info!("net: starting with peer id {}", peer_id);
 
         let mdns = if protocols.mdns {
-            let config = MdnsConfig {
-                ..Default::default()
-            };
-            Mdns::new(config, peer_id).ok()
+            Mdns::new(Default::default(), peer_id).ok()
         } else {
             None
         }
