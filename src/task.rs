@@ -88,8 +88,6 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
-    pub(crate) external_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
-    pub(crate) local_listener: Vec<oneshot::Sender<Vec<Multiaddr>>>,
     pub(crate) timer: TaskTimer,
     pub(crate) local_external_addr: bool,
     pub(crate) relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
@@ -125,8 +123,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             repo,
             bootstraps: Default::default(),
             swarm_event: Default::default(),
-            external_listener: Default::default(),
-            local_listener: Default::default(),
             timer: Default::default(),
             relay_listener: Default::default(),
             local_external_addr: false,
@@ -145,8 +141,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 pub(crate) struct TaskTimer {
     pub(crate) session_cleanup: Interval,
     pub(crate) event_cleanup: Interval,
-    pub(crate) external_check: Interval,
-    pub(crate) local_check: Interval,
 }
 
 impl Default for TaskTimer {
@@ -154,20 +148,9 @@ impl Default for TaskTimer {
         let session_cleanup = Interval::new(Duration::from_secs(5));
         let event_cleanup = Interval::new(Duration::from_secs(60));
 
-        let external_check = Interval::new_at(
-            std::time::Instant::now() + Duration::from_secs(1),
-            Duration::from_secs(1),
-        );
-        let local_check = Interval::new_at(
-            std::time::Instant::now() + Duration::from_secs(1),
-            Duration::from_secs(1),
-        );
-
         Self {
             session_cleanup,
             event_cleanup,
-            external_check,
-            local_check,
         }
     }
 }
@@ -224,26 +207,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
             }
         }
 
-        if self.timer.external_check.poll_next_unpin(cx).is_ready() {
-            let addrs = self.swarm.external_addresses().cloned().collect::<Vec<_>>();
-            if !addrs.is_empty() {
-                for ch in self.external_listener.drain(..) {
-                    let addrs = addrs.clone();
-                    let _ = ch.send(addrs);
-                }
-            }
-        }
-
-        if self.timer.local_check.poll_next_unpin(cx).is_ready() {
-            let addrs = self.swarm.listeners().cloned().collect::<Vec<_>>();
-            if !addrs.is_empty() {
-                for ch in self.local_listener.drain(..) {
-                    let addrs = addrs.clone();
-                    let _ = ch.send(addrs);
-                }
-            }
-        }
-
         Poll::Pending
     }
 }
@@ -253,14 +216,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         let mut session_cleanup = tokio::time::interval(Duration::from_secs(5 * 60));
         let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
 
-        let mut external_check = tokio::time::interval_at(
-            tokio::time::Instant::now() + Duration::from_secs(1),
-            Duration::from_secs(1),
-        );
-        let mut local_check = tokio::time::interval_at(
-            tokio::time::Instant::now() + Duration::from_secs(1),
-            Duration::from_secs(1),
-        );
         loop {
             tokio::select! {
                 Some(swarm) = self.swarm.next() => {
@@ -297,24 +252,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     for id in to_remove {
                         let (tx, _rx) = oneshot::channel();
                         self.destroy_bs_session(id, tx);
-                    }
-                }
-                _ = external_check.tick() => {
-                    let addrs = self.swarm.external_addresses().cloned().collect::<Vec<_>>();
-                    if !addrs.is_empty() {
-                        for ch in self.external_listener.drain(..) {
-                            let addrs = addrs.clone();
-                            let _ = ch.send(addrs);
-                        }
-                    }
-                }
-                _ = local_check.tick() => {
-                    let addrs = self.swarm.listeners().cloned().collect::<Vec<_>>();
-                    if !addrs.is_empty() {
-                        for ch in self.local_listener.drain(..) {
-                            let addrs = addrs.clone();
-                            let _ = ch.send(addrs);
-                        }
                     }
                 }
             }
@@ -366,11 +303,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 listener_id,
                 address,
             } => {
-                for ch in self.local_listener.drain(..) {
-                    let addr = address.clone();
-                    let _ = ch.send(vec![addr]);
-                }
-
                 if self.local_external_addr
                     && !address.is_relay()
                     && (address.is_loopback() || address.is_private())
@@ -1097,15 +1029,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             }
             IpfsEvent::Listeners(ret) => {
                 let listeners = self.swarm.listeners().cloned().collect::<Vec<Multiaddr>>();
-                let res = match listeners.is_empty() {
-                    true => {
-                        let (tx, rx) = oneshot::channel();
-                        self.local_listener.push(tx);
-                        Either::Right(async move { rx.await.unwrap_or_default() }.boxed())
-                    }
-                    false => Either::Left(listeners),
-                };
-                ret.send(Ok(res)).ok();
+                ret.send(Ok(listeners)).ok();
             }
             IpfsEvent::ExternalAddresses(ret) => {
                 let external = self
@@ -1114,15 +1038,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     .cloned()
                     .collect::<Vec<Multiaddr>>();
 
-                let res = match external.is_empty() {
-                    true => {
-                        let (tx, rx) = oneshot::channel();
-                        self.external_listener.push(tx);
-                        Either::Right(async move { rx.await.unwrap_or_default() }.boxed())
-                    }
-                    false => Either::Left(external),
-                };
-                ret.send(Ok(res)).ok();
+                ret.send(Ok(external)).ok();
             }
             IpfsEvent::IsConnected(peer_id, ret) => {
                 let connected = self.swarm.is_connected(&peer_id);

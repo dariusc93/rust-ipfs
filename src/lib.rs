@@ -329,9 +329,9 @@ enum IpfsEvent {
     /// Addresses
     Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     /// Local addresses
-    Listeners(Channel<Either<Vec<Multiaddr>, BoxFuture<'static, Vec<Multiaddr>>>>),
+    Listeners(Channel<Vec<Multiaddr>>),
     /// Local addresses
-    ExternalAddresses(Channel<Either<Vec<Multiaddr>, BoxFuture<'static, Vec<Multiaddr>>>>),
+    ExternalAddresses(Channel<Vec<Multiaddr>>),
     /// Connected peers
     Connected(Channel<Vec<PeerId>>),
     /// Is Connected
@@ -920,7 +920,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 Ok(id) => {
                     let (tx, _rx) = oneshot_channel();
                     fut.pending_add_listener.insert(id, tx);
-                },
+                }
                 _ => continue,
             };
         }
@@ -1555,16 +1555,8 @@ impl Ipfs {
     pub async fn listening_addresses(&self) -> Result<Vec<Multiaddr>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
-
             self.to_task.clone().send(IpfsEvent::Listeners(tx)).await?;
-
-            match rx.await?? {
-                Either::Left(list) => Ok(list),
-                Either::Right(fut) => {
-                    let list = tokio::time::timeout(Duration::from_secs(5), fut).await?;
-                    Ok(list)
-                }
-            }
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1580,13 +1572,7 @@ impl Ipfs {
                 .send(IpfsEvent::ExternalAddresses(tx))
                 .await?;
 
-            match rx.await?? {
-                Either::Left(list) => Ok(list),
-                Either::Right(fut) => {
-                    let list = tokio::time::timeout(Duration::from_secs(5), fut).await?;
-                    Ok(list)
-                }
-            }
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
