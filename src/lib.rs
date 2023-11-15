@@ -64,7 +64,7 @@ use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
-    fmt, io,
+    fmt,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
     sync::atomic::AtomicU64,
@@ -323,24 +323,21 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 #[allow(clippy::type_complexity)]
 enum IpfsEvent {
     /// Connect
-    Connect(DialOpts, OneshotSender<ReceiverChannel<()>>),
+    Connect(DialOpts, Channel<()>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     /// Addresses
     Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     /// Local addresses
-    Listeners(Channel<Either<Vec<Multiaddr>, BoxFuture<'static, Vec<Multiaddr>>>>),
+    Listeners(Channel<Vec<Multiaddr>>),
     /// Local addresses
-    ExternalAddresses(Channel<Either<Vec<Multiaddr>, BoxFuture<'static, Vec<Multiaddr>>>>),
+    ExternalAddresses(Channel<Vec<Multiaddr>>),
     /// Connected peers
     Connected(Channel<Vec<PeerId>>),
     /// Is Connected
     IsConnected(PeerId, Channel<bool>),
     /// Disconnect
-    Disconnect(
-        PeerId,
-        OneshotSender<(ReceiverChannel<()>, ReceiverChannel<()>)>,
-    ),
+    Disconnect(PeerId, Channel<()>),
     /// Ban Peer
     Ban(PeerId, Channel<()>),
     /// Unban peer
@@ -352,14 +349,8 @@ enum IpfsEvent {
     GetBitswapPeers(Channel<BoxFuture<'static, Vec<PeerId>>>),
     WantList(Option<PeerId>, Channel<BoxFuture<'static, Vec<Cid>>>),
     PubsubSubscribed(Channel<Vec<String>>),
-    AddListeningAddress(
-        Multiaddr,
-        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
-    ),
-    RemoveListeningAddress(
-        Multiaddr,
-        OneshotSender<anyhow::Result<oneshot::Receiver<Either<Multiaddr, Result<(), io::Error>>>>>,
-    ),
+    AddListeningAddress(Multiaddr, Channel<Multiaddr>),
+    RemoveListeningAddress(Multiaddr, Channel<()>),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(PeerId, Multiaddr, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
@@ -370,8 +361,6 @@ enum IpfsEvent {
         bool,
         Channel<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
     ),
-    WhitelistPeer(PeerId, Channel<()>),
-    RemoveWhitelistPeer(PeerId, Channel<()>),
     GetProviders(Cid, Channel<Option<BoxStream<'static, PeerId>>>),
     Provide(Cid, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
@@ -574,7 +563,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             .with_kademlia(None, Default::default())
             .with_ping(None)
             .with_pubsub(None)
-            .set_default_listener()
     }
 
     /// Enables kademlia
@@ -905,9 +893,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        // FIXME: mutating options above is an unfortunate side-effect of this call, which could be
-        // reordered for less error prone code.
-
         let swarm_config = options.swarm_configuration.clone().unwrap_or_default();
         let transport_config = options.transport_configuration.unwrap_or_default();
         let swarm = create_swarm(
@@ -922,46 +907,20 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
         .await?;
 
-        let kad_subscriptions = Default::default();
-        let listener_subscriptions = Default::default();
-        let listeners = Default::default();
-        let bootstraps = Default::default();
-
         let IpfsOptions {
             listening_addrs, ..
         } = options;
 
-        let mut fut = task::IpfsTask {
-            repo_events: repo_events.fuse(),
-            from_facade: receiver.fuse(),
-            swarm,
-            listening_addresses: HashMap::with_capacity(listening_addrs.len()),
-            listeners,
-            provider_stream: HashMap::new(),
-            bitswap_provider_stream: Default::default(),
-            record_stream: HashMap::new(),
-            dht_peer_lookup: Default::default(),
-            bitswap_sessions: Default::default(),
-            disconnect_confirmation: Default::default(),
-            pubsub_event_stream: Default::default(),
-            kad_subscriptions,
-            listener_subscriptions,
-            repo,
-            bootstraps,
-            swarm_event,
-            external_listener: Default::default(),
-            local_listener: Default::default(),
-            timer: Default::default(),
-            relay_listener: Default::default(),
-            local_external_addr,
-            rzv_register_pending: Default::default(),
-            rzv_discover_pending: Default::default(),
-            rzv_cookie: Default::default(),
-        };
+        let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), repo);
+        fut.swarm_event = swarm_event;
+        fut.local_external_addr = local_external_addr;
 
         for addr in listening_addrs.into_iter() {
             match fut.swarm.listen_on(addr) {
-                Ok(id) => fut.listeners.insert(id),
+                Ok(id) => {
+                    let (tx, _rx) = oneshot_channel();
+                    fut.pending_add_listener.insert(id, tx);
+                }
                 _ => continue,
             };
         }
@@ -1299,39 +1258,7 @@ impl Ipfs {
                 .send(IpfsEvent::Connect(target, tx))
                 .await?;
 
-            let subscription = rx.await?;
-
-            subscription.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Whitelist a peer
-    pub async fn whitelist(&self, peer_id: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::WhitelistPeer(peer_id, tx))
-                .await?;
-
-            rx.await?.map_err(anyhow::Error::from)
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Remove peer from whitelist
-    pub async fn remove_whitelisted_peer(&self, peer_id: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RemoveWhitelistPeer(peer_id, tx))
-                .await?;
-
-            rx.await?.map_err(anyhow::Error::from)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1381,11 +1308,8 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::Disconnect(target, tx))
                 .await?;
-            let (rx_nb, rx_swarm) = rx.await?;
-            let (result_nb, result_swarm) = futures::join!(rx_nb, rx_swarm);
 
-            result_nb??;
-            result_swarm?
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1631,16 +1555,8 @@ impl Ipfs {
     pub async fn listening_addresses(&self) -> Result<Vec<Multiaddr>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
-
             self.to_task.clone().send(IpfsEvent::Listeners(tx)).await?;
-
-            match rx.await?? {
-                Either::Left(list) => Ok(list),
-                Either::Right(fut) => {
-                    let list = tokio::time::timeout(Duration::from_secs(5), fut).await?;
-                    Ok(list)
-                }
-            }
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1656,13 +1572,7 @@ impl Ipfs {
                 .send(IpfsEvent::ExternalAddresses(tx))
                 .await?;
 
-            match rx.await?? {
-                Either::Left(list) => Ok(list),
-                Either::Right(fut) => {
-                    let list = tokio::time::timeout(Duration::from_secs(5), fut).await?;
-                    Ok(list)
-                }
-            }
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1683,25 +1593,14 @@ impl Ipfs {
     /// has now been changed.
     pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
-            //Note: This is due to a possible race when doing an initial dial out to a relay
-            //      Without this delay, the listener may close, resulting in an error here
-            if addr.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
                 .send(IpfsEvent::AddListeningAddress(addr, tx))
                 .await?;
-            let rx = rx.await??;
-            match rx.await? {
-                Either::Left(addr) => Ok(addr),
-                Either::Right(result) => {
-                    result?;
-                    Err(anyhow::anyhow!("No multiaddr provided"))
-                }
-            }
+
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1719,13 +1618,8 @@ impl Ipfs {
                 .clone()
                 .send(IpfsEvent::RemoveListeningAddress(addr, tx))
                 .await?;
-            let rx = rx.await??;
-            match rx.await? {
-                Either::Left(addr) => Err(anyhow::anyhow!(
-                    "Error: Address {addr} was returned while removing listener"
-                )),
-                Either::Right(result) => result.map_err(anyhow::Error::from),
-            }
+
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -2431,14 +2325,18 @@ mod node {
                 uninit = uninit.set_span(span);
             }
 
-            uninit = match addr {
-                Some(addr) => uninit.set_listening_addrs(addr),
-                None => uninit.set_default_listener(),
+            let list = match addr {
+                Some(addr) => addr,
+                None => vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()],
             };
 
             let ipfs = uninit.start().await.unwrap();
 
             let id = ipfs.keypair().map(|kp| kp.public().to_peer_id()).unwrap();
+            for addr in list {
+                ipfs.add_listening_address(addr).await.expect("To succeed");
+            }
+
             let mut addrs = ipfs.listening_addresses().await.unwrap();
 
             for addr in &mut addrs {

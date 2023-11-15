@@ -84,9 +84,7 @@ impl NetworkBehaviour for Behaviour {
         }
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm) {
-        _ = event;
-    }
+    fn on_swarm_event(&mut self, _: FromSwarm) {}
 
     #[allow(deprecated)]
     fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {

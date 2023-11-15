@@ -1,3 +1,6 @@
+# next [unrelease]
+- refactor: Revise peerbook and move connect/disconnect operations to main task [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.7.1
 - chore: Deprecate UninitalizedIpfs::empty and UninitalizedIpfs::with_opt for UnitializedIpfs::new [PR 118](https://github.com/dariusc93/rust-ipfs/pull/118)
 - feat: Implement redb datastore backend [PR 117](https://github.com/dariusc93/rust-ipfs/pull/117)

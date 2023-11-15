@@ -3,7 +3,7 @@ use super::{addressbook, protocol};
 use bytes::Bytes;
 use libp2p_allow_block_list::BlockedPeers;
 
-use super::peerbook::{self, ConnectionLimits};
+use super::peerbook::{self};
 use either::Either;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ use libp2p::kad::{
     Behaviour as Kademlia, BucketInserts as KademliaBucketInserts, Config as KademliaConfig,
     Record, StoreInserts as KademliaStoreInserts,
 };
-use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig};
+use libp2p::mdns::tokio::Behaviour as Mdns;
 use libp2p::ping::Behaviour as Ping;
 use libp2p::relay::client::Behaviour as RelayClient;
 use libp2p::relay::client::{self, Transport as ClientTransport};
@@ -337,7 +337,6 @@ where
         keypair: &Keypair,
         options: &IpfsOptions,
         repo: Repo,
-        limits: ConnectionLimits,
         custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let protocols = options.protocols;
@@ -347,10 +346,7 @@ where
         info!("net: starting with peer id {}", peer_id);
 
         let mdns = if protocols.mdns {
-            let config = MdnsConfig {
-                ..Default::default()
-            };
-            Mdns::new(config, peer_id).ok()
+            Mdns::new(Default::default(), peer_id).ok()
         } else {
             None
         }
@@ -468,8 +464,7 @@ where
             false => (None, None.into(), None.into()),
         };
 
-        let mut peerbook = peerbook::Behaviour::default();
-        peerbook.set_connection_limit(limits);
+        let peerbook = peerbook::Behaviour::default();
 
         let addressbook =
             addressbook::Behaviour::with_config(options.addr_config.unwrap_or_default());

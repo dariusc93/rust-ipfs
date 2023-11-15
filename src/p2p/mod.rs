@@ -26,7 +26,6 @@ pub use self::behaviour::IdentifyConfiguration;
 pub use self::behaviour::{BitswapConfig, BitswapProtocol};
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
-pub use self::peerbook::ConnectionLimits;
 pub use self::transport::{DnsResolver, TransportConfig, UpdateMode, UpgradeVersion};
 pub(crate) mod gossipsub;
 mod transport;
@@ -155,7 +154,6 @@ impl Default for PubsubConfig {
 
 #[derive(Clone)]
 pub struct SwarmConfig {
-    pub connection: ConnectionLimits,
     pub dial_concurrency_factor: NonZeroU8,
     pub notify_handler_buffer_size: NonZeroUsize,
     pub connection_event_buffer_size: usize,
@@ -165,7 +163,6 @@ pub struct SwarmConfig {
 impl Default for SwarmConfig {
     fn default() -> Self {
         Self {
-            connection: ConnectionLimits::default(),
             dial_concurrency_factor: 8.try_into().expect("8 > 0"),
             notify_handler_buffer_size: 32.try_into().expect("256 > 0"),
             connection_event_buffer_size: 7,
@@ -197,7 +194,7 @@ where
     let idle = options.connection_idle;
 
     let (behaviour, relay_transport) =
-        behaviour::Behaviour::new(&keypair, options, repo, swarm_config.connection, custom).await?;
+        behaviour::Behaviour::new(&keypair, options, repo,  custom).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = match custom_transport {
