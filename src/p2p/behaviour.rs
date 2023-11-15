@@ -24,7 +24,7 @@ use libp2p::kad::{
     Behaviour as Kademlia, BucketInserts as KademliaBucketInserts, Config as KademliaConfig,
     Record, StoreInserts as KademliaStoreInserts,
 };
-use libp2p::mdns::{tokio::Behaviour as Mdns, Config as MdnsConfig};
+use libp2p::mdns::tokio::Behaviour as Mdns;
 use libp2p::ping::Behaviour as Ping;
 use libp2p::relay::client::Behaviour as RelayClient;
 use libp2p::relay::client::{self, Transport as ClientTransport};
