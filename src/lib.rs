@@ -109,6 +109,7 @@ pub use libp2p::{
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
     kad::{store::MemoryStoreConfig, Mode, Record},
+    metrics::{Metrics, Registry},
     ping::Config as PingConfig,
     rendezvous::Namespace,
     swarm::dial_opts::DialOpts,
@@ -779,6 +780,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             ..
         } = self;
 
+        let mut metric_registry = Registry::default();
+
+        let metrics = Metrics::new(&mut metric_registry);
+
         let keys = keys.unwrap_or(Keypair::generate_ed25519());
 
         let root_span = Option::take(&mut options.span)
@@ -911,7 +916,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             listening_addrs, ..
         } = options;
 
-        let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), repo);
+        let mut fut =
+            task::IpfsTask::new(swarm, metrics, repo_events.fuse(), receiver.fuse(), repo);
         fut.swarm_event = swarm_event;
         fut.local_external_addr = local_external_addr;
 

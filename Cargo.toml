@@ -76,6 +76,7 @@ libp2p = { features = [
     "cbor",
     "rendezvous",
     "quic",
+    "metrics",
 ], workspace = true }
 
 libp2p-allow-block-list = "0.3"

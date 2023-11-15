@@ -194,7 +194,7 @@ where
     let idle = options.connection_idle;
 
     let (behaviour, relay_transport) =
-        behaviour::Behaviour::new(&keypair, options, repo,  custom).await?;
+        behaviour::Behaviour::new(&keypair, options, repo, custom).await?;
 
     // Set up an encrypted TCP transport over the Yamux and Mplex protocol. If relay transport is supplied, that will be apart
     let transport = match custom_transport {

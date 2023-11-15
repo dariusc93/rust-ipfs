@@ -65,6 +65,7 @@ use libp2p::{
         GetRecordOk, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
     mdns::Event as MdnsEvent,
+    metrics::Recorder,
     rendezvous::{Cookie, Namespace},
     swarm::{ConnectionId, SwarmEvent},
 };
@@ -74,6 +75,7 @@ use libp2p::{
 #[allow(clippy::type_complexity)]
 pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) swarm: TSwarm<C>,
+    pub(crate) metric: libp2p::metrics::Metrics,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
     pub(crate) listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
@@ -105,6 +107,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub fn new(
         swarm: TSwarm<C>,
+        metric: libp2p::metrics::Metrics,
         repo_events: Fuse<Receiver<RepoEvent>>,
         from_facade: Fuse<Receiver<IpfsEvent>>,
         repo: Repo,
@@ -113,6 +116,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             repo_events,
             from_facade,
             swarm,
+            metric,
             provider_stream: HashMap::new(),
             bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
@@ -298,6 +302,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         if let Some(handler) = self.swarm_event.as_ref() {
             handler(&mut self.swarm, &swarm_event)
         }
+        self.metric.record(&swarm_event);
         match swarm_event {
             SwarmEvent::NewListenAddr {
                 listener_id,
@@ -391,6 +396,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(event)) => {
+                self.metric.record(&event);
                 match event {
                     KademliaEvent::InboundRequest { request } => {
                         trace!("kad: inbound {:?} request handled", request);
@@ -757,60 +763,77 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
             }
-            SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
-                BitswapEvent::Provide { key } => {
-                    if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
-                        let key = key.hash().to_bytes();
-                        let _id = kad.start_providing(key.into()).ok();
+            SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => {
+                // self.metric.record(&event);
+                match event {
+                    BitswapEvent::Provide { key } => {
+                        if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
+                            let key = key.hash().to_bytes();
+                            let _id = kad.start_providing(key.into()).ok();
+                        }
+                    }
+                    BitswapEvent::FindProviders { key, response, .. } => {
+                        if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
+                            info!("Looking for providers for {key}");
+                            let key = key.hash().to_bytes();
+                            let id = kad.get_providers(key.into());
+                            self.bitswap_provider_stream.insert(id, response);
+                        }
+                    }
+                    BitswapEvent::Ping { peer, response } => {
+                        let duration = self.swarm.behaviour().peerbook.get_peer_latest_rtt(peer);
+                        let _ = response.send(duration).ok();
                     }
                 }
-                BitswapEvent::FindProviders { key, response, .. } => {
-                    if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
-                        info!("Looking for providers for {key}");
-                        let key = key.hash().to_bytes();
-                        let id = kad.get_providers(key.into());
-                        self.bitswap_provider_stream.insert(id, response);
-                    }
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::Pubsub(event)) => {
+                self.metric.record(&event);
+                match event {
+                    libp2p::gossipsub::Event::Subscribed { peer_id, topic } => self
+                        .emit_pubsub_event(InnerPubsubEvent::Subscribe {
+                            topic: topic.to_string(),
+                            peer_id,
+                        }),
+                    libp2p::gossipsub::Event::Unsubscribed { peer_id, topic } => self
+                        .emit_pubsub_event(InnerPubsubEvent::Unsubscribe {
+                            topic: topic.to_string(),
+                            peer_id,
+                        }),
+                    _ => {}
                 }
-                BitswapEvent::Ping { peer, response } => {
-                    let duration = self.swarm.behaviour().peerbook.get_peer_latest_rtt(peer);
-                    let _ = response.send(duration).ok();
-                }
-            },
-            SwarmEvent::Behaviour(BehaviourEvent::Pubsub(
-                libp2p::gossipsub::Event::Subscribed { peer_id, topic },
-            )) => self.emit_pubsub_event(InnerPubsubEvent::Subscribe {
-                topic: topic.to_string(),
-                peer_id,
-            }),
-            SwarmEvent::Behaviour(BehaviourEvent::Pubsub(
-                libp2p::gossipsub::Event::Unsubscribed { peer_id, topic },
-            )) => self.emit_pubsub_event(InnerPubsubEvent::Unsubscribe {
-                topic: topic.to_string(),
-                peer_id,
-            }),
-            SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => match event {
-                libp2p::ping::Event {
-                    peer,
-                    connection,
-                    result: Result::Ok(rtt),
-                } => {
-                    trace!(
-                        "ping: rtt to {} is {} ms",
-                        peer.to_base58(),
-                        rtt.as_millis()
-                    );
-                    self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::Ping(event)) => {
+                self.metric.record(&event);
+                match event {
+                    libp2p::ping::Event {
+                        peer,
+                        connection,
+                        result: Result::Ok(rtt),
+                    } => {
+                        trace!(
+                            "ping: rtt to {} is {} ms",
+                            peer.to_base58(),
+                            rtt.as_millis()
+                        );
+                        self.swarm.behaviour_mut().peerbook.set_peer_rtt(peer, rtt);
 
-                    if let Some(m) = self.swarm.behaviour_mut().relay_manager.as_mut() {
-                        m.set_peer_rtt(peer, connection, rtt)
+                        if let Some(m) = self.swarm.behaviour_mut().relay_manager.as_mut() {
+                            m.set_peer_rtt(peer, connection, rtt)
+                        }
+                    }
+                    libp2p::ping::Event { .. } => {
+                        //TODO: Determine if we should continue handling ping errors and if we should disconnect/close connection.
                     }
                 }
-                libp2p::ping::Event { .. } => {
-                    //TODO: Determine if we should continue handling ping errors and if we should disconnect/close connection.
-                }
-            },
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::Dcutr(event)) => {
+                self.metric.record(&event);
+            }
+            SwarmEvent::Behaviour(BehaviourEvent::Relay(event)) => {
+                self.metric.record(&event);
+            }
             SwarmEvent::Behaviour(BehaviourEvent::RelayClient(event)) => {
+                // self.metric.record(&event);
                 debug!("Relay Client Event: {event:?}");
                 if let Some(m) = self.swarm.behaviour_mut().relay_manager.as_mut() {
                     m.process_relay_event(event);
@@ -858,46 +881,49 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
             }
 
-            SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
-                IdentifyEvent::Received { peer_id, info } => {
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .inject_peer_info(info.clone());
+            SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => {
+                self.metric.record(&event);
+                match event {
+                    IdentifyEvent::Received { peer_id, info } => {
+                        self.swarm
+                            .behaviour_mut()
+                            .peerbook
+                            .inject_peer_info(info.clone());
 
-                    if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
-                        for ret in rets {
-                            let _ = ret.send(Ok(info.clone()));
+                        if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                            for ret in rets {
+                                let _ = ret.send(Ok(info.clone()));
+                            }
                         }
-                    }
 
-                    let IdentifyInfo {
-                        listen_addrs,
-                        protocols,
-                        ..
-                    } = info;
+                        let IdentifyInfo {
+                            listen_addrs,
+                            protocols,
+                            ..
+                        } = info;
 
-                    if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
-                        if protocols.iter().any(|p| libp2p::kad::PROTOCOL_NAME.eq(p)) {
-                            for addr in &listen_addrs {
-                                kad.add_address(&peer_id, addr.clone());
+                        if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
+                            if protocols.iter().any(|p| libp2p::kad::PROTOCOL_NAME.eq(p)) {
+                                for addr in &listen_addrs {
+                                    kad.add_address(&peer_id, addr.clone());
+                                }
+                            }
+                        }
+
+                        if protocols
+                            .iter()
+                            .any(|p| libp2p::autonat::DEFAULT_PROTOCOL_NAME.eq(p))
+                        {
+                            if let Some(autonat) = self.swarm.behaviour_mut().autonat.as_mut() {
+                                for addr in listen_addrs {
+                                    autonat.add_server(peer_id, Some(addr));
+                                }
                             }
                         }
                     }
-
-                    if protocols
-                        .iter()
-                        .any(|p| libp2p::autonat::DEFAULT_PROTOCOL_NAME.eq(p))
-                    {
-                        if let Some(autonat) = self.swarm.behaviour_mut().autonat.as_mut() {
-                            for addr in listen_addrs {
-                                autonat.add_server(peer_id, Some(addr));
-                            }
-                        }
-                    }
+                    event => debug!("identify: {:?}", event),
                 }
-                event => debug!("identify: {:?}", event),
-            },
+            }
             SwarmEvent::Behaviour(BehaviourEvent::Autonat(autonat::Event::StatusChanged {
                 old,
                 new,
