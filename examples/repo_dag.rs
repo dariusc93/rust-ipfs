@@ -1,6 +1,3 @@
-use std::future::IntoFuture;
-
-use futures::join;
 use libipld::ipld;
 use rust_ipfs::dag::IpldDag;
 use rust_ipfs::repo::Repo;

@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
 
-        writeln!(stdout, "Connected to {}", peer_id);
+        writeln!(stdout, "Connected to {}", peer_id)?;
     }
 
     let mut event_stream = ipfs.pubsub_events(&topic).await?;

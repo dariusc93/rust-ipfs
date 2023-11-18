@@ -1,6 +1,3 @@
-use std::future::IntoFuture;
-
-use futures::join;
 use libipld::ipld;
 use rust_ipfs::{Ipfs, IpfsPath};
 
