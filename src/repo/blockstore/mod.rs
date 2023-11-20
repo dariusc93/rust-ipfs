@@ -17,6 +17,13 @@ pub(crate) enum RepoBlockCommand {
         cid: Cid,
         response: Channel<Option<Block>>,
     },
+    Size {
+        cid: Cid,
+        response: Channel<Option<usize>>,
+    },
+    TotalSize {
+        response: Channel<usize>,
+    },
     PutBlock {
         block: Block,
         response: Channel<(Cid, BlockPut)>,

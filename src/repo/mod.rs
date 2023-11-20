@@ -70,11 +70,15 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     async fn contains(&self, cid: &Cid) -> Result<bool, Error>;
     /// Returns a block from the blockstore.
     async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error>;
+    /// Get the size of a single block
+    async fn size(&self, cid: &Cid) -> Result<Option<usize>, Error>;
+    /// Get a total size of the block store
+    async fn total_size(&self) -> Result<usize, Error>;
     /// Inserts a block in the blockstore.
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error>;
     /// Removes a block from the blockstore.
     async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error>;
-
+    /// Remove blocks while excluding references from the cleanup
     async fn remove_garbage(&self, references: BoxStream<'static, Cid>) -> Result<Vec<Cid>, Error>;
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;

@@ -89,6 +89,29 @@ impl BlockStore for FsBlockStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    async fn size(&self, cid: &Cid) -> Result<Option<usize>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Size {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn total_size(&self) -> Result<usize, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::TotalSize { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
         let _ = self
@@ -164,6 +187,12 @@ impl FsBlockStoreTask {
                         }
                         RepoBlockCommand::PutBlock { block, response } => {
                             let _ = response.send(self.put(block).await);
+                        }
+                        RepoBlockCommand::Size { cid, response } => {
+                            let _ = response.send(Ok(self.size(&cid).await));
+                        }
+                        RepoBlockCommand::TotalSize { response } => {
+                            let _ = response.send(Ok(self.total_size().await));
                         }
                         RepoBlockCommand::Remove { cid, response } => {
                             let _ = response.send(self.remove(&cid).await);
@@ -291,6 +320,18 @@ impl FsBlockStoreTask {
             }
             Err(e) => Err(Error::new(e)),
         }
+    }
+
+    async fn size(&self, cid: &Cid) -> Option<usize> {
+        let path = block_path(self.path.clone(), cid);
+        fs::metadata(path).await.map(|m| m.len() as usize).ok()
+    }
+
+    async fn total_size(&self) -> usize {
+        fs::metadata(&self.path)
+            .await
+            .map(|m| m.len() as usize)
+            .unwrap_or_default()
     }
 
     async fn remove(&mut self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {

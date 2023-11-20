@@ -85,6 +85,31 @@ impl BlockStore for MemBlockStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    async fn size(&self, cid: &Cid) -> Result<Option<usize>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Size {
+                cid: *cid,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    async fn total_size(&self) -> Result<usize, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::TotalSize {
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
         let _ = self
@@ -160,6 +185,12 @@ impl MemBlockTask {
                         RepoBlockCommand::Get { cid, response } => {
                             let _ = response.send(self.get(&cid).await);
                         }
+                        RepoBlockCommand::Size { cid, response } => {
+                            let _ = response.send(Ok(self.size(&cid).await));
+                        }
+                        RepoBlockCommand::TotalSize { response } => {
+                            let _ = response.send(Ok(self.total_size().await));
+                        }
                         RepoBlockCommand::PutBlock { block, response } => {
                             let _ = response.send(self.put(block).await);
                         }
@@ -219,6 +250,14 @@ impl MemBlockTask {
                 Ok((cid, BlockPut::NewBlock))
             }
         }
+    }
+
+    async fn size(&self, cid: &Cid) -> Option<usize> {
+        self.blocks.get(cid).map(|b| b.data().len())
+    }
+
+    async fn total_size(&self) -> usize {
+        self.blocks.values().map(|b| b.data().len()).sum()
     }
 
     async fn remove(&mut self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
