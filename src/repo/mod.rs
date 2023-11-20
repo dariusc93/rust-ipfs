@@ -74,6 +74,8 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error>;
     /// Removes a block from the blockstore.
     async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error>;
+
+    async fn remove_garbage(&self, references: BoxStream<'static, Cid>) -> Result<Vec<Cid>, Error>;
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;
     /// Wipes the blockstore.
@@ -846,16 +848,17 @@ impl Repo {
     }
 
     /// Function to perform a basic cleanup of unpinned blocks
-    pub async fn cleanup(&self) -> Result<BTreeSet<Cid>, Error> {
-        let mut removed_blocks = BTreeSet::new();
-        let blocks = self.list_blocks().await?;
-        for cid in blocks {
-            if !self.is_pinned(&cid).await? {
-                if let Ok(cid) = self.remove_block(&cid, false).await {
-                    removed_blocks.extend(cid.iter());
-                }
-            }
-        }
+    pub async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+        let pinned = self
+            .list_pins(None)
+            .await
+            .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
+            .try_collect::<BTreeSet<_>>()
+            .await?;
+
+        let refs = futures::stream::iter(pinned);
+
+        let removed_blocks = self.block_store.remove_garbage(refs.boxed()).await?;
         Ok(removed_blocks)
     }
 

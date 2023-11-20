@@ -63,7 +63,7 @@ use tracing_futures::Instrument;
 use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
@@ -1011,7 +1011,7 @@ impl Ipfs {
     /// Cleans up of all unpinned blocks
     /// Note: This is extremely basic and should not be relied on completely
     ///       until there is additional or extended implementation for a gc
-    pub async fn gc(&self) -> Result<BTreeSet<Cid>, Error> {
+    pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
         self.repo.cleanup().instrument(self.span.clone()).await
     }
 

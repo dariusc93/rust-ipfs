@@ -3,11 +3,14 @@ use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
 use async_trait::async_trait;
-use futures::{SinkExt, StreamExt};
+use futures::stream::BoxStream;
+use futures::{FutureExt, SinkExt, StreamExt};
+use futures_timer::Delay;
 use libipld::Cid;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::repo::{BlockRm, BlockRmError};
 
@@ -22,6 +25,8 @@ pub struct MemBlockStore {
 }
 
 struct MemBlockTask {
+    timeout: Duration,
+    temp: HashMap<Cid, Delay>,
     blocks: HashMap<Cid, Block>,
     rx: futures::channel::mpsc::Receiver<RepoBlockCommand>,
 }
@@ -30,7 +35,9 @@ impl MemBlockStore {
     pub fn new(_: PathBuf) -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(1);
         let mut task = MemBlockTask {
+            timeout: Duration::from_secs(120),
             blocks: HashMap::new(),
+            temp: HashMap::new(),
             rx,
         };
 
@@ -104,6 +111,19 @@ impl BlockStore for MemBlockStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
+    async fn remove_garbage(&self, references: BoxStream<'static, Cid>) -> Result<Vec<Cid>, Error> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .tx
+            .clone()
+            .send(RepoBlockCommand::Cleanup {
+                refs: references,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
     async fn list(&self) -> Result<Vec<Cid>, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
         let _ = self
@@ -129,29 +149,44 @@ impl BlockStore for MemBlockStore {
 
 impl MemBlockTask {
     async fn start(&mut self) {
-        while let Some(command) = self.rx.next().await {
-            match command {
-                RepoBlockCommand::Contains { cid, response } => {
-                    let _ = response.send(self.contains(&cid).await);
+        loop {
+            tokio::select! {
+                biased;
+                Some(command) = self.rx.next() => {
+                    match command {
+                        RepoBlockCommand::Contains { cid, response } => {
+                            let _ = response.send(self.contains(&cid).await);
+                        }
+                        RepoBlockCommand::Get { cid, response } => {
+                            let _ = response.send(self.get(&cid).await);
+                        }
+                        RepoBlockCommand::PutBlock { block, response } => {
+                            let _ = response.send(self.put(block).await);
+                        }
+                        RepoBlockCommand::Remove { cid, response } => {
+                            let _ = response.send(self.remove(&cid).await);
+                        }
+                        RepoBlockCommand::List { response } => {
+                            let _ = response.send(self.list().await);
+                        }
+                        RepoBlockCommand::Cleanup {
+                            refs,
+                            response,
+                        } => {
+                            let _ = response.send(self.cleanup(refs).await);
+                        },
+                        RepoBlockCommand::Wipe { response } => {
+                            let _ = response.send({
+                                self.wipe().await;
+                                Ok(())
+                            });
+                        }
+                    }
                 }
-                RepoBlockCommand::Get { cid, response } => {
-                    let _ = response.send(self.get(&cid).await);
-                }
-                RepoBlockCommand::PutBlock { block, response } => {
-                    let _ = response.send(self.put(block).await);
-                }
-                RepoBlockCommand::Remove { cid, response } => {
-                    let _ = response.send(self.remove(&cid).await);
-                }
-                RepoBlockCommand::List { response } => {
-                    let _ = response.send(self.list().await);
-                }
-                RepoBlockCommand::Wipe { response } => {
-                    let _ = response.send({
-                        self.wipe().await;
-                        Ok(())
-                    });
-                }
+                _ = futures::future::poll_fn(|cx| {
+                    self.temp.retain(|_, timer| timer.poll_unpin(cx).is_pending());
+                    std::task::Poll::Pending
+                }) => {}
             }
         }
     }
@@ -170,7 +205,8 @@ impl MemBlockTask {
 
     async fn put(&mut self, block: Block) -> Result<(Cid, BlockPut), Error> {
         use std::collections::hash_map::Entry;
-        match self.blocks.entry(*block.cid()) {
+        let cid = *block.cid();
+        match self.blocks.entry(cid) {
             Entry::Occupied(_) => {
                 trace!("already existing block");
                 Ok((*block.cid(), BlockPut::Existed))
@@ -179,6 +215,7 @@ impl MemBlockTask {
                 trace!("new block");
                 let cid = *ve.key();
                 ve.insert(block);
+                self.temp.insert(cid, Delay::new(self.timeout));
                 Ok((cid, BlockPut::NewBlock))
             }
         }
@@ -186,9 +223,29 @@ impl MemBlockTask {
 
     async fn remove(&mut self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
         match self.blocks.remove(cid) {
-            Some(_block) => Ok(Ok(BlockRm::Removed(*cid))),
+            Some(_block) => {
+                self.temp.remove(cid);
+                Ok(Ok(BlockRm::Removed(*cid)))
+            }
             None => Ok(Err(BlockRmError::NotFound(*cid))),
         }
+    }
+
+    async fn cleanup(&mut self, refs: BoxStream<'_, Cid>) -> Result<Vec<Cid>, Error> {
+        let mut refs = refs.collect::<Vec<_>>().await;
+        refs.extend(self.temp.keys().cloned());
+
+        let mut removed_blocks = vec![];
+
+        self.blocks.retain(|cid, _| {
+            if !refs.contains(cid) {
+                removed_blocks.push(*cid);
+                return false;
+            }
+            true
+        });
+
+        Ok(removed_blocks)
     }
 
     async fn list(&self) -> Result<Vec<Cid>, Error> {
@@ -197,6 +254,7 @@ impl MemBlockTask {
 
     async fn wipe(&mut self) {
         self.blocks.clear();
+        self.temp.clear();
     }
 }
 #[cfg(test)]
