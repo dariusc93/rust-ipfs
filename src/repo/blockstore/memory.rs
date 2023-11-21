@@ -32,10 +32,10 @@ struct MemBlockTask {
 }
 
 impl MemBlockStore {
-    pub fn new(_: PathBuf) -> Self {
+    pub fn new(_: PathBuf, duration: Duration) -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(1);
         let mut task = MemBlockTask {
-            timeout: Duration::from_secs(120),
+            timeout: duration,
             blocks: HashMap::new(),
             temp: HashMap::new(),
             rx,
@@ -313,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_blockstore() {
         let tmp = std::env::temp_dir();
-        let store = MemBlockStore::new(tmp);
+        let store = MemBlockStore::new(tmp, Duration::ZERO);
         let data = b"1".to_vec();
         let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
@@ -346,7 +346,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_blockstore_list() {
         let tmp = std::env::temp_dir();
-        let mem_store = MemBlockStore::new(tmp);
+        let mem_store = MemBlockStore::new(tmp, Duration::ZERO);
 
         mem_store.init().await.unwrap();
         mem_store.open().await.unwrap();

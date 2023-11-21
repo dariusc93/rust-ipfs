@@ -8,7 +8,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Initialize the repo
-    let repo = Repo::new_memory();
+    let repo = Repo::new_memory(None);
     let dag = IpldDag::from(repo.clone());
 
     let cid1: libipld::cid::CidGeneric<64> = dag.put_dag(ipld!("block1")).await?;

@@ -34,11 +34,11 @@ pub struct FsBlockStoreTask {
 }
 
 impl FsBlockStore {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, duration: Duration) -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(1);
         let mut task = FsBlockStoreTask {
             path: path.clone(),
-            timeout: Duration::from_secs(120),
+            timeout: duration,
             temp: HashMap::new(),
             rx,
         };
@@ -470,7 +470,7 @@ mod tests {
         let mut tmp = temp_dir();
         tmp.push("blockstore1");
         std::fs::remove_dir_all(tmp.clone()).ok();
-        let store = FsBlockStore::new(tmp.clone());
+        let store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
 
         let data = b"1".to_vec();
         let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
@@ -513,14 +513,14 @@ mod tests {
         let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
-        let block_store = FsBlockStore::new(tmp.clone());
+        let block_store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
         block_store.init().await.unwrap();
         block_store.open().await.unwrap();
 
         assert!(!block_store.contains(block.cid()).await.unwrap());
         block_store.put(block.clone()).await.unwrap();
 
-        let block_store = FsBlockStore::new(tmp.clone());
+        let block_store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
         block_store.open().await.unwrap();
         assert!(block_store.contains(block.cid()).await.unwrap());
         assert_eq!(block_store.get(block.cid()).await.unwrap().unwrap(), block);
@@ -534,7 +534,7 @@ mod tests {
         tmp.push("blockstore_list");
         std::fs::remove_dir_all(&tmp).ok();
 
-        let block_store = FsBlockStore::new(tmp.clone());
+        let block_store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
         block_store.init().await.unwrap();
         block_store.open().await.unwrap();
 
@@ -559,7 +559,7 @@ mod tests {
         tmp.push("race_to_insert_new");
         std::fs::remove_dir_all(&tmp).ok();
 
-        let single = FsBlockStore::new(tmp.clone());
+        let single = FsBlockStore::new(tmp.clone(), Duration::ZERO);
         single.init().await.unwrap();
 
         let single = Arc::new(single);
@@ -622,7 +622,7 @@ mod tests {
         tmp.push("remove");
         std::fs::remove_dir_all(&tmp).ok();
 
-        let single = FsBlockStore::new(tmp.clone());
+        let single = FsBlockStore::new(tmp.clone(), Duration::ZERO);
 
         single.init().await.unwrap();
 

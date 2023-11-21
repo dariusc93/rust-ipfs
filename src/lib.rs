@@ -470,6 +470,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     custom_behaviour: Option<C>,
     custom_transport: Option<TTransportFn>,
     gc_config: Option<GCConfig>,
+    gc_repo_duration: Option<Duration>,
 }
 
 pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
@@ -495,6 +496,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             custom_behaviour: None,
             custom_transport: None,
             gc_config: None,
+            gc_repo_duration: None,
         }
     }
 
@@ -663,6 +665,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Set a duration for which blocks are not removed due to the garbage collector
+    /// Defaults: 2 mins
+    pub fn set_temp_pin_duration(mut self, duration: Duration) -> Self {
+        self.gc_repo_duration = Some(duration);
+        self
+    }
+
     /// Sets a path
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
@@ -785,6 +794,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             local_external_addr,
             repo_handle,
             gc_config,
+            gc_repo_duration,
             ..
         } = self;
 
@@ -820,7 +830,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         tokio::fs::create_dir_all(path).await?;
                     }
                 }
-                Repo::new(options.ipfs_path.clone())
+                Repo::new(options.ipfs_path.clone(), gc_repo_duration)
             }
         };
 
@@ -968,7 +978,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         if cleanup {
                             let blocks = repo.cleanup().await.unwrap();
                             for block in blocks {
-                                tracing::debug!(block = block.to_string(), "has been cleared from the block store");
+                                tracing::debug!(
+                                    block = block.to_string(),
+                                    "has been cleared from the block store"
+                                );
                             }
                         }
                     }
