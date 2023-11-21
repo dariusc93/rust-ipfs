@@ -8,7 +8,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use futures_timer::Delay;
 use libipld::Cid;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -85,13 +85,13 @@ impl BlockStore for MemBlockStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    async fn size(&self, cid: &Cid) -> Result<Option<usize>, Error> {
+    async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
         let _ = self
             .tx
             .clone()
             .send(RepoBlockCommand::Size {
-                cid: *cid,
+                cid: cid.to_vec(),
                 response: tx,
             })
             .await;
@@ -103,9 +103,7 @@ impl BlockStore for MemBlockStore {
         let _ = self
             .tx
             .clone()
-            .send(RepoBlockCommand::TotalSize {
-                response: tx,
-            })
+            .send(RepoBlockCommand::TotalSize { response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -252,8 +250,14 @@ impl MemBlockTask {
         }
     }
 
-    async fn size(&self, cid: &Cid) -> Option<usize> {
-        self.blocks.get(cid).map(|b| b.data().len())
+    async fn size(&self, cids: &[Cid]) -> Option<usize> {
+        Some(
+            self.blocks
+                .iter()
+                .filter(|(cid, _)| cids.contains(cid))
+                .map(|(_, b)| b.data().len())
+                .sum(),
+        )
     }
 
     async fn total_size(&self) -> usize {
@@ -271,7 +275,7 @@ impl MemBlockTask {
     }
 
     async fn cleanup(&mut self, refs: BoxStream<'_, Cid>) -> Result<Vec<Cid>, Error> {
-        let mut refs = refs.collect::<Vec<_>>().await;
+        let mut refs = refs.collect::<BTreeSet<_>>().await;
         refs.extend(self.temp.keys().cloned());
 
         let mut removed_blocks = vec![];

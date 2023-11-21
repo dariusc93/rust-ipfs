@@ -8,7 +8,7 @@ use futures::stream::BoxStream;
 use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
 use futures_timer::Delay;
 use libipld::Cid;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{self, ErrorKind, Read};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -89,13 +89,13 @@ impl BlockStore for FsBlockStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    async fn size(&self, cid: &Cid) -> Result<Option<usize>, Error> {
+    async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error> {
         let (tx, rx) = futures::channel::oneshot::channel();
         let _ = self
             .tx
             .clone()
             .send(RepoBlockCommand::Size {
-                cid: *cid,
+                cid: cid.to_vec(),
                 response: tx,
             })
             .await;
@@ -322,9 +322,17 @@ impl FsBlockStoreTask {
         }
     }
 
-    async fn size(&self, cid: &Cid) -> Option<usize> {
-        let path = block_path(self.path.clone(), cid);
-        fs::metadata(path).await.map(|m| m.len() as usize).ok()
+    async fn size(&self, cids: &[Cid]) -> Option<usize> {
+        let mut block_sizes = HashMap::new();
+
+        for cid in cids {
+            let path = block_path(self.path.clone(), cid);
+            if let Ok(size) = fs::metadata(path).await.map(|m| m.len() as usize) {
+                block_sizes.insert(*cid, size);
+            }
+        }
+
+        Some(block_sizes.values().sum())
     }
 
     async fn total_size(&self) -> usize {
@@ -349,7 +357,7 @@ impl FsBlockStoreTask {
     }
 
     async fn cleanup(&mut self, refs: BoxStream<'_, Cid>) -> Result<Vec<Cid>, Error> {
-        let mut refs = refs.collect::<Vec<_>>().await;
+        let mut refs = refs.collect::<BTreeSet<_>>().await;
         refs.extend(self.temp.keys().cloned());
 
         let blocks = self.list_stream().await?;
@@ -388,10 +396,16 @@ impl FsBlockStoreTask {
                 futures::future::ready(if path.extension() != Some("data".as_ref()) {
                     Ok(None)
                 } else {
-                    let maybe_cid = filestem_to_block_cid(path.file_stem())
-                        .map(|cid| (cid, path.to_path_buf()));
+                    let maybe_cid = filestem_to_block_cid(path.file_stem());
                     Ok(maybe_cid)
                 })
+            })
+            .try_filter_map(|cid| {
+                let path = self.path.clone();
+                async move {
+                    let path = block_path(path, &cid);
+                    Ok(Some((cid, path)))
+                }
             })
             .boxed())
     }
@@ -593,7 +607,7 @@ mod tests {
             match res {
                 Ok(Ok((_, BlockPut::NewBlock))) => writes += 1,
                 Ok(Ok((_, BlockPut::Existed))) => existing += 1,
-                Ok(Err(e)) => println!("joinhandle err: {e}"),
+                Ok(Err(e)) => tracing::error!("joinhandle err: {e}"),
                 _ => unreachable!("join error"),
             }
         }

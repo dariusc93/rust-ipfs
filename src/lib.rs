@@ -48,7 +48,7 @@ use futures::{
     future::BoxFuture,
     sink::SinkExt,
     stream::{BoxStream, Stream},
-    StreamExt,
+    StreamExt, TryStreamExt,
 };
 
 use keystore::Keystore;
@@ -56,14 +56,14 @@ use p2p::{
     BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig,
     RelayConfig,
 };
-use repo::{BlockStore, DataStore, Lock};
+use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock};
 use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt,
     ops::{Deref, DerefMut, Range},
     path::{Path, PathBuf},
@@ -469,6 +469,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
     custom_behaviour: Option<C>,
     custom_transport: Option<TTransportFn>,
+    gc_config: Option<GCConfig>,
 }
 
 pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
@@ -493,6 +494,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             swarm_event: None,
             custom_behaviour: None,
             custom_transport: None,
+            gc_config: None,
         }
     }
 
@@ -655,6 +657,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Enables automatic garbage collection
+    pub fn with_gc(mut self, config: GCConfig) -> Self {
+        self.gc_config = Some(config);
+        self
+    }
+
     /// Sets a path
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
@@ -776,6 +784,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             record_key_validator,
             local_external_addr,
             repo_handle,
+            gc_config,
             ..
         } = self;
 
@@ -910,6 +919,62 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         let IpfsOptions {
             listening_addrs, ..
         } = options;
+
+        if let Some(config) = gc_config {
+            tokio::spawn({
+                let repo = repo.clone();
+                async move {
+                    let GCConfig { duration, trigger } = config;
+                    let use_config_timer = duration != Duration::ZERO;
+                    if trigger == GCTrigger::None && !use_config_timer {
+                        tracing::warn!("GC does not have a set timer or a trigger. Disabling GC");
+                        return;
+                    }
+
+                    let time = match use_config_timer {
+                        true => duration,
+                        false => Duration::from_secs(60 * 60),
+                    };
+
+                    loop {
+                        tokio::time::sleep(time).await;
+                        let pinned = repo
+                            .list_pins(None)
+                            .await
+                            .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
+                            .try_collect::<BTreeSet<_>>()
+                            .await
+                            .unwrap_or_default();
+                        let pinned = Vec::from_iter(pinned);
+                        let total_size = repo.get_total_size().await.unwrap_or_default();
+                        let pinned_size = repo
+                            .get_blocks_size(&pinned)
+                            .await
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+
+                        let cleanup = match trigger {
+                            GCTrigger::At { size } => {
+                                total_size > 0 && (total_size - pinned_size) >= size
+                            }
+                            GCTrigger::AtStorage => {
+                                (total_size - pinned_size) > 0
+                                    && (total_size - pinned_size) >= repo.max_storage_size()
+                            }
+                            GCTrigger::None => (total_size - pinned_size) > 0,
+                        };
+
+                        if cleanup {
+                            let blocks = repo.cleanup().await.unwrap();
+                            for block in blocks {
+                                tracing::debug!(block = block.to_string(), "has been cleared from the block store");
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), repo);
         fut.swarm_event = swarm_event;
@@ -1049,7 +1114,6 @@ impl Ipfs {
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
     pub async fn remove_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        use futures::stream::TryStreamExt;
         let span = debug_span!(parent: &self.span, "remove_pin", cid = %cid, recursive);
         async move {
             if !recursive {

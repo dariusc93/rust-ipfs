@@ -17,7 +17,7 @@ use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error, fmt, io};
@@ -71,7 +71,7 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     /// Returns a block from the blockstore.
     async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error>;
     /// Get the size of a single block
-    async fn size(&self, cid: &Cid) -> Result<Option<usize>, Error>;
+    async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error>;
     /// Get a total size of the block store
     async fn total_size(&self) -> Result<usize, Error>;
     /// Inserts a block in the blockstore.
@@ -103,6 +103,30 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>;
     /// Wipes the datastore.
     async fn wipe(&self) {}
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GCConfig {
+    /// How long until GC runs
+    /// If duration is not set, it will not run at a timer
+    pub duration: Duration,
+
+    /// What will trigger GC
+    pub trigger: GCTrigger,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum GCTrigger {
+    /// At a specific size. If the size is at or exceeds, it will trigger GC
+    At {
+        size: usize,
+    },
+
+    AtStorage,
+
+    /// No trigger
+    #[default]
+    None,
 }
 
 /// Errors variants describing the possible failures for `Lock::try_exclusive`.
@@ -290,6 +314,7 @@ impl<C: Borrow<Cid>> PinKind<C> {
 pub struct Repo {
     online: Arc<AtomicBool>,
     initialized: Arc<AtomicBool>,
+    max_storage_size: Arc<AtomicUsize>,
     block_store: Arc<dyn BlockStore>,
     data_store: Arc<dyn DataStore>,
     events: Arc<RwLock<Option<Sender<RepoEvent>>>>,
@@ -360,6 +385,7 @@ impl Repo {
             events: Arc::default(),
             subscriptions: Default::default(),
             lockfile,
+            max_storage_size: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -388,6 +414,14 @@ impl Repo {
         let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
         let lockfile = Arc::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
+    }
+
+    pub fn set_max_storage_size(&self, size: usize) {
+        self.max_storage_size.store(size, Ordering::SeqCst);
+    }
+
+    pub fn max_storage_size(&self) -> usize {
+        self.max_storage_size.load(Ordering::SeqCst)
     }
 
     pub async fn migrate(&self, repo: &Self) -> Result<(), Error> {
@@ -605,6 +639,18 @@ impl Repo {
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
         self.get_blocks_with_session(None, cids, peers, local_only, None)
             .await
+    }
+
+    /// Get the size of listed blocks
+    #[inline]
+    pub async fn get_blocks_size(&self, cids: &[Cid]) -> Result<Option<usize>, Error> {
+        self.block_store.size(cids).await
+    }
+
+    /// Get the total size of the block store
+    #[inline]
+    pub async fn get_total_size(&self) -> Result<usize, Error> {
+        self.block_store.total_size().await
     }
 
     pub(crate) async fn get_blocks_with_session(
