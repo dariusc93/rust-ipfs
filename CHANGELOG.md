@@ -1,4 +1,4 @@
-# next [unrelease]
+# 0.8.0
 - feat: Implements garbage collector. [PR 120](https://github.com/dariusc93/rust-ipfs/pull/120)
 - refactor: Revise peerbook and move connect/disconnect operations to main task [PR 119](https://github.com/dariusc93/rust-ipfs/pull/119)
 
