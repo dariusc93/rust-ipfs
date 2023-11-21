@@ -17,7 +17,7 @@ use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error, fmt, io};
@@ -70,10 +70,16 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     async fn contains(&self, cid: &Cid) -> Result<bool, Error>;
     /// Returns a block from the blockstore.
     async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error>;
+    /// Get the size of a single block
+    async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error>;
+    /// Get a total size of the block store
+    async fn total_size(&self) -> Result<usize, Error>;
     /// Inserts a block in the blockstore.
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error>;
     /// Removes a block from the blockstore.
     async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error>;
+    /// Remove blocks while excluding references from the cleanup
+    async fn remove_garbage(&self, references: BoxStream<'static, Cid>) -> Result<Vec<Cid>, Error>;
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;
     /// Wipes the blockstore.
@@ -97,6 +103,30 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>;
     /// Wipes the datastore.
     async fn wipe(&self) {}
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GCConfig {
+    /// How long until GC runs
+    /// If duration is not set, it will not run at a timer
+    pub duration: Duration,
+
+    /// What will trigger GC
+    pub trigger: GCTrigger,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum GCTrigger {
+    /// At a specific size. If the size is at or exceeds, it will trigger GC
+    At {
+        size: usize,
+    },
+
+    AtStorage,
+
+    /// No trigger
+    #[default]
+    None,
 }
 
 /// Errors variants describing the possible failures for `Lock::try_exclusive`.
@@ -284,12 +314,14 @@ impl<C: Borrow<Cid>> PinKind<C> {
 pub struct Repo {
     online: Arc<AtomicBool>,
     initialized: Arc<AtomicBool>,
+    max_storage_size: Arc<AtomicUsize>,
     block_store: Arc<dyn BlockStore>,
     data_store: Arc<dyn DataStore>,
     events: Arc<RwLock<Option<Sender<RepoEvent>>>>,
     pub(crate) subscriptions:
         Arc<Mutex<HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>>>,
     lockfile: Arc<dyn Lock>,
+    gclock: Arc<tokio::sync::RwLock<()>>,
 }
 
 #[async_trait]
@@ -329,10 +361,10 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(repo_type: StoragePath) -> Self {
+    pub fn new(repo_type: StoragePath, duration: Option<Duration>) -> Self {
         match repo_type {
-            StoragePath::Memory => Repo::new_memory(),
-            StoragePath::Disk(path) => Repo::new_fs(path),
+            StoragePath::Memory => Repo::new_memory(duration),
+            StoragePath::Disk(path) => Repo::new_fs(path, duration),
             StoragePath::Custom {
                 blockstore,
                 datastore,
@@ -354,10 +386,13 @@ impl Repo {
             events: Arc::default(),
             subscriptions: Default::default(),
             lockfile,
+            max_storage_size: Arc::new(AtomicUsize::new(0)),
+            gclock: Arc::default(),
         }
     }
 
-    pub fn new_fs(path: impl AsRef<Path>) -> Self {
+    pub fn new_fs(path: impl AsRef<Path>, duration: Option<Duration>) -> Self {
+        let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
         let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
@@ -366,7 +401,7 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(blockstore_path));
+        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(blockstore_path, duration));
         #[cfg(not(any(feature = "sled_data_store", feature = "redb_data_store")))]
         let data_store = Arc::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
@@ -377,11 +412,20 @@ impl Repo {
         Self::new_raw(block_store, data_store, lockfile)
     }
 
-    pub fn new_memory() -> Self {
-        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default()));
+    pub fn new_memory(duration: Option<Duration>) -> Self {
+        let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
+        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default(), duration));
         let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
         let lockfile = Arc::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
+    }
+
+    pub fn set_max_storage_size(&self, size: usize) {
+        self.max_storage_size.store(size, Ordering::SeqCst);
+    }
+
+    pub fn max_storage_size(&self) -> usize {
+        self.max_storage_size.load(Ordering::SeqCst)
     }
 
     pub async fn migrate(&self, repo: &Self) -> Result<(), Error> {
@@ -557,6 +601,7 @@ impl Repo {
 
     /// Puts a block into the block store.
     pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+        let _guard = self.gclock.read().await;
         let (cid, res) = self.block_store.put(block.clone()).await?;
 
         if let BlockPut::NewBlock = res {
@@ -601,6 +646,18 @@ impl Repo {
             .await
     }
 
+    /// Get the size of listed blocks
+    #[inline]
+    pub async fn get_blocks_size(&self, cids: &[Cid]) -> Result<Option<usize>, Error> {
+        self.block_store.size(cids).await
+    }
+
+    /// Get the total size of the block store
+    #[inline]
+    pub async fn get_total_size(&self) -> Result<usize, Error> {
+        self.block_store.total_size().await
+    }
+
     pub(crate) async fn get_blocks_with_session(
         &self,
         session: Option<u64>,
@@ -609,6 +666,7 @@ impl Repo {
         local_only: bool,
         timeout: Option<Duration>,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
+        let _guard = self.gclock.read().await;
         let mut blocks = FuturesOrdered::new();
         let mut missing = cids.to_vec();
         for cid in cids {
@@ -699,6 +757,8 @@ impl Repo {
 
     /// Remove block from the block store.
     pub async fn remove_block(&self, cid: &Cid, recursive: bool) -> Result<Vec<Cid>, Error> {
+        let _guard = self.gclock.read().await;
+
         if self.is_pinned(cid).await? {
             return Err(anyhow::anyhow!("block to remove is pinned"));
         }
@@ -846,16 +906,18 @@ impl Repo {
     }
 
     /// Function to perform a basic cleanup of unpinned blocks
-    pub async fn cleanup(&self) -> Result<BTreeSet<Cid>, Error> {
-        let mut removed_blocks = BTreeSet::new();
-        let blocks = self.list_blocks().await?;
-        for cid in blocks {
-            if !self.is_pinned(&cid).await? {
-                if let Ok(cid) = self.remove_block(&cid, false).await {
-                    removed_blocks.extend(cid.iter());
-                }
-            }
-        }
+    pub async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+        let _guard = self.gclock.write().await;
+        let pinned = self
+            .list_pins(None)
+            .await
+            .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
+            .try_collect::<BTreeSet<_>>()
+            .await?;
+
+        let refs = futures::stream::iter(pinned);
+
+        let removed_blocks = self.block_store.remove_garbage(refs.boxed()).await?;
         Ok(removed_blocks)
     }
 

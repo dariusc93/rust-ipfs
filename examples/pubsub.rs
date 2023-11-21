@@ -4,9 +4,7 @@ use libipld::ipld;
 use libp2p::futures::StreamExt;
 use libp2p::Multiaddr;
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{Ipfs, PubsubEvent};
-
-use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+use rust_ipfs::{Ipfs, Keypair, PubsubEvent, UninitializedIpfs};
 
 use rustyline_async::Readline;
 use std::time::Duration;
@@ -30,6 +28,8 @@ struct Opt {
     topic: Option<String>,
     #[clap(long)]
     stdout_log: bool,
+    #[clap(long)]
+    connect: Vec<Multiaddr>,
 }
 
 #[tokio::main]
@@ -41,8 +41,15 @@ async fn main() -> anyhow::Result<()> {
 
     let topic = opt.topic.unwrap_or_else(|| String::from("ipfs-chat"));
 
+    let keypair = Keypair::generate_ed25519();
+
+    let peer_id = keypair.public().to_peer_id();
+    let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
+
     // Initialize the repo and start a daemon
     let mut uninitialized = UninitializedIpfs::new()
+        .with_custom_behaviour(ext_behaviour::Behaviour::new(peer_id, stdout.clone()))
+        .set_keypair(keypair.clone())
         .with_default()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?);
 
@@ -59,10 +66,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let ipfs: Ipfs = uninitialized.start().await?;
-
-    let identity = ipfs.identity(None).await?;
-    let peer_id = identity.peer_id;
-    let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
 
     ipfs.default_bootstrap().await?;
 
@@ -89,6 +92,20 @@ async fn main() -> anyhow::Result<()> {
         if let Err(e) = ipfs.enable_relay(None).await {
             writeln!(stdout, "> Error selecting a relay: {e}")?;
         }
+    }
+
+    for addr in opt.connect {
+        let Some(peer_id) = addr.peer_id() else {
+            writeln!(stdout, ">{addr} does not contain a p2p protocol. skipping")?;
+            continue;
+        };
+
+        if let Err(e) = ipfs.connect(addr.clone()).await {
+            writeln!(stdout, "> Error connecting to {addr}: {e}")?;
+            continue;
+        }
+
+        writeln!(stdout, "Connected to {}", peer_id)?;
     }
 
     let mut event_stream = ipfs.pubsub_events(&topic).await?;
@@ -151,5 +168,118 @@ async fn topic_discovery(ipfs: Ipfs, topic: String) -> anyhow::Result<()> {
         let mut stream = ipfs.get_providers(cid).await?.boxed();
         while let Some(_providers) = stream.next().await {}
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+mod ext_behaviour {
+    use std::{
+        collections::HashSet,
+        io::Write,
+        task::{Context, Poll},
+    };
+
+    use libp2p::{
+        core::Endpoint,
+        swarm::{
+            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
+            THandlerOutEvent, ToSwarm,
+        },
+        Multiaddr, PeerId,
+    };
+    use rust_ipfs::{NetworkBehaviour, Protocol};
+    use rustyline_async::SharedWriter;
+
+    pub struct Behaviour {
+        addrs: HashSet<Multiaddr>,
+        stdout: SharedWriter,
+        peer_id: PeerId,
+    }
+
+    impl Behaviour {
+        pub fn new(local_peer_id: PeerId, mut stdout: SharedWriter) -> Self {
+            writeln!(stdout, "PeerID: {}", local_peer_id).expect("");
+            Self {
+                peer_id: local_peer_id,
+                addrs: Default::default(),
+                stdout,
+            }
+        }
+    }
+
+    impl NetworkBehaviour for Behaviour {
+        type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
+        type ToSwarm = void::Void;
+
+        fn handle_pending_inbound_connection(
+            &mut self,
+            _: ConnectionId,
+            _: &Multiaddr,
+            _: &Multiaddr,
+        ) -> Result<(), ConnectionDenied> {
+            Ok(())
+        }
+
+        fn handle_pending_outbound_connection(
+            &mut self,
+            _: ConnectionId,
+            _: Option<PeerId>,
+            _: &[Multiaddr],
+            _: Endpoint,
+        ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
+            Ok(vec![])
+        }
+
+        fn handle_established_inbound_connection(
+            &mut self,
+            _: ConnectionId,
+            _: PeerId,
+            _: &Multiaddr,
+            _: &Multiaddr,
+        ) -> Result<THandler<Self>, ConnectionDenied> {
+            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+        }
+
+        fn handle_established_outbound_connection(
+            &mut self,
+            _: ConnectionId,
+            _: PeerId,
+            _: &Multiaddr,
+            _: Endpoint,
+        ) -> Result<THandler<Self>, ConnectionDenied> {
+            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+        }
+
+        fn on_connection_handler_event(
+            &mut self,
+            _: PeerId,
+            _: ConnectionId,
+            _: THandlerOutEvent<Self>,
+        ) {
+        }
+
+        fn on_swarm_event(&mut self, event: FromSwarm) {
+            match event {
+                FromSwarm::NewListenAddr(NewListenAddr { addr, .. }) => {
+                    if self.addrs.insert(addr.clone()) {
+                        writeln!(
+                            self.stdout,
+                            "Listening on {}",
+                            addr.clone().with(Protocol::P2p(self.peer_id))
+                        )
+                        .expect("");
+                    }
+                }
+                FromSwarm::ExternalAddrConfirmed(ev) => {
+                    if self.addrs.insert(ev.addr.clone()) {
+                        writeln!(self.stdout, "Listening on {}", ev.addr).expect("");
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+            Poll::Pending
+        }
     }
 }

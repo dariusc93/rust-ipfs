@@ -48,7 +48,7 @@ use futures::{
     future::BoxFuture,
     sink::SinkExt,
     stream::{BoxStream, Stream},
-    StreamExt,
+    StreamExt, TryStreamExt,
 };
 
 use keystore::Keystore;
@@ -56,7 +56,7 @@ use p2p::{
     BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig,
     RelayConfig,
 };
-use repo::{BlockStore, DataStore, Lock};
+use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock};
 use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -470,6 +470,8 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
     custom_behaviour: Option<C>,
     custom_transport: Option<TTransportFn>,
+    gc_config: Option<GCConfig>,
+    gc_repo_duration: Option<Duration>,
 }
 
 pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
@@ -494,6 +496,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             swarm_event: None,
             custom_behaviour: None,
             custom_transport: None,
+            gc_config: None,
+            gc_repo_duration: None,
         }
     }
 
@@ -656,6 +660,19 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    /// Enables automatic garbage collection
+    pub fn with_gc(mut self, config: GCConfig) -> Self {
+        self.gc_config = Some(config);
+        self
+    }
+
+    /// Set a duration for which blocks are not removed due to the garbage collector
+    /// Defaults: 2 mins
+    pub fn set_temp_pin_duration(mut self, duration: Duration) -> Self {
+        self.gc_repo_duration = Some(duration);
+        self
+    }
+
     /// Sets a path
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
@@ -777,6 +794,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             record_key_validator,
             local_external_addr,
             repo_handle,
+            gc_config,
+            gc_repo_duration,
             ..
         } = self;
 
@@ -816,7 +835,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         tokio::fs::create_dir_all(path).await?;
                     }
                 }
-                Repo::new(options.ipfs_path.clone())
+                Repo::new(options.ipfs_path.clone(), gc_repo_duration)
             }
         };
 
@@ -916,8 +935,68 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             listening_addrs, ..
         } = options;
 
+        if let Some(config) = gc_config {
+            tokio::spawn({
+                let repo = repo.clone();
+                async move {
+                    let GCConfig { duration, trigger } = config;
+                    let use_config_timer = duration != Duration::ZERO;
+                    if trigger == GCTrigger::None && !use_config_timer {
+                        tracing::warn!("GC does not have a set timer or a trigger. Disabling GC");
+                        return;
+                    }
+
+                    let time = match use_config_timer {
+                        true => duration,
+                        false => Duration::from_secs(60 * 60),
+                    };
+
+                    loop {
+                        tokio::time::sleep(time).await;
+                        let pinned = repo
+                            .list_pins(None)
+                            .await
+                            .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
+                            .try_collect::<BTreeSet<_>>()
+                            .await
+                            .unwrap_or_default();
+                        let pinned = Vec::from_iter(pinned);
+                        let total_size = repo.get_total_size().await.unwrap_or_default();
+                        let pinned_size = repo
+                            .get_blocks_size(&pinned)
+                            .await
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+
+                        let cleanup = match trigger {
+                            GCTrigger::At { size } => {
+                                total_size > 0 && (total_size - pinned_size) >= size
+                            }
+                            GCTrigger::AtStorage => {
+                                (total_size - pinned_size) > 0
+                                    && (total_size - pinned_size) >= repo.max_storage_size()
+                            }
+                            GCTrigger::None => (total_size - pinned_size) > 0,
+                        };
+
+                        if cleanup {
+                            let blocks = repo.cleanup().await.unwrap();
+                            for block in blocks {
+                                tracing::debug!(
+                                    block = block.to_string(),
+                                    "has been cleared from the block store"
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         let mut fut =
             task::IpfsTask::new(swarm, metrics, repo_events.fuse(), receiver.fuse(), repo);
+
         fut.swarm_event = swarm_event;
         fut.local_external_addr = local_external_addr;
 
@@ -1017,7 +1096,7 @@ impl Ipfs {
     /// Cleans up of all unpinned blocks
     /// Note: This is extremely basic and should not be relied on completely
     ///       until there is additional or extended implementation for a gc
-    pub async fn gc(&self) -> Result<BTreeSet<Cid>, Error> {
+    pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
         self.repo.cleanup().instrument(self.span.clone()).await
     }
 
@@ -1055,7 +1134,6 @@ impl Ipfs {
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
     pub async fn remove_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        use futures::stream::TryStreamExt;
         let span = debug_span!(parent: &self.span, "remove_pin", cid = %cid, recursive);
         async move {
             if !recursive {
