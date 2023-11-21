@@ -4349,6 +4349,7 @@ dependencies = [
  "either",
  "fs2",
  "futures",
+ "futures-timer",
  "hash_hasher",
  "hex-literal 0.4.1",
  "hickory-resolver",
