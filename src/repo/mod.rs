@@ -321,6 +321,7 @@ pub struct Repo {
     pub(crate) subscriptions:
         Arc<Mutex<HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>>>,
     lockfile: Arc<dyn Lock>,
+    gclock: Arc<tokio::sync::RwLock<()>>,
 }
 
 #[async_trait]
@@ -386,6 +387,7 @@ impl Repo {
             subscriptions: Default::default(),
             lockfile,
             max_storage_size: Arc::new(AtomicUsize::new(0)),
+            gclock: Arc::default(),
         }
     }
 
@@ -597,6 +599,7 @@ impl Repo {
 
     /// Puts a block into the block store.
     pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+        let _guard = self.gclock.read().await;
         let (cid, res) = self.block_store.put(block.clone()).await?;
 
         if let BlockPut::NewBlock = res {
@@ -661,6 +664,7 @@ impl Repo {
         local_only: bool,
         timeout: Option<Duration>,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
+        let _guard = self.gclock.read().await;
         let mut blocks = FuturesOrdered::new();
         let mut missing = cids.to_vec();
         for cid in cids {
@@ -751,6 +755,8 @@ impl Repo {
 
     /// Remove block from the block store.
     pub async fn remove_block(&self, cid: &Cid, recursive: bool) -> Result<Vec<Cid>, Error> {
+        let _guard = self.gclock.read().await;
+
         if self.is_pinned(cid).await? {
             return Err(anyhow::anyhow!("block to remove is pinned"));
         }
@@ -899,6 +905,7 @@ impl Repo {
 
     /// Function to perform a basic cleanup of unpinned blocks
     pub async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+        let _guard = self.gclock.write().await;
         let pinned = self
             .list_pins(None)
             .await
