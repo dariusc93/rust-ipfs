@@ -1,5 +1,6 @@
 # next [unrelease]
-- refactor: Revise peerbook and move connect/disconnect operations to main task [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- feat: Implements garbage collector. [PR 120](https://github.com/dariusc93/rust-ipfs/pull/120)
+- refactor: Revise peerbook and move connect/disconnect operations to main task [PR 119](https://github.com/dariusc93/rust-ipfs/pull/119)
 
 # 0.7.1
 - chore: Deprecate UninitalizedIpfs::empty and UninitalizedIpfs::with_opt for UnitializedIpfs::new [PR 118](https://github.com/dariusc93/rust-ipfs/pull/118)
