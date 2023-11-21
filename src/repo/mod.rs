@@ -401,7 +401,10 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(blockstore_path, duration));
+        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(
+            blockstore_path,
+            duration,
+        ));
         #[cfg(not(any(feature = "sled_data_store", feature = "redb_data_store")))]
         let data_store = Arc::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
@@ -414,7 +417,10 @@ impl Repo {
 
     pub fn new_memory(duration: Option<Duration>) -> Self {
         let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
-        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default(), duration));
+        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(
+            Default::default(),
+            duration,
+        ));
         let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
         let lockfile = Arc::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
