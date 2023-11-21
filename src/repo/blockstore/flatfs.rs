@@ -177,6 +177,10 @@ impl FsBlockStoreTask {
         loop {
             tokio::select! {
                 biased;
+                _ = futures::future::poll_fn(|cx| {
+                    self.temp.retain(|_, timer| timer.poll_unpin(cx).is_pending());
+                    std::task::Poll::Pending
+                }) => {}
                 Some(command) = self.rx.next() => {
                     match command {
                         RepoBlockCommand::Contains { cid, response } => {
@@ -214,10 +218,6 @@ impl FsBlockStoreTask {
                         }
                     }
                 }
-                _ = futures::future::poll_fn(|cx| {
-                    self.temp.retain(|_, timer| timer.poll_unpin(cx).is_pending());
-                    std::task::Poll::Pending
-                }) => {}
             }
         }
     }

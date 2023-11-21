@@ -8,7 +8,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use futures_timer::Delay;
 use libipld::Cid;
 
-use std::collections::{HashMap, BTreeSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -175,6 +175,10 @@ impl MemBlockTask {
         loop {
             tokio::select! {
                 biased;
+                _ = futures::future::poll_fn(|cx| {
+                    self.temp.retain(|_, timer| timer.poll_unpin(cx).is_pending());
+                    std::task::Poll::Pending
+                }) => {}
                 Some(command) = self.rx.next() => {
                     match command {
                         RepoBlockCommand::Contains { cid, response } => {
@@ -212,10 +216,7 @@ impl MemBlockTask {
                         }
                     }
                 }
-                _ = futures::future::poll_fn(|cx| {
-                    self.temp.retain(|_, timer| timer.poll_unpin(cx).is_pending());
-                    std::task::Poll::Pending
-                }) => {}
+
             }
         }
     }
