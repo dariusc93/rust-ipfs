@@ -559,7 +559,9 @@ mod tests {
 
     use anyhow::anyhow;
     use futures::prelude::*;
+    use libp2p::identify;
     use libp2p::identity::Keypair;
+    use libp2p::swarm::NetworkBehaviour;
     use libp2p::swarm::SwarmEvent;
     use libp2p::Swarm;
     use libp2p::SwarmBuilder;
@@ -674,6 +676,12 @@ mod tests {
         get_block::<1024>().await;
     }
 
+    #[derive(NetworkBehaviour)]
+    struct Behaviour {
+        identify: identify::Behaviour,
+        bs: Bitswap<TestStore>,
+    }
+
     async fn get_block<const N: usize>() {
         let kp = Keypair::generate_ed25519();
         let store1 = TestStore::default();
@@ -689,7 +697,13 @@ mod tests {
                 libp2p::yamux::Config::default,
             )
             .unwrap()
-            .with_behaviour(|_| bs1)
+            .with_behaviour(|kp| Behaviour {
+                identify: identify::Behaviour::new(identify::Config::new(
+                    "/test/".into(),
+                    kp.public(),
+                )),
+                bs: bs1,
+            })
             .unwrap()
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
@@ -734,12 +748,18 @@ mod tests {
                 libp2p::yamux::Config::default,
             )
             .unwrap()
-            .with_behaviour(|_| bs2)
+            .with_behaviour(|kp| Behaviour {
+                identify: identify::Behaviour::new(identify::Config::new(
+                    "/test/".into(),
+                    kp.public(),
+                )),
+                bs: bs2,
+            })
             .unwrap()
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
-        let swarm2_bs_client = swarm2.behaviour().client().clone();
+        let swarm2_bs_client = swarm2.behaviour().bs.client().clone();
         let peer2 = tokio::task::spawn(async move {
             let addr = rx.recv().await.unwrap();
             info!("peer2: dialing peer1 at {}", addr);
