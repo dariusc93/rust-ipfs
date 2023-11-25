@@ -628,11 +628,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_1_block() {
-        tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .init();
-
         get_block::<1>().await;
     }
 
@@ -663,11 +658,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_128_block() {
-        tracing_subscriber::registry()
-            .with(fmt::layer().pretty())
-            .with(EnvFilter::from_default_env())
-            .init();
-
         get_block::<128>().await;
     }
 
@@ -683,6 +673,10 @@ mod tests {
     }
 
     async fn get_block<const N: usize>() {
+        _ = tracing_subscriber::registry()
+            .with(fmt::layer().pretty())
+            .with(EnvFilter::from_default_env())
+            .try_init();
         let kp = Keypair::generate_ed25519();
         let store1 = TestStore::default();
         let bs1 = Bitswap::new(kp.public().to_peer_id(), store1.clone(), Config::default()).await;
