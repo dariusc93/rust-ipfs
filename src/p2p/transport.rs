@@ -27,6 +27,7 @@ pub struct TransportConfig {
     pub dns_resolver: Option<DnsResolver>,
     pub version: UpgradeVersion,
     pub enable_quic: bool,
+    pub quic_max_idle_timeout: Duration,
     // pub enable_websocket: bool,
     // pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
@@ -45,6 +46,7 @@ impl Default for TransportConfig {
             support_quic_draft_29: false,
             // enable_webrtc: false,
             timeout: Duration::from_secs(30),
+            quic_max_idle_timeout: Duration::from_secs(10),
             dns_resolver: None,
             version: UpgradeVersion::default(),
         }
@@ -128,6 +130,7 @@ pub(crate) fn build_transport(
         version,
         enable_quic,
         support_quic_draft_29,
+        quic_max_idle_timeout,
         ..
     }: TransportConfig,
 ) -> io::Result<TTransport> {
@@ -179,7 +182,8 @@ pub(crate) fn build_transport(
         true => {
             let mut quic_config = QuicConfig::new(&keypair);
             quic_config.support_draft_29 = support_quic_draft_29;
-
+            quic_config.max_idle_timeout = quic_max_idle_timeout.as_millis() as _;
+            quic_config.keep_alive_interval = quic_max_idle_timeout / 2;
             let quic_transport = TokioQuicTransport::new(quic_config);
 
             OrTransport::new(quic_transport, transport)

@@ -1,3 +1,6 @@
+# 0.8.1
+- chore: Add timeout in transport config for quic `max_idle_timeout` 
+ 
 # 0.8.0
 - feat: Implements garbage collector. [PR 120](https://github.com/dariusc93/rust-ipfs/pull/120)
 - refactor: Revise peerbook and move connect/disconnect operations to main task [PR 119](https://github.com/dariusc93/rust-ipfs/pull/119)
