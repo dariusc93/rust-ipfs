@@ -91,7 +91,7 @@ pub use self::{
 
 pub type Block = libipld::Block<libipld::DefaultParams>;
 
-use libipld::{Cid, Ipld, IpldCodec};
+use libipld::{Cid, Ipld};
 
 pub use libp2p::{
     self,
@@ -1112,12 +1112,11 @@ impl Ipfs {
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
     pub async fn insert_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        let span = debug_span!(parent: &self.span, "insert_pin", cid = %cid, recursive);
-
-        self.repo()
-            .insert_pin(cid, recursive, false)
-            .instrument(span)
-            .await
+        let mut pin_fut = self.repo().pin(cid);
+        if recursive {
+            pin_fut = pin_fut.recursive();
+        }
+        pin_fut.span(self.span.clone()).await
     }
 
     /// Unpins a given Cid recursively or only directly.
@@ -1127,34 +1126,11 @@ impl Ipfs {
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
     pub async fn remove_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        let span = debug_span!(parent: &self.span, "remove_pin", cid = %cid, recursive);
-        async move {
-            if !recursive {
-                self.repo.remove_direct_pin(cid).await
-            } else {
-                // start walking refs of the root after loading it
-
-                let block = match self.repo.get_block_now(cid).await? {
-                    Some(b) => b,
-                    None => {
-                        return Err(anyhow::anyhow!("pinned root not found: {}", cid));
-                    }
-                };
-
-                let ipld = block.decode::<IpldCodec, Ipld>()?;
-                let st = crate::refs::IpldRefs::default()
-                    .with_only_unique()
-                    .with_existing_blocks()
-                    .refs_of_resolved(self.repo(), vec![(*cid, ipld.clone())].into_iter())
-                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
-                    .into_stream()
-                    .boxed();
-
-                self.repo.remove_recursive_pin(cid, st).await
-            }
+        let mut pin_fut = self.repo().remove_pin(cid);
+        if recursive {
+            pin_fut = pin_fut.recursive();
         }
-        .instrument(span)
-        .await
+        pin_fut.span(self.span.clone()).await
     }
 
     /// Checks whether a given block is pinned.

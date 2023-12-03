@@ -21,7 +21,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error, fmt, io};
-use tracing::log;
+use tracing::{log, Span};
+use tracing_futures::Instrument;
 
 #[macro_use]
 #[cfg(test)]
@@ -401,7 +402,10 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(blockstore_path, duration));
+        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(
+            blockstore_path,
+            duration,
+        ));
         #[cfg(not(any(feature = "sled_data_store", feature = "redb_data_store")))]
         let data_store = Arc::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
@@ -414,7 +418,10 @@ impl Repo {
 
     pub fn new_memory(duration: Option<Duration>) -> Self {
         let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
-        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(Default::default(), duration));
+        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(
+            Default::default(),
+            duration,
+        ));
         let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
         let lockfile = Arc::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
@@ -858,30 +865,46 @@ impl Repo {
     }
 
     /// Pins a given Cid recursively or directly (non-recursively).
+    ///
+    /// Pins on a block are additive in sense that a previously directly (non-recursively) pinned
+    /// can be made recursive, but removing the recursive pin on the block removes also the direct
+    /// pin as well.
+    ///
+    /// Pinning a Cid recursively (for supported dag-protobuf and dag-cbor) will walk its
+    /// references and pin the references indirectly. When a Cid is pinned indirectly it will keep
+    /// its previous direct or recursive pin and be indirect in addition.
+    ///
+    /// Recursively pinned Cids cannot be re-pinned non-recursively but non-recursively pinned Cids
+    /// can be "upgraded to" being recursively pinned.
+    pub fn pin(&self, cid: &Cid) -> RepoInsertPin {
+        RepoInsertPin::new(self.clone(), *cid)
+    }
+
+    /// Unpins a given Cid recursively or only directly.
+    ///
+    /// Recursively unpinning a previously only directly pinned Cid will remove the direct pin.
+    ///
+    /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
+    /// pinned tree roots.
+    pub fn remove_pin(&self, cid: &Cid) -> RepoRemovePin {
+        RepoRemovePin::new(self.clone(), *cid)
+    }
+
+    /// Pins a given Cid recursively or directly (non-recursively).
     pub async fn insert_pin(
         &self,
         cid: &Cid,
         recursive: bool,
         local_only: bool,
     ) -> Result<(), Error> {
-        // Can download if `local_only` is false
-        let block = self.get_block(cid, &[], local_only).await?;
-
-        if !recursive {
-            self.insert_direct_pin(cid).await?
-        } else {
-            let ipld = block.decode::<IpldCodec, Ipld>()?;
-
-            let st = crate::refs::IpldRefs::default()
-                .with_only_unique()
-                .refs_of_resolved(self, vec![(*cid, ipld.clone())].into_iter())
-                .map_ok(|crate::refs::Edge { destination, .. }| destination)
-                .into_stream()
-                .boxed();
-
-            self.insert_recursive_pin(cid, st).await?
+        let mut pin_fut = self.pin(cid);
+        if recursive {
+            pin_fut = pin_fut.recursive();
         }
-        Ok(())
+        if local_only {
+            pin_fut = pin_fut.local();
+        }
+        pin_fut.await
     }
 
     /// Inserts a direct pin for a `Cid`.
@@ -945,5 +968,163 @@ impl Repo {
 impl Repo {
     pub fn data_store(&self) -> &dyn DataStore {
         &*self.data_store
+    }
+}
+
+pub struct RepoInsertPin {
+    repo: Repo,
+    cid: Cid,
+    span: Option<Span>,
+    recursive: bool,
+    local: bool,
+    refs: crate::refs::IpldRefs,
+}
+
+impl RepoInsertPin {
+    pub fn new(repo: Repo, cid: Cid) -> Self {
+        Self {
+            repo,
+            cid,
+            recursive: false,
+            local: false,
+            refs: Default::default(),
+            span: None,
+        }
+    }
+
+    /// Recursively pin blocks
+    pub fn recursive(mut self) -> Self {
+        self.recursive = true;
+        self
+    }
+
+    /// Pin local blocks only
+    pub fn local(mut self) -> Self {
+        self.local = true;
+        self
+    }
+
+    /// Pin to a specific depth of the graph
+    pub fn depth(mut self, depth: u64) -> Self {
+        self.refs = self.refs.with_max_depth(depth);
+        self
+    }
+
+    /// Set tracing span
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+}
+
+impl std::future::IntoFuture for RepoInsertPin {
+    type Output = Result<(), anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let cid = self.cid;
+        let local = self.local;
+        let span = self.span.unwrap_or(Span::current());
+        let recursive = self.recursive;
+        let repo = self.repo;
+        let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
+        async move {
+            let block = repo.get_block(&cid, &[], local).await?;
+
+            if !recursive {
+                repo.insert_direct_pin(&cid).await?
+            } else {
+                let ipld = block.decode::<IpldCodec, Ipld>()?;
+
+                let st = self
+                    .refs
+                    .with_only_unique()
+                    .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
+                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                    .into_stream()
+                    .boxed();
+
+                repo.insert_recursive_pin(&cid, st).await?
+            }
+            Ok(())
+        }
+        .instrument(span)
+        .boxed()
+    }
+}
+
+pub struct RepoRemovePin {
+    repo: Repo,
+    cid: Cid,
+    span: Option<Span>,
+    recursive: bool,
+    refs: crate::refs::IpldRefs,
+}
+
+impl RepoRemovePin {
+    pub fn new(repo: Repo, cid: Cid) -> Self {
+        Self {
+            repo,
+            cid,
+            recursive: false,
+            refs: Default::default(),
+            span: None,
+        }
+    }
+
+    /// Recursively unpin blocks
+    pub fn recursive(mut self) -> Self {
+        self.recursive = true;
+        self
+    }
+
+    /// Set tracing span
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+}
+
+impl std::future::IntoFuture for RepoRemovePin {
+    type Output = Result<(), anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let cid = self.cid;
+        let span = self.span.unwrap_or(Span::current());
+        let recursive = self.recursive;
+        let repo = self.repo;
+
+        let span = debug_span!(parent: &span, "remove_pin", cid = %cid, recursive);
+        async move {
+            if !recursive {
+                repo.remove_direct_pin(&cid).await
+            } else {
+                // start walking refs of the root after loading it
+
+                let block = match repo.get_block_now(&cid).await? {
+                    Some(b) => b,
+                    None => {
+                        return Err(anyhow::anyhow!("pinned root not found: {}", cid));
+                    }
+                };
+
+                let ipld = block.decode::<IpldCodec, Ipld>()?;
+                let st = self
+                    .refs
+                    .with_only_unique()
+                    .with_existing_blocks()
+                    .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
+                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                    .into_stream()
+                    .boxed();
+
+                repo.remove_recursive_pin(&cid, st).await
+            }
+        }
+        .instrument(span)
+        .boxed()
     }
 }
