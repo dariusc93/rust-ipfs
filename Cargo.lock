@@ -4384,14 +4384,14 @@ dependencies = [
 
 [[package]]
 name = "rust-ipns"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "cid",
  "clap 4.4.8",
  "derive_more",
  "libipld",
- "libp2p",
+ "libp2p-identity",
  "multihash 0.19.1",
  "quick-protobuf",
  "serde",

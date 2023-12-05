@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use libp2p::PeerId;
+use libp2p_identity::PeerId;
 use rust_ipns::Record;
 
 #[derive(Debug, clap::Parser)]
