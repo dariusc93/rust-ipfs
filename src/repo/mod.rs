@@ -1001,12 +1001,20 @@ impl RepoInsertPin {
     /// Pin local blocks only
     pub fn local(mut self) -> Self {
         self.local = true;
+        self.refs = self.refs.with_existing_blocks();
         self
     }
 
     /// Pin to a specific depth of the graph
     pub fn depth(mut self, depth: u64) -> Self {
         self.refs = self.refs.with_max_depth(depth);
+        self
+    }
+
+    /// Duration to fetch the block from the network before
+    /// timing out
+    pub fn timeout(mut self, duration: Duration) -> Self {
+        self.refs = self.refs.with_timeout(duration);
         self
     }
 

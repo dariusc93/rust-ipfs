@@ -8,6 +8,7 @@ use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::fmt;
+use std::time::Duration;
 
 /// Represents a single link in an IPLD tree encountered during a `refs` walk.
 #[derive(Clone, PartialEq, Eq)]
@@ -42,6 +43,8 @@ pub(crate) struct IpldRefs {
     max_depth: Option<u64>,
     unique: bool,
     download_blocks: bool,
+    exit_on_error: bool,
+    timeout: Option<Duration>,
 }
 
 impl Default for IpldRefs {
@@ -50,6 +53,8 @@ impl Default for IpldRefs {
             max_depth: None, // unlimited
             unique: false,
             download_blocks: true,
+            exit_on_error: false,
+            timeout: None,
         }
     }
 }
@@ -75,6 +80,19 @@ impl IpldRefs {
     /// behaviour to stop on first block which is not found locally.
     pub fn with_existing_blocks(mut self) -> IpldRefs {
         self.download_blocks = false;
+        self
+    }
+
+    /// Duration to fetch the block from the network before
+    /// timing out
+    pub fn with_timeout(mut self, duration: Duration) -> IpldRefs {
+        self.timeout = Some(duration);
+        self
+    }
+
+    /// Yield an error to exit the stream than to continue
+    pub fn with_exit_on_error(mut self) -> IpldRefs {
+        self.exit_on_error = false;
         self
     }
 
@@ -123,6 +141,8 @@ where
         max_depth,
         unique,
         download_blocks: true,
+        timeout: None,
+        exit_on_error: true,
     };
     iplds_refs_inner(repo, iplds, opts).map_err(|e| match e {
         IpldRefsError::Loading(e) => e,
@@ -149,6 +169,8 @@ where
         max_depth,
         unique,
         download_blocks,
+        timeout,
+        exit_on_error,
     } = opts;
 
     let empty_stream = max_depth.map(|n| n == 0).unwrap_or(false);
@@ -190,7 +212,7 @@ where
             let borrowed = repo.borrow();
 
             let block = if download_blocks {
-                match borrowed.get_block(&cid, &[], false).await {
+                match borrowed.get_block_with_session(None, &cid, &[], !download_blocks, timeout).await {
                     Ok(block) => block,
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);
@@ -205,12 +227,18 @@ where
                 match borrowed.get_block_now(&cid).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
-                        yield Err(IpldRefsError::BlockNotFound(cid.to_owned()));
-                        return;
+                        if exit_on_error {
+                            yield Err(IpldRefsError::BlockNotFound(cid.to_owned()));
+                            return;
+                        }
+                        continue;
                     }
                     Err(e) => {
-                        yield Err(IpldRefsError::from(e));
-                        return;
+                        if exit_on_error {
+                            yield Err(IpldRefsError::from(e));
+                            return;
+                        }
+                        continue;
                     }
                 }
             };
