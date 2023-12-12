@@ -91,6 +91,7 @@ impl IpldRefs {
     }
 
     /// Yield an error to exit the stream than to continue
+    #[allow(dead_code)]
     pub fn with_exit_on_error(mut self) -> IpldRefs {
         self.exit_on_error = false;
         self
