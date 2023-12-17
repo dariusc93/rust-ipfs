@@ -217,10 +217,10 @@ where
                     Ok(block) => block,
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);
-                        // TODO: yield error msg
-                        // unsure in which cases this happens, because we'll start to search the content
-                        // and stop only when request has been cancelled (FIXME: no way to stop this
-                        // operation)
+                        if exit_on_error {
+                            yield Err(IpldRefsError::from(e));
+                            return;
+                        }
                         continue;
                     }
                 }

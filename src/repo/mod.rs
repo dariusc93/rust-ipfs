@@ -908,22 +908,30 @@ impl Repo {
     }
 
     /// Inserts a direct pin for a `Cid`.
-    pub async fn insert_direct_pin(&self, cid: &Cid) -> Result<(), Error> {
+    pub(crate) async fn insert_direct_pin(&self, cid: &Cid) -> Result<(), Error> {
         self.data_store.insert_direct_pin(cid).await
     }
 
     /// Inserts a recursive pin for a `Cid`.
-    pub async fn insert_recursive_pin(&self, cid: &Cid, refs: References<'_>) -> Result<(), Error> {
+    pub(crate) async fn insert_recursive_pin(
+        &self,
+        cid: &Cid,
+        refs: References<'_>,
+    ) -> Result<(), Error> {
         self.data_store.insert_recursive_pin(cid, refs).await
     }
 
     /// Removes a direct pin for a `Cid`.
-    pub async fn remove_direct_pin(&self, cid: &Cid) -> Result<(), Error> {
+    pub(crate) async fn remove_direct_pin(&self, cid: &Cid) -> Result<(), Error> {
         self.data_store.remove_direct_pin(cid).await
     }
 
     /// Removes a recursive pin for a `Cid`.
-    pub async fn remove_recursive_pin(&self, cid: &Cid, refs: References<'_>) -> Result<(), Error> {
+    pub(crate) async fn remove_recursive_pin(
+        &self,
+        cid: &Cid,
+        refs: References<'_>,
+    ) -> Result<(), Error> {
         // FIXME: not really sure why is there not an easier way to to transfer control
         self.data_store.remove_recursive_pin(cid, refs).await
     }
