@@ -56,7 +56,7 @@ use p2p::{
     BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig,
     RelayConfig,
 };
-use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock};
+use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoInsertPin, RepoRemovePin};
 use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -91,7 +91,7 @@ pub use self::{
 
 pub type Block = libipld::Block<libipld::DefaultParams>;
 
-use libipld::{Cid, Ipld, IpldCodec};
+use libipld::{Cid, Ipld};
 
 pub use libp2p::{
     self,
@@ -1111,13 +1111,8 @@ impl Ipfs {
     /// If a recursive `insert_pin` operation is interrupted because of a crash or the crash
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
-    pub async fn insert_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        let span = debug_span!(parent: &self.span, "insert_pin", cid = %cid, recursive);
-
-        self.repo()
-            .insert_pin(cid, recursive, false)
-            .instrument(span)
-            .await
+    pub fn insert_pin(&self, cid: &Cid) -> RepoInsertPin {
+        self.repo().pin(cid).span(self.span.clone())
     }
 
     /// Unpins a given Cid recursively or only directly.
@@ -1126,35 +1121,8 @@ impl Ipfs {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub async fn remove_pin(&self, cid: &Cid, recursive: bool) -> Result<(), Error> {
-        let span = debug_span!(parent: &self.span, "remove_pin", cid = %cid, recursive);
-        async move {
-            if !recursive {
-                self.repo.remove_direct_pin(cid).await
-            } else {
-                // start walking refs of the root after loading it
-
-                let block = match self.repo.get_block_now(cid).await? {
-                    Some(b) => b,
-                    None => {
-                        return Err(anyhow::anyhow!("pinned root not found: {}", cid));
-                    }
-                };
-
-                let ipld = block.decode::<IpldCodec, Ipld>()?;
-                let st = crate::refs::IpldRefs::default()
-                    .with_only_unique()
-                    .with_existing_blocks()
-                    .refs_of_resolved(self.repo(), vec![(*cid, ipld.clone())].into_iter())
-                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
-                    .into_stream()
-                    .boxed();
-
-                self.repo.remove_recursive_pin(cid, st).await
-            }
-        }
-        .instrument(span)
-        .await
+    pub fn remove_pin(&self, cid: &Cid) -> RepoRemovePin {
+        self.repo().remove_pin(cid).span(self.span.clone())
     }
 
     /// Checks whether a given block is pinned.
@@ -2517,7 +2485,7 @@ mod tests {
         let cid = ipfs.put_dag(data.clone()).pin(false).await.unwrap();
 
         assert!(ipfs.is_pinned(&cid).await.unwrap());
-        ipfs.remove_pin(&cid, false).await.unwrap();
+        ipfs.remove_pin(&cid).await.unwrap();
         assert!(!ipfs.is_pinned(&cid).await.unwrap());
     }
 }
