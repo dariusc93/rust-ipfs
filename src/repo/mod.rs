@@ -1026,6 +1026,12 @@ impl RepoInsertPin {
         self
     }
 
+    /// 
+    pub fn exit_on_error(mut self) -> Self {
+        self.refs = self.refs.with_exit_on_error();
+        self
+    }
+
     /// Set tracing span
     pub fn span(mut self, span: Span) -> Self {
         self.span = Some(span);
