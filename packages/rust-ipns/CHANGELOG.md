@@ -1,4 +1,4 @@
-# 0.2.1
+# 0.3.0
 - chore: Use libp2p-identity [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 
 # 0.2.0
