@@ -9,7 +9,7 @@ use libp2p::quic::tokio::Transport as TokioQuicTransport;
 use libp2p::quic::Config as QuicConfig;
 use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
-use libp2p::yamux::{Config as YamuxConfig, WindowUpdateMode};
+use libp2p::yamux::Config as YamuxConfig;
 use libp2p::{identity, noise};
 use libp2p::{PeerId, Transport};
 use std::io::{self, ErrorKind};
@@ -20,9 +20,9 @@ pub(crate) type TTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TransportConfig {
-    pub yamux_max_buffer_size: usize,
-    pub yamux_receive_window_size: u32,
-    pub yamux_update_mode: UpdateMode,
+    //TODO: Remove in the future
+    pub yamux_max_buffer_size: Option<usize>,
+    pub yamux_receive_window_size: Option<u32>,
     pub timeout: Duration,
     pub dns_resolver: Option<DnsResolver>,
     pub version: UpgradeVersion,
@@ -37,9 +37,8 @@ pub struct TransportConfig {
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
-            yamux_max_buffer_size: 16 * 1024 * 1024,
-            yamux_receive_window_size: 16 * 1024 * 1024,
-            yamux_update_mode: UpdateMode::default(),
+            yamux_max_buffer_size: None,
+            yamux_receive_window_size: None,
             enable_quic: true,
             // enable_websocket: false,
             // enable_secure_websocket: false,
@@ -78,25 +77,6 @@ impl From<DnsResolver> for (ResolverConfig, ResolverOpts) {
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum UpdateMode {
-    /// See [`WindowUpdateMode::on_receive`]
-    Receive,
-
-    /// See [`WindowUpdateMode::on_read`]
-    #[default]
-    Read,
-}
-
-impl From<UpdateMode> for WindowUpdateMode {
-    fn from(mode: UpdateMode) -> Self {
-        match mode {
-            UpdateMode::Read => WindowUpdateMode::on_read(),
-            UpdateMode::Receive => WindowUpdateMode::on_receive(),
-        }
-    }
-}
-
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UpgradeVersion {
     /// See [`Version::V1`]
     Standard,
@@ -125,7 +105,6 @@ pub(crate) fn build_transport(
         timeout,
         yamux_max_buffer_size,
         yamux_receive_window_size,
-        yamux_update_mode,
         dns_resolver,
         version,
         enable_quic,
@@ -137,15 +116,17 @@ pub(crate) fn build_transport(
     let noise_config =
         noise::Config::new(&keypair).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
+    #[allow(deprecated)]
     let yamux_config = {
         let mut config = YamuxConfig::default();
-        config.set_max_buffer_size(yamux_max_buffer_size);
-        config.set_receive_window_size(yamux_receive_window_size);
-        config.set_window_update_mode(yamux_update_mode.into());
+        if let Some(max_buffer) = yamux_max_buffer_size {
+            config.set_max_buffer_size(max_buffer);
+        }
+        if let Some(receive_window) = yamux_receive_window_size {
+            config.set_receive_window_size(receive_window);
+        }
         config
     };
-
-    let multiplex_upgrade = yamux_config;
 
     let tcp_config = GenTcpConfig::default().nodelay(true).port_reuse(true);
 
@@ -166,14 +147,14 @@ pub(crate) fn build_transport(
             transport
                 .upgrade(version.into())
                 .authenticate(noise_config)
-                .multiplex(multiplex_upgrade)
+                .multiplex(yamux_config)
                 .timeout(timeout)
                 .boxed()
         }
         None => transport
             .upgrade(version.into())
             .authenticate(noise_config)
-            .multiplex(multiplex_upgrade)
+            .multiplex(yamux_config)
             .timeout(timeout)
             .boxed(),
     };
