@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "Rust implementation of IPNS"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Darius Clark"]
 keywords = ["libp2p", "ipfs"]
 
@@ -21,7 +21,14 @@ multihash = { version = "0.19" }
 sha2 = { version = "0.10" }
 chrono = { version = "0.4" }
 
-libp2p = { workspace = true, default-features = true, optional = true }
+libp2p-identity = { version = "0.2", optional = true, features = [
+    "ecdsa",
+    "ed25519",
+    "peerid",
+    "rand",
+    "rsa",
+    "secp256k1",
+] }
 derive_more = "0.99"
 
 [dev-dependencies]
@@ -29,4 +36,4 @@ clap = { workspace = true, features = ["derive"] }
 
 [features]
 default = ["libp2p"]
-libp2p = ["dep:libp2p"]
+libp2p = ["dep:libp2p-identity"]

@@ -4333,7 +4333,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ipfs"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "async-broadcast 0.6.0",
@@ -4384,14 +4384,14 @@ dependencies = [
 
 [[package]]
 name = "rust-ipns"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "cid",
  "clap 4.4.8",
  "derive_more",
  "libipld",
- "libp2p",
+ "libp2p-identity",
  "multihash 0.19.1",
  "quick-protobuf",
  "serde",

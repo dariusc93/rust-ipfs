@@ -11,9 +11,9 @@ use libipld::ipld;
 use libipld::prelude::Codec;
 use libipld::DagCbor;
 use libipld::Ipld;
-use libp2p::identity::Keypair;
-use libp2p::identity::PublicKey;
-use libp2p::PeerId;
+use libp2p_identity::Keypair;
+use libp2p_identity::PublicKey;
+use libp2p_identity::PeerId;
 use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
@@ -66,13 +66,13 @@ pub enum KeyType {
 }
 
 #[cfg(feature = "libp2p")]
-impl From<libp2p::identity::KeyType> for KeyType {
-    fn from(ty: libp2p::identity::KeyType) -> Self {
+impl From<libp2p_identity::KeyType> for KeyType {
+    fn from(ty: libp2p_identity::KeyType) -> Self {
         match ty {
-            libp2p::identity::KeyType::Ed25519 => KeyType::Ed25519,
-            libp2p::identity::KeyType::RSA => KeyType::RSA,
-            libp2p::identity::KeyType::Secp256k1 => KeyType::Secp256k1,
-            libp2p::identity::KeyType::Ecdsa => KeyType::ECDSA,
+            libp2p_identity::KeyType::Ed25519 => KeyType::Ed25519,
+            libp2p_identity::KeyType::RSA => KeyType::RSA,
+            libp2p_identity::KeyType::Secp256k1 => KeyType::Secp256k1,
+            libp2p_identity::KeyType::Ecdsa => KeyType::ECDSA,
         }
     }
 }
