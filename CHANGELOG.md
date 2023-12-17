@@ -1,4 +1,5 @@
 # 0.9.0
+- feat: Add `Repo::pin`, `Repo::remove_pin` and expanded options [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 - chore: Update `rust-ipns` [PR 121](https://github.com/dariusc93/rust-ipfs/pull/121)
 
 # 0.8.1
