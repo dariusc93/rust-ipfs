@@ -1,6 +1,6 @@
 use chrono::Duration;
 
-use libp2p::identity::Keypair;
+use libp2p_identity::Keypair;
 use rust_ipns::Record;
 
 fn main() -> std::io::Result<()> {

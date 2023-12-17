@@ -1,3 +1,6 @@
+# 0.9.0
+- chore: Update `rust-ipns` [PR 121](https://github.com/dariusc93/rust-ipfs/pull/121)
+
 # 0.8.1
 - chore: Add timeout in transport config for quic `max_idle_timeout` 
  
