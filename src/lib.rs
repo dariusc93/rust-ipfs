@@ -607,7 +607,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    #[cfg(not(feature = "beetle_bitswap"))]
+    #[cfg(feature = "libp2p_bitswap")]
     /// Enables bitswap
     pub fn with_bitswap(mut self) -> Self {
         self.options.protocols.bitswap = true;
