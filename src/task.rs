@@ -1238,8 +1238,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let result = match self
                     .swarm
                     .behaviour_mut()
-                    .addressbook
-                    .add_address(peer_id, addr.clone())
+                    .add_peer(peer_id, addr.clone())
                 {
                     true => Ok(()),
                     false => Err(anyhow::anyhow!(

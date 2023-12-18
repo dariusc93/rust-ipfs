@@ -539,7 +539,11 @@ where
         ))
     }
 
-    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
+    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) -> bool {
+        if self.addressbook.contains(&peer, &addr) {
+            return false;
+        }
+
         if !self.addressbook.contains(&peer, &addr) {
             self.addressbook.add_address(peer, addr.clone());
         }
@@ -554,6 +558,8 @@ where
                 bs.add_address(&peer, addr);
             }
         }
+
+        true
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId) {
