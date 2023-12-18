@@ -545,7 +545,14 @@ where
         }
 
         if let Some(kad) = self.kademlia.as_mut() {
-            kad.add_address(&peer, addr);
+            kad.add_address(&peer, addr.clone());
+        }
+
+        #[cfg(feature = "libp2p_bitswap")]
+        {
+            if let Some(bs) = self.bitswap.as_mut() {
+                bs.add_address(&peer, addr);
+            }
         }
     }
 

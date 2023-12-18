@@ -25,6 +25,7 @@ use libipld::{error::BlockNotFound, store::StoreParams, Block, Cid, Result};
 use libp2p::core::{Endpoint, Multiaddr};
 use libp2p::identity::PeerId;
 
+use libp2p::swarm::behaviour::ConnectionEstablished;
 #[cfg(feature = "compat")]
 use libp2p::swarm::derive_prelude::Either;
 use libp2p::swarm::{
@@ -152,11 +153,13 @@ impl<P: StoreParams> Bitswap<P> {
 
     /// Adds an address for a peer.
     pub fn add_address(&mut self, peer_id: &PeerId, addr: Multiaddr) {
+        self.query_manager.add_peer(peer_id);
         self.inner.add_address(peer_id, addr);
     }
 
     /// Removes an address for a peer.
     pub fn remove_address(&mut self, peer_id: &PeerId, addr: &Multiaddr) {
+        self.query_manager.remove_peer(peer_id);
         self.inner.remove_address(peer_id, addr);
     }
 
@@ -456,6 +459,15 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
+            FromSwarm::ConnectionEstablished(ConnectionEstablished {
+                peer_id,
+                other_established,
+                ..
+            }) => {
+                if other_established == 0 {
+                    self.query_manager.add_peer(&peer_id);
+                }
+            }
             FromSwarm::ConnectionClosed(ConnectionClosed {
                 peer_id,
                 connection_id,
@@ -465,6 +477,9 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                 #[cfg(feature = "compat")]
                 if remaining_established == 0 {
                     self.compat.remove(&peer_id);
+                }
+                if remaining_established == 0 {
+                    self.query_manager.remove_peer(&peer_id);
                 }
                 self.inner
                     .on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {

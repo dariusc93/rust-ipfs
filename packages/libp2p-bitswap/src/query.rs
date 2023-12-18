@@ -3,7 +3,7 @@ use fnv::{FnvHashMap, FnvHashSet};
 use libipld::Cid;
 use libp2p::PeerId;
 use prometheus::HistogramTimer;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 /// Query id.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -128,6 +128,7 @@ enum Transition<S, C> {
 #[derive(Default)]
 pub struct QueryManager {
     id_counter: u64,
+    peers: HashSet<PeerId>,
     queries: FnvHashMap<QueryId, Query>,
     events: VecDeque<QueryEvent>,
 }
@@ -191,6 +192,14 @@ impl QueryManager {
         )
     }
 
+    pub fn add_peer(&mut self, peer_id: &PeerId) {
+        self.peers.insert(*peer_id);
+    }
+
+    pub fn remove_peer(&mut self, peer_id: &PeerId) {
+        self.peers.remove(peer_id);
+    }
+
     /// Starts a query to locate and retrieve a block. Panics if no providers are supplied.
     pub fn get(
         &mut self,
@@ -206,6 +215,7 @@ impl QueryManager {
         let root = parent.unwrap_or(id);
         tracing::trace!("{} {} get", root, id);
         let mut state = GetState::default();
+
         for peer in providers {
             if state.block.is_none() {
                 state.block = Some(self.block(root, id, peer, cid));
@@ -213,6 +223,18 @@ impl QueryManager {
                 state.have.insert(self.have(root, id, peer, cid));
             }
         }
+
+        if state.block.is_none() && !self.peers.is_empty() {
+            let peers = self.peers.clone();
+            for peer in peers {
+                if state.block.is_none() {
+                    state.block = Some(self.block(root, id, peer, cid));
+                } else {
+                    state.have.insert(self.have(root, id, peer, cid));
+                }
+            }
+        }
+
         assert!(state.block.is_some());
         let query = Query {
             hdr: Header {

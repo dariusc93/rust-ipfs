@@ -1805,7 +1805,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             RepoEvent::RemovedBlock(cid) => self.swarm.behaviour_mut().stop_providing_block(&cid),
         }
     }
-    #[cfg(not(feature = "beetle_bitswap"))]
+
+    #[cfg(feature = "libp2p_bitswap")]
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
             RepoEvent::WantBlock(_, cids, peers) => {
