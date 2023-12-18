@@ -22,6 +22,9 @@
 // the docs better.
 //#![allow(private_intra_doc_links)]
 
+#[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+compile_error!("Requires bitswap to be enabled");
+
 pub mod config;
 pub mod dag;
 pub mod error;
@@ -52,10 +55,11 @@ use futures::{
 };
 
 use keystore::Keystore;
-use p2p::{
-    BitswapConfig, IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig,
-    RelayConfig,
-};
+
+#[cfg(feature = "beetle_bitswap")]
+use p2p::BitswapConfig;
+
+use p2p::{IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig, RelayConfig};
 use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoInsertPin, RepoRemovePin};
 use tokio::task::JoinHandle;
 use tracing::Span;
@@ -167,6 +171,7 @@ pub struct IpfsOptions {
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
 
+    #[cfg(feature = "beetle_bitswap")]
     /// Bitswap configuration
     pub bitswap_config: Option<BitswapConfig>,
 
@@ -257,6 +262,7 @@ impl Default for IpfsOptions {
         Self {
             ipfs_path: StoragePath::Memory,
             bootstrap: Default::default(),
+            #[cfg(feature = "beetle_bitswap")]
             bitswap_config: Default::default(),
             relay_server_config: Default::default(),
             kad_configuration: Default::default(),
@@ -559,11 +565,23 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    #[cfg(feature = "beetle_bitswap")]
     /// Load default behaviour for basic functionality
     pub fn with_default(self) -> Self {
         self.with_identify(None)
             .with_autonat()
             .with_bitswap(None)
+            .with_kademlia(None, Default::default())
+            .with_ping(None)
+            .with_pubsub(None)
+    }
+
+    #[cfg(feature = "libp2p_bitswap")]
+    /// Load default behaviour for basic functionality
+    pub fn with_default(self) -> Self {
+        self.with_identify(None)
+            .with_autonat()
+            .with_bitswap()
             .with_kademlia(None, Default::default())
             .with_ping(None)
             .with_pubsub(None)
@@ -581,10 +599,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
+    #[cfg(feature = "beetle_bitswap")]
     /// Enables bitswap
     pub fn with_bitswap(mut self, config: Option<BitswapConfig>) -> Self {
         self.options.protocols.bitswap = true;
         self.options.bitswap_config = config;
+        self
+    }
+
+    #[cfg(feature = "libp2p_bitswap")]
+    /// Enables bitswap
+    pub fn with_bitswap(mut self) -> Self {
+        self.options.protocols.bitswap = true;
         self
     }
 

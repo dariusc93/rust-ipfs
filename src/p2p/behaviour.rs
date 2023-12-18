@@ -1,7 +1,11 @@
 use super::gossipsub::GossipsubStream;
 use super::{addressbook, protocol};
+#[cfg(feature = "beetle_bitswap")]
 use bytes::Bytes;
+
 use libp2p_allow_block_list::BlockedPeers;
+#[cfg(feature = "libp2p_bitswap")]
+use libp2p_bitswap_next::Bitswap;
 
 use super::peerbook::{self};
 use either::Either;
@@ -12,8 +16,12 @@ use crate::IpfsOptions;
 
 use crate::p2p::MultiaddrExt;
 use crate::repo::Repo;
-
+#[cfg(feature = "beetle_bitswap")]
 use beetle_bitswap_next::{Bitswap, ProtocolId};
+
+#[cfg(feature = "libp2p_bitswap")]
+use libipld::DefaultParams;
+
 use libipld::Cid;
 use libp2p::core::Multiaddr;
 use libp2p::dcutr::Behaviour as Dcutr;
@@ -45,6 +53,9 @@ where
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
     pub mdns: Toggle<Mdns>,
+    #[cfg(feature = "libp2p_bitswap")]
+    pub bitswap: Toggle<Bitswap<DefaultParams>>,
+    #[cfg(feature = "beetle_bitswap")]
     pub bitswap: Toggle<Bitswap<Repo>>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
     pub ping: Toggle<Ping>,
@@ -272,6 +283,7 @@ impl Default for KadConfig {
     }
 }
 
+#[cfg(feature = "beetle_bitswap")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BitswapConfig {
     protocol: Vec<BitswapProtocol>,
@@ -279,6 +291,7 @@ pub struct BitswapConfig {
     server: bool,
 }
 
+#[cfg(feature = "beetle_bitswap")]
 impl Default for BitswapConfig {
     fn default() -> Self {
         Self {
@@ -294,6 +307,7 @@ impl Default for BitswapConfig {
     }
 }
 
+#[cfg(feature = "beetle_bitswap")]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
 pub enum BitswapProtocol {
     ProtocolLegacy,
@@ -303,6 +317,7 @@ pub enum BitswapProtocol {
     Protocol120,
 }
 
+#[cfg(feature = "beetle_bitswap")]
 impl From<BitswapProtocol> for ProtocolId {
     fn from(value: BitswapProtocol) -> Self {
         match value {
@@ -314,6 +329,7 @@ impl From<BitswapProtocol> for ProtocolId {
     }
 }
 
+#[cfg(feature = "beetle_bitswap")]
 impl From<BitswapConfig> for beetle_bitswap_next::Config {
     fn from(value: BitswapConfig) -> Self {
         beetle_bitswap_next::Config {
@@ -387,8 +403,21 @@ where
             .then_some(autonat::Behaviour::new(peer_id, Default::default()))
             .into();
 
+        #[cfg(feature = "beetle_bitswap")]
         let bitswap = (protocols.bitswap)
             .then_some(Bitswap::new(peer_id, repo, Default::default()).await)
+            .into();
+
+        #[cfg(feature = "libp2p_bitswap")]
+        let bitswap = protocols
+            .bitswap
+            .then_some(Bitswap::new(
+                Default::default(),
+                repo,
+                Box::new(|fut| {
+                    tokio::spawn(fut);
+                }),
+            ))
             .into();
 
         let ping = protocols
@@ -488,6 +517,7 @@ where
             Behaviour {
                 mdns,
                 kademlia,
+                #[cfg(any(feature = "libp2p_bitswap", feature = "beetle_bitswap"))]
                 bitswap,
                 ping,
                 identify,
@@ -510,14 +540,27 @@ where
         ))
     }
 
-    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) {
+    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) -> bool {
+        if self.addressbook.contains(&peer, &addr) {
+            return false;
+        }
+
         if !self.addressbook.contains(&peer, &addr) {
             self.addressbook.add_address(peer, addr.clone());
         }
 
         if let Some(kad) = self.kademlia.as_mut() {
-            kad.add_address(&peer, addr);
+            kad.add_address(&peer, addr.clone());
         }
+
+        #[cfg(feature = "libp2p_bitswap")]
+        {
+            if let Some(bs) = self.bitswap.as_mut() {
+                bs.add_address(&peer, addr);
+            }
+        }
+
+        true
     }
 
     pub fn remove_peer(&mut self, peer: &PeerId) {
@@ -540,6 +583,7 @@ where
         self.protocol.iter().collect::<Vec<_>>()
     }
 
+    #[cfg(feature = "beetle_bitswap")]
     pub fn notify_new_blocks(&self, blocks: Vec<crate::Block>) {
         if let Some(bitswap) = self.bitswap.as_ref() {
             let client = bitswap.client().clone();
@@ -562,6 +606,7 @@ where
         self.pubsub.as_mut()
     }
 
+    #[cfg(feature = "beetle_bitswap")]
     pub fn bitswap(&mut self) -> Option<&mut Bitswap<Repo>> {
         self.bitswap.as_mut()
     }

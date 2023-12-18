@@ -1450,6 +1450,19 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
+name = "env_logger"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95b3f3e67048839cb0d0781f445682a35113da7121f7c949db0e2be96a4fbece"
@@ -2496,6 +2509,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-bitswap-next"
+version = "0.26.0"
+dependencies = [
+ "async-std",
+ "async-trait",
+ "asynchronous-codec 0.7.0",
+ "bytes",
+ "env_logger 0.9.3",
+ "fnv",
+ "futures",
+ "lazy_static",
+ "libipld",
+ "libp2p",
+ "multihash 0.18.1",
+ "prometheus",
+ "quick-protobuf",
+ "quick-protobuf-codec 0.3.1",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "unsigned-varint 0.8.0",
+]
+
+[[package]]
 name = "libp2p-connection-limits"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2916,7 +2953,7 @@ dependencies = [
  "anyhow",
  "async-std",
  "clap 4.4.11",
- "env_logger",
+ "env_logger 0.10.1",
  "futures",
  "futures-timer",
  "libp2p",
@@ -3960,6 +3997,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "449811d15fbdf5ceb5c1144416066429cf82316e2ec8ce0c1f6f8a02e7bbcf8c"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot 0.12.1",
+ "protobuf",
+ "thiserror",
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3981,6 +4033,12 @@ dependencies = [
  "quote",
  "syn 2.0.41",
 ]
+
+[[package]]
+name = "protobuf"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "quick-error"
@@ -4355,6 +4413,7 @@ dependencies = [
  "libipld",
  "libp2p",
  "libp2p-allow-block-list",
+ "libp2p-bitswap-next",
  "libp2p-nat",
  "libp2p-relay-manager",
  "parking_lot 0.12.1",
@@ -5327,6 +5386,12 @@ name = "unsigned-varint"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb066959b24b5196ae73cb057f45598450d2c5f71460e98c49b738086eff9c06"
+dependencies = [
+ "asynchronous-codec 0.7.0",
+ "bytes",
+ "futures-io",
+ "futures-util",
+]
 
 [[package]]
 name = "untrusted"
