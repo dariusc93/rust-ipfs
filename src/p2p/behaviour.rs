@@ -517,6 +517,7 @@ where
             Behaviour {
                 mdns,
                 kademlia,
+                #[cfg(any(feature = "libp2p_bitswap", feature = "beetle_bitswap"))]
                 bitswap,
                 ping,
                 identify,
