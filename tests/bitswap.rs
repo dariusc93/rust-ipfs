@@ -3,7 +3,6 @@ use libipld::{Block, Cid, IpldCodec};
 mod common;
 use common::{spawn_nodes, Topology};
 
-
 // this test is designed to trigger unfavorable conditions for the bitswap
 // protocol by putting blocks in every second node and attempting to get
 // them from the other nodes; intended to be used for debugging or stress
