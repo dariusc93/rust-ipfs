@@ -14,7 +14,7 @@ version = "0.9.0"
 default = ["beetle_bitswap"]
 
 beetle_bitswap = ["beetle-bitswap-next"]
-libp2p_bitswap = ["libp2p-bitswap-next"]
+libp2p_bitswap = ["libp2p-bitswap-next", "libp2p-bitswap-next/compat"]
 
 sled_data_store = []
 redb_data_store = []
