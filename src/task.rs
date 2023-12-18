@@ -6,15 +6,28 @@ use futures::{
         oneshot,
     },
     stream::Fuse,
-    FutureExt, SinkExt, StreamExt,
+    FutureExt, StreamExt,
 };
+
+#[cfg(feature = "beetle_bitswap")]
+use futures::SinkExt;
 
 use crate::TSwarmEvent;
 use crate::{
     p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
     Channel, InnerPubsubEvent,
 };
+
+#[cfg(feature = "beetle_bitswap")]
 use beetle_bitswap_next::BitswapEvent;
+
+#[cfg(feature = "libp2p_bitswap")]
+use libp2p_bitswap_next::BitswapEvent;
+
+#[cfg(feature = "libp2p_bitswap")]
+use libipld::Cid;
+
+#[cfg(feature = "beetle_bitswap")]
 use tokio::task::JoinHandle;
 
 use wasm_timer::Interval;
@@ -72,6 +85,7 @@ use libp2p::{
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) swarm: TSwarm<C>,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
@@ -86,7 +100,10 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
+    #[cfg(feature = "beetle_bitswap")]
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
+    #[cfg(feature = "libp2p_bitswap")]
+    pub(crate) bitswap_sessions: HashMap<libp2p_bitswap_next::QueryId, Cid>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub(crate) timer: TaskTimer,
     pub(crate) local_external_addr: bool,
@@ -139,16 +156,19 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 }
 
 pub(crate) struct TaskTimer {
+    #[cfg(feature = "beetle_bitswap")]
     pub(crate) session_cleanup: Interval,
     pub(crate) event_cleanup: Interval,
 }
 
 impl Default for TaskTimer {
     fn default() -> Self {
+        #[cfg(feature = "beetle_bitswap")]
         let session_cleanup = Interval::new(Duration::from_secs(5));
         let event_cleanup = Interval::new(Duration::from_secs(60));
 
         Self {
+            #[cfg(feature = "beetle_bitswap")]
             session_cleanup,
             event_cleanup,
         }
@@ -185,25 +205,28 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
             self.pubsub_event_stream.retain(|ch| !ch.is_closed());
         }
 
-        if self.timer.session_cleanup.poll_next_unpin(cx).is_ready() {
-            let mut to_remove = Vec::new();
-            for (id, tasks) in &mut self.bitswap_sessions {
-                tasks.retain(|(_, task)| !task.is_finished());
+        #[cfg(feature = "beetle_bitswap")]
+        {
+            if self.timer.session_cleanup.poll_next_unpin(cx).is_ready() {
+                let mut to_remove = Vec::new();
+                for (id, tasks) in &mut self.bitswap_sessions {
+                    tasks.retain(|(_, task)| !task.is_finished());
 
-                if tasks.is_empty() {
-                    to_remove.push(*id);
+                    if tasks.is_empty() {
+                        to_remove.push(*id);
+                    }
+
+                    // Only do a small chunk of cleanup on each iteration
+                    // TODO(arqu): magic number
+                    if to_remove.len() >= 10 {
+                        break;
+                    }
                 }
 
-                // Only do a small chunk of cleanup on each iteration
-                // TODO(arqu): magic number
-                if to_remove.len() >= 10 {
-                    break;
+                for id in to_remove {
+                    let (tx, _rx) = oneshot::channel();
+                    self.destroy_bs_session(id, tx);
                 }
-            }
-
-            for id in to_remove {
-                let (tx, _rx) = oneshot::channel();
-                self.destroy_bs_session(id, tx);
             }
         }
 
@@ -234,30 +257,34 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
                 }
                 _ = session_cleanup.tick() => {
-                    let mut to_remove = Vec::new();
-                    for (id, tasks) in &mut self.bitswap_sessions {
-                        tasks.retain(|(_, task)| !task.is_finished());
+                    #[cfg(feature = "beetle_bitswap")]
+                    {
+                        let mut to_remove = Vec::new();
+                        for (id, tasks) in &mut self.bitswap_sessions {
+                            tasks.retain(|(_, task)| !task.is_finished());
 
-                        if tasks.is_empty() {
-                            to_remove.push(*id);
+                            if tasks.is_empty() {
+                                to_remove.push(*id);
+                            }
+
+                            // Only do a small chunk of cleanup on each iteration
+                            // TODO(arqu): magic number
+                            if to_remove.len() >= 10 {
+                                break;
+                            }
                         }
 
-                        // Only do a small chunk of cleanup on each iteration
-                        // TODO(arqu): magic number
-                        if to_remove.len() >= 10 {
-                            break;
+                        for id in to_remove {
+                            let (tx, _rx) = oneshot::channel();
+                            self.destroy_bs_session(id, tx);
                         }
-                    }
-
-                    for id in to_remove {
-                        let (tx, _rx) = oneshot::channel();
-                        self.destroy_bs_session(id, tx);
                     }
                 }
             }
         }
     }
 
+    #[cfg(feature = "beetle_bitswap")]
     fn destroy_bs_session(&mut self, ctx: u64, ret: oneshot::Sender<anyhow::Result<()>>) {
         if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
             let client = bitswap.client().clone();
@@ -511,14 +538,17 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 providers,
                             })) => {
                                 if !providers.is_empty() {
-                                    if let Entry::Occupied(entry) =
-                                        self.bitswap_provider_stream.entry(id)
+                                    #[cfg(feature = "beetle_bitswap")]
                                     {
-                                        let providers = providers.clone();
-                                        let mut tx = entry.get().clone();
-                                        tokio::spawn(async move {
-                                            let _ = tx.send(Ok(providers)).await;
-                                        });
+                                        if let Entry::Occupied(entry) =
+                                            self.bitswap_provider_stream.entry(id)
+                                        {
+                                            let providers = providers.clone();
+                                            let mut tx = entry.get().clone();
+                                            tokio::spawn(async move {
+                                                let _ = tx.send(Ok(providers)).await;
+                                            });
+                                        }
                                     }
                                 }
                                 if let Entry::Occupied(entry) = self.provider_stream.entry(id) {
@@ -757,6 +787,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
             }
+            #[cfg(feature = "beetle_bitswap")]
             SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
                 BitswapEvent::Provide { key } => {
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
@@ -775,6 +806,17 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 BitswapEvent::Ping { peer, response } => {
                     let duration = self.swarm.behaviour().peerbook.get_peer_latest_rtt(peer);
                     let _ = response.send(duration).ok();
+                }
+            },
+            #[cfg(feature = "libp2p_bitswap")]
+            SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
+                BitswapEvent::Progress(id, remaining) => {
+                    tracing::trace!(id = %id, remaining_blocks = remaining);
+                }
+                BitswapEvent::Complete(id, result) => {
+                    let cid = self.bitswap_sessions.remove(&id);
+                    let cid = cid.expect("Valid session");
+                    tracing::debug!(id = %id, cid = %cid, result = ?result, "completed query");
                 }
             },
             SwarmEvent::Behaviour(BehaviourEvent::Pubsub(
@@ -1233,31 +1275,46 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let _ = ret.send(Ok(rx));
             }
             IpfsEvent::WantList(peer, ret) => {
-                if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
-                    let client = bitswap.client().clone();
-                    let server = bitswap.server().cloned();
+                #[cfg(feature = "beetle_bitswap")]
+                {
+                    if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
+                        let client = bitswap.client().clone();
+                        let server = bitswap.server().cloned();
 
-                    let _ = ret.send(Ok(async move {
-                        if let Some(peer) = peer {
-                            if let Some(server) = server {
-                                server.wantlist_for_peer(&peer).await
+                        let _ = ret.send(Ok(async move {
+                            if let Some(peer) = peer {
+                                if let Some(server) = server {
+                                    server.wantlist_for_peer(&peer).await
+                                } else {
+                                    Vec::new()
+                                }
                             } else {
-                                Vec::new()
+                                Vec::from_iter(client.get_wantlist().await)
                             }
-                        } else {
-                            Vec::from_iter(client.get_wantlist().await)
                         }
+                        .boxed()));
+                    } else {
+                        let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                     }
-                    .boxed()));
-                } else {
+                }
+                #[cfg(feature = "libp2p_bitswap")]
+                {
+                    _ = peer;
                     let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
             }
             IpfsEvent::GetBitswapPeers(ret) => {
-                if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
-                    let client = bitswap.client().clone();
-                    let _ = ret.send(Ok(async move { client.get_peers().await }.boxed()));
-                } else {
+                #[cfg(feature = "beetle_bitswap")]
+                {
+                    if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
+                        let client = bitswap.client().clone();
+                        let _ = ret.send(Ok(async move { client.get_peers().await }.boxed()));
+                    } else {
+                        let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                    }
+                }
+                #[cfg(feature = "libp2p_bitswap")]
+                {
                     let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
             }
@@ -1651,6 +1708,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         }
     }
 
+    #[cfg(feature = "beetle_bitswap")]
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
             RepoEvent::WantBlock(session, mut cids, peers) => {
@@ -1745,6 +1803,24 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 // let _ = ret.send(Err(anyhow!("not actively providing blocks yet")));
             }
             RepoEvent::RemovedBlock(cid) => self.swarm.behaviour_mut().stop_providing_block(&cid),
+        }
+    }
+    #[cfg(not(feature = "beetle_bitswap"))]
+    fn handle_repo_event(&mut self, event: RepoEvent) {
+        match event {
+            RepoEvent::WantBlock(_, cids, peers) => {
+                let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
+                    return;
+                };
+
+                for cid in cids {
+                    let id = bs.get(cid, peers.iter().copied());
+                    self.bitswap_sessions.insert(id, cid);
+                }
+            }
+            RepoEvent::UnwantBlock(_) => {}
+            RepoEvent::NewBlock(_) => {}
+            RepoEvent::RemovedBlock(_) => {}
         }
     }
 }

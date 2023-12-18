@@ -23,7 +23,10 @@ mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;
 pub use self::behaviour::BehaviourEvent;
 pub use self::behaviour::IdentifyConfiguration;
+
+#[cfg(feature = "beetle_bitswap")]
 pub use self::behaviour::{BitswapConfig, BitswapProtocol};
+
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::transport::{DnsResolver, TransportConfig, UpgradeVersion};
