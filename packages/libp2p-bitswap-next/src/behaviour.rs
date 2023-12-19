@@ -462,11 +462,23 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
                 other_established,
-                ..
+                connection_id,
+                endpoint,
+                failed_addresses,
             }) => {
                 if other_established == 0 {
                     self.query_manager.add_peer(&peer_id);
                 }
+
+                self.inner.on_swarm_event(FromSwarm::ConnectionEstablished(
+                    ConnectionEstablished {
+                        peer_id,
+                        other_established,
+                        connection_id,
+                        endpoint,
+                        failed_addresses,
+                    },
+                ));
             }
             FromSwarm::ConnectionClosed(ConnectionClosed {
                 peer_id,

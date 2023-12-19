@@ -1,6 +1,6 @@
 [package]
 name = "libp2p-bitswap-next"
-version = "0.26.0"
+version = "0.26.1"
 authors = ["Darius C", "David Craven <david@craven.ch>"]
 edition = "2018"
 description = "Implementation of the ipfs bitswap protocol."
