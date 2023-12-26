@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{time::Duration, num::NonZeroU8};
 
 use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt};
@@ -23,6 +23,7 @@ pub fn ls<'a>(
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
+    retry: Option<NonZeroU8>,
 ) -> UnixfsLs<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
@@ -41,7 +42,7 @@ pub fn ls<'a>(
     let stream = async_stream::stream! {
 
         let resolved = match dag
-            .resolve_with_session(session, path.clone(), true, providers, local_only, timeout, None)
+            .resolve_with_session(session, path.clone(), true, providers, local_only, timeout, retry)
             .await {
                 Ok((resolved, _)) => resolved,
                 Err(e) => {
@@ -66,7 +67,7 @@ pub fn ls<'a>(
         let mut root_directory = String::new();
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match repo.get_block_with_session(session, next, providers, local_only, timeout, None).await {
+            let block = match repo.get_block_with_session(session, next, providers, local_only, timeout, retry).await {
                 Ok(block) => block,
                 Err(error) => {
                     yield NodeItem::Error { error };

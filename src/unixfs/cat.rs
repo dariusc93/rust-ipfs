@@ -6,6 +6,7 @@ use futures::stream::{BoxStream, Stream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
+use std::num::NonZeroU8;
 use std::ops::Range;
 use std::{borrow::Borrow, time::Duration};
 use tracing::{Instrument, Span};
@@ -25,6 +26,7 @@ pub fn cat<'a>(
     providers: &'a [PeerId],
     local_only: bool,
     timeout: Option<Duration>,
+    retry: Option<NonZeroU8>,
 ) -> UnixfsCat<'a> {
     let (repo, dag, session) = match which {
         Either::Left(ipfs) => (
@@ -53,7 +55,7 @@ pub fn cat<'a>(
         // metadata. To get to it the user needs to create a Visitor over the first block.
         let block = match starting_point.into() {
             StartingPoint::Left(path) => match dag
-                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout, None)
+                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout, retry)
                 .await
                 .map_err(TraversalFailed::Resolving)
                 .and_then(|(resolved, _)| {
@@ -105,7 +107,7 @@ pub fn cat<'a>(
             let (next, _) = visit.pending_links();
 
             let borrow = repo.borrow();
-            let block = match borrow.get_block_with_session(session, next, providers, local_only, timeout, None).await {
+            let block = match borrow.get_block_with_session(session, next, providers, local_only, timeout, retry).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield Err(TraversalFailed::Loading(*next, e));

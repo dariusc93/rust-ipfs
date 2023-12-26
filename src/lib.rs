@@ -1253,7 +1253,7 @@ impl Ipfs {
         range: Option<Range<u64>>,
     ) -> UnixfsCat<'_> {
         self.unixfs()
-            .cat(starting_point, range, &[], false, None)
+            .cat(starting_point, range, &[], false, None, None)
             .span(self.span.clone())
     }
 
@@ -1277,14 +1277,14 @@ impl Ipfs {
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
     pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet<'_> {
         self.unixfs()
-            .get(path, dest, &[], false, None)
+            .get(path, dest, &[], false, None, None)
             .span(self.span.clone())
     }
 
     /// List directory contents
     pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs<'_> {
         self.unixfs()
-            .ls(path, &[], false, None)
+            .ls(path, &[], false, None, None)
             .span(self.span.clone())
     }
 

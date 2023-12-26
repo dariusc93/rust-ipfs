@@ -3,7 +3,7 @@
 //! Adding files and directory structures is supported but not exposed via an API. See examples and
 //! `ipfs-http`.
 
-use std::{ops::Range, path::PathBuf, time::Duration};
+use std::{num::NonZeroU8, ops::Range, path::PathBuf, time::Duration};
 
 use anyhow::Error;
 use either::Either;
@@ -90,6 +90,7 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> UnixfsCat<'a> {
         // convert early not to worry about the lifetime of parameter
         let starting_point = starting_point.into();
@@ -100,6 +101,7 @@ impl IpfsUnixfs {
             peers,
             local,
             timeout,
+            retry,
         )
     }
 
@@ -145,8 +147,17 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> UnixfsGet<'a> {
-        get(Either::Left(&self.ipfs), path, dest, peers, local, timeout)
+        get(
+            Either::Left(&self.ipfs),
+            path,
+            dest,
+            peers,
+            local,
+            timeout,
+            retry,
+        )
     }
 
     /// List directory contents
@@ -156,8 +167,9 @@ impl IpfsUnixfs {
         peers: &'a [PeerId],
         local: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> UnixfsLs<'a> {
-        ls(Either::Left(&self.ipfs), path, peers, local, timeout)
+        ls(Either::Left(&self.ipfs), path, peers, local, timeout, retry)
     }
 }
 
