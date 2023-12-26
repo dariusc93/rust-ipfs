@@ -320,7 +320,7 @@ pub struct Repo {
     data_store: Arc<dyn DataStore>,
     events: Arc<RwLock<Option<Sender<RepoEvent>>>>,
     pub(crate) subscriptions:
-        Arc<Mutex<HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>>>,
+        Arc<Mutex<HashMap<Cid, Vec<futures::channel::mpsc::Sender<Result<Block, String>>>>>>,
     lockfile: Arc<dyn Lock>,
     gclock: Arc<tokio::sync::RwLock<()>>,
 }
@@ -653,9 +653,9 @@ impl Repo {
             }
             let list = self.subscriptions.lock().remove(&cid);
             if let Some(mut list) = list {
-                for ch in list.drain(..) {
+                for mut ch in list.drain(..) {
                     let block = block.clone();
-                    let _ = ch.send(Ok(block));
+                    let _ = ch.try_send(Ok(block));
                 }
             }
         }
@@ -732,29 +732,30 @@ impl Repo {
             anyhow::bail!("Unable to locate missing blocks {missing:?}");
         }
 
-        for cid in &missing {
-            let cid = *cid;
-            let (tx, rx) = futures::channel::oneshot::channel();
-            self.subscriptions.lock().entry(cid).or_default().push(tx);
-
-            let timeout = timeout.unwrap_or(Duration::from_secs(60));
-            let task = async move {
-                let block = tokio::time::timeout(timeout, rx)
-                    .await
-                    .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
-                    .map_err(|e| anyhow!("{e}"))?;
-                Ok::<_, anyhow::Error>(block)
-            }
-            .boxed();
-            blocks.push_back(task);
-        }
-
         // sending only fails if no one is listening anymore
         // and that is okay with us.
 
         let mut events = self
             .repo_channel()
             .ok_or(anyhow::anyhow!("Channel is not available"))?;
+
+        for cid in &missing {
+            let cid = *cid;
+            let (tx, mut rx) = futures::channel::mpsc::channel(0);
+            self.subscriptions.lock().entry(cid).or_default().push(tx);
+
+            let timeout = timeout.unwrap_or(Duration::from_secs(60));
+            let task = async move {
+                let block = tokio::time::timeout(timeout, rx.next())
+                    .await
+                    .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))?
+                    .ok_or(anyhow!("sender dropped"))?
+                    .map_err(|e| anyhow!("{e}"))?;
+                Ok::<_, anyhow::Error>(block)
+            }
+            .boxed();
+            blocks.push_back(task);
+        }
 
         events
             .send(RepoEvent::WantBlock(session, cids.to_vec(), peers.to_vec()))

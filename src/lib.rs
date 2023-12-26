@@ -2350,7 +2350,7 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
-    use futures::TryFutureExt;
+    use futures::{channel::mpsc, TryFutureExt};
 
     use super::*;
 
@@ -2425,8 +2425,7 @@ mod node {
         #[allow(clippy::type_complexity)]
         pub fn get_subscriptions(
             &self,
-        ) -> &parking_lot::Mutex<HashMap<Cid, Vec<oneshot::Sender<Result<Block, String>>>>>
-        {
+        ) -> &parking_lot::Mutex<HashMap<Cid, Vec<mpsc::Sender<Result<Block, String>>>>> {
             &self.ipfs.repo.subscriptions
         }
 
