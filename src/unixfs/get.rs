@@ -52,7 +52,7 @@ pub fn get<'a, P: AsRef<Path>>(
             };
 
         let block  = match dag
-            .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
+            .resolve_with_session(session, path.clone(), true, providers, local_only, timeout, None)
             .await
             .map_err(TraversalFailed::Resolving)
             .and_then(|(resolved, _)| resolved.into_unixfs_block().map_err(TraversalFailed::Path)) {
@@ -70,7 +70,7 @@ pub fn get<'a, P: AsRef<Path>>(
 
         while walker.should_continue() {
             let (next, _) = walker.pending_links();
-            let block = match repo.get_block_with_session(session, next, providers, local_only, timeout).await {
+            let block = match repo.get_block_with_session(session, next, providers, local_only, timeout, None).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };

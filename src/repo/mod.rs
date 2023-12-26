@@ -16,6 +16,7 @@ use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
+use std::num::NonZeroU8;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -672,7 +673,7 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
     ) -> Result<Block, Error> {
-        self.get_block_with_session(None, cid, peers, local_only, None)
+        self.get_block_with_session(None, cid, peers, local_only, None, None)
             .await
     }
 
@@ -685,7 +686,7 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
-        self.get_blocks_with_session(None, cids, peers, local_only, None)
+        self.get_blocks_with_session(None, cids, peers, local_only, None, None)
             .await
     }
 
@@ -708,6 +709,7 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
         let _guard = self.gclock.read().await;
         let mut blocks = FuturesOrdered::new();
@@ -739,19 +741,39 @@ impl Repo {
             .repo_channel()
             .ok_or(anyhow::anyhow!("Channel is not available"))?;
 
+        let timeout = timeout.unwrap_or(Duration::from_secs(60));
+        let retry: u8 = retry
+            .unwrap_or(1.try_into().expect("greater in zero"))
+            .into();
+
         for cid in &missing {
             let cid = *cid;
             let (tx, mut rx) = futures::channel::mpsc::channel(0);
             self.subscriptions.lock().entry(cid).or_default().push(tx);
+            let event = events.clone();
+            let peers = peers.to_vec();
 
-            let timeout = timeout.unwrap_or(Duration::from_secs(60));
             let task = async move {
-                let block = tokio::time::timeout(timeout, rx.next())
-                    .await
-                    .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))?
-                    .ok_or(anyhow!("sender dropped"))?
-                    .map_err(|e| anyhow!("{e}"))?;
-                Ok::<_, anyhow::Error>(block)
+                let mut iter = (0..retry).peekable();
+                while iter.next().is_some() {
+                    match tokio::time::timeout(timeout, rx.next()).await {
+                        Ok(Some(Ok(block))) => return Ok(block),
+                        Ok(Some(Err(e))) => return Err(anyhow!("{e}")),
+                        Ok(None) => return Err(anyhow!("sender dropped")),
+                        Err(_) => {
+                            if iter.peek().is_none() {
+                                tracing::error!(block = %cid, "Timeout while resolving block");
+                                break;
+                            }
+                            tracing::debug!(block = %cid, "Retrying WantBlock");
+                            _ = event
+                                .clone()
+                                .send(RepoEvent::WantBlock(session, vec![cid], peers.to_vec()))
+                                .await;
+                        }
+                    }
+                }
+                Err(anyhow::anyhow!("Timeout while resolving {cid}"))
             }
             .boxed();
             blocks.push_back(task);
@@ -772,10 +794,11 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> Result<Block, Error> {
         let cids = vec![*cid];
         let mut blocks = self
-            .get_blocks_with_session(session, &cids, peers, local_only, timeout)
+            .get_blocks_with_session(session, &cids, peers, local_only, timeout, retry)
             .await?;
 
         blocks

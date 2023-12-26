@@ -53,7 +53,7 @@ pub fn cat<'a>(
         // metadata. To get to it the user needs to create a Visitor over the first block.
         let block = match starting_point.into() {
             StartingPoint::Left(path) => match dag
-                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
+                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout, None)
                 .await
                 .map_err(TraversalFailed::Resolving)
                 .and_then(|(resolved, _)| {
@@ -105,7 +105,7 @@ pub fn cat<'a>(
             let (next, _) = visit.pending_links();
 
             let borrow = repo.borrow();
-            let block = match borrow.get_block_with_session(session, next, providers, local_only, timeout).await {
+            let block = match borrow.get_block_with_session(session, next, providers, local_only, timeout, None).await {
                 Ok(block) => block,
                 Err(e) => {
                     yield Err(TraversalFailed::Loading(*next, e));

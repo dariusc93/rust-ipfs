@@ -26,6 +26,7 @@ use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::iter::Peekable;
 use std::marker::PhantomData;
+use std::num::NonZeroU8;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -233,6 +234,7 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> Result<Ipld, ResolveError> {
         let resolved_path = match &self.ipfs {
             Some(ipfs) => ipfs
@@ -256,7 +258,7 @@ impl IpldDag {
 
         let (node, _) = match self
             .resolve0(
-                session, cid, &mut iter, true, providers, local_only, timeout,
+                session, cid, &mut iter, true, providers, local_only, timeout, retry,
             )
             .await
         {
@@ -288,10 +290,11 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
-        self.resolve_with_session(None, path, follow_links, providers, local_only, None)
+        self.resolve_with_session(None, path, follow_links, providers, local_only, None, None)
             .await
     }
 
+    #[allow(clippy::complexity)]
     pub(crate) async fn resolve_with_session(
         &self,
         session: Option<u64>,
@@ -300,6 +303,7 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
         let resolved_path = match &self.ipfs {
             Some(ipfs) => ipfs
@@ -330,6 +334,7 @@ impl IpldDag {
                     providers,
                     local_only,
                     timeout,
+                    retry,
                 )
                 .await
             {
@@ -360,6 +365,7 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
         timeout: Option<Duration>,
+        retry: Option<NonZeroU8>,
     ) -> Result<(ResolvedNode, usize), RawResolveLocalError> {
         use LocallyResolved::*;
 
@@ -371,7 +377,7 @@ impl IpldDag {
         loop {
             let block = match self
                 .repo
-                .get_block_with_session(session, &current, providers, local_only, timeout)
+                .get_block_with_session(session, &current, providers, local_only, timeout, retry)
                 .await
             {
                 Ok(block) => block,
@@ -446,6 +452,7 @@ pub struct DagGet {
     providers: Vec<PeerId>,
     local: bool,
     timeout: Option<Duration>,
+    retry: Option<NonZeroU8>,
     span: Option<Span>,
 }
 
@@ -458,6 +465,7 @@ impl DagGet {
             providers: vec![],
             local: false,
             timeout: None,
+            retry: None,
             span: None,
         }
     }
@@ -500,6 +508,11 @@ impl DagGet {
         self
     }
 
+    pub fn retry(mut self, retry: NonZeroU8) -> Self {
+        self.retry = Some(retry);
+        self
+    }
+
     /// Deserialize to a serde-compatible object
     pub fn deserialized<D: DeserializeOwned>(self) -> DagGetDeserialize<D> {
         DagGetDeserialize {
@@ -531,6 +544,7 @@ impl std::future::IntoFuture for DagGet {
                     &self.providers,
                     self.local,
                     self.timeout,
+                    self.retry,
                 )
                 .await
         }
