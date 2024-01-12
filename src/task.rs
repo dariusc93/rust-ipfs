@@ -47,26 +47,12 @@ use crate::{
     repo::{Repo, RepoEvent},
 };
 
-pub use crate::{
-    error::Error,
-    p2p::BehaviourEvent,
-    p2p::KadResult,
-    path::IpfsPath,
-    repo::{PinKind, PinMode},
-};
+pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 
 use libipld::multibase::{self, Base};
 pub use libp2p::{
-    self,
-    core::transport::ListenerId,
-    gossipsub::{MessageId, PublishError},
-    identity::Keypair,
-    identity::PublicKey,
-    kad::{Quorum, RecordKey as Key},
-    multiaddr::multiaddr,
-    multiaddr::Protocol,
-    swarm::NetworkBehaviour,
-    Multiaddr, PeerId,
+    self, core::transport::ListenerId, kad::RecordKey as Key, swarm::NetworkBehaviour, Multiaddr,
+    PeerId,
 };
 
 use libp2p::{

@@ -72,7 +72,7 @@ async fn wantlist_cancellation() {
     let wantlist_populated = bounded_retry(
         Duration::from_secs(1),
         || ipfs.bitswap_wantlist(None),
-        |ret| ret.unwrap().get(0) == Some(&cid),
+        |ret| ret.unwrap().first() == Some(&cid),
     )
     .await;
 
