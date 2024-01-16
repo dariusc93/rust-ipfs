@@ -62,7 +62,7 @@ where
     pub identify: Toggle<Identify>,
     pub pubsub: Toggle<GossipsubStream>,
     pub autonat: Toggle<autonat::Behaviour>,
-    pub upnp: Toggle<libp2p_nat::Behaviour>,
+    pub upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
     pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
@@ -482,7 +482,7 @@ where
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
-        let upnp = Toggle::from(protocols.upnp.then_some(libp2p_nat::Behaviour::default()));
+        let upnp = Toggle::from(protocols.upnp.then(libp2p::upnp::tokio::Behaviour::default));
 
         let (transport, relay_client, relay_manager) = match protocols.relay_client {
             true => {

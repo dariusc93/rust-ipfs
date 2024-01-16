@@ -1,3 +1,6 @@
+# 0.9.1
+- chore: Switch from libp2p-nat to libp2p-upnp. [PR 128](https://github.com/dariusc93/rust-ipfs/pull/128)
+
 # 0.9.0
 - feat: Add libp2p-bitswap and feature gate both implementation. [PR 126](https://github.com/dariusc93/rust-ipfs/pull/126)
 - feat: Add `Repo::pin`, `Repo::remove_pin` and expanded options [PR 122](https://github.com/dariusc93/rust-ipfs/pull/122)
