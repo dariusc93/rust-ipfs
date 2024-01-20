@@ -103,6 +103,41 @@ pub struct RelayConfig {
     pub circuit_src_rate_limiters: Vec<RateLimit>,
 }
 
+impl Default for RelayConfig {
+    fn default() -> Self {
+        Self {
+            max_reservations: 128,
+            max_reservations_per_peer: 4,
+            reservation_duration: Duration::from_secs(60 * 60),
+            reservation_rate_limiters: vec![
+                RateLimit::PerPeer {
+                    limit: NonZeroU32::new(30).expect("30 > 0"),
+                    interval: Duration::from_secs(60 * 2),
+                },
+                RateLimit::PerIp {
+                    limit: NonZeroU32::new(60).expect("60 > 0"),
+                    interval: Duration::from_secs(60),
+                },
+            ],
+
+            max_circuits: 16,
+            max_circuits_per_peer: 4,
+            max_circuit_duration: Duration::from_secs(2 * 60),
+            max_circuit_bytes: 1 << 17,
+            circuit_src_rate_limiters: vec![
+                RateLimit::PerPeer {
+                    limit: NonZeroU32::new(30).expect("30 > 0"),
+                    interval: Duration::from_secs(60 * 2),
+                },
+                RateLimit::PerIp {
+                    limit: NonZeroU32::new(60).expect("60 > 0"),
+                    interval: Duration::from_secs(60),
+                },
+            ],
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct IdentifyConfiguration {
     pub protocol_version: String,
@@ -376,11 +411,7 @@ where
             MemoryStore::with_config(peer_id, config)
         };
 
-        let kad_config = match options
-            .kad_configuration
-            .clone()
-            .unwrap_or(Either::Left(KadConfig::default()))
-        {
+        let kad_config = match options.kad_configuration.clone() {
             Either::Left(kad) => kad.into(),
             Either::Right(kad) => kad,
         };
@@ -422,24 +453,23 @@ where
 
         let ping = protocols
             .ping
-            .then_some(Ping::new(
-                options.ping_configuration.clone().unwrap_or_default(),
-            ))
+            .then_some(Ping::new(options.ping_configuration.clone()))
             .into();
 
         let identify = protocols
             .identify
-            .then_some(Identify::new(
-                options
-                    .identify_configuration
-                    .clone()
-                    .unwrap_or_default()
-                    .into(keypair.public()),
-            ))
+            .then(|| {
+                Identify::new(
+                    options
+                        .identify_configuration
+                        .clone()
+                        .into(keypair.public()),
+                )
+            })
             .into();
 
         let pubsub = {
-            let pubsub_config = options.pubsub_config.clone().unwrap_or_default();
+            let pubsub_config = options.pubsub_config.clone();
             let mut builder = libp2p::gossipsub::ConfigBuilder::default();
 
             if let Some(protocol) = pubsub_config.custom_protocol_id {
@@ -470,11 +500,7 @@ where
 
         // Maybe have this enable in conjunction with RelayClient?
         let dcutr = Toggle::from(protocols.dcutr.then_some(Dcutr::new(peer_id)));
-        let relay_config = options
-            .relay_server_config
-            .clone()
-            .map(|rc| rc.into())
-            .unwrap_or_default();
+        let relay_config = options.relay_server_config.clone().into();
 
         let relay = Toggle::from(
             protocols
@@ -495,8 +521,7 @@ where
 
         let peerbook = peerbook::Behaviour::default();
 
-        let addressbook =
-            addressbook::Behaviour::with_config(options.addr_config.unwrap_or_default());
+        let addressbook = addressbook::Behaviour::with_config(options.addr_config);
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
         let protocol = protocol::Behaviour::default();
