@@ -13,7 +13,7 @@ use super::UnixfsStatus;
 
 #[derive(Clone, Debug, Copy)]
 pub struct AddOption {
-    pub chunk: Option<Chunker>,
+    pub chunk: Chunker,
     pub pin: bool,
     pub provide: bool,
     pub wrap: bool,
@@ -37,7 +37,7 @@ impl<'a> From<PathBuf> for AddOpt<'a> {
 impl Default for AddOption {
     fn default() -> Self {
         Self {
-            chunk: Some(Chunker::Size(256 * 1024)),
+            chunk: Chunker::Size(256 * 1024),
             pin: false,
             provide: false,
             wrap: false,
@@ -107,7 +107,7 @@ pub fn add<'a>(
         };
 
         let mut adder = FileAdderBuilder::default()
-            .with_chunker(opt.map(|o| o.chunk.unwrap_or_default()).unwrap_or_default())
+            .with_chunker(opt.map(|o| o.chunk).unwrap_or_default())
             .build();
 
         yield UnixfsStatus::ProgressStatus { written, total_size };
