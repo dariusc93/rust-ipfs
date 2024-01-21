@@ -336,9 +336,7 @@ impl NetworkBehaviour for GossipsubStream {
                 ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
                     let topic = message.topic.clone();
                     if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(TrySendError::Closed(_)) =
-                            oe.get().try_broadcast(message.clone())
-                        {
+                        if let Err(TrySendError::Closed(_)) = oe.get().try_broadcast(message) {
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
