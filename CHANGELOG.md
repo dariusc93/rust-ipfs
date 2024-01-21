@@ -1,5 +1,5 @@
 # 0.10.0
-- feat: Retry fetching block after timeout. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- feat: Retry fetching block after timeout. [PR 130](https://github.com/dariusc93/rust-ipfs/pull/130)
 
 # 0.9.0
 - feat: Add libp2p-bitswap and feature gate both implementation. [PR 126](https://github.com/dariusc93/rust-ipfs/pull/126)
