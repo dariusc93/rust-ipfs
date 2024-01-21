@@ -429,7 +429,8 @@ impl Repo {
         }
     }
 
-    pub fn new_fs(path: impl AsRef<Path>, duration: Option<Duration>) -> Self {
+    pub fn new_fs(path: impl AsRef<Path>, duration: impl Into<Option<Duration>>) -> Self {
+        let duration = duration.into();
         let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
         let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
@@ -453,7 +454,8 @@ impl Repo {
         Self::new_raw(block_store, data_store, lockfile)
     }
 
-    pub fn new_memory(duration: Option<Duration>) -> Self {
+    pub fn new_memory(duration: impl Into<Option<Duration>>) -> Self {
+        let duration = duration.into();
         let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
         let block_store = Arc::new(blockstore::memory::MemBlockStore::new(
             Default::default(),
@@ -704,13 +706,14 @@ impl Repo {
 
     pub(crate) async fn get_blocks_with_session(
         &self,
-        session: Option<u64>,
+        session: impl Into<Option<u64>>,
         cids: &[Cid],
         peers: &[PeerId],
         local_only: bool,
-        timeout: Option<Duration>,
+        timeout: impl Into<Option<Duration>>,
         retry: Option<NonZeroU8>,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
+        let timeout = timeout.into();
         let _guard = self.gclock.read().await;
         let mut blocks = FuturesOrdered::new();
         let mut missing = cids.to_vec();
@@ -780,7 +783,11 @@ impl Repo {
         }
 
         events
-            .send(RepoEvent::WantBlock(session, cids.to_vec(), peers.to_vec()))
+            .send(RepoEvent::WantBlock(
+                session.into(),
+                cids.to_vec(),
+                peers.to_vec(),
+            ))
             .await
             .ok();
 
@@ -789,11 +796,11 @@ impl Repo {
 
     pub(crate) async fn get_block_with_session(
         &self,
-        session: Option<u64>,
+        session: impl Into<Option<u64>>,
         cid: &Cid,
         peers: &[PeerId],
         local_only: bool,
-        timeout: Option<Duration>,
+        timeout: impl Into<Option<Duration>>,
         retry: Option<NonZeroU8>,
     ) -> Result<Block, Error> {
         let cids = vec![*cid];
@@ -1019,16 +1026,18 @@ impl Repo {
 
     pub async fn list_pins(
         &self,
-        mode: Option<PinMode>,
+        mode: impl Into<Option<PinMode>>,
     ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>> {
+        let mode = mode.into();
         self.data_store.list(mode).await
     }
 
     pub async fn query_pins(
         &self,
         cids: Vec<Cid>,
-        requirement: Option<PinMode>,
+        requirement: impl Into<Option<PinMode>>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
+        let requirement = requirement.into();
         self.data_store.query(cids, requirement).await
     }
 }
