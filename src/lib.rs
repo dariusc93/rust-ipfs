@@ -59,7 +59,10 @@ use keystore::Keystore;
 #[cfg(feature = "beetle_bitswap")]
 use p2p::BitswapConfig;
 
-use p2p::{IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig, RelayConfig};
+use p2p::{
+    IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig, RelayConfig,
+    SwarmConfig, TransportConfig,
+};
 use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoInsertPin, RepoRemovePin};
 use tokio::task::JoinHandle;
 use tracing::Span;
@@ -173,38 +176,38 @@ pub struct IpfsOptions {
 
     #[cfg(feature = "beetle_bitswap")]
     /// Bitswap configuration
-    pub bitswap_config: Option<BitswapConfig>,
+    pub bitswap_config: BitswapConfig,
 
     /// Relay server config
-    pub relay_server_config: Option<RelayConfig>,
+    pub relay_server_config: RelayConfig,
 
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
     /// Transport configuration
-    pub transport_configuration: Option<crate::p2p::TransportConfig>,
+    pub transport_configuration: crate::p2p::TransportConfig,
 
     /// Swarm configuration
-    pub swarm_configuration: Option<crate::p2p::SwarmConfig>,
+    pub swarm_configuration: crate::p2p::SwarmConfig,
 
     /// Identify configuration
-    pub identify_configuration: Option<crate::p2p::IdentifyConfiguration>,
+    pub identify_configuration: crate::p2p::IdentifyConfiguration,
 
     /// Pubsub configuration
-    pub pubsub_config: Option<crate::p2p::PubsubConfig>,
+    pub pubsub_config: crate::p2p::PubsubConfig,
 
     /// Kad configuration
-    pub kad_configuration: Option<Either<KadConfig, libp2p::kad::Config>>,
+    pub kad_configuration: Either<KadConfig, libp2p::kad::Config>,
 
     /// Kad Store Config
     /// Note: Only supports MemoryStoreConfig at this time
     pub kad_store_config: KadStoreConfig,
 
     /// Ping Configuration
-    pub ping_configuration: Option<PingConfig>,
+    pub ping_configuration: PingConfig,
 
     /// Address book configuration
-    pub addr_config: Option<AddressBookConfig>,
+    pub addr_config: AddressBookConfig,
 
     pub keystore: Keystore,
 
@@ -265,7 +268,7 @@ impl Default for IpfsOptions {
             #[cfg(feature = "beetle_bitswap")]
             bitswap_config: Default::default(),
             relay_server_config: Default::default(),
-            kad_configuration: Default::default(),
+            kad_configuration: Either::Left(Default::default()),
             kad_store_config: Default::default(),
             ping_configuration: Default::default(),
             identify_configuration: Default::default(),
@@ -274,9 +277,9 @@ impl Default for IpfsOptions {
             keystore: Keystore::in_memory(),
             connection_idle: Duration::from_secs(30),
             listening_addrs: vec![],
-            transport_configuration: None,
-            pubsub_config: None,
-            swarm_configuration: None,
+            transport_configuration: TransportConfig::default(),
+            pubsub_config: PubsubConfig::default(),
+            swarm_configuration: SwarmConfig::default(),
             span: None,
             protocols: Default::default(),
         }
@@ -568,31 +571,32 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     #[cfg(feature = "beetle_bitswap")]
     /// Load default behaviour for basic functionality
     pub fn with_default(self) -> Self {
-        self.with_identify(None)
+        self.with_identify(Default::default())
             .with_autonat()
-            .with_bitswap(None)
-            .with_kademlia(None, Default::default())
-            .with_ping(None)
-            .with_pubsub(None)
+            .with_bitswap(Default::default())
+            .with_kademlia(Either::Left(Default::default()), Default::default())
+            .with_ping(Default::default())
+            .with_pubsub(Default::default())
     }
 
     #[cfg(feature = "libp2p_bitswap")]
     /// Load default behaviour for basic functionality
     pub fn with_default(self) -> Self {
-        self.with_identify(None)
+        self.with_identify(Default::default())
             .with_autonat()
             .with_bitswap()
-            .with_kademlia(None, Default::default())
-            .with_ping(None)
-            .with_pubsub(None)
+            .with_kademlia(Either::Left(Default::default()), Default::default())
+            .with_ping(Default::default())
+            .with_pubsub(Default::default())
     }
 
     /// Enables kademlia
     pub fn with_kademlia(
         mut self,
-        config: Option<Either<KadConfig, libp2p::kad::Config>>,
+        config: impl Into<Either<KadConfig, libp2p::kad::Config>>,
         store: KadStoreConfig,
     ) -> Self {
+        let config = config.into();
         self.options.protocols.kad = true;
         self.options.kad_configuration = config;
         self.options.kad_store_config = store;
@@ -601,7 +605,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
     #[cfg(feature = "beetle_bitswap")]
     /// Enables bitswap
-    pub fn with_bitswap(mut self, config: Option<BitswapConfig>) -> Self {
+    pub fn with_bitswap(mut self, config: BitswapConfig) -> Self {
         self.options.protocols.bitswap = true;
         self.options.bitswap_config = config;
         self
@@ -628,7 +632,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable relay server
-    pub fn with_relay_server(mut self, config: Option<RelayConfig>) -> Self {
+    pub fn with_relay_server(mut self, config: RelayConfig) -> Self {
         self.options.protocols.relay_server = true;
         self.options.relay_server_config = config;
         self
@@ -653,14 +657,14 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enables identify
-    pub fn with_identify(mut self, config: Option<crate::p2p::IdentifyConfiguration>) -> Self {
+    pub fn with_identify(mut self, config: crate::p2p::IdentifyConfiguration) -> Self {
         self.options.protocols.identify = true;
         self.options.identify_configuration = config;
         self
     }
 
     /// Enables pubsub
-    pub fn with_pubsub(mut self, config: Option<PubsubConfig>) -> Self {
+    pub fn with_pubsub(mut self, config: PubsubConfig) -> Self {
         self.options.protocols.pubsub = true;
         self.options.pubsub_config = config;
         self
@@ -673,7 +677,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enables ping
-    pub fn with_ping(mut self, config: Option<PingConfig>) -> Self {
+    pub fn with_ping(mut self, config: PingConfig) -> Self {
         self.options.protocols.ping = true;
         self.options.ping_configuration = config;
         self
@@ -707,7 +711,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
     /// Set transport configuration
     pub fn set_transport_configuration(mut self, config: crate::p2p::TransportConfig) -> Self {
-        self.options.transport_configuration = Some(config);
+        self.options.transport_configuration = config;
         self
     }
 
@@ -719,7 +723,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
     /// Set swarm configuration
     pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
-        self.options.swarm_configuration = Some(config);
+        self.options.swarm_configuration = config;
         self
     }
 
@@ -745,7 +749,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
     /// Set address book configuration
     pub fn set_addrbook_configuration(mut self, config: AddressBookConfig) -> Self {
-        self.options.addr_config = Some(config);
+        self.options.addr_config = config;
         self
     }
 
@@ -887,7 +891,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         }
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
-        let id_conf = options.identify_configuration.clone().unwrap_or_default();
+        let id_conf = options.identify_configuration.clone();
 
         let keystore = options.keystore.clone();
 
@@ -938,8 +942,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        let swarm_config = options.swarm_configuration.clone().unwrap_or_default();
-        let transport_config = options.transport_configuration.unwrap_or_default();
+        let swarm_config = options.swarm_configuration.clone();
+        let transport_config = options.transport_configuration;
         let swarm = create_swarm(
             &keys,
             &options,
@@ -1262,14 +1266,14 @@ impl Ipfs {
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
         let path = path.as_ref();
-        self.unixfs().add(path, None).span(self.span.clone())
+        self.unixfs().add(path, Default::default()).span(self.span.clone())
     }
 
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
     pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> UnixfsAdd<'a> {
-        self.unixfs().add(stream, None).span(self.span.clone())
+        self.unixfs().add(stream, Default::default()).span(self.span.clone())
     }
 
     /// Retreive a file and saving it to a path.

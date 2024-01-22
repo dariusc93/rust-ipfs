@@ -29,7 +29,7 @@ pub fn get<'a, P: AsRef<Path>>(
         Either::Right(repo) => {
             let session = repo
                 .is_online()
-                .then_some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+                .then(|| crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
             (repo.clone(), IpldDag::from(repo.clone()), session)
         }
     };

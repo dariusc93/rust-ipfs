@@ -1,6 +1,7 @@
 # 0.10.0
 - feat: Retry fetching block after timeout. [PR 130](https://github.com/dariusc93/rust-ipfs/pull/130)
-- refactor: Remove option around chunker and use conversion for option arguments
+- refactor: Remove option and use configuration directly. [PR 129](https://github.com/dariusc93/rust-ipfs/pull/129)
+- refactor: Remove option around chunker and use conversion for option arguments.
 - chore: Switch from libp2p-nat to libp2p-upnp. [PR 128](https://github.com/dariusc93/rust-ipfs/pull/128)
 
 # 0.9.0

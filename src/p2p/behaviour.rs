@@ -103,6 +103,41 @@ pub struct RelayConfig {
     pub circuit_src_rate_limiters: Vec<RateLimit>,
 }
 
+impl Default for RelayConfig {
+    fn default() -> Self {
+        Self {
+            max_reservations: 128,
+            max_reservations_per_peer: 4,
+            reservation_duration: Duration::from_secs(60 * 60),
+            reservation_rate_limiters: vec![
+                RateLimit::PerPeer {
+                    limit: NonZeroU32::new(30).expect("30 > 0"),
+                    interval: Duration::from_secs(60 * 2),
+                },
+                RateLimit::PerIp {
+                    limit: NonZeroU32::new(60).expect("60 > 0"),
+                    interval: Duration::from_secs(60),
+                },
+            ],
+
+            max_circuits: 16,
+            max_circuits_per_peer: 4,
+            max_circuit_duration: Duration::from_secs(2 * 60),
+            max_circuit_bytes: 1 << 17,
+            circuit_src_rate_limiters: vec![
+                RateLimit::PerPeer {
+                    limit: NonZeroU32::new(30).expect("30 > 0"),
+                    interval: Duration::from_secs(60 * 2),
+                },
+                RateLimit::PerIp {
+                    limit: NonZeroU32::new(60).expect("60 > 0"),
+                    interval: Duration::from_secs(60),
+                },
+            ],
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct IdentifyConfiguration {
     pub protocol_version: String,
@@ -334,7 +369,7 @@ impl From<BitswapConfig> for beetle_bitswap_next::Config {
     fn from(value: BitswapConfig) -> Self {
         beetle_bitswap_next::Config {
             client: Default::default(),
-            server: value.server.then_some(Default::default()),
+            server: value.server.then(Default::default),
             protocol: beetle_bitswap_next::ProtocolConfig {
                 protocol_ids: value.protocol.iter().map(|proto| (*proto).into()).collect(),
                 max_transmit_size: value.max_buf_size.unwrap_or(1024 * 1024 * 2),
@@ -376,17 +411,13 @@ where
             MemoryStore::with_config(peer_id, config)
         };
 
-        let kad_config = match options
-            .kad_configuration
-            .clone()
-            .unwrap_or(Either::Left(KadConfig::default()))
-        {
+        let kad_config = match options.kad_configuration.clone() {
             Either::Left(kad) => kad.into(),
             Either::Right(kad) => kad,
         };
 
         let mut kademlia: Toggle<Kademlia<MemoryStore>> = Toggle::from(
-            (protocols.kad).then_some(Kademlia::with_config(peer_id, store, kad_config)),
+            (protocols.kad).then(|| Kademlia::with_config(peer_id, store, kad_config)),
         );
 
         if let Some(kad) = kademlia.as_mut() {
@@ -400,46 +431,49 @@ where
 
         let autonat = protocols
             .autonat
-            .then_some(autonat::Behaviour::new(peer_id, Default::default()))
+            .then(|| autonat::Behaviour::new(peer_id, Default::default()))
             .into();
 
         #[cfg(feature = "beetle_bitswap")]
-        let bitswap = (protocols.bitswap)
-            .then_some(Bitswap::new(peer_id, repo, Default::default()).await)
-            .into();
+        let bitswap = match protocols.bitswap {
+            true => Some(Bitswap::new(peer_id, repo, Default::default()).await),
+            false => None,
+        }
+        .into();
 
         #[cfg(feature = "libp2p_bitswap")]
         let bitswap = protocols
             .bitswap
-            .then_some(Bitswap::new(
-                Default::default(),
-                repo,
-                Box::new(|fut| {
-                    tokio::spawn(fut);
-                }),
-            ))
+            .then(|| {
+                Bitswap::new(
+                    Default::default(),
+                    repo,
+                    Box::new(|fut| {
+                        tokio::spawn(fut);
+                    }),
+                )
+            })
             .into();
 
         let ping = protocols
             .ping
-            .then_some(Ping::new(
-                options.ping_configuration.clone().unwrap_or_default(),
-            ))
+            .then(|| Ping::new(options.ping_configuration.clone()))
             .into();
 
         let identify = protocols
             .identify
-            .then_some(Identify::new(
-                options
-                    .identify_configuration
-                    .clone()
-                    .unwrap_or_default()
-                    .into(keypair.public()),
-            ))
+            .then(|| {
+                Identify::new(
+                    options
+                        .identify_configuration
+                        .clone()
+                        .into(keypair.public()),
+                )
+            })
             .into();
 
         let pubsub = {
-            let pubsub_config = options.pubsub_config.clone().unwrap_or_default();
+            let pubsub_config = options.pubsub_config.clone();
             let mut builder = libp2p::gossipsub::ConfigBuilder::default();
 
             if let Some(protocol) = pubsub_config.custom_protocol_id {
@@ -454,7 +488,7 @@ where
 
             builder.validation_mode(pubsub_config.validate.into());
 
-            let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
+            let config = builder.build().map_err(anyhow::Error::from)?;
 
             let gossipsub = libp2p::gossipsub::Behaviour::new(
                 libp2p::gossipsub::MessageAuthenticity::Signed(keypair.clone()),
@@ -464,17 +498,13 @@ where
 
             protocols
                 .pubsub
-                .then_some(GossipsubStream::from(gossipsub))
+                .then(|| GossipsubStream::from(gossipsub))
                 .into()
         };
 
         // Maybe have this enable in conjunction with RelayClient?
-        let dcutr = Toggle::from(protocols.dcutr.then_some(Dcutr::new(peer_id)));
-        let relay_config = options
-            .relay_server_config
-            .clone()
-            .map(|rc| rc.into())
-            .unwrap_or_default();
+        let dcutr = Toggle::from(protocols.dcutr.then(|| Dcutr::new(peer_id)));
+        let relay_config = options.relay_server_config.clone().into();
 
         let relay = Toggle::from(
             protocols
@@ -495,8 +525,7 @@ where
 
         let peerbook = peerbook::Behaviour::default();
 
-        let addressbook =
-            addressbook::Behaviour::with_config(options.addr_config.unwrap_or_default());
+        let addressbook = addressbook::Behaviour::with_config(options.addr_config);
 
         let block_list = libp2p_allow_block_list::Behaviour::default();
         let protocol = protocol::Behaviour::default();
@@ -504,14 +533,12 @@ where
 
         let rendezvous_client = protocols
             .rendezvous_client
-            .then_some(libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
+            .then(|| libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
             .into();
 
         let rendezvous_server = protocols
             .rendezvous_server
-            .then_some(libp2p::rendezvous::server::Behaviour::new(
-                Default::default(),
-            ))
+            .then(|| libp2p::rendezvous::server::Behaviour::new(Default::default()))
             .into();
         Ok((
             Behaviour {

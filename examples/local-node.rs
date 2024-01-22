@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
         .with_relay(true)
-        .with_relay_server(None)
+        .with_relay_server(Default::default())
         .with_upnp()
         .with_rendezvous_server()
         .with_custom_behaviour(ext_behaviour::Behaviour::new(local_peer_id))
