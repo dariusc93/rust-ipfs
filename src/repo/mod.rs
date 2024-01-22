@@ -714,6 +714,7 @@ impl Repo {
         retry: Option<NonZeroU8>,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
         let timeout = timeout.into();
+        let session = session.into();
         let _guard = self.gclock.read().await;
         let mut blocks = FuturesOrdered::new();
         let mut missing = cids.to_vec();
@@ -784,7 +785,7 @@ impl Repo {
 
         events
             .send(RepoEvent::WantBlock(
-                session.into(),
+                session,
                 cids.to_vec(),
                 peers.to_vec(),
             ))
