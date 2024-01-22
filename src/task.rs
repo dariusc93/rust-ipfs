@@ -227,6 +227,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
         loop {
             tokio::select! {
+                biased;
                 Some(swarm) = self.swarm.next() => {
                     self.handle_swarm_event(swarm);
                 },
@@ -1667,7 +1668,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 };
 
                 let cookie = use_cookie
-                    .then_some(self.rzv_cookie.get(&peer_id).cloned().flatten())
+                    .then(|| self.rzv_cookie.get(&peer_id).cloned().flatten())
                     .flatten();
 
                 rz.discover(ns.clone(), cookie, ttl, peer_id);
