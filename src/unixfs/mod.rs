@@ -72,10 +72,24 @@ impl From<Vec<u8>> for AddOpt<'_> {
     }
 }
 
+impl From<(String, Vec<u8>)> for AddOpt<'_> {
+    fn from((name, bytes): (String, Vec<u8>)) -> Self {
+        let bytes: Bytes = bytes.into();
+        Self::from((name, bytes))
+    }
+}
+
 impl From<Bytes> for AddOpt<'_> {
     fn from(bytes: Bytes) -> Self {
         let stream = stream::once(async { Ok::<_, std::io::Error>(bytes) }).boxed();
         AddOpt::Stream(stream)
+    }
+}
+
+impl From<(String, Bytes)> for AddOpt<'_> {
+    fn from((name, bytes): (String, Bytes)) -> Self {
+        let stream = stream::once(async { Ok::<_, std::io::Error>(bytes) }).boxed();
+        Self::from((name, stream))
     }
 }
 
