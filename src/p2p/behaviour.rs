@@ -369,7 +369,7 @@ impl From<BitswapConfig> for beetle_bitswap_next::Config {
     fn from(value: BitswapConfig) -> Self {
         beetle_bitswap_next::Config {
             client: Default::default(),
-            server: value.server.then_some(Default::default()),
+            server: value.server.then(Default::default),
             protocol: beetle_bitswap_next::ProtocolConfig {
                 protocol_ids: value.protocol.iter().map(|proto| (*proto).into()).collect(),
                 max_transmit_size: value.max_buf_size.unwrap_or(1024 * 1024 * 2),
@@ -417,7 +417,7 @@ where
         };
 
         let mut kademlia: Toggle<Kademlia<MemoryStore>> = Toggle::from(
-            (protocols.kad).then_some(Kademlia::with_config(peer_id, store, kad_config)),
+            (protocols.kad).then(|| Kademlia::with_config(peer_id, store, kad_config)),
         );
 
         if let Some(kad) = kademlia.as_mut() {
@@ -431,29 +431,33 @@ where
 
         let autonat = protocols
             .autonat
-            .then_some(autonat::Behaviour::new(peer_id, Default::default()))
+            .then(|| autonat::Behaviour::new(peer_id, Default::default()))
             .into();
 
         #[cfg(feature = "beetle_bitswap")]
-        let bitswap = (protocols.bitswap)
-            .then_some(Bitswap::new(peer_id, repo, Default::default()).await)
-            .into();
+        let bitswap = match protocols.bitswap {
+            true => Some(Bitswap::new(peer_id, repo, Default::default()).await),
+            false => None,
+        }
+        .into();
 
         #[cfg(feature = "libp2p_bitswap")]
         let bitswap = protocols
             .bitswap
-            .then_some(Bitswap::new(
-                Default::default(),
-                repo,
-                Box::new(|fut| {
-                    tokio::spawn(fut);
-                }),
-            ))
+            .then(|| {
+                Bitswap::new(
+                    Default::default(),
+                    repo,
+                    Box::new(|fut| {
+                        tokio::spawn(fut);
+                    }),
+                )
+            })
             .into();
 
         let ping = protocols
             .ping
-            .then_some(Ping::new(options.ping_configuration.clone()))
+            .then(|| Ping::new(options.ping_configuration.clone()))
             .into();
 
         let identify = protocols
@@ -484,7 +488,7 @@ where
 
             builder.validation_mode(pubsub_config.validate.into());
 
-            let config = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
+            let config = builder.build().map_err(anyhow::Error::from)?;
 
             let gossipsub = libp2p::gossipsub::Behaviour::new(
                 libp2p::gossipsub::MessageAuthenticity::Signed(keypair.clone()),
@@ -494,12 +498,12 @@ where
 
             protocols
                 .pubsub
-                .then_some(GossipsubStream::from(gossipsub))
+                .then(|| GossipsubStream::from(gossipsub))
                 .into()
         };
 
         // Maybe have this enable in conjunction with RelayClient?
-        let dcutr = Toggle::from(protocols.dcutr.then_some(Dcutr::new(peer_id)));
+        let dcutr = Toggle::from(protocols.dcutr.then(|| Dcutr::new(peer_id)));
         let relay_config = options.relay_server_config.clone().into();
 
         let relay = Toggle::from(
@@ -529,14 +533,12 @@ where
 
         let rendezvous_client = protocols
             .rendezvous_client
-            .then_some(libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
+            .then(|| libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
             .into();
 
         let rendezvous_server = protocols
             .rendezvous_server
-            .then_some(libp2p::rendezvous::server::Behaviour::new(
-                Default::default(),
-            ))
+            .then(|| libp2p::rendezvous::server::Behaviour::new(Default::default()))
             .into();
         Ok((
             Behaviour {
