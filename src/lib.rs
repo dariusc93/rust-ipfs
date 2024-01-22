@@ -41,6 +41,7 @@ pub mod unixfs;
 extern crate tracing;
 
 use anyhow::{anyhow, format_err};
+use bytes::Bytes;
 use dag::{DagGet, DagPut};
 use either::Either;
 use futures::{
@@ -1266,14 +1267,18 @@ impl Ipfs {
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
         let path = path.as_ref();
-        self.unixfs().add(path, Default::default()).span(self.span.clone())
+        self.unixfs()
+            .add(path, Default::default())
+            .span(self.span.clone())
     }
 
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
-    pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> UnixfsAdd<'a> {
-        self.unixfs().add(stream, Default::default()).span(self.span.clone())
+    pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Bytes>>) -> UnixfsAdd<'a> {
+        self.unixfs()
+            .add(stream, Default::default())
+            .span(self.span.clone())
     }
 
     /// Retreive a file and saving it to a path.

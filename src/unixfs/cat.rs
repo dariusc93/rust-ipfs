@@ -1,5 +1,6 @@
 use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::stream;
+use bytes::Bytes;
 use either::Either;
 use futures::future::BoxFuture;
 use futures::stream::{BoxStream, Stream};
@@ -74,7 +75,7 @@ pub fn cat<'a>(
         let (visit, bytes) = match visit.start(block.data()) {
             Ok((bytes, _, _, visit)) => {
                 let bytes = if !bytes.is_empty() {
-                    Some(bytes.to_vec())
+                    Some(Bytes::copy_from_slice(bytes))
                 } else {
                     None
                 };
@@ -117,7 +118,7 @@ pub fn cat<'a>(
                 Ok((bytes, next_visit)) => {
                     if !bytes.is_empty() {
                         // TODO: manual implementation could allow returning just the slice
-                        yield Ok(bytes.to_vec());
+                        yield Ok(Bytes::copy_from_slice(bytes));
                     }
 
                     match next_visit {
@@ -159,7 +160,7 @@ impl From<Block> for StartingPoint {
 }
 
 pub struct UnixfsCat<'a> {
-    stream: BoxStream<'a, Result<Vec<u8>, TraversalFailed>>,
+    stream: BoxStream<'a, Result<Bytes, TraversalFailed>>,
     span: Option<Span>,
 }
 
@@ -171,7 +172,7 @@ impl<'a> UnixfsCat<'a> {
 }
 
 impl<'a> Stream for UnixfsCat<'a> {
-    type Item = Result<Vec<u8>, TraversalFailed>;
+    type Item = Result<Bytes, TraversalFailed>;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -181,7 +182,7 @@ impl<'a> Stream for UnixfsCat<'a> {
 }
 
 impl<'a> std::future::IntoFuture for UnixfsCat<'a> {
-    type Output = Result<Vec<u8>, TraversalFailed>;
+    type Output = Result<Bytes, TraversalFailed>;
 
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
@@ -192,7 +193,7 @@ impl<'a> std::future::IntoFuture for UnixfsCat<'a> {
             while let Some(bytes) = self.stream.try_next().await? {
                 data.extend(bytes);
             }
-            Ok(data)
+            Ok(data.into())
         }
         .instrument(span)
         .boxed()

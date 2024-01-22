@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{repo::Repo, Block};
+use bytes::Bytes;
 use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt, TryFutureExt};
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
@@ -24,7 +25,7 @@ pub enum AddOpt<'a> {
     Stream {
         name: Option<String>,
         total: Option<usize>,
-        stream: BoxStream<'a, std::result::Result<Vec<u8>, std::io::Error>>,
+        stream: BoxStream<'a, std::result::Result<Bytes, std::io::Error>>,
     },
 }
 
@@ -87,7 +88,7 @@ pub fn add<'a>(which: Either<&Ipfs, &Repo>, options: AddOpt<'a>, opt: AddOption)
                 .and_then(|file| async move {
                     let size = file.metadata().await?.len() as usize;
 
-                    let stream = ReaderStream::new(file).map(|x| x.map(|x| x.into()));
+                    let stream = ReaderStream::new(file);
 
                     let name: Option<String> = path.file_name().map(|f| f.to_string_lossy().to_string());
 
