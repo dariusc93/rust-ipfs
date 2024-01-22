@@ -109,7 +109,7 @@ impl IpfsUnixfs {
     pub fn add<'a, I: Into<AddOpt<'a>>>(
         &self,
         item: I,
-        option: Option<AddOption>,
+        option: AddOption,
     ) -> UnixfsAdd<'a> {
         let item = item.into();
         match item {

@@ -60,7 +60,7 @@ impl<'a> UnixfsAdd<'a> {
 pub fn add_file<'a, P: AsRef<Path>>(
     which: Either<&Ipfs, &Repo>,
     path: P,
-    opt: Option<AddOption>,
+    opt: AddOption,
 ) -> UnixfsAdd<'a>
 where
 {
@@ -68,11 +68,7 @@ where
     add(which, path.into(), opt)
 }
 
-pub fn add<'a>(
-    which: Either<&Ipfs, &Repo>,
-    options: AddOpt<'a>,
-    opt: Option<AddOption>,
-) -> UnixfsAdd<'a> {
+pub fn add<'a>(which: Either<&Ipfs, &Repo>, options: AddOpt<'a>, opt: AddOption) -> UnixfsAdd<'a> {
     let (ipfs, repo) = match which {
         Either::Left(ipfs) => {
             let repo = ipfs.repo().clone();
@@ -107,7 +103,7 @@ pub fn add<'a>(
         };
 
         let mut adder = FileAdderBuilder::default()
-            .with_chunker(opt.map(|o| o.chunk).unwrap_or_default())
+            .with_chunker(opt.chunk)
             .build();
 
         yield UnixfsStatus::ProgressStatus { written, total_size };
@@ -178,68 +174,64 @@ pub fn add<'a>(
 
         let mut path = IpfsPath::from(cid);
 
-        if let Some(opt) = opt {
+        if opt.wrap {
+            if let Some(name) = name {
+                let result = {
+                    let repo = repo.clone();
+                    async move {
+                        let mut opts = rust_unixfs::dir::builder::TreeOptions::default();
+                        opts.wrap_with_directory();
 
-            if opt.wrap {
-                if let Some(name) = name {
-                    let result = {
-                        let repo = repo.clone();
-                        async move {
-                            let mut opts = rust_unixfs::dir::builder::TreeOptions::default();
-                            opts.wrap_with_directory();
+                        let mut tree = rust_unixfs::dir::builder::BufferingTreeBuilder::new(opts);
+                        tree.put_link(&name, cid, written as _)?;
 
-                            let mut tree = rust_unixfs::dir::builder::BufferingTreeBuilder::new(opts);
-                            tree.put_link(&name, cid, written as _)?;
+                        let mut iter = tree.build();
+                        let mut cids = Vec::new();
 
-                            let mut iter = tree.build();
-                            let mut cids = Vec::new();
+                        while let Some(node) = iter.next_borrowed() {
+                            let node = node?;
+                            let block = Block::new(node.cid.to_owned(), node.block.into())?;
 
-                            while let Some(node) = iter.next_borrowed() {
-                                let node = node?;
-                                let block = Block::new(node.cid.to_owned(), node.block.into())?;
+                            repo.put_block(block).await?;
 
-                                repo.put_block(block).await?;
-
-                                cids.push(*node.cid);
-                            }
-                            let cid = cids.last().ok_or(anyhow::anyhow!("no cid available"))?;
-                            let path = IpfsPath::from(*cid).sub_path(&name)?;
-
-                            Ok::<_, anyhow::Error>(path)
+                            cids.push(*node.cid);
                         }
-                    };
+                        let cid = cids.last().ok_or(anyhow::anyhow!("no cid available"))?;
+                        let path = IpfsPath::from(*cid).sub_path(&name)?;
 
-                    path = match result.await {
-                        Ok(path) => path,
-                        Err(e) => {
-                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
-                            return;
-                        }
-                    };
-
-                }
-            }
-
-            let cid = path.root().cid().copied().expect("Cid is apart of the path");
-
-            if opt.pin {
-                if let Ok(false) = repo.is_pinned(&cid).await {
-                    if let Err(e) = repo.insert_pin(&cid, true, true).await {
-                        error!("Unable to pin {cid}: {e}");
+                        Ok::<_, anyhow::Error>(path)
                     }
-                }
-            }
+                };
 
-            tokio::spawn(async move {
-                if opt.provide {
-                    if let Some(ipfs) = ipfs {
-                        if let Err(e) = ipfs.provide(cid).await {
-                            error!("Unable to provide {cid}: {e}");
-                        }
+                path = match result.await {
+                    Ok(path) => path,
+                    Err(e) => {
+                        yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                        return;
                     }
-                }
-            });
+                };
+            }
         }
+
+        let cid = path.root().cid().copied().expect("Cid is apart of the path");
+
+        if opt.pin {
+            if let Ok(false) = repo.is_pinned(&cid).await {
+                if let Err(e) = repo.insert_pin(&cid, true, true).await {
+                    error!("Unable to pin {cid}: {e}");
+                }
+            }
+        }
+
+        tokio::spawn(async move {
+            if opt.provide {
+                if let Some(ipfs) = ipfs {
+                    if let Err(e) = ipfs.provide(cid).await {
+                        error!("Unable to provide {cid}: {e}");
+                    }
+                }
+            }
+        });
 
         yield UnixfsStatus::CompletedStatus { path, written, total_size }
     };
