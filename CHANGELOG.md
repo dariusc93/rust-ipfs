@@ -1,4 +1,5 @@
 # 0.10.0
+- refactor: Use `Bytes` apart of unixfs operations. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 - refactor: Remove option and use configuration directly. [PR 129](https://github.com/dariusc93/rust-ipfs/pull/129)
 - refactor: Remove option around chunker and use conversion for option arguments.
 - chore: Switch from libp2p-nat to libp2p-upnp. [PR 128](https://github.com/dariusc93/rust-ipfs/pull/128)
