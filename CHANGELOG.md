@@ -1,5 +1,6 @@
 # 0.10.0
 - feat: Retry fetching block after timeout. [PR 130](https://github.com/dariusc93/rust-ipfs/pull/130)
+- chore: Reduce allocation when initializing Repo and misc cleanup. [PR 132](https://github.com/dariusc93/rust-ipfs/pull/132)
 - refactor: Use `Bytes` apart of unixfs operations. [PR 131](https://github.com/dariusc93/rust-ipfs/pull/131)
 - refactor: Remove option and use configuration directly. [PR 129](https://github.com/dariusc93/rust-ipfs/pull/129)
 - refactor: Remove option around chunker and use conversion for option arguments.
