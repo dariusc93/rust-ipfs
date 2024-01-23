@@ -365,7 +365,8 @@ impl libp2p_bitswap_next::BitswapStore for Repo {
     }
 
     async fn get(&mut self, cid: &Cid) -> anyhow::Result<Option<Vec<u8>>> {
-        self.inner.block_store
+        self.inner
+            .block_store
             .get(cid)
             .await
             .map(|block| block.map(|block| block.data().to_vec()))
