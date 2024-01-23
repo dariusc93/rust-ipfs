@@ -67,7 +67,7 @@ use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoInsertPin, Repo
 use tokio::task::JoinHandle;
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
+use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -1264,16 +1264,19 @@ impl Ipfs {
     /// Add a file from a path to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
+    #[deprecated(note = "Use `Ipfs::add_unixfs` instead")]
     pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
-        let path = path.as_ref();
-        self.unixfs().add(path, Default::default()).span(self.span.clone())
+        let path = path.as_ref().to_path_buf();
+        self.add_unixfs(path)
     }
 
     /// Add a file through a stream of data to the blockstore
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
-    pub fn add_unixfs<'a>(&self, stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> UnixfsAdd<'a> {
-        self.unixfs().add(stream, Default::default()).span(self.span.clone())
+    pub fn add_unixfs<'a>(&self, opt: impl Into<AddOpt<'a>>) -> UnixfsAdd<'a> {
+        self.unixfs()
+            .add(opt, Default::default())
+            .span(self.span.clone())
     }
 
     /// Retreive a file and saving it to a path.
