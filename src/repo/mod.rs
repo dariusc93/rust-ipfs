@@ -487,13 +487,11 @@ impl Repo {
             anyhow::bail!("Repository cannot be online");
         }
         let block_migration = {
-            let this = self.clone();
-            let external = repo.clone();
             async move {
-                if let Ok(list) = this.list_blocks().await {
+                if let Ok(list) = self.list_blocks().await {
                     for cid in list {
-                        match this.get_block_now(&cid).await {
-                            Ok(Some(block)) => match external.inner.block_store.put(block).await {
+                        match self.get_block_now(&cid).await {
+                            Ok(Some(block)) => match repo.inner.block_store.put(block).await {
                                 Ok(_) => {}
                                 Err(e) => error!("Error migrating {cid}: {e}"),
                             },
@@ -506,12 +504,10 @@ impl Repo {
         };
 
         let data_migration = {
-            let this = self.clone();
-            let external = repo.clone();
             async move {
-                let mut data_stream = this.data_store().iter().await;
+                let mut data_stream = self.data_store().iter().await;
                 while let Some((k, v)) = data_stream.next().await {
-                    if let Err(e) = external.data_store().put(&k, &v).await {
+                    if let Err(e) = repo.data_store().put(&k, &v).await {
                         error!("Unable to migrate {k:?} into repo: {e}");
                     }
                 }
@@ -519,24 +515,20 @@ impl Repo {
         };
 
         let pins_migration = {
-            let this = self.clone();
-            let external = repo.clone();
             async move {
-                let mut stream = this.data_store().list(None).await;
+                let mut stream = self.data_store().list(None).await;
                 while let Some(Ok((cid, pin_mode))) = stream.next().await {
                     match pin_mode {
-                        PinMode::Direct => {
-                            match external.data_store().insert_direct_pin(&cid).await {
-                                Ok(_) => {}
-                                Err(e) => error!("Unable to migrate pin {cid}: {e}"),
-                            }
-                        }
+                        PinMode::Direct => match repo.data_store().insert_direct_pin(&cid).await {
+                            Ok(_) => {}
+                            Err(e) => error!("Unable to migrate pin {cid}: {e}"),
+                        },
                         PinMode::Indirect => {
                             //No need to track since we will be obtaining the reference from the pin that is recursive
                             continue;
                         }
                         PinMode::Recursive => {
-                            let block = match this.get_block_now(&cid).await.map(|block| {
+                            let block = match self.get_block_now(&cid).await.map(|block| {
                                 block.and_then(|block| block.decode::<IpldCodec, Ipld>().ok())
                             }) {
                                 Ok(Some(block)) => block,
@@ -554,7 +546,7 @@ impl Repo {
                                 .into_stream()
                                 .boxed();
 
-                            if let Err(e) = external.insert_recursive_pin(&cid, st).await {
+                            if let Err(e) = repo.insert_recursive_pin(&cid, st).await {
                                 error!("Error migrating pin {cid}: {e}");
                                 continue;
                             }
