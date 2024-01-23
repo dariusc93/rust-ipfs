@@ -124,15 +124,15 @@ use libp2p::{
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub enum StoragePath {
     Disk(PathBuf),
     #[default]
     Memory,
     Custom {
-        blockstore: Arc<dyn BlockStore>,
-        datastore: Arc<dyn DataStore>,
-        lock: Arc<dyn Lock>,
+        blockstore: Box<dyn BlockStore>,
+        datastore: Box<dyn DataStore>,
+        lock: Box<dyn Lock>,
     },
 }
 

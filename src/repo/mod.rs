@@ -324,11 +324,11 @@ pub(crate) struct RepoInner {
     online: AtomicBool,
     initialized: AtomicBool,
     max_storage_size: AtomicUsize,
-    block_store: Arc<dyn BlockStore>,
-    data_store: Arc<dyn DataStore>,
+    block_store: Box<dyn BlockStore>,
+    data_store: Box<dyn DataStore>,
     events: RwLock<Option<Sender<RepoEvent>>>,
     pub(crate) subscriptions: Mutex<SubscriptionsMap>,
-    lockfile: Arc<dyn Lock>,
+    lockfile: Box<dyn Lock>,
 }
 
 #[cfg(feature = "beetle_bitswap")]
@@ -417,9 +417,9 @@ impl Repo {
     }
 
     pub fn new_raw(
-        block_store: Arc<dyn BlockStore>,
-        data_store: Arc<dyn DataStore>,
-        lockfile: Arc<dyn Lock>,
+        block_store: Box<dyn BlockStore>,
+        data_store: Box<dyn DataStore>,
+        lockfile: Box<dyn Lock>,
     ) -> Self {
         let inner = RepoInner {
             initialized: AtomicBool::default(),
@@ -448,29 +448,29 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Arc::new(blockstore::flatfs::FsBlockStore::new(
+        let block_store = Box::new(blockstore::flatfs::FsBlockStore::new(
             blockstore_path,
             duration,
         ));
         #[cfg(not(any(feature = "sled_data_store", feature = "redb_data_store")))]
-        let data_store = Arc::new(datastore::flatfs::FsDataStore::new(datastore_path));
+        let data_store = Box::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
-        let data_store = Arc::new(datastore::sled::SledDataStore::new(datastore_path));
+        let data_store = Box::new(datastore::sled::SledDataStore::new(datastore_path));
         #[cfg(feature = "redb_data_store")]
-        let data_store = Arc::new(datastore::redb::RedbDataStore::new(datastore_path));
-        let lockfile = Arc::new(lock::FsLock::new(lockfile_path));
+        let data_store = Box::new(datastore::redb::RedbDataStore::new(datastore_path));
+        let lockfile = Box::new(lock::FsLock::new(lockfile_path));
         Self::new_raw(block_store, data_store, lockfile)
     }
 
     pub fn new_memory(duration: impl Into<Option<Duration>>) -> Self {
         let duration = duration.into();
         let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
-        let block_store = Arc::new(blockstore::memory::MemBlockStore::new(
+        let block_store = Box::new(blockstore::memory::MemBlockStore::new(
             Default::default(),
             duration,
         ));
-        let data_store = Arc::new(datastore::memory::MemDataStore::new(Default::default()));
-        let lockfile = Arc::new(lock::MemLock);
+        let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
+        let lockfile = Box::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
     }
 
