@@ -361,11 +361,11 @@ impl libp2p_bitswap_next::BitswapStore for Repo {
     type Params = libipld::DefaultParams;
 
     async fn contains(&mut self, cid: &Cid) -> anyhow::Result<bool> {
-        self.block_store.contains(cid).await
+        self.inner.block_store.contains(cid).await
     }
 
     async fn get(&mut self, cid: &Cid) -> anyhow::Result<Option<Vec<u8>>> {
-        self.block_store
+        self.inner.block_store
             .get(cid)
             .await
             .map(|block| block.map(|block| block.data().to_vec()))
