@@ -130,9 +130,9 @@ pub enum StoragePath {
     #[default]
     Memory,
     Custom {
-        blockstore: Box<dyn BlockStore>,
-        datastore: Box<dyn DataStore>,
-        lock: Box<dyn Lock>,
+        blockstore: Option<Box<dyn BlockStore>>,
+        datastore: Option<Box<dyn DataStore>>,
+        lock: Option<Box<dyn Lock>>,
     },
 }
 
@@ -157,8 +157,6 @@ impl PartialEq for StoragePath {
 impl Eq for StoragePath {}
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
-// TODO: Refactor
-#[derive(Clone)]
 pub struct IpfsOptions {
     /// The path of the ipfs repo (blockstore and datastore).
     ///
@@ -860,7 +858,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         tokio::fs::create_dir_all(path).await?;
                     }
                 }
-                Repo::new(options.ipfs_path.clone(), gc_repo_duration)
+                Repo::new(&mut options.ipfs_path, gc_repo_duration)
             }
         };
 

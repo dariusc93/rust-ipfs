@@ -405,7 +405,7 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(repo_type: StoragePath, duration: Option<Duration>) -> Self {
+    pub fn new(repo_type: &mut StoragePath, duration: Option<Duration>) -> Self {
         match repo_type {
             StoragePath::Memory => Repo::new_memory(duration),
             StoragePath::Disk(path) => Repo::new_fs(path, duration),
@@ -413,7 +413,11 @@ impl Repo {
                 blockstore,
                 datastore,
                 lock,
-            } => Repo::new_raw(blockstore, datastore, lock),
+            } => Repo::new_raw(
+                blockstore.take().expect("Requires blockstore"),
+                datastore.take().expect("Requires datastore"),
+                lock.take().expect("Requires lockfile for data and block store"),
+            ),
         }
     }
 
