@@ -416,7 +416,8 @@ impl Repo {
             } => Repo::new_raw(
                 blockstore.take().expect("Requires blockstore"),
                 datastore.take().expect("Requires datastore"),
-                lock.take().expect("Requires lockfile for data and block store"),
+                lock.take()
+                    .expect("Requires lockfile for data and block store"),
             ),
         }
     }
@@ -1108,6 +1109,7 @@ impl std::future::IntoFuture for RepoInsertPin {
         let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
         async move {
             let block = repo.get_block(&cid, &[], local).await?;
+            let _g = repo.inner.gclock.read().await;
 
             if !recursive {
                 repo.insert_direct_pin(&cid).await?
@@ -1176,6 +1178,7 @@ impl std::future::IntoFuture for RepoRemovePin {
 
         let span = debug_span!(parent: &span, "remove_pin", cid = %cid, recursive);
         async move {
+            let _g = repo.inner.gclock.read().await;
             if !recursive {
                 repo.remove_direct_pin(&cid).await
             } else {
