@@ -2434,7 +2434,7 @@ mod node {
             &self,
         ) -> &parking_lot::Mutex<HashMap<Cid, Vec<oneshot::Sender<Result<Block, String>>>>>
         {
-            &self.ipfs.repo.subscriptions
+            &self.ipfs.repo.inner.subscriptions
         }
 
         /// Bootstraps the local node to join the DHT: it looks up the node's own ID in the

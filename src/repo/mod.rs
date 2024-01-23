@@ -306,6 +306,8 @@ impl<C: Borrow<Cid>> PinKind<C> {
     }
 }
 
+type SubscriptionsMap = HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>;
+
 /// Describes a repo.
 ///
 /// Consolidates a blockstore, a datastore and a subscription registry.
@@ -313,16 +315,20 @@ impl<C: Borrow<Cid>> PinKind<C> {
 #[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
 pub struct Repo {
-    online: Arc<AtomicBool>,
-    initialized: Arc<AtomicBool>,
-    max_storage_size: Arc<AtomicUsize>,
+    pub(crate) inner: Arc<RepoInner>,
+    gclock: Arc<tokio::sync::RwLock<()>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct RepoInner {
+    online: AtomicBool,
+    initialized: AtomicBool,
+    max_storage_size: AtomicUsize,
     block_store: Arc<dyn BlockStore>,
     data_store: Arc<dyn DataStore>,
-    events: Arc<RwLock<Option<Sender<RepoEvent>>>>,
-    pub(crate) subscriptions:
-        Arc<Mutex<HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>>>,
+    events: RwLock<Option<Sender<RepoEvent>>>,
+    pub(crate) subscriptions: Mutex<SubscriptionsMap>,
     lockfile: Arc<dyn Lock>,
-    gclock: Arc<tokio::sync::RwLock<()>>,
 }
 
 #[cfg(feature = "beetle_bitswap")]
@@ -415,15 +421,18 @@ impl Repo {
         data_store: Arc<dyn DataStore>,
         lockfile: Arc<dyn Lock>,
     ) -> Self {
-        Repo {
-            initialized: Arc::default(),
-            online: Arc::default(),
+        let inner = RepoInner {
+            initialized: AtomicBool::default(),
+            online: AtomicBool::default(),
             block_store,
             data_store,
-            events: Arc::default(),
+            events: Default::default(),
             subscriptions: Default::default(),
             lockfile,
-            max_storage_size: Arc::new(AtomicUsize::new(0)),
+            max_storage_size: Default::default(),
+        };
+        Repo {
+            inner: Arc::new(inner),
             gclock: Arc::default(),
         }
     }
@@ -466,11 +475,11 @@ impl Repo {
     }
 
     pub fn set_max_storage_size(&self, size: usize) {
-        self.max_storage_size.store(size, Ordering::SeqCst);
+        self.inner.max_storage_size.store(size, Ordering::SeqCst);
     }
 
     pub fn max_storage_size(&self) -> usize {
-        self.max_storage_size.load(Ordering::SeqCst)
+        self.inner.max_storage_size.load(Ordering::SeqCst)
     }
 
     pub async fn migrate(&self, repo: &Self) -> Result<(), Error> {
@@ -484,7 +493,7 @@ impl Repo {
                 if let Ok(list) = this.list_blocks().await {
                     for cid in list {
                         match this.get_block_now(&cid).await {
-                            Ok(Some(block)) => match external.block_store.put(block).await {
+                            Ok(Some(block)) => match external.inner.block_store.put(block).await {
                                 Ok(_) => {}
                                 Err(e) => error!("Error migrating {cid}: {e}"),
                             },
@@ -561,7 +570,7 @@ impl Repo {
     }
 
     pub(crate) fn initialize_channel(&self) -> Receiver<RepoEvent> {
-        let mut event_guard = self.events.write();
+        let mut event_guard = self.inner.events.write();
         let (sender, receiver) = channel(1);
         debug_assert!(event_guard.is_none());
         *event_guard = Some(sender);
@@ -572,17 +581,17 @@ impl Repo {
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
     /// refactoring, see notes on [`crate::Ipfs::exit_daemon`].
     pub fn shutdown(&self) {
-        let mut map = self.subscriptions.lock();
+        let mut map = self.inner.subscriptions.lock();
         map.clear();
         drop(map);
-        if let Some(mut event) = self.events.write().take() {
+        if let Some(mut event) = self.inner.events.write().take() {
             event.close_channel()
         }
         self.set_offline();
     }
 
     pub fn is_online(&self) -> bool {
-        self.online.load(Ordering::SeqCst)
+        self.inner.online.load(Ordering::SeqCst)
     }
 
     pub(crate) fn set_online(&self) {
@@ -590,7 +599,7 @@ impl Repo {
             return;
         }
 
-        self.online.store(true, Ordering::SeqCst)
+        self.inner.online.store(true, Ordering::SeqCst)
     }
 
     pub(crate) fn set_offline(&self) {
@@ -598,30 +607,30 @@ impl Repo {
             return;
         }
 
-        self.online.store(false, Ordering::SeqCst)
+        self.inner.online.store(false, Ordering::SeqCst)
     }
 
     fn repo_channel(&self) -> Option<Sender<RepoEvent>> {
-        self.events.read().clone()
+        self.inner.events.read().clone()
     }
 
     pub async fn init(&self) -> Result<(), Error> {
         //Avoid initializing again
-        if self.initialized.load(Ordering::SeqCst) {
+        if self.inner.initialized.load(Ordering::SeqCst) {
             return Ok(());
         }
         // Dropping the guard (even though not strictly necessary to compile) to avoid potential
         // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
             log::debug!("Trying lockfile");
-            self.lockfile.try_exclusive()?;
+            self.inner.lockfile.try_exclusive()?;
             log::debug!("lockfile tried");
         }
 
-        let f1 = self.block_store.init();
-        let f2 = self.data_store.init();
+        let f1 = self.inner.block_store.init();
+        let f2 = self.inner.data_store.init();
         let (r1, r2) = futures::future::join(f1, f2).await;
-        let init = self.initialized.clone();
+        let init = &self.inner.initialized;
         if r1.is_err() {
             r1.map(|_| {
                 init.store(true, Ordering::SeqCst);
@@ -634,8 +643,8 @@ impl Repo {
     }
 
     pub async fn open(&self) -> Result<(), Error> {
-        let f1 = self.block_store.open();
-        let f2 = self.data_store.open();
+        let f1 = self.inner.block_store.open();
+        let f2 = self.inner.data_store.open();
         let (r1, r2) = futures::future::join(f1, f2).await;
         if r1.is_err() {
             r1
@@ -647,13 +656,13 @@ impl Repo {
     /// Puts a block into the block store.
     pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
         let _guard = self.gclock.read().await;
-        let (cid, res) = self.block_store.put(block.clone()).await?;
+        let (cid, res) = self.inner.block_store.put(block.clone()).await?;
 
         if let BlockPut::NewBlock = res {
             if let Some(mut event) = self.repo_channel() {
                 _ = event.send(RepoEvent::NewBlock(block.clone())).await;
             }
-            let list = self.subscriptions.lock().remove(&cid);
+            let list = self.inner.subscriptions.lock().remove(&cid);
             if let Some(mut list) = list {
                 for ch in list.drain(..) {
                     let block = block.clone();
@@ -694,13 +703,13 @@ impl Repo {
     /// Get the size of listed blocks
     #[inline]
     pub async fn get_blocks_size(&self, cids: &[Cid]) -> Result<Option<usize>, Error> {
-        self.block_store.size(cids).await
+        self.inner.block_store.size(cids).await
     }
 
     /// Get the total size of the block store
     #[inline]
     pub async fn get_total_size(&self) -> Result<usize, Error> {
-        self.block_store.total_size().await
+        self.inner.block_store.total_size().await
     }
 
     pub(crate) async fn get_blocks_with_session(
@@ -738,7 +747,12 @@ impl Repo {
         for cid in &missing {
             let cid = *cid;
             let (tx, rx) = futures::channel::oneshot::channel();
-            self.subscriptions.lock().entry(cid).or_default().push(tx);
+            self.inner
+                .subscriptions
+                .lock()
+                .entry(cid)
+                .or_default()
+                .push(tx);
 
             let timeout = timeout.unwrap_or(Duration::from_secs(60));
             let task = async move {
@@ -792,17 +806,17 @@ impl Repo {
 
     /// Retrieves a block from the block store if it's available locally.
     pub async fn get_block_now(&self, cid: &Cid) -> Result<Option<Block>, Error> {
-        self.block_store.get(cid).await
+        self.inner.block_store.get(cid).await
     }
 
     /// Check to determine if blockstore contain a block
     pub async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
-        self.block_store.contains(cid).await
+        self.inner.block_store.contains(cid).await
     }
 
     /// Lists the blocks in the blockstore.
     pub async fn list_blocks(&self) -> Result<Vec<Cid>, Error> {
-        self.block_store.list().await
+        self.inner.block_store.list().await
     }
 
     /// Remove block from the block store.
@@ -830,7 +844,7 @@ impl Repo {
                 continue;
             }
 
-            match self.block_store.remove(&cid).await? {
+            match self.inner.block_store.remove(&cid).await? {
                 Ok(success) => match success {
                     BlockRm::Removed(_cid) => {
                         // sending only fails if the background task has exited
@@ -875,7 +889,7 @@ impl Repo {
     pub async fn get_ipns(&self, ipns: &PeerId) -> Result<Option<IpfsPath>, Error> {
         use std::str::FromStr;
 
-        let data_store = &self.data_store;
+        let data_store = &self.inner.data_store;
         let key = ipns.to_owned();
         // FIXME: needless vec<u8> creation
         let key = format!("ipns/{key}");
@@ -896,7 +910,7 @@ impl Repo {
         let value = string.as_bytes();
         // FIXME: needless vec<u8> creation
         let key = format!("ipns/{ipns}");
-        self.data_store.put(key.as_bytes(), value).await
+        self.inner.data_store.put(key.as_bytes(), value).await
     }
 
     /// Remove an ipld path from the datastore.
@@ -904,7 +918,7 @@ impl Repo {
         // FIXME: us needing to clone the peerid is wasteful to pass it as a reference only to be
         // cloned again
         let key = format!("ipns/{ipns}");
-        self.data_store.remove(key.as_bytes()).await
+        self.inner.data_store.remove(key.as_bytes()).await
     }
 
     /// Pins a given Cid recursively or directly (non-recursively).
@@ -952,7 +966,7 @@ impl Repo {
 
     /// Inserts a direct pin for a `Cid`.
     pub(crate) async fn insert_direct_pin(&self, cid: &Cid) -> Result<(), Error> {
-        self.data_store.insert_direct_pin(cid).await
+        self.inner.data_store.insert_direct_pin(cid).await
     }
 
     /// Inserts a recursive pin for a `Cid`.
@@ -961,12 +975,12 @@ impl Repo {
         cid: &Cid,
         refs: References<'_>,
     ) -> Result<(), Error> {
-        self.data_store.insert_recursive_pin(cid, refs).await
+        self.inner.data_store.insert_recursive_pin(cid, refs).await
     }
 
     /// Removes a direct pin for a `Cid`.
     pub(crate) async fn remove_direct_pin(&self, cid: &Cid) -> Result<(), Error> {
-        self.data_store.remove_direct_pin(cid).await
+        self.inner.data_store.remove_direct_pin(cid).await
     }
 
     /// Removes a recursive pin for a `Cid`.
@@ -976,7 +990,7 @@ impl Repo {
         refs: References<'_>,
     ) -> Result<(), Error> {
         // FIXME: not really sure why is there not an easier way to to transfer control
-        self.data_store.remove_recursive_pin(cid, refs).await
+        self.inner.data_store.remove_recursive_pin(cid, refs).await
     }
 
     /// Function to perform a basic cleanup of unpinned blocks
@@ -991,13 +1005,13 @@ impl Repo {
 
         let refs = futures::stream::iter(pinned);
 
-        let removed_blocks = self.block_store.remove_garbage(refs.boxed()).await?;
+        let removed_blocks = self.inner.block_store.remove_garbage(refs.boxed()).await?;
         Ok(removed_blocks)
     }
 
     /// Checks if a `Cid` is pinned.
     pub async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
-        self.data_store.is_pinned(cid).await
+        self.inner.data_store.is_pinned(cid).await
     }
 
     pub async fn list_pins(
@@ -1005,7 +1019,7 @@ impl Repo {
         mode: impl Into<Option<PinMode>>,
     ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>> {
         let mode = mode.into();
-        self.data_store.list(mode).await
+        self.inner.data_store.list(mode).await
     }
 
     pub async fn query_pins(
@@ -1014,13 +1028,13 @@ impl Repo {
         requirement: impl Into<Option<PinMode>>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
         let requirement = requirement.into();
-        self.data_store.query(cids, requirement).await
+        self.inner.data_store.query(cids, requirement).await
     }
 }
 
 impl Repo {
     pub fn data_store(&self) -> &dyn DataStore {
-        &*self.data_store
+        &*self.inner.data_store
     }
 }
 
