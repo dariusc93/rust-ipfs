@@ -978,6 +978,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
                     loop {
                         tokio::time::sleep(time).await;
+                        let _g = repo.inner.gclock.write().await;
                         let pinned = repo
                             .list_pins(None)
                             .await
