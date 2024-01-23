@@ -6,8 +6,12 @@
 use std::{num::NonZeroU8, ops::Range, path::PathBuf, time::Duration};
 
 use anyhow::Error;
+use bytes::Bytes;
 use either::Either;
-use futures::stream::BoxStream;
+use futures::{
+    stream::{self, BoxStream},
+    StreamExt,
+};
 use libipld::Cid;
 use libp2p::PeerId;
 use ll::file::FileReadFailed;
@@ -33,8 +37,8 @@ pub struct IpfsUnixfs {
 
 pub enum AddOpt<'a> {
     Path(PathBuf),
-    Stream(BoxStream<'a, std::io::Result<Vec<u8>>>),
-    StreamWithName(String, BoxStream<'a, std::io::Result<Vec<u8>>>),
+    Stream(BoxStream<'a, std::io::Result<Bytes>>),
+    StreamWithName(String, BoxStream<'a, std::io::Result<Bytes>>),
 }
 
 impl<'a> From<&'a str> for AddOpt<'a> {
@@ -61,14 +65,55 @@ impl From<PathBuf> for AddOpt<'_> {
     }
 }
 
+impl From<Vec<u8>> for AddOpt<'_> {
+    fn from(bytes: Vec<u8>) -> Self {
+        let bytes: Bytes = bytes.into();
+        Self::from(bytes)
+    }
+}
+
+impl From<(String, Vec<u8>)> for AddOpt<'_> {
+    fn from((name, bytes): (String, Vec<u8>)) -> Self {
+        let bytes: Bytes = bytes.into();
+        Self::from((name, bytes))
+    }
+}
+
+impl From<Bytes> for AddOpt<'_> {
+    fn from(bytes: Bytes) -> Self {
+        let stream = stream::once(async { Ok::<_, std::io::Error>(bytes) }).boxed();
+        AddOpt::Stream(stream)
+    }
+}
+
+impl From<(String, Bytes)> for AddOpt<'_> {
+    fn from((name, bytes): (String, Bytes)) -> Self {
+        let stream = stream::once(async { Ok::<_, std::io::Error>(bytes) }).boxed();
+        Self::from((name, stream))
+    }
+}
+
+impl<'a> From<BoxStream<'a, std::io::Result<Bytes>>> for AddOpt<'a> {
+    fn from(stream: BoxStream<'a, std::io::Result<Bytes>>) -> Self {
+        AddOpt::Stream(stream)
+    }
+}
+
+impl<'a> From<(String, BoxStream<'a, std::io::Result<Bytes>>)> for AddOpt<'a> {
+    fn from((name, stream): (String, BoxStream<'a, std::io::Result<Bytes>>)) -> Self {
+        AddOpt::StreamWithName(name, stream)
+    }
+}
+
 impl<'a> From<BoxStream<'a, std::io::Result<Vec<u8>>>> for AddOpt<'a> {
     fn from(stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> Self {
-        AddOpt::Stream(stream)
+        AddOpt::Stream(stream.map(|result| result.map(|data| data.into())).boxed())
     }
 }
 
 impl<'a> From<(String, BoxStream<'a, std::io::Result<Vec<u8>>>)> for AddOpt<'a> {
     fn from((name, stream): (String, BoxStream<'a, std::io::Result<Vec<u8>>>)) -> Self {
+        let stream = stream.map(|result| result.map(|data| data.into())).boxed();
         AddOpt::StreamWithName(name, stream)
     }
 }
@@ -108,11 +153,7 @@ impl IpfsUnixfs {
     /// Add a file from either a file or stream
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` or `ipfs::unixfs::add_file` directly.
-    pub fn add<'a, I: Into<AddOpt<'a>>>(
-        &self,
-        item: I,
-        option: AddOption,
-    ) -> UnixfsAdd<'a> {
+    pub fn add<'a, I: Into<AddOpt<'a>>>(&self, item: I, option: AddOption) -> UnixfsAdd<'a> {
         let item = item.into();
         match item {
             AddOpt::Path(path) => add_file(Either::Left(&self.ipfs), path, option),
