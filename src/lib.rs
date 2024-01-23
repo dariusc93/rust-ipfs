@@ -124,15 +124,15 @@ use libp2p::{
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub enum StoragePath {
     Disk(PathBuf),
     #[default]
     Memory,
     Custom {
-        blockstore: Arc<dyn BlockStore>,
-        datastore: Arc<dyn DataStore>,
-        lock: Arc<dyn Lock>,
+        blockstore: Option<Box<dyn BlockStore>>,
+        datastore: Option<Box<dyn DataStore>>,
+        lock: Option<Box<dyn Lock>>,
     },
 }
 
@@ -157,8 +157,6 @@ impl PartialEq for StoragePath {
 impl Eq for StoragePath {}
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
-// TODO: Refactor
-#[derive(Clone)]
 pub struct IpfsOptions {
     /// The path of the ipfs repo (blockstore and datastore).
     ///
@@ -860,7 +858,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         tokio::fs::create_dir_all(path).await?;
                     }
                 }
-                Repo::new(options.ipfs_path.clone(), gc_repo_duration)
+                Repo::new(&mut options.ipfs_path, gc_repo_duration)
             }
         };
 
@@ -978,6 +976,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
                     loop {
                         tokio::time::sleep(time).await;
+                        let _g = repo.inner.gclock.write().await;
                         let pinned = repo
                             .list_pins(None)
                             .await
@@ -2434,7 +2433,7 @@ mod node {
             &self,
         ) -> &parking_lot::Mutex<HashMap<Cid, Vec<oneshot::Sender<Result<Block, String>>>>>
         {
-            &self.ipfs.repo.subscriptions
+            &self.ipfs.repo.inner.subscriptions
         }
 
         /// Bootstraps the local node to join the DHT: it looks up the node's own ID in the
