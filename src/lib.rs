@@ -47,11 +47,7 @@ use futures::{
     channel::{
         mpsc::{channel, Sender, UnboundedReceiver},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
-    },
-    future::BoxFuture,
-    sink::SinkExt,
-    stream::{BoxStream, Stream},
-    StreamExt, TryStreamExt,
+    }, future::BoxFuture, sink::SinkExt, stream::{BoxStream, Stream}, FutureExt, StreamExt, TryStreamExt
 };
 
 use keystore::Keystore;
@@ -1068,11 +1064,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
 
-                if as_fut {
-                    fut.instrument(swarm_span).await;
+                let fut = if as_fut {
+                    fut.boxed()
                 } else {
-                    fut.run().instrument(swarm_span).await;
-                }
+                    fut.run().boxed()
+                };
+
+                tokio::select! {
+                    _ = fut => {}
+                    _ = token.cancelled() => {},
+                };
             }
         });
         Ok(ipfs)
