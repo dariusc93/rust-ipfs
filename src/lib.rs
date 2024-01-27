@@ -47,7 +47,11 @@ use futures::{
     channel::{
         mpsc::{channel, Sender, UnboundedReceiver},
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
-    }, future::BoxFuture, sink::SinkExt, stream::{BoxStream, Stream}, FutureExt, StreamExt, TryStreamExt
+    },
+    future::BoxFuture,
+    sink::SinkExt,
+    stream::{BoxStream, Stream},
+    FutureExt, StreamExt, TryStreamExt,
 };
 
 use keystore::Keystore;
@@ -1075,6 +1079,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                     _ = token.cancelled() => {},
                 };
             }
+            .instrument(swarm_span)
         });
         Ok(ipfs)
     }
