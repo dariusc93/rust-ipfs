@@ -980,7 +980,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         true => duration,
                         false => Duration::from_secs(60 * 60),
                     };
-                    let mut interval = tokio::time::interval(time);
+
+                    let mut interval =
+                        tokio::time::interval_at(tokio::time::Instant::now() + time, time);
 
                     loop {
                         tokio::select! {
