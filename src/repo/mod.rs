@@ -1,6 +1,5 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
-use crate::path::IpfsPath;
 use crate::{Block, StoragePath};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -881,42 +880,6 @@ impl Repo {
             Ok(references)
         }
         .boxed()
-    }
-
-    /// Get an ipld path from the datastore.
-    pub async fn get_ipns(&self, ipns: &PeerId) -> Result<Option<IpfsPath>, Error> {
-        use std::str::FromStr;
-
-        let data_store = &self.inner.data_store;
-        let key = ipns.to_owned();
-        // FIXME: needless vec<u8> creation
-        let key = format!("ipns/{key}");
-        let bytes = data_store.get(key.as_bytes()).await?;
-        match bytes {
-            Some(ref bytes) => {
-                let string = String::from_utf8_lossy(bytes);
-                let path = IpfsPath::from_str(&string)?;
-                Ok(Some(path))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Put an ipld path into the datastore.
-    pub async fn put_ipns(&self, ipns: &PeerId, path: &IpfsPath) -> Result<(), Error> {
-        let string = path.to_string();
-        let value = string.as_bytes();
-        // FIXME: needless vec<u8> creation
-        let key = format!("ipns/{ipns}");
-        self.inner.data_store.put(key.as_bytes(), value).await
-    }
-
-    /// Remove an ipld path from the datastore.
-    pub async fn remove_ipns(&self, ipns: &PeerId) -> Result<(), Error> {
-        // FIXME: us needing to clone the peerid is wasteful to pass it as a reference only to be
-        // cloned again
-        let key = format!("ipns/{ipns}");
-        self.inner.data_store.remove(key.as_bytes()).await
     }
 
     /// Pins a given Cid recursively or directly (non-recursively).
