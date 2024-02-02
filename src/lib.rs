@@ -1218,33 +1218,6 @@ impl Ipfs {
         self.dag().get_dag(path).span(self.span.clone())
     }
 
-    /// Get an ipld path from the datastore.
-    /// Note: This will be replaced in the future and shouldnt be depended on completely
-    pub async fn get_ipns(&self, peer_id: &PeerId) -> Result<Option<IpfsPath>, Error> {
-        self.repo
-            .get_ipns(peer_id)
-            .instrument(self.span.clone())
-            .await
-    }
-
-    /// Put an ipld path into the datastore.
-    /// Note: This will be replaced in the future and shouldnt be depended on completely
-    pub async fn put_ipns(&self, peer_id: &PeerId, path: &IpfsPath) -> Result<(), Error> {
-        self.repo
-            .put_ipns(peer_id, path)
-            .instrument(self.span.clone())
-            .await
-    }
-
-    /// Remove an ipld path from the datastore.
-    /// Note: This will be replaced in the future and shouldnt be depended on completely
-    pub async fn remove_ipns(&self, peer_id: &PeerId) -> Result<(), Error> {
-        self.repo
-            .remove_ipns(peer_id)
-            .instrument(self.span.clone())
-            .await
-    }
-
     /// Creates a stream which will yield the bytes of an UnixFS file from the root Cid, with the
     /// optional file byte range. If the range is specified and is outside of the file, the stream
     /// will end without producing any bytes.
