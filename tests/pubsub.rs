@@ -10,26 +10,26 @@ use common::{spawn_nodes, Topology};
 #[tokio::test]
 async fn subscribe_only_once() {
     let a = Node::new("test_node").await;
-    let _stream = a.pubsub_subscribe("some_topic".into()).await.unwrap();
+    let _stream = a.pubsub_subscribe("some_topic").await.unwrap();
 }
 
 #[tokio::test]
 async fn subscribe_multiple_times() {
     let a = Node::new("test_node").await;
-    let _stream = a.pubsub_subscribe("some_topic".into()).await.unwrap();
-    a.pubsub_subscribe("some_topic".into()).await.unwrap();
+    let _stream = a.pubsub_subscribe("some_topic").await.unwrap();
+    a.pubsub_subscribe("some_topic").await.unwrap();
 }
 
 #[tokio::test]
 async fn resubscribe_after_unsubscribe() {
     let a = Node::new("test_node").await;
 
-    let mut stream = a.pubsub_subscribe("topic".into()).await.unwrap();
+    let mut stream = a.pubsub_subscribe("topic").await.unwrap();
     a.pubsub_unsubscribe("topic").await.unwrap();
     // sender has been dropped
     assert_eq!(stream.next().await, None);
 
-    drop(a.pubsub_subscribe("topic".into()).await.unwrap());
+    drop(a.pubsub_subscribe("topic").await.unwrap());
 }
 
 #[tokio::test]
@@ -37,8 +37,8 @@ async fn unsubscribe_cloned_via_drop() {
     let empty: &[&str] = &[];
     let a = Node::new("test_node").await;
 
-    let msgs_1 = a.pubsub_subscribe("topic".into()).await.unwrap();
-    let msgs_2 = a.pubsub_subscribe("topic".into()).await.unwrap();
+    let msgs_1 = a.pubsub_subscribe("topic").await.unwrap();
+    let msgs_2 = a.pubsub_subscribe("topic").await.unwrap();
 
     drop(msgs_1);
 
@@ -55,7 +55,7 @@ async fn unsubscribe_cloned_via_drop() {
 async fn unsubscribe_via_drop() {
     let a = Node::new("test_node").await;
 
-    let msgs = a.pubsub_subscribe("topic".into()).await.unwrap();
+    let msgs = a.pubsub_subscribe("topic").await.unwrap();
     assert_eq!(a.pubsub_subscribed().await.unwrap(), &["topic"]);
 
     drop(msgs);

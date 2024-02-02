@@ -41,6 +41,7 @@ pub mod unixfs;
 extern crate tracing;
 
 use anyhow::{anyhow, format_err};
+use bytes::Bytes;
 use dag::{DagGet, DagPut};
 use either::Either;
 use futures::{
@@ -351,7 +352,7 @@ enum IpfsEvent {
     Unban(PeerId, Channel<()>),
     PubsubSubscribe(String, Channel<Option<SubscriptionStream>>),
     PubsubUnsubscribe(String, Channel<Result<bool, Error>>),
-    PubsubPublish(String, Vec<u8>, Channel<Result<MessageId, PublishError>>),
+    PubsubPublish(String, Bytes, Channel<Result<MessageId, PublishError>>),
     PubsubPeers(Option<String>, Channel<Vec<PeerId>>),
     GetBitswapPeers(Channel<BoxFuture<'static, Vec<PeerId>>>),
     WantList(Option<PeerId>, Channel<BoxFuture<'static, Vec<Cid>>>),
@@ -1462,8 +1463,12 @@ impl Ipfs {
     /// Subscribes to a given topic. Can be done at most once without unsubscribing in the between.
     /// The subscription can be unsubscribed by dropping the stream or calling
     /// [`Ipfs::pubsub_unsubscribe`].
-    pub async fn pubsub_subscribe(&self, topic: String) -> Result<SubscriptionStream, Error> {
+    pub async fn pubsub_subscribe(
+        &self,
+        topic: impl Into<String>,
+    ) -> Result<SubscriptionStream, Error> {
         async move {
+            let topic = topic.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1481,9 +1486,10 @@ impl Ipfs {
     /// Stream that returns [`PubsubEvent`] for a given topic
     pub async fn pubsub_events(
         &self,
-        topic: &str,
+        topic: impl Into<String>,
     ) -> Result<BoxStream<'static, PubsubEvent>, Error> {
         async move {
+            let topic = topic.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1512,8 +1518,14 @@ impl Ipfs {
     }
 
     /// Publishes to the topic which may have been subscribed to earlier
-    pub async fn pubsub_publish(&self, topic: String, data: Vec<u8>) -> Result<MessageId, Error> {
+    pub async fn pubsub_publish(
+        &self,
+        topic: impl Into<String>,
+        data: impl Into<Bytes>,
+    ) -> Result<MessageId, Error> {
         async move {
+            let topic = topic.into();
+            let data = data.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1546,8 +1558,12 @@ impl Ipfs {
     }
 
     /// Returns all known pubsub peers with the optional topic filter
-    pub async fn pubsub_peers(&self, topic: Option<String>) -> Result<Vec<PeerId>, Error> {
+    pub async fn pubsub_peers(
+        &self,
+        topic: impl Into<Option<String>>,
+    ) -> Result<Vec<PeerId>, Error> {
         async move {
+            let topic = topic.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1578,8 +1594,12 @@ impl Ipfs {
     }
 
     /// Returns the known wantlist for the local node when the `peer` is `None` or the wantlist of the given `peer`
-    pub async fn bitswap_wantlist(&self, peer: Option<PeerId>) -> Result<Vec<Cid>, Error> {
+    pub async fn bitswap_wantlist(
+        &self,
+        peer: impl Into<Option<PeerId>>,
+    ) -> Result<Vec<Cid>, Error> {
         async move {
+            let peer = peer.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1945,8 +1965,9 @@ impl Ipfs {
     }
 
     /// Enable use of a relay. If `peer_id` is `None`, it will select a relay at random to use, if one have been added
-    pub async fn enable_relay(&self, peer_id: Option<PeerId>) -> Result<(), Error> {
+    pub async fn enable_relay(&self, peer_id: impl Into<Option<PeerId>>) -> Result<(), Error> {
         async move {
+            let peer_id = peer_id.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1976,15 +1997,15 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_register_namespace<S: Into<String>>(
+    pub async fn rendezvous_register_namespace(
         &self,
-        namespace: S,
-        ttl: Option<u64>,
+        namespace: impl Into<String>,
+        ttl: impl Into<Option<u64>>,
         peer_id: PeerId,
     ) -> Result<(), Error> {
         async move {
             let namespace = Namespace::new(namespace.into())?;
-
+            let ttl = ttl.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -2000,9 +2021,9 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_unregister_namespace<S: Into<String>>(
+    pub async fn rendezvous_unregister_namespace(
         &self,
-        namespace: S,
+        namespace: impl Into<String>,
         peer_id: PeerId,
     ) -> Result<(), Error> {
         async move {
@@ -2023,14 +2044,15 @@ impl Ipfs {
         .await
     }
 
-    pub async fn rendezvous_namespace_discovery<S: Into<String>>(
+    pub async fn rendezvous_namespace_discovery(
         &self,
-        namespace: S,
-        ttl: Option<u64>,
+        namespace: impl Into<String>,
+        ttl: impl Into<Option<u64>>,
         peer_id: PeerId,
     ) -> Result<HashMap<PeerId, Vec<Multiaddr>>, Error> {
         async move {
             let namespace = Namespace::new(namespace.into())?;
+            let ttl = ttl.into();
 
             let (tx, rx) = oneshot_channel();
 
