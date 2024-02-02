@@ -145,7 +145,7 @@ impl Ipns {
 
         let keypair = match key {
             Some(key) => self.ipfs.keystore().get_keypair(key).await?,
-            None => self.ipfs.keypair()?.clone(),
+            None => self.ipfs.keypair().clone(),
         };
 
         let peer_id = keypair.public().to_peer_id();

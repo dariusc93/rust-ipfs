@@ -2250,8 +2250,8 @@ impl Ipfs {
     }
 
     /// Returns the keypair to the node
-    pub fn keypair(&self) -> Result<&Keypair, Error> {
-        Ok(&self.key)
+    pub fn keypair(&self) -> &Keypair {
+        &self.key
     }
 
     /// Returns the keystore
@@ -2335,16 +2335,6 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
     anyhow::bail!("Invalid prefix")
 }
 
-#[allow(dead_code)]
-pub(crate) fn peerid_from_multiaddr(addr: &Multiaddr) -> anyhow::Result<PeerId> {
-    let mut addr = addr.clone();
-    let peer_id = match addr.pop() {
-        Some(Protocol::P2p(peer_id)) => peer_id,
-        _ => anyhow::bail!("Invalid PeerId"),
-    };
-    Ok(peer_id)
-}
-
 use crate::p2p::AddressBookConfig;
 #[doc(hidden)]
 pub use node::Node;
@@ -2404,7 +2394,7 @@ mod node {
 
             let ipfs = uninit.start().await.unwrap();
 
-            let id = ipfs.keypair().map(|kp| kp.public().to_peer_id()).unwrap();
+            let id = ipfs.keypair().public().to_peer_id();
             for addr in list {
                 ipfs.add_listening_address(addr).await.expect("To succeed");
             }

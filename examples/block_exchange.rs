@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
 
-    let peer_id = node_a.keypair().map(|kp| kp.public().to_peer_id())?;
+    let peer_id = node_a.keypair().public().to_peer_id();
 
     let addrs = node_a.listening_addresses().await?;
 
