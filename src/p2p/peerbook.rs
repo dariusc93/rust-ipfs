@@ -13,7 +13,6 @@ use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Default, Debug)]
-#[allow(clippy::type_complexity)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     peer_info: HashMap<PeerId, Info>,
