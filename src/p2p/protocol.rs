@@ -86,7 +86,6 @@ impl NetworkBehaviour for Behaviour {
 
     fn on_swarm_event(&mut self, _: FromSwarm) {}
 
-    #[allow(deprecated)]
     fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);

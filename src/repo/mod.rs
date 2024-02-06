@@ -105,7 +105,7 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn wipe(&self) {}
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GCConfig {
     /// How long until GC runs
     /// If duration is not set, it will not run at a timer
@@ -115,7 +115,16 @@ pub struct GCConfig {
     pub trigger: GCTrigger,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+impl Default for GCConfig {
+    fn default() -> Self {
+        Self {
+            duration: Duration::from_secs(60 * 60),
+            trigger: GCTrigger::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GCTrigger {
     /// At a specific size. If the size is at or exceeds, it will trigger GC
     At {

@@ -52,7 +52,7 @@ use futures::{
     future::BoxFuture,
     sink::SinkExt,
     stream::{BoxStream, Stream},
-    StreamExt, TryStreamExt,
+    FutureExt, StreamExt, TryStreamExt,
 };
 
 use keystore::Keystore;
@@ -66,6 +66,7 @@ use p2p::{
 };
 use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoInsertPin, RepoRemovePin};
 use tokio::task::JoinHandle;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Span;
 use tracing_futures::Instrument;
 use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
@@ -315,6 +316,7 @@ pub struct Ipfs {
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
+    _guard: Arc<DropGuard>,
 }
 
 impl std::fmt::Debug for Ipfs {
@@ -889,6 +891,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
+        let token = CancellationToken::new();
+        let _guard = Arc::new(token.clone().drop_guard());
+
         let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone();
 
@@ -902,6 +907,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             keystore,
             to_task,
             record_key_validator,
+            _guard,
         };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
@@ -962,6 +968,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         if let Some(config) = gc_config {
             tokio::spawn({
                 let repo = repo.clone();
+                let token = token.clone();
                 async move {
                     let GCConfig { duration, trigger } = config;
                     let use_config_timer = duration != Duration::ZERO;
@@ -975,43 +982,57 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         false => Duration::from_secs(60 * 60),
                     };
 
+                    let mut interval =
+                        tokio::time::interval_at(tokio::time::Instant::now() + time, time);
+
                     loop {
-                        tokio::time::sleep(time).await;
-                        let _g = repo.inner.gclock.write().await;
-                        let pinned = repo
-                            .list_pins(None)
-                            .await
-                            .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
-                            .try_collect::<BTreeSet<_>>()
-                            .await
-                            .unwrap_or_default();
-                        let pinned = Vec::from_iter(pinned);
-                        let total_size = repo.get_total_size().await.unwrap_or_default();
-                        let pinned_size = repo
-                            .get_blocks_size(&pinned)
-                            .await
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default();
+                        tokio::select! {
+                            _ = token.cancelled() => {
+                                tracing::debug!("gc task cancelled");
+                                break
+                            },
+                            _ = interval.tick() => {
+                                let _g = repo.inner.gclock.write().await;
+                                tracing::debug!("preparing gc operation");
+                                let pinned = repo
+                                    .list_pins(None)
+                                    .await
+                                    .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
+                                    .try_collect::<BTreeSet<_>>()
+                                    .await
+                                    .unwrap_or_default();
+                                let pinned = Vec::from_iter(pinned);
+                                let total_size = repo.get_total_size().await.unwrap_or_default();
+                                let pinned_size = repo
+                                    .get_blocks_size(&pinned)
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .unwrap_or_default();
 
-                        let cleanup = match trigger {
-                            GCTrigger::At { size } => {
-                                total_size > 0 && (total_size - pinned_size) >= size
-                            }
-                            GCTrigger::AtStorage => {
-                                (total_size - pinned_size) > 0
-                                    && (total_size - pinned_size) >= repo.max_storage_size()
-                            }
-                            GCTrigger::None => (total_size - pinned_size) > 0,
-                        };
+                                let unpinned_blocks = total_size - pinned_size;
 
-                        if cleanup {
-                            let blocks = repo.cleanup().await.unwrap();
-                            for block in blocks {
-                                tracing::debug!(
-                                    block = block.to_string(),
-                                    "has been cleared from the block store"
-                                );
+                                tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
+                                
+                                let cleanup = match trigger {
+                                    GCTrigger::At { size } => {
+                                        total_size > 0 && unpinned_blocks >= size
+                                    }
+                                    GCTrigger::AtStorage => {
+                                        unpinned_blocks > 0
+                                            && unpinned_blocks >= repo.max_storage_size()
+                                    }
+                                    GCTrigger::None => unpinned_blocks > 0,
+                                };
+
+                                tracing::debug!(will_run = %cleanup);
+
+                                if cleanup {
+                                    tracing::debug!("running cleanup of unpinned blocks");
+                                    let blocks = repo.cleanup().await.unwrap();
+                                    tracing::debug!(removed_blocks = blocks.len(), "blocks removed");
+                                    tracing::debug!("cleanup finished");
+                                }
                             }
                         }
                     }
@@ -1054,12 +1075,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
 
-                if as_fut {
-                    fut.instrument(swarm_span).await;
+                let fut = if as_fut {
+                    fut.boxed()
                 } else {
-                    fut.run().instrument(swarm_span).await;
-                }
+                    fut.run().boxed()
+                };
+
+                tokio::select! {
+                    _ = fut => {}
+                    _ = token.cancelled() => {},
+                };
             }
+            .instrument(swarm_span)
         });
         Ok(ipfs)
     }

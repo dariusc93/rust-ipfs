@@ -231,14 +231,14 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 Some(swarm) = self.swarm.next() => {
                     self.handle_swarm_event(swarm);
                 },
+                Some(repo) = self.repo_events.next() => {
+                    self.handle_repo_event(repo);
+                },
                 Some(event) = self.from_facade.next() => {
                     if matches!(event, IpfsEvent::Exit) {
                         break;
                     }
                     self.handle_event(event);
-                },
-                Some(repo) = self.repo_events.next() => {
-                    self.handle_repo_event(repo);
                 },
                 _ = event_cleanup.tick() => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
@@ -302,7 +302,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
     fn emit_pubsub_event(&self, event: InnerPubsubEvent) {
         for ch in &self.pubsub_event_stream {
-            let ch = ch.clone();
             let event = event.clone();
             let _ = ch.unbounded_send(event);
         }
