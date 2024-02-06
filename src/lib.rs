@@ -992,6 +992,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                             },
                             _ = interval.tick() => {
                                 let _g = repo.inner.gclock.write().await;
+                                tracing::debug!("preparing gc operation");
                                 let pinned = repo
                                     .list_pins(None)
                                     .await
@@ -1007,7 +1008,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                     .ok()
                                     .flatten()
                                     .unwrap_or_default();
-
+                                tracing::debug!(total_size = %total_size, ?trigger);
                                 let cleanup = match trigger {
                                     GCTrigger::At { size } => {
                                         total_size > 0 && (total_size - pinned_size) >= size
@@ -1019,14 +1020,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                     GCTrigger::None => (total_size - pinned_size) > 0,
                                 };
 
+                                tracing::debug!(will_run = %cleanup);
+
                                 if cleanup {
+                                    tracing::debug!("running cleanup of unpinned blocks");
                                     let blocks = repo.cleanup().await.unwrap();
-                                    for block in blocks {
-                                        tracing::debug!(
-                                            block = block.to_string(),
-                                            "has been cleared from the block store"
-                                        );
-                                    }
+                                    tracing::debug!(removed_blocks = blocks.len(), "blocks removed");
+                                    tracing::debug!("cleanup finished");
                                 }
                             }
                         }

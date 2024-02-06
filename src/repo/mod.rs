@@ -124,7 +124,7 @@ impl Default for GCConfig {
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GCTrigger {
     /// At a specific size. If the size is at or exceeds, it will trigger GC
     At {
