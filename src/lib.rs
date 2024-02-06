@@ -1008,16 +1008,20 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                     .ok()
                                     .flatten()
                                     .unwrap_or_default();
-                                tracing::debug!(total_size = %total_size, ?trigger);
+
+                                let unpinned_blocks = total_size - pinned_size;
+
+                                tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
+                                
                                 let cleanup = match trigger {
                                     GCTrigger::At { size } => {
-                                        total_size > 0 && (total_size - pinned_size) >= size
+                                        total_size > 0 && unpinned_blocks >= size
                                     }
                                     GCTrigger::AtStorage => {
-                                        (total_size - pinned_size) > 0
-                                            && (total_size - pinned_size) >= repo.max_storage_size()
+                                        unpinned_blocks > 0
+                                            && unpinned_blocks >= repo.max_storage_size()
                                     }
-                                    GCTrigger::None => (total_size - pinned_size) > 0,
+                                    GCTrigger::None => unpinned_blocks > 0,
                                 };
 
                                 tracing::debug!(will_run = %cleanup);
