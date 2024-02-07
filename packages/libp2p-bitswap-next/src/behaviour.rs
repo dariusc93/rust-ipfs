@@ -234,7 +234,7 @@ fn start_db_thread<S: BitswapStore>(
                 DbRequest::Bitswap(channel, request) => {
                     let response = match request.ty {
                         RequestType::Have => {
-                            let have = store.contains(&request.cid).await.ok().unwrap_or_default();
+                            let have = store.contains(&request.cid).await.unwrap_or_default();
                             if have {
                                 RESPONSES_TOTAL.with_label_values(&["have"]).inc();
                             } else {
@@ -244,7 +244,7 @@ fn start_db_thread<S: BitswapStore>(
                             BitswapResponse::Have(have)
                         }
                         RequestType::Block => {
-                            let block = store.get(&request.cid).await.ok().unwrap_or_default();
+                            let block = store.get(&request.cid).await.unwrap_or_default();
                             if let Some(data) = block {
                                 RESPONSES_TOTAL.with_label_values(&["block"]).inc();
                                 SENT_BLOCK_BYTES.inc_by(data.len() as u64);
