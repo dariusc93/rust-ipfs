@@ -901,7 +901,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         let ipfs = Ipfs {
             span: facade_span,
-            repo: repo.clone(),
+            repo,
             identify_conf: id_conf,
             key: keys.clone(),
             keystore,
@@ -915,9 +915,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         //TODO: Add persistent layer for kad store
         let blocks = match options.provider {
             RepoProvider::None => vec![],
-            RepoProvider::All => repo.list_blocks().await.unwrap_or_default(),
+            RepoProvider::All => ipfs.repo.list_blocks().await.unwrap_or_default(),
             RepoProvider::Pinned => {
-                repo.list_pins(None)
+                ipfs.repo
+                    .list_pins(None)
                     .await
                     .filter_map(|result| async move { result.map(|(cid, _)| cid).ok() })
                     .collect()
@@ -947,14 +948,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        let swarm_config = options.swarm_configuration.clone();
-        let transport_config = options.transport_configuration;
         let swarm = create_swarm(
             &keys,
             &options,
-            swarm_config,
-            transport_config,
-            repo.clone(),
+            &ipfs.repo,
             exec_span,
             (custom_behaviour, custom_transport),
         )
@@ -967,7 +964,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         if let Some(config) = gc_config {
             tokio::spawn({
-                let repo = repo.clone();
+                let repo = ipfs.repo.clone();
                 let token = token.clone();
                 async move {
                     let GCConfig { duration, trigger } = config;
@@ -1013,7 +1010,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                 let unpinned_blocks = total_size - pinned_size;
 
                                 tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
-                                
+
                                 let cleanup = match trigger {
                                     GCTrigger::At { size } => {
                                         total_size > 0 && unpinned_blocks >= size
@@ -1040,7 +1037,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             });
         }
 
-        let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), repo);
+        let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), &ipfs.repo);
         fut.swarm_event = swarm_event;
         fut.local_external_addr = local_external_addr;
 

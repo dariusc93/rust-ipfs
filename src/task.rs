@@ -110,7 +110,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         swarm: TSwarm<C>,
         repo_events: Fuse<Receiver<RepoEvent>>,
         from_facade: Fuse<Receiver<IpfsEvent>>,
-        repo: Repo,
+        repo: &Repo,
     ) -> Self {
         IpfsTask {
             repo_events,
@@ -123,7 +123,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             bitswap_sessions: Default::default(),
             pubsub_event_stream: Default::default(),
             kad_subscriptions: Default::default(),
-            repo,
+            repo: repo.clone(),
             bootstraps: Default::default(),
             swarm_event: Default::default(),
             timer: Default::default(),

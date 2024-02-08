@@ -181,9 +181,7 @@ impl Default for SwarmConfig {
 pub async fn create_swarm<C>(
     keypair: &Keypair,
     options: &IpfsOptions,
-    swarm_config: SwarmConfig,
-    transport_config: TransportConfig,
-    repo: Repo,
+    repo: &Repo,
     span: Span,
     (custom, custom_transport): (Option<C>, Option<TTransportFn>),
 ) -> Result<TSwarm<C>, Error>
@@ -193,6 +191,9 @@ where
 {
     let keypair = keypair.clone();
     let peer_id = keypair.public().to_peer_id();
+
+    let swarm_config = options.swarm_configuration.clone();
+    let transport_config = options.transport_configuration;
 
     let idle = options.connection_idle;
 

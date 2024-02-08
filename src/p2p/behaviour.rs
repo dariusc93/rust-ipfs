@@ -387,7 +387,7 @@ where
     pub async fn new(
         keypair: &Keypair,
         options: &IpfsOptions,
-        repo: Repo,
+        repo: &Repo,
         custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let protocols = options.protocols;
@@ -436,7 +436,7 @@ where
 
         #[cfg(feature = "beetle_bitswap")]
         let bitswap = match protocols.bitswap {
-            true => Some(Bitswap::new(peer_id, repo, Default::default()).await),
+            true => Some(Bitswap::new(peer_id, repo.clone(), Default::default()).await),
             false => None,
         }
         .into();
@@ -447,7 +447,7 @@ where
             .then(|| {
                 Bitswap::new(
                     Default::default(),
-                    repo,
+                    repo.clone(),
                     Box::new(|fut| {
                         tokio::spawn(fut);
                     }),
