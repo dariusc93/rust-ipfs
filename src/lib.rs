@@ -1566,7 +1566,7 @@ impl Ipfs {
     /// unsubscribed by dropping the stream.
     ///
     /// Returns true if unsubscription was successful
-    pub async fn pubsub_unsubscribe(&self, topic: &str) -> Result<bool, Error> {
+    pub async fn pubsub_unsubscribe(&self, topic: impl Into<String>) -> Result<bool, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1780,7 +1780,7 @@ impl Ipfs {
     /// `libp2p`'s  `KademliaConfig`.
     pub async fn provide(&self, cid: Cid) -> Result<(), Error> {
         // don't provide things we don't actually have
-        if self.repo.get_block_now(&cid).await?.is_none() {
+        if !self.repo.contains(&cid).await? {
             return Err(anyhow!(
                 "Error: block {} not found locally, cannot provide",
                 cid
@@ -1889,7 +1889,7 @@ impl Ipfs {
     pub async fn dht_put<T: AsRef<[u8]>>(
         &self,
         key: T,
-        value: Vec<u8>,
+        value: impl Into<Vec<u8>>,
         quorum: Quorum,
     ) -> Result<(), Error> {
         let kad_result = async move {
@@ -1911,7 +1911,7 @@ impl Ipfs {
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::DhtPut(key, value, quorum, tx))
+                .send(IpfsEvent::DhtPut(key, value.into(), quorum, tx))
                 .await?;
 
             Ok(rx.await?).map_err(|e: String| anyhow!(e))
