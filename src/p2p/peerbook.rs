@@ -125,7 +125,6 @@ impl NetworkBehaviour for Behaviour {
     ) {
     }
 
-    #[allow(clippy::single_match)]
     fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {

@@ -13,10 +13,7 @@ use futures::{
 use futures::SinkExt;
 
 use crate::TSwarmEvent;
-use crate::{
-    p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
-    Channel, InnerPubsubEvent,
-};
+use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 
 #[cfg(feature = "beetle_bitswap")]
 use beetle_bitswap_next::BitswapEvent;
@@ -1326,9 +1323,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     .peerbook
                     .peer_connections(peer_id)
                     .unwrap_or_default()
-                    .iter()
-                    .map(|addr| extract_peer_id_from_multiaddr(addr.clone()))
-                    .map(|(_, addr)| addr)
+                    .into_iter()
+                    .map(|mut addr| {
+                        addr.extract_peer_id();
+                        addr
+                    })
                     .collect::<Vec<_>>();
 
                 let locally_known_addrs = if !listener_addrs.is_empty() {
