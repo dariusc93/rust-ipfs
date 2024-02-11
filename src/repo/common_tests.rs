@@ -50,7 +50,7 @@ macro_rules! pinstore_interface_tests {
         mod $module_name {
 
             use futures::{StreamExt, TryStreamExt};
-            use hash_hasher::HashedMap;
+            use std::collections::HashMap;
             use libipld::Cid;
             use std::convert::TryFrom;
             use $crate::repo::common_tests::DSTestContext;
@@ -178,7 +178,7 @@ macro_rules! pinstore_interface_tests {
                 let mut both = repo
                     .list(None)
                     .await
-                    .try_collect::<HashedMap<Cid, PinMode>>()
+                    .try_collect::<HashMap<Cid, PinMode>>()
                     .await
                     .unwrap();
 
@@ -211,7 +211,7 @@ macro_rules! pinstore_interface_tests {
                 let mut both = repo
                     .list(None)
                     .await
-                    .try_collect::<HashedMap<Cid, PinMode>>()
+                    .try_collect::<HashMap<Cid, PinMode>>()
                     .await
                     .unwrap();
 
@@ -242,7 +242,7 @@ macro_rules! pinstore_interface_tests {
                 let mut both = repo
                     .list(None)
                     .await
-                    .try_collect::<HashedMap<Cid, PinMode>>()
+                    .try_collect::<HashMap<Cid, PinMode>>()
                     .await
                     .unwrap();
 
@@ -302,7 +302,7 @@ macro_rules! pinstore_interface_tests {
                 let mut one = repo
                     .list(None)
                     .await
-                    .try_collect::<HashedMap<Cid, PinMode>>()
+                    .try_collect::<HashMap<Cid, PinMode>>()
                     .await
                     .unwrap();
 

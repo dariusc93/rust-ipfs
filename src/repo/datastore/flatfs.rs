@@ -6,9 +6,8 @@ use async_trait::async_trait;
 use core::convert::TryFrom;
 use futures::stream::TryStreamExt;
 use futures::StreamExt;
-use hash_hasher::HashedSet;
 use libipld::Cid;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
@@ -323,11 +322,11 @@ impl PinStore for FsDataStore {
         let st = async_stream::try_stream! {
 
             // keep track of all returned not to give out duplicate cids
-            let mut returned: HashedSet<Cid> = HashedSet::default();
+            let mut returned: HashSet<Cid> = HashSet::default();
 
             // the set of recursive will be interesting after all others
-            let mut recursive: HashedSet<Cid> = HashedSet::default();
-            let mut direct: HashedSet<Cid> = HashedSet::default();
+            let mut recursive: HashSet<Cid> = HashSet::default();
+            let mut direct: HashSet<Cid> = HashSet::default();
 
             let collect_recursive_for_indirect = requirement.is_indirect_or_any();
 
