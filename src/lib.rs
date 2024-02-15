@@ -761,20 +761,20 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Set keypair
-    pub fn set_keypair(mut self, keypair: Keypair) -> Self {
-        self.keys = Some(keypair);
+    pub fn set_keypair(mut self, keypair: &Keypair) -> Self {
+        self.keys = Some(keypair.clone());
         self
     }
 
     /// Set block and data repo
-    pub fn set_repo(mut self, repo: Repo) -> Self {
-        self.repo_handle = Some(repo);
+    pub fn set_repo(mut self, repo: &Repo) -> Self {
+        self.repo_handle = Some(repo.clone());
         self
     }
 
     /// Set a keystore
-    pub fn set_keystore(mut self, keystore: Keystore) -> Self {
-        self.options.keystore = keystore;
+    pub fn set_keystore(mut self, keystore: &Keystore) -> Self {
+        self.options.keystore = keystore.clone();
         self
     }
 
@@ -784,7 +784,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    #[allow(clippy::type_complexity)]
     /// Set a transport
     pub fn with_custom_transport(mut self, transport: TTransportFn) -> Self {
         self.custom_transport = Some(transport);
