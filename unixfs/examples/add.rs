@@ -22,7 +22,7 @@ fn main() {
 
     loop {
         match stdin.fill_buf().unwrap() {
-            x if x.is_empty() => {
+            [] => {
                 eprintln!("finishing");
                 eprintln!("{adder:?}");
                 let blocks = adder.finish();

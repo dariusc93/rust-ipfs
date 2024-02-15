@@ -13,10 +13,7 @@ use futures::{
 use futures::SinkExt;
 
 use crate::TSwarmEvent;
-use crate::{
-    p2p::{addr::extract_peer_id_from_multiaddr, MultiaddrExt},
-    Channel, InnerPubsubEvent,
-};
+use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 
 #[cfg(feature = "beetle_bitswap")]
 use beetle_bitswap_next::BitswapEvent;
@@ -888,26 +885,15 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
                 IdentifyEvent::Received { peer_id, info } => {
-                    self.swarm
-                        .behaviour_mut()
-                        .peerbook
-                        .inject_peer_info(info.clone());
-
-                    if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
-                        for ret in rets {
-                            let _ = ret.send(Ok(info.clone()));
-                        }
-                    }
-
                     let IdentifyInfo {
                         listen_addrs,
                         protocols,
                         ..
-                    } = info;
+                    } = &info;
 
                     if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
                         if protocols.iter().any(|p| libp2p::kad::PROTOCOL_NAME.eq(p)) {
-                            for addr in &listen_addrs {
+                            for addr in listen_addrs {
                                 kad.add_address(&peer_id, addr.clone());
                             }
                         }
@@ -919,10 +905,18 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     {
                         if let Some(autonat) = self.swarm.behaviour_mut().autonat.as_mut() {
                             for addr in listen_addrs {
-                                autonat.add_server(peer_id, Some(addr));
+                                autonat.add_server(peer_id, Some(addr.clone()));
                             }
                         }
                     }
+
+                    if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                        for ret in rets {
+                            let _ = ret.send(Ok(info.clone()));
+                        }
+                    }
+
+                    self.swarm.behaviour_mut().peerbook.inject_peer_info(info);
                 }
                 event => debug!("identify: {:?}", event),
             },
@@ -1329,9 +1323,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     .peerbook
                     .peer_connections(peer_id)
                     .unwrap_or_default()
-                    .iter()
-                    .map(|addr| extract_peer_id_from_multiaddr(addr.clone()))
-                    .map(|(_, addr)| addr)
+                    .into_iter()
+                    .map(|mut addr| {
+                        addr.extract_peer_id();
+                        addr
+                    })
                     .collect::<Vec<_>>();
 
                 let locally_known_addrs = if !listener_addrs.is_empty() {

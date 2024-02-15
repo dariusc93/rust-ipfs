@@ -42,12 +42,10 @@ async fn unsubscribe_cloned_via_drop() {
 
     drop(msgs_1);
 
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     assert_ne!(a.pubsub_subscribed().await.unwrap(), empty);
 
     drop(msgs_2);
 
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
 }
 
@@ -59,7 +57,6 @@ async fn unsubscribe_via_drop() {
     assert_eq!(a.pubsub_subscribed().await.unwrap(), &["topic"]);
 
     drop(msgs);
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let empty: &[&str] = &[];
     assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);

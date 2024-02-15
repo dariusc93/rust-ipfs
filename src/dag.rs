@@ -494,7 +494,7 @@ impl DagGet {
         self
     }
 
-    /// Timeout duration
+    /// Timeout duration to resolve a block before returning an error
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -566,10 +566,10 @@ where
 pub struct DagPut {
     dag_ipld: IpldDag,
     codec: IpldCodec,
-    data: Option<Ipld>,
-    hash: Option<Code>,
+    data: Box<dyn FnOnce() -> anyhow::Result<Ipld> + Send + 'static>,
+    hash: Code,
     pinned: Option<bool>,
-    span: Option<Span>,
+    span: Span,
     provide: bool,
 }
 
@@ -578,25 +578,25 @@ impl DagPut {
         Self {
             dag_ipld: dag,
             codec: IpldCodec::DagCbor,
-            data: None,
-            hash: None,
+            data: Box::new(|| anyhow::bail!("data not available")),
+            hash: Code::Sha2_256,
             pinned: None,
-            span: None,
+            span: Span::current(),
             provide: false,
         }
     }
 
     /// Set a ipld object
     pub fn ipld(mut self, data: Ipld) -> Self {
-        self.data = Some(data);
+        self.data = Box::new(move || Ok(data));
         self
     }
 
     /// Set a serde-compatible object
-    pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Result<Self, Error> {
-        let data = to_ipld(data)?;
-        self.data = Some(data);
-        Ok(self)
+    pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Self {
+        let result = to_ipld(data).map_err(anyhow::Error::from);
+        self.data = Box::new(move || result);
+        self
     }
 
     /// Pin block
@@ -605,15 +605,15 @@ impl DagPut {
         self
     }
 
-    /// Provide block over DHT
+    /// Provide block over DHT or (a future) content discovery protocol
     pub fn provide(mut self) -> Self {
         self.provide = true;
         self
     }
 
-    /// Set direct type for multihash
+    /// Set multihash type
     pub fn hash(mut self, code: Code) -> Self {
-        self.hash = Some(code);
+        self.hash = code;
         self
     }
 
@@ -625,7 +625,7 @@ impl DagPut {
 
     /// Set tracing span
     pub fn span(mut self, span: Span) -> Self {
-        self.span = Some(span);
+        self.span = span;
         self
     }
 }
@@ -636,16 +636,16 @@ impl std::future::IntoFuture for DagPut {
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let span = self.span.unwrap_or(Span::current());
+        let span = self.span;
         async move {
             if self.provide && self.dag_ipld.ipfs.is_none() {
                 anyhow::bail!("Ipfs is offline");
             }
 
-            let data = self.data.ok_or(anyhow::anyhow!("Ipld was not provided"))?;
+            let data = (self.data)()?;
 
             let bytes = self.codec.encode(&data)?;
-            let code = self.hash.unwrap_or(Code::Sha2_256);
+            let code = self.hash;
             let hash = code.digest(&bytes);
             let version = if self.codec == IpldCodec::DagPb {
                 Version::V0

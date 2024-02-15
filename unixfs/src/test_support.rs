@@ -1,12 +1,12 @@
 use core::convert::TryFrom;
-use hash_hasher::HashedMap;
+use std::collections::HashMap;
 use hex_literal::hex;
 use libipld::multihash::Multihash;
 use libipld::{multihash, Cid};
 
 #[derive(Default)]
 pub struct FakeBlockstore {
-    blocks: HashedMap<Cid, Vec<u8>>,
+    blocks: HashMap<Cid, Vec<u8>>,
 }
 
 impl FakeBlockstore {

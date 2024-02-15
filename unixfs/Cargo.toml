@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 name = "rust-unixfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
-version = "0.4.0"
+version = "0.4.1"
 
 [features]
 default = ["filetime"]
@@ -21,7 +21,6 @@ quick-protobuf = { default-features = false, features = [
 sha2 = { default-features = false, version = "0.10" }
 
 [dev-dependencies]
-hash_hasher = "2.0.3"
 hex-literal = { default-features = false, version = "0.3" }
 libc = { default-features = false, version = "0.2" }
 multibase = { default-features = false, version = "0.9" }

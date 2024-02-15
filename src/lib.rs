@@ -1674,17 +1674,7 @@ impl Ipfs {
 
     /// Add a given multiaddr as a listening address. Will fail if the address is unsupported, or
     /// if it is already being listened on. Currently will invoke `Swarm::listen_on` internally,
-    /// keep the ListenerId for later `remove_listening_address` use in a HashMap.
-    ///
-    /// The returned future will resolve on the first bound listening address when this is called
-    /// with `/ip4/0.0.0.0/...` or anything similar which will bound through multiple concrete
-    /// listening addresses.
-    ///
-    /// Trying to add an unspecified listening address while any other listening address adding is
-    /// in progress will result in error.
-    ///
-    /// Returns the bound multiaddress, which in the case of original containing an ephemeral port
-    /// has now been changed.
+    /// returning the first `Multiaddr` that is being listened on.
     pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -1886,9 +1876,9 @@ impl Ipfs {
     /// Stores the given key + value record locally and replicates it in the DHT. It doesn't
     /// expire locally and is periodically replicated in the DHT, as per the `KademliaConfig`
     /// setup.
-    pub async fn dht_put<T: AsRef<[u8]>>(
+    pub async fn dht_put(
         &self,
-        key: T,
+        key: impl AsRef<[u8]>,
         value: impl Into<Vec<u8>>,
         quorum: Quorum,
     ) -> Result<(), Error> {
