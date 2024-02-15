@@ -494,7 +494,7 @@ impl DagGet {
         self
     }
 
-    /// Timeout duration
+    /// Timeout duration to resolve a block before returning an error
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -605,13 +605,13 @@ impl DagPut {
         self
     }
 
-    /// Provide block over DHT
+    /// Provide block over DHT or (a future) content discovery protocol
     pub fn provide(mut self) -> Self {
         self.provide = true;
         self
     }
 
-    /// Set direct type for multihash
+    /// Set multihash type
     pub fn hash(mut self, code: Code) -> Self {
         self.hash = code;
         self
