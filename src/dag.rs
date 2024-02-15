@@ -567,9 +567,9 @@ pub struct DagPut {
     dag_ipld: IpldDag,
     codec: IpldCodec,
     data: Box<dyn FnOnce() -> anyhow::Result<Ipld> + Send + 'static>,
-    hash: Option<Code>,
+    hash: Code,
     pinned: Option<bool>,
-    span: Option<Span>,
+    span: Span,
     provide: bool,
 }
 
@@ -579,9 +579,9 @@ impl DagPut {
             dag_ipld: dag,
             codec: IpldCodec::DagCbor,
             data: Box::new(|| anyhow::bail!("data not available")),
-            hash: None,
+            hash: Code::Sha2_256,
             pinned: None,
-            span: None,
+            span: Span::current(),
             provide: false,
         }
     }
@@ -613,7 +613,7 @@ impl DagPut {
 
     /// Set direct type for multihash
     pub fn hash(mut self, code: Code) -> Self {
-        self.hash = Some(code);
+        self.hash = code;
         self
     }
 
@@ -625,7 +625,7 @@ impl DagPut {
 
     /// Set tracing span
     pub fn span(mut self, span: Span) -> Self {
-        self.span = Some(span);
+        self.span = span;
         self
     }
 }
@@ -636,7 +636,7 @@ impl std::future::IntoFuture for DagPut {
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let span = self.span.unwrap_or(Span::current());
+        let span = self.span;
         async move {
             if self.provide && self.dag_ipld.ipfs.is_none() {
                 anyhow::bail!("Ipfs is offline");
@@ -645,7 +645,7 @@ impl std::future::IntoFuture for DagPut {
             let data = (self.data)()?;
 
             let bytes = self.codec.encode(&data)?;
-            let code = self.hash.unwrap_or(Code::Sha2_256);
+            let code = self.hash;
             let hash = code.digest(&bytes);
             let version = if self.codec == IpldCodec::DagPb {
                 Version::V0
