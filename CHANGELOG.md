@@ -1,4 +1,5 @@
 # 0.10.0
+- refactor: Serialize dag internally, remove redundant dependencies and code and minor optimizations. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 - chore: Cancel gc task when ipfs drops. [PR 133](https://github.com/dariusc93/rust-ipfs/pull/133)
 - chore: Reduce allocation when initializing Repo and misc cleanup. [PR 132](https://github.com/dariusc93/rust-ipfs/pull/132)
 - refactor: Use `Bytes` apart of unixfs operations. [PR 131](https://github.com/dariusc93/rust-ipfs/pull/131)
