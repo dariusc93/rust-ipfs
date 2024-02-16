@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize the repo and start a daemon
     let mut uninitialized = UninitializedIpfs::new()
         .with_custom_behaviour(ext_behaviour::Behaviour::new(peer_id, stdout.clone()))
-        .set_keypair(keypair.clone())
+        .set_keypair(&keypair)
         .with_default()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?);
 
