@@ -107,10 +107,9 @@ impl Stream for UnixfsAdd {
                     let (ipfs, repo) = match self.core.take().expect("ipfs or repo is used") {
                         Either::Left(ipfs) => {
                             let repo = ipfs.repo().clone();
-                            let ipfs = ipfs.clone();
                             (Some(ipfs), repo)
                         }
-                        Either::Right(repo) => (None, repo.clone()),
+                        Either::Right(repo) => (None, repo),
                     };
                     let option = self.opt.take().expect("option already constructed");
                     let chunk = self.chunk;
