@@ -174,7 +174,7 @@ impl Stream for UnixfsLs {
                                 }
                                 Ok(ContinuedWalk::Symlink( .. )) => {},
                                 Err(error) => {
-                                    yield Entry::Error { error: anyhow::anyhow!("{error}") };
+                                    yield Entry::Error { error: anyhow::Error::from(error) };
                                     return;
                                 }
                             };

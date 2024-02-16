@@ -126,7 +126,7 @@ impl Stream for UnixfsGet {
                             .map_err(TraversalFailed::Io) {
                                 Ok(f) => f,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
                                     return;
                                 }
                             };
@@ -138,7 +138,7 @@ impl Stream for UnixfsGet {
                             .and_then(|(resolved, _)| resolved.into_unixfs_block().map_err(TraversalFailed::Path)) {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
                                     return;
                                 }
                         };
@@ -153,7 +153,7 @@ impl Stream for UnixfsGet {
                             let block = match repo.get_block_with_session(session, next, &providers, local_only, timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
                                     return;
                                 }
                             };
@@ -179,11 +179,11 @@ impl Stream for UnixfsGet {
                                         let next = &slice[n..];
                                         n += next.len();
                                         if let Err(e) = file.write_all(next).await {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
                                             return;
                                         }
                                         if let Err(e) = file.sync_all().await {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
                                             return;
                                         }
 
@@ -198,7 +198,7 @@ impl Stream for UnixfsGet {
                                 Ok(ContinuedWalk::Directory( .. )) | Ok(ContinuedWalk::RootDirectory( .. )) => {}, //TODO
                                 Ok(ContinuedWalk::Symlink( .. )) => {},
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
                                     return;
                                 }
                             };

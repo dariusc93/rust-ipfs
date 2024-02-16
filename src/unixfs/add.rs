@@ -126,7 +126,7 @@ impl Stream for UnixfsAdd {
                                 }).await {
                                     Ok(s) => s,
                                     Err(e) => {
-                                        yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::anyhow!("{e}")) };
+                                        yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::Error::from(e)) };
                                         return;
                                     }
                                 },
@@ -143,7 +143,7 @@ impl Stream for UnixfsAdd {
                             let buffer = match buffer {
                                 Ok(buf) => buf,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
                                     return;
                                 }
                             };
@@ -155,14 +155,14 @@ impl Stream for UnixfsAdd {
                                     let block = match Block::new(cid, block) {
                                         Ok(block) => block,
                                         Err(e) => {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
                                             return;
                                         }
                                     };
                                     let _cid = match repo.put_block(block).await {
                                         Ok(cid) => cid,
                                         Err(e) => {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
                                             return;
                                         }
                                     };
@@ -181,14 +181,14 @@ impl Stream for UnixfsAdd {
                             let block = match Block::new(cid, block) {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
                                     return;
                                 }
                             };
                             let _cid = match repo.put_block(block).await {
                                 Ok(cid) => cid,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
                                     return;
                                 }
                             };
@@ -237,7 +237,7 @@ impl Stream for UnixfsAdd {
                                 path = match result.await {
                                     Ok(path) => path,
                                     Err(e) => {
-                                        yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::anyhow!("{e}")) };
+                                        yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
                                         return;
                                     }
                                 };
