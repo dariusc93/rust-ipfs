@@ -242,6 +242,8 @@ pub(crate) struct Libp2pProtocol {
     pub(crate) rendezvous_server: bool,
     pub(crate) upnp: bool,
     pub(crate) ping: bool,
+    #[cfg(feature = "experimental_stream")]
+    pub(crate) streams: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -400,7 +402,10 @@ enum IpfsEvent {
         PeerId,
         Channel<HashMap<PeerId, Vec<Multiaddr>>>,
     ),
-
+    #[cfg(feature = "experimental_stream")]
+    StreamControlHandle(Channel<libp2p_stream::Control>),
+    #[cfg(feature = "experimental_stream")]
+    NewStream(StreamProtocol, Channel<libp2p_stream::IncomingStreams>),
     Exit,
 }
 
@@ -661,6 +666,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     pub fn with_identify(mut self, config: crate::p2p::IdentifyConfiguration) -> Self {
         self.options.protocols.identify = true;
         self.options.identify_configuration = config;
+        self
+    }
+
+    #[cfg(feature = "experimental_stream")]
+    pub fn with_streams(mut self) -> Self {
+        self.options.protocols.streams = true;
         self
     }
 
@@ -1636,6 +1647,61 @@ impl Ipfs {
         .await
     }
 
+    #[cfg(feature = "experimental_stream")]
+    pub async fn stream_control(&self) -> Result<libp2p_stream::Control, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::StreamControlHandle(tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    #[cfg(feature = "experimental_stream")]
+    pub async fn new_stream(
+        &self,
+        protocol: impl Into<StreamProtocolRef>,
+    ) -> Result<libp2p_stream::IncomingStreams, Error> {
+        let protocol: StreamProtocol = protocol.into().try_into()?;
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::NewStream(protocol, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    #[cfg(feature = "experimental_stream")]
+    pub async fn open_stream(
+        &self,
+        peer_id: PeerId,
+        protocol: impl Into<StreamProtocolRef>,
+    ) -> Result<libp2p::Stream, Error> {
+        let protocol: StreamProtocol = protocol.into().try_into()?;
+        async move {
+            let mut control = self.stream_control().await?;
+            let stream = control
+                .open_stream(peer_id, protocol)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(stream)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
     /// Returns a list of local blocks
     ///
     /// This implementation is subject to change into a stream, which might only include the pinned
@@ -2280,6 +2346,44 @@ impl Ipfs {
 
         // ignoring the error because it'd mean that the background task had already been dropped
         let _ = self.to_task.try_send(IpfsEvent::Exit);
+    }
+}
+
+pub enum StreamProtocolRef {
+    Static(&'static str),
+    Owned(String),
+    Direct(StreamProtocol),
+}
+
+impl From<&'static str> for StreamProtocolRef {
+    fn from(protocol: &'static str) -> Self {
+        StreamProtocolRef::Static(protocol)
+    }
+}
+
+impl From<String> for StreamProtocolRef {
+    fn from(protocol: String) -> Self {
+        StreamProtocolRef::Owned(protocol)
+    }
+}
+
+impl From<StreamProtocol> for StreamProtocolRef {
+    fn from(protocol: StreamProtocol) -> Self {
+        StreamProtocolRef::Direct(protocol)
+    }
+}
+
+impl TryFrom<StreamProtocolRef> for StreamProtocol {
+    type Error = std::io::Error;
+    fn try_from(protocl_ref: StreamProtocolRef) -> Result<Self, Self::Error> {
+        let protocol = match protocl_ref {
+            StreamProtocolRef::Direct(protocol) => protocol,
+            StreamProtocolRef::Owned(protocol) => StreamProtocol::try_from_owned(protocol)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
+            StreamProtocolRef::Static(protocol) => StreamProtocol::new(protocol),
+        };
+
+        Ok(protocol)
     }
 }
 
