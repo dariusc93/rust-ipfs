@@ -23,7 +23,7 @@ mod get;
 mod ls;
 pub use add::UnixfsAdd;
 pub use cat::{StartingPoint, UnixfsCat};
-pub use get::{get, UnixfsGet};
+pub use get::UnixfsGet;
 pub use ls::{ls, NodeItem, UnixfsLs};
 
 use crate::{
@@ -157,15 +157,8 @@ impl IpfsUnixfs {
     /// Retreive a file and saving it to a local path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub fn get<'a, P: AsRef<std::path::Path>>(
-        &self,
-        path: IpfsPath,
-        dest: P,
-        peers: &'a [PeerId],
-        local: bool,
-        timeout: Option<Duration>,
-    ) -> UnixfsGet<'a> {
-        get(Either::Left(&self.ipfs), path, dest, peers, local, timeout)
+    pub fn get<P: AsRef<std::path::Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet {
+        UnixfsGet::with_ipfs(&self.ipfs, path, dest)
     }
 
     /// List directory contents

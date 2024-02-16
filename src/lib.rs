@@ -1273,12 +1273,8 @@ impl Ipfs {
     }
 
     /// Retreive a file and saving it to a path.
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet<'_> {
-        self.unixfs()
-            .get(path, dest, &[], false, None)
-            .span(self.span.clone())
+    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet {
+        self.unixfs().get(path, dest).span(self.span.clone())
     }
 
     /// List directory contents
