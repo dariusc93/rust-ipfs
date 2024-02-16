@@ -21,7 +21,7 @@ mod add;
 mod cat;
 mod get;
 mod ls;
-pub use add::{add, add_file, AddOption, UnixfsAdd};
+pub use add::UnixfsAdd;
 pub use cat::{cat, StartingPoint, UnixfsCat};
 pub use get::{get, UnixfsGet};
 pub use ls::{ls, NodeItem, UnixfsLs};
@@ -35,84 +35,84 @@ pub struct IpfsUnixfs {
     ipfs: Ipfs,
 }
 
-pub enum AddOpt<'a> {
+pub enum AddOpt {
     Path(PathBuf),
-    Stream(BoxStream<'a, std::io::Result<Bytes>>),
-    StreamWithName(String, BoxStream<'a, std::io::Result<Bytes>>),
+    Stream(BoxStream<'static, std::io::Result<Bytes>>),
+    StreamWithName(String, BoxStream<'static, std::io::Result<Bytes>>),
 }
 
-impl<'a> From<&'a str> for AddOpt<'a> {
-    fn from(value: &'a str) -> Self {
+impl From<&str> for AddOpt {
+    fn from(value: &str) -> Self {
         AddOpt::Path(PathBuf::from(value))
     }
 }
 
-impl From<String> for AddOpt<'_> {
+impl From<String> for AddOpt {
     fn from(value: String) -> Self {
         AddOpt::Path(PathBuf::from(value))
     }
 }
 
-impl<'a> From<&'a std::path::Path> for AddOpt<'_> {
-    fn from(path: &'a std::path::Path) -> Self {
+impl From<&std::path::Path> for AddOpt {
+    fn from(path: &std::path::Path) -> Self {
         AddOpt::Path(path.to_path_buf())
     }
 }
 
-impl From<PathBuf> for AddOpt<'_> {
+impl From<PathBuf> for AddOpt {
     fn from(path: PathBuf) -> Self {
         AddOpt::Path(path)
     }
 }
 
-impl From<Vec<u8>> for AddOpt<'_> {
+impl From<Vec<u8>> for AddOpt {
     fn from(bytes: Vec<u8>) -> Self {
         let bytes: Bytes = bytes.into();
         Self::from(bytes)
     }
 }
 
-impl From<(String, Vec<u8>)> for AddOpt<'_> {
+impl From<(String, Vec<u8>)> for AddOpt {
     fn from((name, bytes): (String, Vec<u8>)) -> Self {
         let bytes: Bytes = bytes.into();
         Self::from((name, bytes))
     }
 }
 
-impl From<Bytes> for AddOpt<'_> {
+impl From<Bytes> for AddOpt {
     fn from(bytes: Bytes) -> Self {
         let stream = stream::once(async { Ok::<_, std::io::Error>(bytes) }).boxed();
         AddOpt::Stream(stream)
     }
 }
 
-impl From<(String, Bytes)> for AddOpt<'_> {
+impl From<(String, Bytes)> for AddOpt {
     fn from((name, bytes): (String, Bytes)) -> Self {
         let stream = stream::once(async { Ok::<_, std::io::Error>(bytes) }).boxed();
         Self::from((name, stream))
     }
 }
 
-impl<'a> From<BoxStream<'a, std::io::Result<Bytes>>> for AddOpt<'a> {
-    fn from(stream: BoxStream<'a, std::io::Result<Bytes>>) -> Self {
+impl From<BoxStream<'static, std::io::Result<Bytes>>> for AddOpt {
+    fn from(stream: BoxStream<'static, std::io::Result<Bytes>>) -> Self {
         AddOpt::Stream(stream)
     }
 }
 
-impl<'a> From<(String, BoxStream<'a, std::io::Result<Bytes>>)> for AddOpt<'a> {
-    fn from((name, stream): (String, BoxStream<'a, std::io::Result<Bytes>>)) -> Self {
+impl From<(String, BoxStream<'static, std::io::Result<Bytes>>)> for AddOpt {
+    fn from((name, stream): (String, BoxStream<'static, std::io::Result<Bytes>>)) -> Self {
         AddOpt::StreamWithName(name, stream)
     }
 }
 
-impl<'a> From<BoxStream<'a, std::io::Result<Vec<u8>>>> for AddOpt<'a> {
-    fn from(stream: BoxStream<'a, std::io::Result<Vec<u8>>>) -> Self {
+impl From<BoxStream<'static, std::io::Result<Vec<u8>>>> for AddOpt {
+    fn from(stream: BoxStream<'static, std::io::Result<Vec<u8>>>) -> Self {
         AddOpt::Stream(stream.map(|result| result.map(|data| data.into())).boxed())
     }
 }
 
-impl<'a> From<(String, BoxStream<'a, std::io::Result<Vec<u8>>>)> for AddOpt<'a> {
-    fn from((name, stream): (String, BoxStream<'a, std::io::Result<Vec<u8>>>)) -> Self {
+impl From<(String, BoxStream<'static, std::io::Result<Vec<u8>>>)> for AddOpt {
+    fn from((name, stream): (String, BoxStream<'static, std::io::Result<Vec<u8>>>)) -> Self {
         let stream = stream.map(|result| result.map(|data| data.into())).boxed();
         AddOpt::StreamWithName(name, stream)
     }
@@ -151,27 +151,25 @@ impl IpfsUnixfs {
     /// Add a file from either a file or stream
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::add` or `ipfs::unixfs::add_file` directly.
-    pub fn add<'a, I: Into<AddOpt<'a>>>(&self, item: I, option: AddOption) -> UnixfsAdd<'a> {
+    pub fn add<I: Into<AddOpt>>(&self, item: I) -> UnixfsAdd {
         let item = item.into();
         match item {
-            AddOpt::Path(path) => add_file(Either::Left(&self.ipfs), path, option),
-            AddOpt::Stream(stream) => add(
-                Either::Left(&self.ipfs),
+            AddOpt::Path(path) => UnixfsAdd::with_ipfs(&self.ipfs, path),
+            AddOpt::Stream(stream) => UnixfsAdd::with_ipfs(
+                &self.ipfs,
                 add::AddOpt::Stream {
                     name: None,
                     total: None,
                     stream,
                 },
-                option,
             ),
-            AddOpt::StreamWithName(name, stream) => add(
-                Either::Left(&self.ipfs),
+            AddOpt::StreamWithName(name, stream) => UnixfsAdd::with_ipfs(
+                &self.ipfs,
                 add::AddOpt::Stream {
                     name: Some(name),
                     total: None,
                     stream,
                 },
-                option,
             ),
         }
     }
