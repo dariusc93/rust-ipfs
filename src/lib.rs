@@ -1278,10 +1278,8 @@ impl Ipfs {
     }
 
     /// List directory contents
-    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs<'_> {
-        self.unixfs()
-            .ls(path, &[], false, None)
-            .span(self.span.clone())
+    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs {
+        self.unixfs().ls(path).span(self.span.clone())
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.

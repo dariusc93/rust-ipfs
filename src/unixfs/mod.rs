@@ -3,17 +3,15 @@
 //! Adding files and directory structures is supported but not exposed via an API. See examples and
 //! `ipfs-http`.
 
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use anyhow::Error;
 use bytes::Bytes;
-use either::Either;
 use futures::{
     stream::{self, BoxStream},
     StreamExt,
 };
 use libipld::Cid;
-use libp2p::PeerId;
 use ll::file::FileReadFailed;
 pub use rust_unixfs as ll;
 
@@ -24,7 +22,7 @@ mod ls;
 pub use add::UnixfsAdd;
 pub use cat::{StartingPoint, UnixfsCat};
 pub use get::UnixfsGet;
-pub use ls::{ls, NodeItem, UnixfsLs};
+pub use ls::UnixfsLs;
 
 use crate::{
     dag::{ResolveError, UnexpectedResolved},
@@ -162,14 +160,8 @@ impl IpfsUnixfs {
     }
 
     /// List directory contents
-    pub fn ls<'a>(
-        &self,
-        path: IpfsPath,
-        peers: &'a [PeerId],
-        local: bool,
-        timeout: Option<Duration>,
-    ) -> UnixfsLs<'a> {
-        ls(Either::Left(&self.ipfs), path, peers, local, timeout)
+    pub fn ls(&self, path: IpfsPath) -> UnixfsLs {
+        UnixfsLs::with_ipfs(&self.ipfs, path)
     }
 }
 
