@@ -1045,6 +1045,24 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let info = self.swarm.behaviour().supported_protocols();
                 let _ = ret.send(info);
             }
+            #[cfg(feature = "experimental_stream")]
+            IpfsEvent::StreamControlHandle(ret) => {
+                let Some(stream) = self.swarm.behaviour_mut().stream.as_ref() else {
+                    let _ = ret.send(Err(anyhow!("stream protocol is disabled")));
+                    return;
+                };
+
+                _ = ret.send(Ok(stream.new_control()))
+            }
+            #[cfg(feature = "experimental_stream")]
+            IpfsEvent::NewStream(protocol, ret) => {
+                let Some(stream) = self.swarm.behaviour_mut().stream.as_ref() else {
+                    let _ = ret.send(Err(anyhow!("stream protocol is disabled")));
+                    return;
+                };
+
+                _ = ret.send(stream.new_control().accept(protocol).map_err(anyhow::Error::from))
+            }
             IpfsEvent::Addresses(ret) => {
                 let addrs = self.swarm.behaviour_mut().addrs();
                 ret.send(Ok(addrs)).ok();

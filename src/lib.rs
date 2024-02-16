@@ -242,6 +242,8 @@ pub(crate) struct Libp2pProtocol {
     pub(crate) rendezvous_server: bool,
     pub(crate) upnp: bool,
     pub(crate) ping: bool,
+    #[cfg(feature = "experimental_stream")]
+    pub(crate) streams: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -400,7 +402,10 @@ enum IpfsEvent {
         PeerId,
         Channel<HashMap<PeerId, Vec<Multiaddr>>>,
     ),
-
+    #[cfg(feature = "experimental_stream")]
+    StreamControlHandle(Channel<libp2p_stream::Control>),
+    #[cfg(feature = "experimental_stream")]
+    NewStream(StreamProtocol, Channel<libp2p_stream::IncomingStreams>),
     Exit,
 }
 
@@ -661,6 +666,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     pub fn with_identify(mut self, config: crate::p2p::IdentifyConfiguration) -> Self {
         self.options.protocols.identify = true;
         self.options.identify_configuration = config;
+        self
+    }
+
+    #[cfg(feature = "experimental_stream")]
+    pub fn with_streams(mut self) -> Self {
+        self.options.protocols.streams = true;
         self
     }
 
@@ -1631,6 +1642,59 @@ impl Ipfs {
                 .await?;
 
             Ok(rx.await??.await)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    #[cfg(feature = "experimental_stream")]
+    pub async fn stream_control(&self) -> Result<libp2p_stream::Control, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::StreamControlHandle(tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    #[cfg(feature = "experimental_stream")]
+    pub async fn new_stream(
+        &self,
+        protocol: impl Into<StreamProtocol>,
+    ) -> Result<libp2p_stream::IncomingStreams, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::NewStream(protocol.into(), tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    #[cfg(feature = "experimental_stream")]
+    pub async fn open_stream(
+        &self,
+        peer_id: PeerId,
+        protocol: impl Into<StreamProtocol>,
+    ) -> Result<libp2p::Stream, Error> {
+        async move {
+            let mut control = self.stream_control().await?;
+            let stream = control
+                .open_stream(peer_id, protocol.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(stream)
         }
         .instrument(self.span.clone())
         .await

@@ -69,6 +69,8 @@ where
     pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
     pub rendezvous_client: Toggle<libp2p::rendezvous::client::Behaviour>,
     pub rendezvous_server: Toggle<libp2p::rendezvous::server::Behaviour>,
+    #[cfg(feature = "experimental_stream")]
+    pub stream: Toggle<libp2p_stream::Behaviour>,
     pub dcutr: Toggle<Dcutr>,
     pub addressbook: addressbook::Behaviour,
     pub peerbook: peerbook::Behaviour,
@@ -540,6 +542,10 @@ where
             .rendezvous_server
             .then(|| libp2p::rendezvous::server::Behaviour::new(Default::default()))
             .into();
+
+        #[cfg(feature = "experimental_stream")]
+        let stream = protocols.streams.then(libp2p_stream::Behaviour::new).into();
+
         Ok((
             Behaviour {
                 mdns,
@@ -555,6 +561,8 @@ where
                 relay_client,
                 relay_manager,
                 block_list,
+                #[cfg(feature = "experimental_stream")]
+                stream,
                 upnp,
                 peerbook,
                 addressbook,
