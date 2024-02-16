@@ -3,7 +3,7 @@
 //! Adding files and directory structures is supported but not exposed via an API. See examples and
 //! `ipfs-http`.
 
-use std::{ops::Range, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::Error;
 use bytes::Bytes;
@@ -22,7 +22,7 @@ mod cat;
 mod get;
 mod ls;
 pub use add::UnixfsAdd;
-pub use cat::{cat, StartingPoint, UnixfsCat};
+pub use cat::{StartingPoint, UnixfsCat};
 pub use get::{get, UnixfsGet};
 pub use ls::{ls, NodeItem, UnixfsLs};
 
@@ -126,31 +126,11 @@ impl IpfsUnixfs {
     /// Creates a stream which will yield the bytes of an UnixFS file from the root Cid, with the
     /// optional file byte range. If the range is specified and is outside of the file, the stream
     /// will end without producing any bytes.
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::cat` directly.
-    pub fn cat<'a>(
-        &self,
-        starting_point: impl Into<StartingPoint>,
-        range: Option<Range<u64>>,
-        peers: &'a [PeerId],
-        local: bool,
-        timeout: Option<Duration>,
-    ) -> UnixfsCat<'a> {
-        // convert early not to worry about the lifetime of parameter
-        let starting_point = starting_point.into();
-        cat(
-            Either::Left(&self.ipfs),
-            starting_point,
-            range,
-            peers,
-            local,
-            timeout,
-        )
+    pub fn cat(&self, starting_point: impl Into<StartingPoint>) -> UnixfsCat {
+        UnixfsCat::with_ipfs(&self.ipfs, starting_point)
     }
 
     /// Add a file from either a file or stream
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::add` or `ipfs::unixfs::add_file` directly.
     pub fn add<I: Into<AddOpt>>(&self, item: I) -> UnixfsAdd {
         let item = item.into();
         match item {
@@ -216,6 +196,14 @@ pub enum UnixfsStatus {
         total_size: Option<usize>,
         error: Option<anyhow::Error>,
     },
+}
+
+pub(crate) enum StatusStreamState {
+    None,
+    Pending {
+        stream: BoxStream<'static, UnixfsStatus>,
+    },
+    Done,
 }
 
 /// Types of failures which can occur while walking the UnixFS graph.

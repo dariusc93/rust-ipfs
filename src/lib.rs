@@ -74,7 +74,7 @@ use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
-    ops::{Deref, DerefMut, Range},
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::atomic::AtomicU64,
     sync::Arc,
@@ -1256,16 +1256,8 @@ impl Ipfs {
     /// Creates a stream which will yield the bytes of an UnixFS file from the root Cid, with the
     /// optional file byte range. If the range is specified and is outside of the file, the stream
     /// will end without producing any bytes.
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::cat` directly.
-    pub fn cat_unixfs(
-        &self,
-        starting_point: impl Into<unixfs::StartingPoint>,
-        range: Option<Range<u64>>,
-    ) -> UnixfsCat<'_> {
-        self.unixfs()
-            .cat(starting_point, range, &[], false, None)
-            .span(self.span.clone())
+    pub fn cat_unixfs(&self, starting_point: impl Into<unixfs::StartingPoint>) -> UnixfsCat {
+        self.unixfs().cat(starting_point).span(self.span.clone())
     }
 
     /// Add a file from a path to the blockstore

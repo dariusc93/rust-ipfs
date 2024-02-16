@@ -8,6 +8,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
+use std::task::Poll;
 use std::{borrow::Borrow, time::Duration};
 use tracing::{Instrument, Span};
 
@@ -19,124 +20,66 @@ use super::TraversalFailed;
 /// be helpful in some contexts, like the http.
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
-pub fn cat<'a>(
-    which: Either<&Ipfs, &Repo>,
-    starting_point: impl Into<StartingPoint> + Send + 'a,
+
+pub struct UnixfsCat {
+    core: Option<Either<Ipfs, Repo>>,
+    span: Span,
+    starting_point: Option<StartingPoint>,
     range: Option<Range<u64>>,
-    providers: &'a [PeerId],
+    providers: Vec<PeerId>,
     local_only: bool,
     timeout: Option<Duration>,
-) -> UnixfsCat<'a> {
-    let (repo, dag, session) = match which {
-        Either::Left(ipfs) => (
-            ipfs.repo().clone(),
-            ipfs.dag(),
-            Some(crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
-        ),
-        Either::Right(repo) => {
-            let session = repo
-                .is_online()
-                .then(|| crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
-            (repo.clone(), IpldDag::from(repo.clone()), session)
-        }
-    };
+    stream: Option<BoxStream<'static, Result<Bytes, TraversalFailed>>>,
+}
 
-    let mut visit = IdleFileVisit::default();
-    if let Some(range) = range {
-        visit = visit.with_target_range(range);
+impl UnixfsCat {
+    pub fn with_ipfs(ipfs: &Ipfs, starting_point: impl Into<StartingPoint>) -> Self {
+        Self::with_either(Either::Left(ipfs.clone()), starting_point)
     }
 
-    // using async_stream here at least to get on faster; writing custom streams is not too easy
-    // but this might be easy enough to write open.
-    let stream = stream! {
+    pub fn with_repo(repo: &Repo, starting_point: impl Into<StartingPoint>) -> Self {
+        Self::with_either(Either::Right(repo.clone()), starting_point)
+    }
 
-        // Get the root block to start the traversal. The stream does not expose any of the file
-        // metadata. To get to it the user needs to create a Visitor over the first block.
-        let block = match starting_point.into() {
-            StartingPoint::Left(path) => match dag
-                .resolve_with_session(session, path.clone(), true, providers, local_only, timeout)
-                .await
-                .map_err(TraversalFailed::Resolving)
-                .and_then(|(resolved, _)| {
-                    resolved.into_unixfs_block().map_err(TraversalFailed::Path)
-                }) {
-                    Ok(block) => block,
-                    Err(e) => {
-                        yield Err(e);
-                        return;
-                    }
-                },
-            StartingPoint::Right(block) => block,
-        };
-
-        let mut cache = None;
-        // Start the visit from the root block. We need to move the both components as Options into the
-        // stream as we can't yet return them from this Future context.
-        let (visit, bytes) = match visit.start(block.data()) {
-            Ok((bytes, _, _, visit)) => {
-                let bytes = if !bytes.is_empty() {
-                    Some(Bytes::copy_from_slice(bytes))
-                } else {
-                    None
-                };
-
-                (visit, bytes)
-            }
-            Err(e) => {
-                yield Err(TraversalFailed::Walking(*block.cid(), e));
-                return;
-            }
-        };
-
-        if let Some(bytes) = bytes {
-            yield Ok(bytes);
+    fn with_either(core: Either<Ipfs, Repo>, starting_point: impl Into<StartingPoint>) -> Self {
+        let starting_point = starting_point.into();
+        Self {
+            core: Some(core),
+            starting_point: Some(starting_point),
+            span: Span::current(),
+            range: None,
+            providers: Vec::new(),
+            local_only: false,
+            timeout: None,
+            stream: None,
         }
+    }
 
-        let mut visit = match visit {
-            Some(visit) => visit,
-            None => return,
-        };
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = span;
+        self
+    }
 
-        loop {
-            // TODO: if it was possible, it would make sense to start downloading N of these
-            // we could just create an FuturesUnordered which would drop the value right away. that
-            // would probably always cost many unnecessary clones, but it would be nice to "shut"
-            // the subscriber so that it will only resolve to a value but still keep the operation
-            // going. Not that we have any "operation" concept of the Want yet.
-            let (next, _) = visit.pending_links();
-
-            let borrow = repo.borrow();
-            let block = match borrow.get_block_with_session(session, next, providers, local_only, timeout).await {
-                Ok(block) => block,
-                Err(e) => {
-                    yield Err(TraversalFailed::Loading(*next, e));
-                    return;
-                },
-            };
-
-            match visit.continue_walk(block.data(), &mut cache) {
-                Ok((bytes, next_visit)) => {
-                    if !bytes.is_empty() {
-                        // TODO: manual implementation could allow returning just the slice
-                        yield Ok(Bytes::copy_from_slice(bytes));
-                    }
-
-                    match next_visit {
-                        Some(v) => visit = v,
-                        None => return,
-                    }
-                }
-                Err(e) => {
-                    yield Err(TraversalFailed::Walking(*block.cid(), e));
-                    return;
-                }
-            }
+    pub fn provider(mut self, peer_id: PeerId) -> Self {
+        if !self.providers.contains(&peer_id) {
+            self.providers.push(peer_id);
         }
-    };
+        self
+    }
 
-    UnixfsCat {
-        stream: stream.boxed(),
-        span: None,
+    pub fn providers(mut self, list: &[PeerId]) -> Self {
+        self.providers = list.to_owned();
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn local(mut self) -> Self {
+        self.local_only = true;
+        self
     }
 }
 
@@ -159,38 +102,158 @@ impl From<Block> for StartingPoint {
     }
 }
 
-pub struct UnixfsCat<'a> {
-    stream: BoxStream<'a, Result<Bytes, TraversalFailed>>,
-    span: Option<Span>,
-}
-
-impl<'a> UnixfsCat<'a> {
-    pub fn span(mut self, span: Span) -> Self {
-        self.span = Some(span);
-        self
-    }
-}
-
-impl<'a> Stream for UnixfsCat<'a> {
+impl Stream for UnixfsCat {
     type Item = Result<Bytes, TraversalFailed>;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.stream.poll_next_unpin(cx)
+        loop {
+            match &mut self.stream {
+                Some(stream) => match futures::ready!(stream.poll_next_unpin(cx)) {
+                    None => {
+                        self.stream.take();
+                        return Poll::Ready(None);
+                    }
+                    task => return Poll::Ready(task),
+                },
+                None => {
+                    let Some(core) = self.core.take() else {
+                        return Poll::Ready(None);
+                    };
+
+                    let (repo, dag, session) = match core {
+                        Either::Left(ipfs) => (
+                            ipfs.repo().clone(),
+                            ipfs.dag(),
+                            Some(
+                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                            ),
+                        ),
+                        Either::Right(repo) => {
+                            let session = repo.is_online().then(|| {
+                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                            });
+                            (repo.clone(), IpldDag::from(repo.clone()), session)
+                        }
+                    };
+
+                    let mut visit = IdleFileVisit::default();
+
+                    if let Some(range) = self.range.clone() {
+                        visit = visit.with_target_range(range);
+                    }
+
+                    let starting_point = self.starting_point.take().expect("starting point exist");
+                    let providers = std::mem::take(&mut self.providers);
+                    let local_only = self.local_only;
+                    let timeout = self.timeout;
+
+                    // using async_stream here at least to get on faster; writing custom streams is not too easy
+                    // but this might be easy enough to write open.
+                    let stream = stream! {
+
+                        // Get the root block to start the traversal. The stream does not expose any of the file
+                        // metadata. To get to it the user needs to create a Visitor over the first block.
+                        let block = match starting_point {
+                            StartingPoint::Left(path) => match dag
+                                .resolve_with_session(session, path.clone(), true, &providers, local_only, timeout)
+                                .await
+                                .map_err(TraversalFailed::Resolving)
+                                .and_then(|(resolved, _)| {
+                                    resolved.into_unixfs_block().map_err(TraversalFailed::Path)
+                                }) {
+                                    Ok(block) => block,
+                                    Err(e) => {
+                                        yield Err(e);
+                                        return;
+                                    }
+                                },
+                            StartingPoint::Right(block) => block,
+                        };
+
+                        let mut cache = None;
+                        // Start the visit from the root block. We need to move the both components as Options into the
+                        // stream as we can't yet return them from this Future context.
+                        let (visit, bytes) = match visit.start(block.data()) {
+                            Ok((bytes, _, _, visit)) => {
+                                let bytes = if !bytes.is_empty() {
+                                    Some(Bytes::copy_from_slice(bytes))
+                                } else {
+                                    None
+                                };
+
+                                (visit, bytes)
+                            }
+                            Err(e) => {
+                                yield Err(TraversalFailed::Walking(*block.cid(), e));
+                                return;
+                            }
+                        };
+
+                        if let Some(bytes) = bytes {
+                            yield Ok(bytes);
+                        }
+
+                        let mut visit = match visit {
+                            Some(visit) => visit,
+                            None => return,
+                        };
+
+                        loop {
+                            // TODO: if it was possible, it would make sense to start downloading N of these
+                            // we could just create an FuturesUnordered which would drop the value right away. that
+                            // would probably always cost many unnecessary clones, but it would be nice to "shut"
+                            // the subscriber so that it will only resolve to a value but still keep the operation
+                            // going. Not that we have any "operation" concept of the Want yet.
+                            let (next, _) = visit.pending_links();
+
+                            let borrow = repo.borrow();
+                            let block = match borrow.get_block_with_session(session, next, &providers, local_only, timeout).await {
+                                Ok(block) => block,
+                                Err(e) => {
+                                    yield Err(TraversalFailed::Loading(*next, e));
+                                    return;
+                                },
+                            };
+
+                            match visit.continue_walk(block.data(), &mut cache) {
+                                Ok((bytes, next_visit)) => {
+                                    if !bytes.is_empty() {
+                                        // TODO: manual implementation could allow returning just the slice
+                                        yield Ok(Bytes::copy_from_slice(bytes));
+                                    }
+
+                                    match next_visit {
+                                        Some(v) => visit = v,
+                                        None => return,
+                                    }
+                                }
+                                Err(e) => {
+                                    yield Err(TraversalFailed::Walking(*block.cid(), e));
+                                    return;
+                                }
+                            }
+                        }
+                    }.boxed();
+
+                    self.stream.replace(stream);
+                }
+            }
+        }
     }
 }
 
-impl<'a> std::future::IntoFuture for UnixfsCat<'a> {
+impl std::future::IntoFuture for UnixfsCat {
     type Output = Result<Bytes, TraversalFailed>;
 
-    type IntoFuture = BoxFuture<'a, Self::Output>;
+    type IntoFuture = BoxFuture<'static, Self::Output>;
 
     fn into_future(mut self) -> Self::IntoFuture {
-        let span = self.span.unwrap_or(Span::current());
+        let span = self.span.clone();
         async move {
             let mut data = vec![];
-            while let Some(bytes) = self.stream.try_next().await? {
+            while let Some(bytes) = self.try_next().await? {
                 data.extend(bytes);
             }
             Ok(data.into())

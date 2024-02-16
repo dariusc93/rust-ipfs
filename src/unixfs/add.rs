@@ -10,7 +10,7 @@ use tracing::{Instrument, Span};
 
 use crate::{Ipfs, IpfsPath};
 
-use super::UnixfsStatus;
+use super::{StatusStreamState, UnixfsStatus};
 
 pub enum AddOpt {
     File(PathBuf),
@@ -35,15 +35,7 @@ pub struct UnixfsAdd {
     pin: bool,
     provide: bool,
     wrap: bool,
-    stream: AddStreamState,
-}
-
-enum AddStreamState {
-    None,
-    Pending {
-        stream: BoxStream<'static, UnixfsStatus>,
-    },
-    Done,
+    stream: StatusStreamState,
 }
 
 impl UnixfsAdd {
@@ -65,7 +57,7 @@ impl UnixfsAdd {
             pin: true,
             provide: false,
             wrap: false,
-            stream: AddStreamState::None,
+            stream: StatusStreamState::None,
         }
     }
 
@@ -103,7 +95,7 @@ impl Stream for UnixfsAdd {
     ) -> std::task::Poll<Option<Self::Item>> {
         loop {
             match &mut self.stream {
-                AddStreamState::None => {
+                StatusStreamState::None => {
                     let (ipfs, repo) = match self.core.take().expect("ipfs or repo is used") {
                         Either::Left(ipfs) => {
                             let repo = ipfs.repo().clone();
@@ -274,11 +266,11 @@ impl Stream for UnixfsAdd {
                         yield UnixfsStatus::CompletedStatus { path, written, total_size }
                     };
 
-                    self.stream = AddStreamState::Pending {
+                    self.stream = StatusStreamState::Pending {
                         stream: stream.boxed(),
                     };
                 }
-                AddStreamState::Pending { stream } => {
+                StatusStreamState::Pending { stream } => {
                     match futures::ready!(stream.poll_next_unpin(cx)) {
                         Some(item) => {
                             if matches!(
@@ -286,17 +278,17 @@ impl Stream for UnixfsAdd {
                                 UnixfsStatus::FailedStatus { .. }
                                     | UnixfsStatus::CompletedStatus { .. }
                             ) {
-                                self.stream = AddStreamState::Done;
+                                self.stream = StatusStreamState::Done;
                             }
                             return Poll::Ready(Some(item));
                         }
                         None => {
-                            self.stream = AddStreamState::Done;
+                            self.stream = StatusStreamState::Done;
                             return Poll::Ready(None);
                         }
                     }
                 }
-                AddStreamState::Done => return Poll::Ready(None),
+                StatusStreamState::Done => return Poll::Ready(None),
             }
         }
     }
