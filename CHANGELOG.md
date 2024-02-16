@@ -1,4 +1,5 @@
 # 0.10.0
+- refactor: Removed unixfs free functions and use Unixfs* directly. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 - feat: Add implementation for `libp2p-stream`. [PR 135](https://github.com/dariusc93/rust-ipfs/pull/135)
 - refactor: Serialize dag internally, remove redundant dependencies and code and minor optimizations. [PR 134](https://github.com/dariusc93/rust-ipfs/pull/134)
 - chore: Cancel gc task when ipfs drops. [PR 133](https://github.com/dariusc93/rust-ipfs/pull/133)
