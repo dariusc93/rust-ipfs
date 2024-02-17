@@ -1061,7 +1061,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     return;
                 };
 
-                _ = ret.send(stream.new_control().accept(protocol).map_err(anyhow::Error::from))
+                _ = ret.send(
+                    stream
+                        .new_control()
+                        .accept(protocol)
+                        .map_err(anyhow::Error::from),
+                )
             }
             IpfsEvent::Addresses(ret) => {
                 let addrs = self.swarm.behaviour_mut().addrs();

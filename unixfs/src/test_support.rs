@@ -1,8 +1,8 @@
 use core::convert::TryFrom;
-use std::collections::HashMap;
 use hex_literal::hex;
 use libipld::multihash::Multihash;
 use libipld::{multihash, Cid};
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct FakeBlockstore {

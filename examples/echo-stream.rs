@@ -1,4 +1,4 @@
-// echo example based on libp2p-stream example 
+// echo example based on libp2p-stream example
 #[cfg(feature = "experimental_stream")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -50,8 +50,8 @@ macro_rules! pinstore_interface_tests {
         mod $module_name {
 
             use futures::{StreamExt, TryStreamExt};
-            use std::collections::HashMap;
             use libipld::Cid;
+            use std::collections::HashMap;
             use std::convert::TryFrom;
             use $crate::repo::common_tests::DSTestContext;
             use $crate::repo::{PinKind, PinMode, PinStore};

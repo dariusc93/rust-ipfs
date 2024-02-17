@@ -131,7 +131,7 @@ impl Stream for UnixfsLs {
                                     return;
                                 }
                             };
-                
+
                         let block = match resolved.into_unixfs_block() {
                             Ok(block) => block,
                             Err(e) => {
@@ -139,10 +139,10 @@ impl Stream for UnixfsLs {
                                 return;
                             }
                         };
-                
+
                         let cid = block.cid();
                         let root_name = cid.to_string();
-                
+
                         let mut walker = Walker::new(*cid, root_name);
                         let mut cache = None;
                         let mut root_directory = String::new();
@@ -156,7 +156,7 @@ impl Stream for UnixfsLs {
                                 }
                             };
                             let block_data = block.data();
-                
+
                             match walker.next(block_data, &mut cache) {
                                 Ok(ContinuedWalk::Bucket(..)) => {}
                                 Ok(ContinuedWalk::File(_, cid, path, _, size)) => {
