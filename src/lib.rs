@@ -74,7 +74,7 @@ use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
-    ops::{Deref, DerefMut, Range},
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::atomic::AtomicU64,
     sync::Arc,
@@ -1256,50 +1256,30 @@ impl Ipfs {
     /// Creates a stream which will yield the bytes of an UnixFS file from the root Cid, with the
     /// optional file byte range. If the range is specified and is outside of the file, the stream
     /// will end without producing any bytes.
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::cat` directly.
-    pub fn cat_unixfs(
-        &self,
-        starting_point: impl Into<unixfs::StartingPoint>,
-        range: Option<Range<u64>>,
-    ) -> UnixfsCat<'_> {
-        self.unixfs()
-            .cat(starting_point, range, &[], false, None)
-            .span(self.span.clone())
+    pub fn cat_unixfs(&self, starting_point: impl Into<unixfs::StartingPoint>) -> UnixfsCat {
+        self.unixfs().cat(starting_point).span(self.span.clone())
     }
 
     /// Add a file from a path to the blockstore
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::add_file` directly.
     #[deprecated(note = "Use `Ipfs::add_unixfs` instead")]
-    pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd<'_> {
+    pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd {
         let path = path.as_ref().to_path_buf();
         self.add_unixfs(path)
     }
 
     /// Add a file through a stream of data to the blockstore
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::add` directly.
-    pub fn add_unixfs<'a>(&self, opt: impl Into<AddOpt<'a>>) -> UnixfsAdd<'a> {
-        self.unixfs()
-            .add(opt, Default::default())
-            .span(self.span.clone())
+    pub fn add_unixfs(&self, opt: impl Into<AddOpt>) -> UnixfsAdd {
+        self.unixfs().add(opt).span(self.span.clone())
     }
 
     /// Retreive a file and saving it to a path.
-    ///
-    /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet<'_> {
-        self.unixfs()
-            .get(path, dest, &[], false, None)
-            .span(self.span.clone())
+    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet {
+        self.unixfs().get(path, dest).span(self.span.clone())
     }
 
     /// List directory contents
-    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs<'_> {
-        self.unixfs()
-            .ls(path, &[], false, None)
-            .span(self.span.clone())
+    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs {
+        self.unixfs().ls(path).span(self.span.clone())
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.
