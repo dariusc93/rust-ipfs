@@ -6,11 +6,6 @@ use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use cid::Cid;
-use libipld::cbor::DagCborCodec;
-use libipld::ipld;
-use libipld::prelude::Codec;
-use libipld::DagCbor;
-use libipld::Ipld;
 use libp2p_identity::Keypair;
 use libp2p_identity::PeerId;
 use libp2p_identity::PublicKey;
@@ -32,7 +27,6 @@ mod generate;
     Ord,
     Serialize,
     Deserialize,
-    DagCbor,
     derive_more::Display,
 )]
 #[repr(i32)]
@@ -109,38 +103,38 @@ impl From<generate::ipns_pb::IpnsEntry<'_>> for Record {
     }
 }
 
-impl From<&Record> for generate::ipns_pb::IpnsEntry<'_> {
-    fn from(record: &Record) -> Self {
+impl<'a> From<&'a Record> for generate::ipns_pb::IpnsEntry<'a> {
+    fn from(record: &'a Record) -> Self {
         generate::ipns_pb::IpnsEntry {
-            validity: record.validity.clone().into(),
+            validity: (&record.validity).into(),
             validityType: generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL,
-            value: record.value.clone().into(),
-            signatureV1: record.signature_v1.clone().into(),
-            signatureV2: record.signature_v2.clone().into(),
+            value: (&record.value).into(),
+            signatureV1: (&record.signature_v1).into(),
+            signatureV2: (&record.signature_v2).into(),
             sequence: record.sequence,
-            pubKey: record.public_key.clone().into(),
+            pubKey: (&record.public_key).into(),
             ttl: record.ttl,
-            data: record.data.clone().into(),
+            data: (&record.data).into(),
         }
     }
 }
 
-#[derive(Debug, Clone, DagCbor)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Data {
-    #[ipld(rename = "Valid")]
-    value: Vec<u8>,
+    #[serde(rename = "Valid")]
+    pub value: Vec<u8>,
 
-    #[ipld(rename = "ValidityType")]
-    validity_type: ValidityType,
+    #[serde(rename = "ValidityType")]
+    pub validity_type: ValidityType,
 
-    #[ipld(rename = "Validity")]
-    validity: Vec<u8>,
+    #[serde(rename = "Validity")]
+    pub validity: Vec<u8>,
 
-    #[ipld(rename = "Sequence")]
-    sequence: u64,
+    #[serde(rename = "Sequence")]
+    pub sequence: u64,
 
-    #[ipld(rename = "TTL")]
-    ttl: u64,
+    #[serde(rename = "TTL")]
+    pub ttl: u64,
 }
 
 impl Data {
@@ -197,17 +191,16 @@ impl Record {
             .sign(&signature_v1_construct)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        let document = ipld!({
-            "Value": value.clone(),
-            "ValidityType": i32::from(validity_type),
-            "Validity": validity.clone(),
-            "Sequence": seq,
-            "TTL": ttl
-        });
+        let document = Data {
+            value: value.clone(),
+            validity_type,
+            validity: validity.clone(),
+            sequence: seq,
+            ttl,
+        };
 
-        let data = DagCborCodec
-            .encode(&document)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let data = cbor4ii::serde::to_vec(Vec::new(), &document)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         let mut signature_v2_construct = vec![
             0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65,
@@ -296,45 +289,8 @@ impl Record {
     }
 
     pub fn data(&self) -> std::io::Result<Data> {
-        //Note: Because of the cbor4ii crate giving errors without exact reason, we will convert it into an ipld document instead
-        //      and map it to the struct manually for the time being.
-        //TODO: Investigate cbor crate and why it would not deserialize the data directly
-        let document: Ipld = DagCborCodec
-            .decode(&self.data)
+        let data: Data = cbor4ii::serde::from_slice(&self.data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        let ipld_value = match document.get("Value") {
-            Ok(Ipld::Bytes(bytes)) => bytes.clone(),
-            _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
-        };
-
-        let ipld_validity_type = match document.get("ValidityType") {
-            Ok(Ipld::Integer(0)) => ValidityType::EOL,
-            _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
-        };
-
-        let ipld_validity = match document.get("Validity") {
-            Ok(Ipld::Bytes(bytes)) => bytes.clone(),
-            _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
-        };
-
-        let ipld_ttl = match document.get("TTL") {
-            Ok(Ipld::Integer(int)) => std::cmp::min(*int, i64::MAX as i128) as u64,
-            _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
-        };
-
-        let ipld_sequence = match document.get("Sequence") {
-            Ok(Ipld::Integer(int)) => std::cmp::min(*int, i64::MAX as i128) as u64,
-            _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
-        };
-
-        let data = Data {
-            value: ipld_value,
-            validity_type: ipld_validity_type,
-            validity: ipld_validity,
-            sequence: ipld_sequence,
-            ttl: ipld_ttl,
-        };
 
         if data.value != self.value
             || data.validity != self.validity
@@ -356,6 +312,8 @@ impl Record {
 
     #[cfg(feature = "libp2p")]
     pub fn verify(&self, peer_id: PeerId) -> std::io::Result<()> {
+        use multihash::Multihash;
+
         if self.signature_v2.is_empty() && self.signature_v1.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -365,15 +323,15 @@ impl Record {
 
         if self.data.is_empty() {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+                std::io::ErrorKind::InvalidData,
                 "Empty data field",
             ));
         }
 
         let key = peer_id.to_bytes();
 
-        let mh = libipld::Multihash::from_bytes(&key).expect("msg");
-        let cid = libipld::Cid::new_v1(0x72, mh);
+        let mh = Multihash::from_bytes(&key).expect("valid hash");
+        let cid = Cid::new_v1(0x72, mh);
 
         let public_key = match self.public_key.is_empty() {
             true => cid.hash().digest(),
