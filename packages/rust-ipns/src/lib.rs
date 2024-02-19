@@ -103,18 +103,18 @@ impl From<generate::ipns_pb::IpnsEntry<'_>> for Record {
     }
 }
 
-impl From<&Record> for generate::ipns_pb::IpnsEntry<'_> {
-    fn from(record: &Record) -> Self {
+impl<'a> From<&'a Record> for generate::ipns_pb::IpnsEntry<'a> {
+    fn from(record: &'a Record) -> Self {
         generate::ipns_pb::IpnsEntry {
-            validity: record.validity.clone().into(),
+            validity: (&record.validity).into(),
             validityType: generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL,
-            value: record.value.clone().into(),
-            signatureV1: record.signature_v1.clone().into(),
-            signatureV2: record.signature_v2.clone().into(),
+            value: (&record.value).into(),
+            signatureV1: (&record.signature_v1).into(),
+            signatureV2: (&record.signature_v2).into(),
             sequence: record.sequence,
-            pubKey: record.public_key.clone().into(),
+            pubKey: (&record.public_key).into(),
             ttl: record.ttl,
-            data: record.data.clone().into(),
+            data: (&record.data).into(),
         }
     }
 }
