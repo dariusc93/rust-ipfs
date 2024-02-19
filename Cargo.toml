@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.9.1"
+version = "0.10.0"
 
 [features]
 
@@ -30,9 +30,9 @@ libp2p-stream = { version = "0.1.0-alpha" }
 beetle-bitswap-next = { version = "0.5.1", path = "packages/beetle-bitswap-next" }
 libp2p-bitswap-next = { version = "0.26.1", path = "packages/libp2p-bitswap-next" }
 rust-unixfs = { version = "0.4.1", path = "unixfs" }
-libipld = "0.16"
+libipld = { version = "0.16", features = ["serde-codec"] }
 clap = { version = "4.3", features = ["derive"] }
-rust-ipns = { version = "0.3", path = "packages/rust-ipns" }
+rust-ipns = { version = "0.4", path = "packages/rust-ipns" }
 chrono = { version = "0.4" }
 libp2p-relay-manager = { version = "0.2.1", path = "packages/libp2p-relay-manager" }
 
