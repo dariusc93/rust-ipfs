@@ -1,3 +1,6 @@
+# 0.10.1
+- fix: Export `Entry` for UnixfsLs
+
 # 0.10.0
 - refactor: Removed unixfs free functions and use Unixfs* directly. [PR 136](https://github.com/dariusc93/rust-ipfs/pull/136)
 - feat: Add implementation for `libp2p-stream`. [PR 135](https://github.com/dariusc93/rust-ipfs/pull/135)

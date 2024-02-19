@@ -22,7 +22,7 @@ mod ls;
 pub use add::UnixfsAdd;
 pub use cat::{StartingPoint, UnixfsCat};
 pub use get::UnixfsGet;
-pub use ls::UnixfsLs;
+pub use ls::{UnixfsLs, Entry};
 
 use crate::{
     dag::{ResolveError, UnexpectedResolved},
