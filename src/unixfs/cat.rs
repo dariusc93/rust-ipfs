@@ -21,6 +21,7 @@ use super::TraversalFailed;
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UnixfsCat {
     core: Option<Either<Ipfs, Repo>>,
     span: Span,
@@ -67,8 +68,8 @@ impl UnixfsCat {
         self
     }
 
-    pub fn providers(mut self, list: &[PeerId]) -> Self {
-        self.providers = list.to_owned();
+    pub fn providers(mut self, providers: impl Into<Vec<PeerId>>) -> Self {
+        self.providers = providers.into();
         self
     }
 

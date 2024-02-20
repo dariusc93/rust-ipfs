@@ -27,6 +27,7 @@ impl From<PathBuf> for AddOpt {
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UnixfsAdd {
     core: Option<Either<Ipfs, Repo>>,
     opt: Option<AddOpt>,

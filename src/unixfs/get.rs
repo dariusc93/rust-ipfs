@@ -15,6 +15,7 @@ use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 use super::{StatusStreamState, TraversalFailed, UnixfsStatus};
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UnixfsGet {
     core: Option<Either<Ipfs, Repo>>,
     dest: PathBuf,
@@ -66,8 +67,8 @@ impl UnixfsGet {
         self
     }
 
-    pub fn providers(mut self, list: &[PeerId]) -> Self {
-        self.providers = list.to_owned();
+    pub fn providers(mut self, providers: impl Into<Vec<PeerId>>) -> Self {
+        self.providers = providers.into();
         self
     }
 

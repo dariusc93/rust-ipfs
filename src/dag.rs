@@ -26,6 +26,7 @@ use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::iter::Peekable;
 use std::marker::PhantomData;
+use std::task::Poll;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -439,26 +440,29 @@ impl IpldDag {
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagGet {
-    dag_ipld: IpldDag,
+    dag_ipld: Option<IpldDag>,
     session: Option<u64>,
     path: Option<IpfsPath>,
     providers: Vec<PeerId>,
     local: bool,
     timeout: Option<Duration>,
-    span: Option<Span>,
+    span: Span,
+    fut: Option<BoxFuture<'static, Result<Ipld, Error>>>,
 }
 
 impl DagGet {
     pub fn new(dag: IpldDag) -> Self {
         Self {
-            dag_ipld: dag,
+            dag_ipld: Some(dag),
             session: None,
             path: None,
             providers: vec![],
             local: false,
             timeout: None,
-            span: None,
+            span: Span::current(),
+            fut: None,
         }
     }
 
@@ -483,8 +487,8 @@ impl DagGet {
     }
 
     /// List of peers that may contain the block
-    pub fn providers(mut self, providers: &[PeerId]) -> Self {
-        self.providers = providers.to_vec();
+    pub fn providers(mut self, providers: impl Into<Vec<PeerId>>) -> Self {
+        self.providers = providers.into();
         self
     }
 
@@ -510,35 +514,56 @@ impl DagGet {
 
     /// Set tracing span
     pub fn span(mut self, span: Span) -> Self {
-        self.span = Some(span);
+        self.span = span;
         self
     }
 }
 
-impl std::future::IntoFuture for DagGet {
-    type Output = Result<Ipld, ResolveError>;
+impl std::future::Future for DagGet {
+    type Output = Result<Ipld, Error>;
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        loop {
+            match &mut self.fut.as_mut() {
+                Some(fut) => {
+                    let result = futures::ready!(fut.poll_unpin(cx));
+                    self.fut.take();
+                    return Poll::Ready(result);
+                }
+                None => {
+                    let Some(dag) = self.dag_ipld.take() else {
+                        return Poll::Ready(Err(anyhow::anyhow!("Future previously polled")));
+                    };
 
-    type IntoFuture = BoxFuture<'static, Self::Output>;
+                    let Some(path) = self.path.take() else {
+                        return Poll::Ready(Err(ResolveError::PathNotProvided.into()));
+                    };
 
-    fn into_future(self) -> Self::IntoFuture {
-        let span = self.span.unwrap_or(Span::current());
-        async move {
-            let path = self.path.ok_or(ResolveError::PathNotProvided)?;
-            self.dag_ipld
-                .get_with_session(
-                    self.session,
-                    path,
-                    &self.providers,
-                    self.local,
-                    self.timeout,
-                )
-                .await
+                    let session = self.session;
+
+                    let span = self.span.clone();
+                    let providers = std::mem::take(&mut self.providers);
+                    let local = self.local;
+                    let timeout = self.timeout;
+
+                    self.fut = Some(
+                        async move {
+                            dag.get_with_session(session, path, &providers, local, timeout)
+                                .await
+                                .map_err(anyhow::Error::from)
+                        }
+                        .instrument(span)
+                        .boxed(),
+                    );
+                }
+            }
         }
-        .instrument(span)
-        .boxed()
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagGetDeserialize<D> {
     dag_get: DagGet,
     _marker: PhantomData<D>,
@@ -563,45 +588,54 @@ where
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagPut {
-    dag_ipld: IpldDag,
+    dag_ipld: Option<IpldDag>,
     codec: IpldCodec,
-    data: Box<dyn FnOnce() -> anyhow::Result<Ipld> + Send + 'static>,
+    data: Option<Box<dyn FnOnce() -> anyhow::Result<Ipld> + Send + 'static>>,
     hash: Code,
-    pinned: Option<bool>,
+    pinned: Option<(bool, bool)>,
     span: Span,
     provide: bool,
+    fut: Option<BoxFuture<'static, Result<Cid, anyhow::Error>>>,
 }
 
 impl DagPut {
     pub fn new(dag: IpldDag) -> Self {
         Self {
-            dag_ipld: dag,
+            dag_ipld: Some(dag),
             codec: IpldCodec::DagCbor,
-            data: Box::new(|| anyhow::bail!("data not available")),
+            data: Some(Box::new(|| anyhow::bail!("data not available"))),
             hash: Code::Sha2_256,
             pinned: None,
             span: Span::current(),
             provide: false,
+            fut: None,
         }
     }
 
     /// Set a ipld object
     pub fn ipld(mut self, data: Ipld) -> Self {
-        self.data = Box::new(move || Ok(data));
+        self.data = Some(Box::new(move || Ok(data)));
         self
     }
 
     /// Set a serde-compatible object
     pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Self {
         let result = to_ipld(data).map_err(anyhow::Error::from);
-        self.data = Box::new(move || result);
+        self.data = Some(Box::new(move || result));
         self
     }
 
     /// Pin block
     pub fn pin(mut self, recursive: bool) -> Self {
-        self.pinned = Some(recursive);
+        self.pinned = Some((recursive, false));
+        self
+    }
+
+    /// Pin existing blocks
+    pub fn pin_local(mut self, recursive: bool) -> Self {
+        self.pinned = Some((recursive, true));
         self
     }
 
@@ -630,50 +664,81 @@ impl DagPut {
     }
 }
 
-impl std::future::IntoFuture for DagPut {
+impl std::future::Future for DagPut {
     type Output = Result<Cid, anyhow::Error>;
-
-    type IntoFuture = BoxFuture<'static, Self::Output>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        let span = self.span;
-        async move {
-            if self.provide && self.dag_ipld.ipfs.is_none() {
-                anyhow::bail!("Ipfs is offline");
-            }
-
-            let data = (self.data)()?;
-
-            let bytes = self.codec.encode(&data)?;
-            let code = self.hash;
-            let hash = code.digest(&bytes);
-            let version = if self.codec == IpldCodec::DagPb {
-                Version::V0
-            } else {
-                Version::V1
-            };
-            let cid = Cid::new(version, self.codec.into(), hash)?;
-            let block = Block::new(cid, bytes)?;
-            let (cid, _) = self.dag_ipld.repo.put_block(block).await?;
-
-            if let Some(opt) = self.pinned {
-                if !self.dag_ipld.repo.is_pinned(&cid).await? {
-                    self.dag_ipld.repo.insert_pin(&cid, opt, true).await?;
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        loop {
+            match &mut self.fut.as_mut() {
+                Some(fut) => {
+                    let result = futures::ready!(fut.poll_unpin(cx));
+                    self.fut.take();
+                    return Poll::Ready(result);
                 }
-            }
+                None => {
+                    let Some(dag) = self.dag_ipld.take() else {
+                        return Poll::Ready(Err(anyhow::anyhow!("Future previously polled")));
+                    };
 
-            if self.provide {
-                if let Some(ipfs) = &self.dag_ipld.ipfs {
-                    if let Err(e) = ipfs.provide(cid).await {
-                        error!("Failed to provide content over DHT: {e}")
+                    let data = self.data.take().expect("Data fn available");
+
+                    if self.provide && dag.ipfs.is_none() {
+                        return Poll::Ready(Err(anyhow::anyhow!("Ipfs is offline")));
                     }
+
+                    let span = self.span.clone();
+                    let data = match (data)() {
+                        Ok(data) => data,
+                        Err(e) => return Poll::Ready(Err(e)),
+                    };
+
+                    let bytes = match self.codec.encode(&data) {
+                        Ok(data) => data,
+                        Err(e) => return Poll::Ready(Err(e)),
+                    };
+
+                    let code = self.hash;
+                    let codec = self.codec;
+                    let pinned = self.pinned;
+                    let provide = self.provide;
+
+                    let hash = code.digest(&bytes);
+                    let version = if codec == IpldCodec::DagPb {
+                        Version::V0
+                    } else {
+                        Version::V1
+                    };
+
+                    self.fut = Some(
+                        async move {
+                            let cid = Cid::new(version, codec.into(), hash)?;
+                            let block = Block::new(cid, bytes)?;
+                            let (cid, _) = dag.repo.put_block(block).await?;
+
+                            if let Some((recursive, local)) = pinned {
+                                if !dag.repo.is_pinned(&cid).await? {
+                                    dag.repo.insert_pin(&cid, recursive, local).await?;
+                                }
+                            }
+
+                            if provide {
+                                if let Some(ipfs) = &dag.ipfs {
+                                    if let Err(e) = ipfs.provide(cid).await {
+                                        error!("Failed to provide content over DHT: {e}")
+                                    }
+                                }
+                            }
+
+                            Ok(cid)
+                        }
+                        .instrument(span)
+                        .boxed(),
+                    );
                 }
             }
-
-            Ok(cid)
         }
-        .instrument(span)
-        .boxed()
     }
 }
 
