@@ -498,6 +498,12 @@ impl DagGet {
         self
     }
 
+    /// Set flag to resolve block locally
+    pub fn set_local(mut self, local: bool) -> Self {
+        self.local = local;
+        self
+    }
+
     /// Timeout duration to resolve a block before returning an error
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
