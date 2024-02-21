@@ -1041,6 +1041,15 @@ impl RepoInsertPin {
         self
     }
 
+    /// Set a flag to pin local blocks only
+    pub fn set_local(mut self, local: bool) -> Self {
+        self.local = local;
+        if local {
+            self.refs = self.refs.with_existing_blocks();
+        }
+        self
+    }
+
     /// Pin to a specific depth of the graph
     pub fn depth(mut self, depth: u64) -> Self {
         self.refs = self.refs.with_max_depth(depth);
