@@ -1,3 +1,6 @@
+# 0.10.2
+- feat: Add DagGet::set_local and RepoInsertPin::set_local
+
 # 0.10.1
 - fix: Export `Entry` for UnixfsLs
 
