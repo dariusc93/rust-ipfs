@@ -82,6 +82,11 @@ impl UnixfsCat {
         self.local_only = true;
         self
     }
+
+    pub fn set_local(mut self, local: bool) -> Self {
+        self.local_only = local;
+        self
+    }
 }
 
 /// The starting point for unixfs walks. Can be converted from IpfsPath and Blocks, and Cids can be
