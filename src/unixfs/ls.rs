@@ -75,6 +75,11 @@ impl UnixfsLs {
         self.local_only = true;
         self
     }
+
+    pub fn set_local(mut self, local: bool) -> Self {
+        self.local_only = local;
+        self
+    }
 }
 
 impl Stream for UnixfsLs {
