@@ -87,6 +87,8 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) bitswap_sessions: HashMap<u64, Vec<(oneshot::Sender<()>, JoinHandle<()>)>>,
     #[cfg(feature = "libp2p_bitswap")]
     pub(crate) bitswap_sessions: HashMap<libp2p_bitswap_next::QueryId, Cid>,
+    #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+    pub(crate) bitswap_sessions: HashMap<i64, libipld::Cid>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub(crate) timer: TaskTimer,
     pub(crate) local_external_addr: bool,
@@ -1026,6 +1028,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
             }
+            #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+            SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
+                crate::p2p::bitswap::Event::NeedBlock { cid } => {
+                    if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
+                        info!("Looking for providers for {cid}");
+                        let key = cid.hash().to_bytes();
+                        kad.get_providers(key.into());
+                    }
+                }
+            },
             _ => debug!("Swarm event: {:?}", swarm_event),
         }
     }
@@ -1821,6 +1833,26 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             }
             RepoEvent::UnwantBlock(_) => {}
             RepoEvent::NewBlock(_) => {}
+            RepoEvent::RemovedBlock(_) => {}
+        }
+    }
+
+    #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+    fn handle_repo_event(&mut self, event: RepoEvent) {
+        match event {
+            RepoEvent::WantBlock(_, cids, peers) => {
+                let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
+                    return;
+                };
+                bs.get(cids, peers);
+            }
+            RepoEvent::UnwantBlock(_) => {}
+            RepoEvent::NewBlock(block) => {
+                let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
+                    return;
+                };
+                bs.notify_new_blocks([*block.cid()]);
+            }
             RepoEvent::RemovedBlock(_) => {}
         }
     }

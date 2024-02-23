@@ -18,6 +18,7 @@ pub(crate) mod addr;
 pub(crate) mod addressbook;
 pub(crate) mod peerbook;
 pub mod protocol;
+pub mod bitswap;
 
 mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;
