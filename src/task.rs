@@ -117,6 +117,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
+            #[cfg(any(feature = "libp2p_bitswap", feature = "beetle_bitswap"))]
             bitswap_sessions: Default::default(),
             pubsub_event_stream: Default::default(),
             kad_subscriptions: Default::default(),
@@ -882,7 +883,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     _ => {}
                 }
             }
-
+            #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+            SwarmEvent::Behaviour(BehaviourEvent::Bitswap(event)) => match event {
+                crate::p2p::bitswap::Event::NeedBlock { cid } => {
+                    if let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() {
+                        info!("Looking for providers for {cid}");
+                        let key = cid.hash().to_bytes();
+                        kad.get_providers(key.into());
+                    }
+                }
+            },
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
                 IdentifyEvent::Received { peer_id, info } => {
                     let IdentifyInfo {
@@ -1273,6 +1283,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let _ = ret.send(Ok(rx));
             }
             IpfsEvent::WantList(peer, ret) => {
+                #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+                {
+                    _ = peer;
+                    let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                }
                 #[cfg(feature = "beetle_bitswap")]
                 {
                     if let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() {
@@ -1312,6 +1327,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
                 #[cfg(feature = "libp2p_bitswap")]
+                {
+                    let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                }
+                #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
                 {
                     let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
@@ -1818,6 +1837,22 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let id = bs.get(cid, peers.iter().copied());
                     self.bitswap_sessions.insert(id, cid);
                 }
+            }
+            RepoEvent::UnwantBlock(_) => {}
+            RepoEvent::NewBlock(_) => {}
+            RepoEvent::RemovedBlock(_) => {}
+        }
+    }
+
+    #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+    fn handle_repo_event(&mut self, event: RepoEvent) {
+        match event {
+            RepoEvent::WantBlock(_, cids, peers) => {
+                let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
+                    return;
+                };
+
+                bs.gets(cids, &peers);
             }
             RepoEvent::UnwantBlock(_) => {}
             RepoEvent::NewBlock(_) => {}

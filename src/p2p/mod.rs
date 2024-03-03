@@ -17,6 +17,7 @@ use tracing::Span;
 pub(crate) mod addr;
 pub(crate) mod addressbook;
 pub(crate) mod peerbook;
+pub(crate) mod bitswap;
 pub mod protocol;
 
 mod behaviour;

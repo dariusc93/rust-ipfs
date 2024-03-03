@@ -22,6 +22,9 @@ use beetle_bitswap_next::{Bitswap, ProtocolId};
 #[cfg(feature = "libp2p_bitswap")]
 use libipld::DefaultParams;
 
+#[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+use super::bitswap::Behaviour as Bitswap;
+
 use libipld::Cid;
 use libp2p::core::Multiaddr;
 use libp2p::dcutr::Behaviour as Dcutr;
@@ -57,6 +60,8 @@ where
     pub bitswap: Toggle<Bitswap<DefaultParams>>,
     #[cfg(feature = "beetle_bitswap")]
     pub bitswap: Toggle<Bitswap<Repo>>,
+    #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+    pub bitswap: Toggle<Bitswap>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
     pub ping: Toggle<Ping>,
     pub identify: Toggle<Identify>,
@@ -457,6 +462,9 @@ where
             })
             .into();
 
+        #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+        let bitswap = protocols.bitswap.then(|| Bitswap::new(repo)).into();
+
         let ping = protocols
             .ping
             .then(|| Ping::new(options.ping_configuration.clone()))
@@ -550,7 +558,6 @@ where
             Behaviour {
                 mdns,
                 kademlia,
-                #[cfg(any(feature = "libp2p_bitswap", feature = "beetle_bitswap"))]
                 bitswap,
                 ping,
                 identify,
