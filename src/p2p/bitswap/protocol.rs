@@ -1,13 +1,14 @@
+use std::io;
 use std::iter;
 
 use asynchronous_codec::{FramedRead, FramedWrite};
 use futures::{future::BoxFuture, AsyncRead, AsyncWrite, SinkExt, StreamExt};
 use libp2p::{core::UpgradeInfo, InboundUpgrade, OutboundUpgrade, StreamProtocol};
 
-use super::bitswap_pb;
+use super::{bitswap_pb, message::BitswapMessage};
 
 const PROTOCOL: StreamProtocol = StreamProtocol::new("/ipfs/bitswap/1.2.0");
-const MAX_SIZE: usize = 2 * 1024 * 1024;
+const MAX_BUF_SIZE: usize = 2_097_152;
 
 #[derive(Debug, Clone, Default)]
 pub struct BitswapProtocol;
@@ -26,14 +27,14 @@ where
     TSocket: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Output = bitswap_pb::Message;
-    type Error = std::io::Error;
+    type Error = io::Error;
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
     fn upgrade_inbound(self, socket: TSocket, _: Self::Info) -> Self::Future {
         Box::pin(async move {
             let mut framed = FramedRead::new(
                 socket,
-                quick_protobuf_codec::Codec::<bitswap_pb::Message>::new(MAX_SIZE),
+                quick_protobuf_codec::Codec::<bitswap_pb::Message>::new(MAX_BUF_SIZE),
             );
 
             let message = framed
@@ -47,7 +48,7 @@ where
     }
 }
 
-impl UpgradeInfo for bitswap_pb::Message {
+impl UpgradeInfo for BitswapMessage {
     type Info = StreamProtocol;
     type InfoIter = iter::Once<Self::Info>;
 
@@ -56,12 +57,12 @@ impl UpgradeInfo for bitswap_pb::Message {
     }
 }
 
-impl<TSocket> OutboundUpgrade<TSocket> for bitswap_pb::Message
+impl<TSocket> OutboundUpgrade<TSocket> for BitswapMessage
 where
     TSocket: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Output = ();
-    type Error = std::io::Error;
+    type Error = io::Error;
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
     #[inline]
@@ -69,10 +70,12 @@ where
         Box::pin(async move {
             let mut framed = FramedWrite::new(
                 socket,
-                quick_protobuf_codec::Codec::<bitswap_pb::Message>::new(MAX_SIZE),
+                quick_protobuf_codec::Codec::<bitswap_pb::Message>::new(MAX_BUF_SIZE),
             );
 
-            framed.send(self).await?;
+            let message = self.into_proto()?;
+
+            framed.send(message).await?;
             framed.close().await?;
             Ok(())
         })

@@ -1312,6 +1312,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     _ = peer;
                     let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
+                #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+                {
+                    _ = peer;
+                    let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                }
             }
             IpfsEvent::GetBitswapPeers(ret) => {
                 #[cfg(feature = "beetle_bitswap")]
@@ -1324,6 +1329,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
                 #[cfg(feature = "libp2p_bitswap")]
+                {
+                    let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                }
+                #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
                 {
                     let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
                 }
@@ -1844,7 +1853,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
                     return;
                 };
-                bs.get(cids, peers);
+                bs.gets(cids, &peers);
             }
             RepoEvent::UnwantBlock(_) => {}
             RepoEvent::NewBlock(block) => {

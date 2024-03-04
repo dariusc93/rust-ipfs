@@ -462,7 +462,7 @@ where
         #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
         let bitswap = protocols
             .bitswap
-            .then(|| super::bitswap::Behaviour::new(Default::default(), repo.clone()))
+            .then(|| super::bitswap::Behaviour::new(repo))
             .into();
 
         let ping = protocols
