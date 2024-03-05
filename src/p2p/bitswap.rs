@@ -186,7 +186,7 @@ impl Behaviour {
         }
     }
 
-    pub fn on_connection_established(
+    fn on_connection_established(
         &mut self,
         ConnectionEstablished {
             connection_id,
@@ -205,20 +205,10 @@ impl Behaviour {
         futs.push(futures::future::pending().boxed());
 
         self.tasks.insert((peer_id, connection_id), futs);
-
-        for cid in self.wants_list.clone() {
-            if !self
-                .sent_wants
-                .get(&cid)
-                .map(|list| list.contains(&peer_id))
-                .unwrap_or_default()
-            {
-                self.get(&cid, &[peer_id]);
-            }
-        }
+        self.send_wants(peer_id);
     }
 
-    pub fn on_connection_close(
+    fn on_connection_close(
         &mut self,
         ConnectionClosed {
             connection_id,
@@ -257,6 +247,21 @@ impl Behaviour {
                 list.retain(|peer| *peer != peer_id);
                 !list.is_empty()
             });
+        }
+    }
+
+    fn send_wants(&mut self, peer_id: PeerId) {
+        let list = self.wants_list.iter().copied().collect::<Vec<_>>();
+
+        for cid in list {
+            if !self
+                .sent_wants
+                .get(&cid)
+                .map(|list| list.contains(&peer_id))
+                .unwrap_or_default()
+            {
+                self.get(&cid, &[peer_id]);
+            }
         }
     }
 
