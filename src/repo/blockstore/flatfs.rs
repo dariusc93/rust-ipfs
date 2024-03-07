@@ -5,7 +5,7 @@ use crate::repo::{BlockRm, BlockRmError};
 use crate::Block;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
+use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt, TryStreamExt};
 use futures_timer::Delay;
 use libipld::Cid;
 use std::collections::{BTreeSet, HashMap};
@@ -336,9 +336,19 @@ impl FsBlockStoreTask {
     }
 
     async fn total_size(&self) -> usize {
-        fs::metadata(&self.path)
+        self.list_stream()
+            .and_then(|blocks| async move {
+                let list = blocks
+                    .try_filter_map(|(_, path)| async move {
+                        let meta = fs::metadata(path).await?;
+                        Ok(Some(meta.len()))
+                    })
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .unwrap_or_default();
+                Ok(list.into_iter().sum::<u64>() as usize)
+            })
             .await
-            .map(|m| m.len() as usize)
             .unwrap_or_default()
     }
 
