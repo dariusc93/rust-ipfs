@@ -1,5 +1,5 @@
 # 0.10.4
-- fix: Check the files of each block directly for Repo::get_total_size. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- fix: Check the files of each block directly for Repo::get_total_size. [PR 140](https://github.com/dariusc93/rust-ipfs/pull/140)
 
 # 0.10.3
 - feat: Add set_local to Unixfs* functions
