@@ -21,7 +21,7 @@ quick-protobuf = { default-features = false, features = [
 sha2 = { default-features = false, version = "0.10" }
 
 [dev-dependencies]
-hex-literal = { default-features = false, version = "0.3" }
+hex-literal = { default-features = false, version = "0.4" }
 libc = { default-features = false, version = "0.2" }
 multibase = { default-features = false, version = "0.9" }
 tar = { default-features = false, version = "0.4" }
