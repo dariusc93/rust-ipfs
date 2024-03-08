@@ -591,14 +591,23 @@ impl Repo {
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
     /// refactoring, see notes on [`crate::Ipfs::exit_daemon`].
     pub async fn shutdown(&self) {
+        let init = &mut *self.inner.initialized.write().await;
+
+        if !*init {
+            return;
+        }
+
+        *init = false;
+
         {
             let mut map = self.inner.subscriptions.lock();
             map.clear();
         }
+        
         if let Some(mut event) = self.inner.events.write().await.take() {
             event.close_channel()
         }
-        *self.inner.initialized.write().await = false;
+
         self.set_offline().await;
     }
 
