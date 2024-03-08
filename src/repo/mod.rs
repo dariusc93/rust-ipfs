@@ -594,11 +594,11 @@ impl Repo {
         {
             let mut map = self.inner.subscriptions.lock();
             map.clear();
-            drop(map);
         }
         if let Some(mut event) = self.inner.events.write().await.take() {
             event.close_channel()
         }
+        *self.inner.initialized.write() = false;
         self.set_offline().await;
     }
 
