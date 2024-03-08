@@ -598,7 +598,7 @@ impl Repo {
         if let Some(mut event) = self.inner.events.write().await.take() {
             event.close_channel()
         }
-        *self.inner.initialized.write() = false;
+        *self.inner.initialized.write().await = false;
         self.set_offline().await;
     }
 
