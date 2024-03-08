@@ -96,22 +96,7 @@ impl Stream for UnixfsGet {
         loop {
             match &mut self.stream {
                 StatusStreamState::None => {
-                    let (repo, dag, session) = match self.core.take().expect("ipfs or repo is used")
-                    {
-                        Either::Left(ipfs) => (
-                            ipfs.repo().clone(),
-                            ipfs.dag(),
-                            Some(
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                            ),
-                        ),
-                        Either::Right(repo) => {
-                            let session = repo.is_online().then(|| {
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                            });
-                            (repo.clone(), IpldDag::from(repo.clone()), session)
-                        }
-                    };
+                    let core = self.core.take().expect("ipfs or repo is used");
 
                     let path = self.path.take().expect("starting point exist");
                     let providers = std::mem::take(&mut self.providers);
@@ -120,7 +105,21 @@ impl Stream for UnixfsGet {
                     let dest = self.dest.clone();
 
                     let stream = async_stream::stream! {
-
+                        let (repo, dag, session) = match core {
+                            Either::Left(ipfs) => (
+                                ipfs.repo().clone(),
+                                ipfs.dag(),
+                                Some(
+                                    crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                                ),
+                            ),
+                            Either::Right(repo) => {
+                                let session = repo.is_online().await.then(|| {
+                                    crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                                });
+                                (repo.clone(), IpldDag::from(repo.clone()), session)
+                            }
+                        };
 
                         let mut cache = None;
                         let mut total_size = None;

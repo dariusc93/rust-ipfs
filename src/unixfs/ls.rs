@@ -102,21 +102,6 @@ impl Stream for UnixfsLs {
                         return Poll::Ready(None);
                     };
 
-                    let (repo, dag, session) = match core {
-                        Either::Left(ipfs) => (
-                            ipfs.repo().clone(),
-                            ipfs.dag(),
-                            Some(
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                            ),
-                        ),
-                        Either::Right(repo) => {
-                            let session = repo.is_online().then(|| {
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                            });
-                            (repo.clone(), IpldDag::from(repo.clone()), session)
-                        }
-                    };
 
                     let path = self.path.take().expect("path exist");
                     let providers = std::mem::take(&mut self.providers);
@@ -126,6 +111,23 @@ impl Stream for UnixfsLs {
                     // using async_stream here at least to get on faster; writing custom streams is not too easy
                     // but this might be easy enough to write open.
                     let stream = async_stream::stream! {
+
+                        let (repo, dag, session) = match core {
+                            Either::Left(ipfs) => (
+                                ipfs.repo().clone(),
+                                ipfs.dag(),
+                                Some(
+                                    crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                                ),
+                            ),
+                            Either::Right(repo) => {
+                                let session = repo.is_online().await.then(|| {
+                                    crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                                });
+                                (repo.clone(), IpldDag::from(repo.clone()), session)
+                            }
+                        };
+    
 
                         let resolved = match dag
                             .resolve_with_session(session, path, true, &providers, local_only, timeout)

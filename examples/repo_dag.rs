@@ -25,6 +25,6 @@ async fn main() -> anyhow::Result<()> {
     println!("Received block with contents: {:?}", block1);
     println!("Received block with contents: {:?}", block2);
 
-    repo.shutdown();
+    repo.shutdown().await;
     Ok(())
 }

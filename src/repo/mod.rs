@@ -16,7 +16,6 @@ use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error, fmt, io};
@@ -328,12 +327,12 @@ pub struct Repo {
 
 #[derive(Debug)]
 pub(crate) struct RepoInner {
-    online: AtomicBool,
-    initialized: AtomicBool,
-    max_storage_size: AtomicUsize,
+    online: tokio::sync::RwLock<bool>,
+    initialized: tokio::sync::RwLock<bool>,
+    max_storage_size: RwLock<usize>,
     block_store: Box<dyn BlockStore>,
     data_store: Box<dyn DataStore>,
-    events: RwLock<Option<Sender<RepoEvent>>>,
+    events: tokio::sync::RwLock<Option<Sender<RepoEvent>>>,
     pub(crate) subscriptions: Mutex<SubscriptionsMap>,
     lockfile: Box<dyn Lock>,
     pub(crate) gclock: tokio::sync::RwLock<()>,
@@ -430,14 +429,14 @@ impl Repo {
         }
     }
 
-    pub fn new_raw(
+    fn new_raw(
         block_store: Box<dyn BlockStore>,
         data_store: Box<dyn DataStore>,
         lockfile: Box<dyn Lock>,
     ) -> Self {
         let inner = RepoInner {
-            initialized: AtomicBool::default(),
-            online: AtomicBool::default(),
+            initialized: Default::default(),
+            online: Default::default(),
             block_store,
             data_store,
             events: Default::default(),
@@ -489,17 +488,21 @@ impl Repo {
     }
 
     pub fn set_max_storage_size(&self, size: usize) {
-        self.inner.max_storage_size.store(size, Ordering::SeqCst);
+        *self.inner.max_storage_size.write() = size
     }
 
     pub fn max_storage_size(&self) -> usize {
-        self.inner.max_storage_size.load(Ordering::SeqCst)
+        *self.inner.max_storage_size.read()
     }
 
     pub async fn migrate(&self, repo: &Self) -> Result<(), Error> {
-        if self.is_online() || repo.is_online() {
+        let this_online = &*self.inner.online.read().await;
+        let repo_online = &*repo.inner.online.read().await;
+
+        if *this_online || *repo_online {
             anyhow::bail!("Repository cannot be online");
         }
+
         let block_migration = {
             async move {
                 if let Ok(list) = self.list_blocks().await {
@@ -575,54 +578,62 @@ impl Repo {
         Ok(())
     }
 
-    pub(crate) fn initialize_channel(&self) -> Receiver<RepoEvent> {
-        let mut event_guard = self.inner.events.write();
+    pub(crate) async fn initialize_channel(&self) -> Receiver<RepoEvent> {
+        let mut event_guard = self.inner.events.write().await;
         let (sender, receiver) = channel(1);
         debug_assert!(event_guard.is_none());
         *event_guard = Some(sender);
-        self.set_online();
+        drop(event_guard);
+        self.set_online().await;
         receiver
     }
 
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
     /// refactoring, see notes on [`crate::Ipfs::exit_daemon`].
-    pub fn shutdown(&self) {
-        let mut map = self.inner.subscriptions.lock();
-        map.clear();
-        drop(map);
-        if let Some(mut event) = self.inner.events.write().take() {
+    pub async fn shutdown(&self) {
+        {
+            let mut map = self.inner.subscriptions.lock();
+            map.clear();
+            drop(map);
+        }
+        if let Some(mut event) = self.inner.events.write().await.take() {
             event.close_channel()
         }
-        self.set_offline();
+        self.set_offline().await;
     }
 
-    pub fn is_online(&self) -> bool {
-        self.inner.online.load(Ordering::SeqCst)
+    pub async fn is_online(&self) -> bool {
+        *self.inner.online.read().await
     }
 
-    pub(crate) fn set_online(&self) {
-        if self.is_online() {
+    pub(crate) async fn set_online(&self) {
+        let online = &mut *self.inner.online.write().await;
+
+        if *online {
             return;
         }
 
-        self.inner.online.store(true, Ordering::SeqCst)
+        *online = true;
     }
 
-    pub(crate) fn set_offline(&self) {
-        if !self.is_online() {
+    pub(crate) async fn set_offline(&self) {
+        let online = &mut *self.inner.online.write().await;
+
+        if !*online {
             return;
         }
 
-        self.inner.online.store(false, Ordering::SeqCst)
+        *online = false;
     }
 
-    fn repo_channel(&self) -> Option<Sender<RepoEvent>> {
-        self.inner.events.read().clone()
+    async fn repo_channel(&self) -> Option<Sender<RepoEvent>> {
+        self.inner.events.read().await.clone()
     }
 
     pub async fn init(&self) -> Result<(), Error> {
+        let init = &mut *self.inner.initialized.write().await;
         //Avoid initializing again
-        if self.inner.initialized.load(Ordering::SeqCst) {
+        if *init {
             return Ok(());
         }
         // Dropping the guard (even though not strictly necessary to compile) to avoid potential
@@ -636,14 +647,14 @@ impl Repo {
         let f1 = self.inner.block_store.init();
         let f2 = self.inner.data_store.init();
         let (r1, r2) = futures::future::join(f1, f2).await;
-        let init = &self.inner.initialized;
+
         if r1.is_err() {
             r1.map(|_| {
-                init.store(true, Ordering::SeqCst);
+                *init = true;
             })
         } else {
             r2.map(|_| {
-                init.store(true, Ordering::SeqCst);
+                *init = true;
             })
         }
     }
@@ -665,7 +676,7 @@ impl Repo {
         let (cid, res) = self.inner.block_store.put(block.clone()).await?;
 
         if let BlockPut::NewBlock = res {
-            if let Some(mut event) = self.repo_channel() {
+            if let Some(mut event) = self.repo_channel().await {
                 _ = event.send(RepoEvent::NewBlock(block.clone())).await;
             }
             let list = self.inner.subscriptions.lock().remove(&cid);
@@ -746,7 +757,7 @@ impl Repo {
             return Ok(blocks.boxed());
         }
 
-        if local_only || !self.is_online() {
+        if local_only || !self.is_online().await {
             anyhow::bail!("Unable to locate missing blocks {missing:?}");
         }
 
@@ -777,6 +788,7 @@ impl Repo {
 
         let mut events = self
             .repo_channel()
+            .await
             .ok_or(anyhow::anyhow!("Channel is not available"))?;
 
         events
@@ -854,7 +866,7 @@ impl Repo {
                 Ok(success) => match success {
                     BlockRm::Removed(_cid) => {
                         // sending only fails if the background task has exited
-                        if let Some(mut events) = self.repo_channel() {
+                        if let Some(mut events) = self.repo_channel().await {
                             let _ = events.send(RepoEvent::RemovedBlock(cid)).await;
                         }
                         removed.push(cid);

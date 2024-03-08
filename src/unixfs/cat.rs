@@ -127,22 +127,7 @@ impl Stream for UnixfsCat {
                         return Poll::Ready(None);
                     };
 
-                    let (repo, dag, session) = match core {
-                        Either::Left(ipfs) => (
-                            ipfs.repo().clone(),
-                            ipfs.dag(),
-                            Some(
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                            ),
-                        ),
-                        Either::Right(repo) => {
-                            let session = repo.is_online().then(|| {
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                            });
-                            (repo.clone(), IpldDag::from(repo.clone()), session)
-                        }
-                    };
-
+  
                     let mut visit = IdleFileVisit::default();
 
                     if let Some(range) = self.range.clone() {
@@ -157,7 +142,22 @@ impl Stream for UnixfsCat {
                     // using async_stream here at least to get on faster; writing custom streams is not too easy
                     // but this might be easy enough to write open.
                     let stream = stream! {
-
+                        let (repo, dag, session) = match core {
+                            Either::Left(ipfs) => (
+                                ipfs.repo().clone(),
+                                ipfs.dag(),
+                                Some(
+                                    crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                                ),
+                            ),
+                            Either::Right(repo) => {
+                                let session = repo.is_online().await.then(|| {
+                                    crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                                });
+                                (repo.clone(), IpldDag::from(repo.clone()), session)
+                            }
+                        };
+    
                         // Get the root block to start the traversal. The stream does not expose any of the file
                         // metadata. To get to it the user needs to create a Visitor over the first block.
                         let block = match starting_point {

@@ -860,7 +860,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         let repo = match repo_handle {
             Some(repo) => {
-                if repo.is_online() {
+                if repo.is_online().await {
                     anyhow::bail!("Repo is already initialized");
                 }
                 repo
@@ -877,7 +877,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
         repo.init().instrument(init_span.clone()).await?;
 
-        let repo_events = repo.initialize_channel();
+        let repo_events = repo.initialize_channel().await;
 
         if let Some(limit) = fdlimit {
             #[cfg(unix)]
@@ -2322,7 +2322,7 @@ impl Ipfs {
     pub async fn exit_daemon(mut self) {
         // FIXME: this is a stopgap measure needed while repo is part of the struct Ipfs instead of
         // the background task or stream. After that this could be handled by dropping.
-        self.repo.shutdown();
+        self.repo.shutdown().await;
 
         // ignoring the error because it'd mean that the background task had already been dropped
         let _ = self.to_task.try_send(IpfsEvent::Exit);
