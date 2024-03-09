@@ -15,8 +15,8 @@ use libp2p::{
     core::Endpoint,
     swarm::{
         behaviour::ConnectionEstablished, dial_opts::DialOpts, ConnectionClosed, ConnectionDenied,
-        ConnectionId, FromSwarm, NetworkBehaviour, NotifyHandler, OneShotHandler, THandler,
-        THandlerInEvent, THandlerOutEvent, ToSwarm,
+        ConnectionId, DialFailure, FromSwarm, NetworkBehaviour, NotifyHandler, OneShotHandler,
+        THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -257,6 +257,30 @@ impl Behaviour {
                 list.retain(|peer| *peer != peer_id);
                 !list.is_empty()
             });
+        }
+    }
+
+    fn on_dial_failure(
+        &mut self,
+        DialFailure {
+            connection_id: _,
+            peer_id,
+            error: _,
+        }: DialFailure,
+    ) {
+        let Some(peer_id) = peer_id else {
+            return;
+        };
+
+        if self.connections.contains_key(&peer_id) {
+            // Since there is still an existing connection for the peer
+            // we can ignore the dial failure
+            return;
+        }
+
+        // Remove entry from all wants
+        for list in self.sent_wants.values_mut() {
+            list.remove(&peer_id);
         }
     }
 
@@ -519,6 +543,7 @@ impl NetworkBehaviour for Behaviour {
         match event {
             FromSwarm::ConnectionEstablished(event) => self.on_connection_established(event),
             FromSwarm::ConnectionClosed(event) => self.on_connection_close(event),
+            FromSwarm::DialFailure(event) => self.on_dial_failure(event),
             _ => {}
         }
     }
