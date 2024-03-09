@@ -108,15 +108,17 @@ impl Behaviour {
                 self.connections.keys().copied().collect::<VecDeque<_>>()
             }
             false => {
+                let mut connected = VecDeque::new();
                 for peer_id in providers {
                     if self.connections.contains_key(peer_id) {
+                        connected.push_back(*peer_id);
                         continue;
                     }
                     let opts = DialOpts::peer_id(*peer_id).build();
 
                     self.events.push_back(ToSwarm::Dial { opts });
                 }
-                VecDeque::from_iter(providers.to_vec())
+                connected
             }
         };
 
