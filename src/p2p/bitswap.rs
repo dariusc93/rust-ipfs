@@ -102,14 +102,23 @@ impl Behaviour {
     pub fn get(&mut self, cid: &Cid, providers: &[PeerId]) {
         self.wants_list.insert(*cid);
 
+        let wants = self.sent_wants.entry(*cid).or_default();
+
         let peers = match providers.is_empty() {
             true => {
                 //If no providers are provided, we can send requests connected peers
-                self.connections.keys().copied().collect::<VecDeque<_>>()
+                self.connections
+                    .keys()
+                    .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
+                    .copied()
+                    .collect::<VecDeque<_>>()
             }
             false => {
                 let mut connected = VecDeque::new();
-                for peer_id in providers {
+                for peer_id in providers
+                    .iter()
+                    .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
+                {
                     if self.connections.contains_key(peer_id) {
                         connected.push_back(*peer_id);
                         continue;
@@ -117,6 +126,7 @@ impl Behaviour {
                     let opts = DialOpts::peer_id(*peer_id).build();
 
                     self.events.push_back(ToSwarm::Dial { opts });
+                    wants.insert(*peer_id);
                 }
                 connected
             }
@@ -150,8 +160,6 @@ impl Behaviour {
 
         // requests.push_front(first_request);
 
-        let wants = self.sent_wants.entry(*cid).or_default();
-
         for (peer_id, message) in requests {
             self.events.push_back(ToSwarm::NotifyHandler {
                 peer_id: *peer_id,
@@ -178,7 +186,7 @@ impl Behaviour {
             self.events.extend(
                 self.connections
                     .keys()
-                    .filter(|peer_id| self.blacklist_connections.contains_key(peer_id))
+                    .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
                     .map(|peer_id| ToSwarm::NotifyHandler {
                         peer_id: *peer_id,
                         handler: NotifyHandler::Any,
