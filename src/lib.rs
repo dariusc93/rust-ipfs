@@ -2508,6 +2508,8 @@ mod node {
             };
 
             let ipfs = uninit.start().await.unwrap();
+            
+            ipfs.dht_mode(DhtMode::Server).await.unwrap();
 
             let id = ipfs.keypair().public().to_peer_id();
             for addr in list {
