@@ -464,18 +464,24 @@ impl NetworkBehaviour for Behaviour {
     ) {
         let message = match event {
             Ok(Message::Receive { message }) => {
-                self.blacklist_connections
-                    .entry(peer_id)
-                    .or_default()
-                    .remove(&connection_id);
+                if let Entry::Occupied(mut e) = self.blacklist_connections.entry(peer_id) {
+                    let list = e.get_mut();
+                    list.remove(&connection_id);
+                    if list.is_empty() {
+                        e.remove();
+                    }
+                }
 
                 message
             }
             Ok(Message::Sent) => {
-                self.blacklist_connections
-                    .entry(peer_id)
-                    .or_default()
-                    .remove(&connection_id);
+                if let Entry::Occupied(mut e) = self.blacklist_connections.entry(peer_id) {
+                    let list = e.get_mut();
+                    list.remove(&connection_id);
+                    if list.is_empty() {
+                        e.remove();
+                    }
+                }
                 return;
             }
             Err(_) => {
