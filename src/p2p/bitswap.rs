@@ -80,7 +80,7 @@ pub struct Behaviour {
     store: Repo,
     wants_list: HashSet<Cid>,
     sent_wants: HashMap<Cid, HashSet<PeerId>>,
-    have_block: HashMap<Cid, VecDeque<PeerId>>,
+    have_block: HashMap<Cid, VecDeque<(PeerId, ConnectionId)>>,
     pending_have_block: HashMap<Cid, PeerId>,
     tasks: StreamMap<(PeerId, ConnectionId), FuturesList>,
 }
@@ -255,7 +255,7 @@ impl Behaviour {
             });
 
             self.have_block.retain(|_, list| {
-                list.retain(|peer| *peer != peer_id);
+                list.retain(|(peer, id)| *peer != peer_id && *id != connection_id);
                 !list.is_empty()
             });
         }
@@ -326,9 +326,12 @@ impl Behaviour {
                         e.remove();
                     }
                 }
-                self.have_block.entry(cid).or_default().push_back(peer_id);
+                self.have_block
+                    .entry(cid)
+                    .or_default()
+                    .push_back((peer_id, connection_id));
                 if let Entry::Vacant(e) = self.pending_have_block.entry(cid) {
-                    let next_peer_id = self
+                    let (next_peer_id, connection_id) = self
                         .have_block
                         .entry(cid)
                         .or_default()
@@ -368,7 +371,8 @@ impl Behaviour {
                     .unwrap_or_default()
                 {
                     self.pending_have_block.remove(&cid);
-                    let Some(next_peer_id) = self.have_block.entry(cid).or_default().pop_front()
+                    let Some((next_peer_id, next_connection_id)) =
+                        self.have_block.entry(cid).or_default().pop_front()
                     else {
                         return Poll::Ready(None);
                     };
@@ -377,7 +381,7 @@ impl Behaviour {
 
                     return Poll::Ready(Some(ToSwarm::NotifyHandler {
                         peer_id: next_peer_id,
-                        handler: NotifyHandler::One(connection_id),
+                        handler: NotifyHandler::One(next_connection_id),
                         event: BitswapMessage::Request(
                             BitswapRequest::block(cid).send_dont_have(true),
                         ),
@@ -395,10 +399,10 @@ impl Behaviour {
                 self.pending_have_block.remove(&cid);
                 let list = self.have_block.remove(&cid).unwrap_or_default();
 
-                for peer_id in list {
+                for (peer_id, connection_id) in list {
                     self.events.push_front(ToSwarm::NotifyHandler {
                         peer_id,
-                        handler: NotifyHandler::Any,
+                        handler: NotifyHandler::One(connection_id),
                         event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
                     });
                 }
