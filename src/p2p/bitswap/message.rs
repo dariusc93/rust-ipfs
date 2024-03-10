@@ -1,5 +1,6 @@
 use super::{bitswap_pb, pb::bitswap_pb::mod_Message::mod_Wantlist::WantType, prefix::Prefix};
 use bitswap_pb::message::{BlockPresenceType, Wantlist};
+use bytes::Bytes;
 use libipld::Cid;
 use std::io;
 
@@ -74,7 +75,7 @@ impl BitswapRequest {
 #[derive(Clone, Debug)]
 pub enum BitswapResponse {
     Have(bool),
-    Block(Vec<u8>),
+    Block(Bytes),
 }
 
 #[derive(Clone, Debug)]
@@ -103,7 +104,7 @@ impl BitswapMessage {
             let cid = prefix.to_cid(&payload.data).map_err(io::Error::other)?;
             messages.push(BitswapMessage::Response(
                 cid,
-                BitswapResponse::Block(payload.data),
+                BitswapResponse::Block(Bytes::from(payload.data)),
             ));
         }
 
@@ -151,7 +152,7 @@ impl BitswapMessage {
             Self::Response(cid, BitswapResponse::Block(bytes)) => {
                 msg.payload.push(bitswap_pb::message::Block {
                     prefix: Prefix::from(cid).to_bytes(),
-                    data: bytes,
+                    data: bytes.to_vec(),
                 });
             }
         }

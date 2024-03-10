@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use bytes::Bytes;
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use libipld::Cid;
 use libp2p::{
@@ -520,7 +521,7 @@ impl NetworkBehaviour for Behaviour {
                                 }
                             }
                             BitswapResponse::Block(data) => {
-                                let Ok(block) = Block::new(cid, data) else {
+                                let Ok(block) = Block::new(cid, data.to_vec()) else {
                                     // The block is invalid so we will notify the behaviour that we still dont have the block
                                     // from said peer
                                     return TaskHandle::DontHaveBlock { peer_id, cid };
@@ -606,7 +607,7 @@ pub async fn handle_inbound_request(
         }
         RequestType::Block => {
             let block = repo.get_block_now(&request.cid).await.unwrap_or_default();
-            if let Some(data) = block.map(|b| b.data().to_vec()) {
+            if let Some(data) = block.map(|b| Bytes::copy_from_slice(b.data())) {
                 Some(BitswapResponse::Block(data))
             } else if request.send_dont_have {
                 Some(BitswapResponse::Have(false))
