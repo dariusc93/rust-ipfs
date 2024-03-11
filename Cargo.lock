@@ -615,7 +615,7 @@ dependencies = [
  "async-trait",
  "asynchronous-codec 0.6.2",
  "bytes",
- "cid",
+ "cid 0.11.1",
  "criterion 0.4.0",
  "deadqueue",
  "derivative",
@@ -874,6 +874,18 @@ dependencies = [
  "serde",
  "serde_bytes",
  "unsigned-varint 0.7.2",
+]
+
+[[package]]
+name = "cid"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3147d8272e8fa0ccd29ce51194dd98f79ddfb8191ba9e3409884e751798acf3a"
+dependencies = [
+ "core2",
+ "multibase",
+ "multihash 0.19.1",
+ "unsigned-varint 0.8.0",
 ]
 
 [[package]]
@@ -2356,7 +2368,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5acd707e8d8b092e967b2af978ed84709eaded82b75effe6cb6f6cc797ef8158"
 dependencies = [
  "anyhow",
- "cid",
+ "cid 0.10.1",
  "core2",
  "multibase",
  "multihash 0.18.1",
@@ -4399,7 +4411,7 @@ version = "0.4.0"
 dependencies = [
  "cbor4ii",
  "chrono",
- "cid",
+ "cid 0.11.1",
  "clap 4.4.18",
  "derive_more",
  "libp2p-identity",

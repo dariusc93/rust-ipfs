@@ -18,7 +18,7 @@ async-trait = "0.1.68"
 asynchronous-codec = "0.6"
 
 bytes = "1.4"
-cid = "0.10"
+cid = "0.11"
 deadqueue = "0.2.4"
 derivative = "2.2"
 futures = "0.3.28"

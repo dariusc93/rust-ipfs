@@ -15,7 +15,7 @@ keywords = ["libp2p", "ipfs"]
 [dependencies]
 cbor4ii = { version = "0.3", features = ["serde1"] }
 quick-protobuf = "0.8"
-cid = "0.10"
+cid = "0.11"
 serde = { version = "1", features = ["derive"] }
 multihash = { version = "0.18" }
 sha2 = { version = "0.10" }
