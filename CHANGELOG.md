@@ -1,5 +1,5 @@
 # 0.10.5
-- chore: Feature gate sled and redb datastores. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- chore: Feature gate sled and redb datastores. [PR 162](https://github.com/dariusc93/rust-ipfs/pull/162)
 
 # 0.10.4
 - fix: Check the files of each block directly for Repo::get_total_size. [PR 140](https://github.com/dariusc93/rust-ipfs/pull/140)
