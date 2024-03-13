@@ -835,7 +835,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             local_external_addr,
             repo_handle,
             gc_config,
-            gc_repo_duration,
             ..
         } = self;
 
@@ -871,7 +870,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         tokio::fs::create_dir_all(path).await?;
                     }
                 }
-                Repo::new(&mut options.ipfs_path, gc_repo_duration)
+                Repo::new(&mut options.ipfs_path)
             }
         };
 

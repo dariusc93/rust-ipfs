@@ -78,8 +78,8 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error>;
     /// Removes a block from the blockstore.
     async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error>;
-    /// Remove blocks while excluding references from the cleanup
-    async fn remove_garbage(&self, references: BoxStream<'static, Cid>) -> Result<Vec<Cid>, Error>;
+    /// Remove multiple blocks from the blockstore
+    async fn remove_many(&self, blocks: Vec<Cid>) -> Result<BoxStream<'static, Cid>, Error>;
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;
     /// Wipes the blockstore.
@@ -413,10 +413,10 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(repo_type: &mut StoragePath, duration: Option<Duration>) -> Self {
+    pub fn new(repo_type: &mut StoragePath) -> Self {
         match repo_type {
-            StoragePath::Memory => Repo::new_memory(duration),
-            StoragePath::Disk(path) => Repo::new_fs(path, duration),
+            StoragePath::Memory => Repo::new_memory(),
+            StoragePath::Disk(path) => Repo::new_fs(path),
             StoragePath::Custom {
                 blockstore,
                 datastore,
@@ -451,9 +451,7 @@ impl Repo {
         }
     }
 
-    pub fn new_fs(path: impl AsRef<Path>, duration: impl Into<Option<Duration>>) -> Self {
-        let duration = duration.into();
-        let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
+    pub fn new_fs(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
@@ -462,10 +460,7 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Box::new(blockstore::flatfs::FsBlockStore::new(
-            blockstore_path,
-            duration,
-        ));
+        let block_store = Box::new(blockstore::flatfs::FsBlockStore::new(blockstore_path));
         #[cfg(not(any(feature = "sled_data_store", feature = "redb_data_store")))]
         let data_store = Box::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
@@ -476,13 +471,8 @@ impl Repo {
         Self::new_raw(block_store, data_store, lockfile)
     }
 
-    pub fn new_memory(duration: impl Into<Option<Duration>>) -> Self {
-        let duration = duration.into();
-        let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
-        let block_store = Box::new(blockstore::memory::MemBlockStore::new(
-            Default::default(),
-            duration,
-        ));
+    pub fn new_memory() -> Self {
+        let block_store = Box::new(blockstore::memory::MemBlockStore::new(Default::default()));
         let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
         let lockfile = Box::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
@@ -964,7 +954,9 @@ impl Repo {
     }
 
     /// Function to perform a basic cleanup of unpinned blocks
-    pub async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+    pub(crate) async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+        let blocks = BTreeSet::from_iter(self.list_blocks().await.unwrap_or_default());
+
         let pinned = self
             .list_pins(None)
             .await
@@ -972,9 +964,16 @@ impl Repo {
             .try_collect::<BTreeSet<_>>()
             .await?;
 
-        let refs = futures::stream::iter(pinned);
+        let unpinned_blocks = pinned.difference(&blocks).copied().collect::<Vec<_>>();
 
-        let removed_blocks = self.inner.block_store.remove_garbage(refs.boxed()).await?;
+        let removed_blocks = self
+            .inner
+            .block_store
+            .remove_many(unpinned_blocks)
+            .await?
+            .collect::<Vec<_>>()
+            .await;
+
         Ok(removed_blocks)
     }
 
