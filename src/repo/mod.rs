@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error, fmt, io};
+use tokio::sync::RwLockReadGuard;
 use tracing::{log, Span};
 use tracing_futures::Instrument;
 
@@ -1000,7 +1001,19 @@ impl Repo {
     }
 }
 
+pub struct GCGuard<'a> {
+    _g: RwLockReadGuard<'a, ()>,
+}
+
 impl Repo {
+    /// Hold a guard to prevent GC from running until this guard has dropped
+    /// Note: Until this guard drops, the GC task, if enabled, would not perform any cleanup.
+    ///       If the GC task is running, this guard will await until GC finishes
+    pub async fn gc_guard(&self) -> GCGuard {
+        let _g = self.inner.gclock.read().await;
+        GCGuard { _g }
+    }
+
     pub fn data_store(&self) -> &dyn DataStore {
         &*self.inner.data_store
     }
