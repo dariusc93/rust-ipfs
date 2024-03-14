@@ -1,7 +1,6 @@
 use crate::error::Error;
 use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
-use crate::repo::{BlockRm, BlockRmError};
 use crate::Block;
 use async_trait::async_trait;
 use futures::stream::{BoxStream, FuturesUnordered};
@@ -73,12 +72,13 @@ impl BlockStore for FsBlockStore {
         inner.put(block).await
     }
 
-    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+    async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.remove(cid).await
     }
 
-    async fn remove_many(&self, blocks: Vec<Cid>) -> Result<BoxStream<'static, Cid>, Error> {
+    async fn remove_many(&self, blocks: &[Cid]) -> Result<BoxStream<'static, Cid>, Error> {
+        let blocks = blocks.to_vec();
         let inner = &mut *self.inner.write().await;
         inner.remove_many(blocks).await
     }
@@ -222,22 +222,15 @@ impl FsBlockStoreInner {
             .unwrap_or_default()
     }
 
-    async fn remove(&mut self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+    async fn remove(&mut self, cid: &Cid) -> Result<(), Error> {
         let path = block_path(self.path.clone(), cid);
-
         trace!(cid = %cid, "removing block after synchronizing");
-        match fs::remove_file(path).await {
-            // FIXME: not sure if theres any point in taking cid ownership here?
-            Ok(()) => Ok(Ok(BlockRm::Removed(*cid))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(Err(BlockRmError::NotFound(*cid)))
-            }
-            Err(e) => Err(e.into()),
-        }
+        fs::remove_file(path).await.map_err(anyhow::Error::from)
     }
 
     async fn remove_many(&self, blocks: Vec<Cid>) -> Result<BoxStream<'static, Cid>, Error> {
         let path = self.path.clone();
+
         let stream = FuturesUnordered::from_iter(blocks.into_iter().map(|cid| async move { cid }))
             .map(move |cid| (cid, block_path(path.clone(), &cid)))
             .filter_map(|(cid, path)| async move { fs::remove_file(path).await.ok().map(|_| cid) });
@@ -372,7 +365,7 @@ mod tests {
         assert!(!contains);
         let get = store.get(&cid).await.unwrap();
         assert_eq!(get, None);
-        if store.remove(&cid).await.unwrap().is_ok() {
+        if store.remove(&cid).await.is_ok() {
             panic!("block should not be found")
         }
 
@@ -383,7 +376,7 @@ mod tests {
         let get = store.get(&cid);
         assert_eq!(get.await.unwrap(), Some(block.clone()));
 
-        store.remove(&cid).await.unwrap().unwrap();
+        store.remove(&cid).await.unwrap();
         let contains = store.contains(&cid);
         assert!(!contains.await.unwrap());
         let get = store.get(&cid);
@@ -527,7 +520,7 @@ mod tests {
         // compare the multihash since we store the block named as cidv1
         assert_eq!(single.list().await.unwrap()[0].hash(), cid.hash());
 
-        single.remove(&cid).await.unwrap().unwrap();
+        single.remove(&cid).await.unwrap();
         assert_eq!(single.list().await.unwrap().len(), 0);
     }
 }

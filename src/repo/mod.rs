@@ -78,9 +78,9 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     /// Inserts a block in the blockstore.
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error>;
     /// Removes a block from the blockstore.
-    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error>;
+    async fn remove(&self, cid: &Cid) -> Result<(), Error>;
     /// Remove multiple blocks from the blockstore
-    async fn remove_many(&self, blocks: Vec<Cid>) -> Result<BoxStream<'static, Cid>, Error>;
+    async fn remove_many(&self, blocks: &[Cid]) -> Result<BoxStream<'static, Cid>, Error>;
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;
     /// Wipes the blockstore.
@@ -824,8 +824,6 @@ impl Repo {
             return Err(anyhow::anyhow!("block to remove is pinned"));
         }
 
-        let mut removed = vec![];
-
         let list = match recursive {
             true => {
                 let mut list = self.recursive_collections(*cid).await?;
@@ -836,24 +834,25 @@ impl Repo {
             false => BTreeSet::from_iter(std::iter::once(*cid)),
         };
 
-        for cid in list {
-            if self.is_pinned(&cid).await? {
-                continue;
-            }
+        let list = FuturesOrdered::from_iter(list.into_iter().map(|cid| async move { cid }))
+            .filter_map(|cid| async move {
+                (!self.is_pinned(&cid).await.unwrap_or_default()).then_some(cid)
+            })
+            .collect::<Vec<Cid>>()
+            .await;
 
-            match self.inner.block_store.remove(&cid).await? {
-                Ok(success) => match success {
-                    BlockRm::Removed(_cid) => {
-                        // sending only fails if the background task has exited
-                        if let Some(mut events) = self.repo_channel() {
-                            let _ = events.send(RepoEvent::RemovedBlock(cid)).await;
-                        }
-                        removed.push(cid);
-                    }
-                },
-                Err(err) => match err {
-                    BlockRmError::NotFound(cid) => warn!("{cid} is not found to be removed"),
-                },
+        let removed = self
+            .inner
+            .block_store
+            .remove_many(&list)
+            .await?
+            .collect::<Vec<_>>()
+            .await;
+
+        for cid in &removed {
+            // notify ipfs task about the removed blocks
+            if let Some(mut events) = self.repo_channel() {
+                let _ = events.send(RepoEvent::RemovedBlock(*cid)).await;
             }
         }
         Ok(removed)
@@ -965,12 +964,12 @@ impl Repo {
             .try_collect::<BTreeSet<_>>()
             .await?;
 
-        let unpinned_blocks = pinned.difference(&blocks).copied().collect::<Vec<_>>();
+        let unpinned_blocks = blocks.difference(&pinned).copied().collect::<Vec<_>>();
 
         let removed_blocks = self
             .inner
             .block_store
-            .remove_many(unpinned_blocks)
+            .remove_many(&unpinned_blocks)
             .await?
             .collect::<Vec<_>>()
             .await;

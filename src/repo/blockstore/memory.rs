@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
 use async_trait::async_trait;
-use futures::stream::{self, BoxStream};
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use libipld::Cid;
 use tokio::sync::RwLock;
@@ -11,8 +11,6 @@ use tokio::sync::RwLock;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-use crate::repo::{BlockRm, BlockRmError};
 
 /// Describes an in-memory block store.
 ///
@@ -100,27 +98,29 @@ impl BlockStore for MemBlockStore {
         }
     }
 
-    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+    async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
 
         match inner.blocks.remove(cid) {
-            Some(_block) => Ok(Ok(BlockRm::Removed(*cid))),
-            None => Ok(Err(BlockRmError::NotFound(*cid))),
+            Some(_block) => Ok(()),
+            None => Err(std::io::Error::from(std::io::ErrorKind::NotFound).into()),
         }
     }
 
-    async fn remove_many(&self, blocks: Vec<Cid>) -> Result<BoxStream<'static, Cid>, Error> {
-        let inner = &mut *self.inner.write().await;
+    async fn remove_many(&self, blocks: &[Cid]) -> Result<BoxStream<'static, Cid>, Error> {
+        let inner = self.inner.clone();
+        let blocks = blocks.to_vec();
 
-        let mut removed = vec![];
-
-        for cid in blocks {
-            if inner.blocks.remove(&cid).is_some() {
-                removed.push(cid);
+        let stream = async_stream::stream! {
+            let inner = &mut *inner.write().await;
+            for cid in blocks {
+                if inner.blocks.remove(&cid).is_some() {
+                    yield cid;
+                }
             }
-        }
+        };
 
-        Ok(stream::iter(removed).boxed())
+        Ok(stream.boxed())
     }
 
     async fn list(&self) -> Result<Vec<Cid>, Error> {
@@ -158,7 +158,7 @@ mod tests {
         assert!(!contains.await.unwrap());
         let get = store.get(&cid);
         assert_eq!(get.await.unwrap(), None);
-        if store.remove(&cid).await.unwrap().is_ok() {
+        if store.remove(&cid).await.is_ok() {
             panic!("block should not be found")
         }
 
@@ -169,7 +169,7 @@ mod tests {
         let get = store.get(&cid);
         assert_eq!(get.await.unwrap(), Some(block.clone()));
 
-        store.remove(&cid).await.unwrap().unwrap();
+        store.remove(&cid).await.unwrap();
         let contains = store.contains(&cid);
         assert!(!contains.await.unwrap());
         let get = store.get(&cid);
