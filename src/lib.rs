@@ -1153,6 +1153,7 @@ impl Ipfs {
     /// Note: This is extremely basic and should not be relied on completely
     ///       until there is additional or extended implementation for a gc
     pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
+        let _g = self.repo.inner.gclock.write().await;
         self.repo.cleanup().instrument(self.span.clone()).await
     }
 
