@@ -17,6 +17,7 @@ pub enum Entry {
     File { cid: Cid, file: String, size: usize },
 }
 
+#[must_use = "do nothing unless you `.await` or poll the stream"]
 pub struct UnixfsLs {
     core: Option<Either<Ipfs, Repo>>,
     span: Span,

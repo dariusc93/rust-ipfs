@@ -439,6 +439,7 @@ impl IpldDag {
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagGet {
     dag_ipld: IpldDag,
     session: Option<u64>,
@@ -545,6 +546,7 @@ impl std::future::IntoFuture for DagGet {
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagGetDeserialize<D> {
     dag_get: DagGet,
     _marker: PhantomData<D>,
@@ -569,6 +571,7 @@ where
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagPut {
     dag_ipld: IpldDag,
     codec: IpldCodec,
@@ -647,6 +650,8 @@ impl std::future::IntoFuture for DagPut {
             if self.provide && self.dag_ipld.ipfs.is_none() {
                 anyhow::bail!("Ipfs is offline");
             }
+
+            let _g = self.dag_ipld.repo.gc_guard().await;
 
             let data = (self.data)()?;
 

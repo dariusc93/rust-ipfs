@@ -1100,8 +1100,9 @@ impl std::future::IntoFuture for RepoInsertPin {
         let repo = self.repo;
         let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
         async move {
-            let block = repo.get_block(&cid, &[], local).await?;
+            // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
+            let block = repo.get_block(&cid, &[], local).await?;
 
             if !recursive {
                 repo.insert_direct_pin(&cid).await?
