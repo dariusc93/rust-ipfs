@@ -1,3 +1,6 @@
+# 0.11.0
+- feat: Implemented basic bitswap protocol internally. [PR 156](httops://github.com/dariusc93/rust-ipfs/pull/156)
+
 # 0.10.4
 - fix: Check the files of each block directly for Repo::get_total_size. [PR 140](https://github.com/dariusc93/rust-ipfs/pull/140)
 
