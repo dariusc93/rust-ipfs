@@ -35,6 +35,7 @@ pub struct BitswapRequest {
     pub cid: Cid,
     pub send_dont_have: bool,
     pub cancel: bool,
+    pub priority: i32,
 }
 
 impl BitswapRequest {
@@ -44,6 +45,7 @@ impl BitswapRequest {
             cid,
             send_dont_have: false,
             cancel: false,
+            priority: 1,
         }
     }
 
@@ -53,11 +55,17 @@ impl BitswapRequest {
             cid,
             send_dont_have: false,
             cancel: false,
+            priority: 1,
         }
     }
 
     pub fn send_dont_have(mut self, b: bool) -> Self {
         self.send_dont_have = b;
+        self
+    }
+
+    pub fn set_priority(mut self, p: i32) -> Self {
+        self.priority = p;
         self
     }
 
@@ -67,6 +75,7 @@ impl BitswapRequest {
             cid,
             send_dont_have: false,
             cancel: true,
+            priority: 1,
         }
     }
 }
@@ -95,6 +104,7 @@ impl BitswapMessage {
                     cid,
                     send_dont_have: entry.sendDontHave,
                     cancel: entry.cancel,
+                    priority: entry.priority,
                 }));
             }
         }
@@ -125,6 +135,7 @@ impl BitswapMessage {
                 cid,
                 send_dont_have,
                 cancel,
+                priority,
             }) => {
                 let wantlist = Wantlist {
                     entries: vec![bitswap_pb::message::wantlist::Entry {
@@ -132,7 +143,7 @@ impl BitswapMessage {
                         wantType: ty.into(),
                         sendDontHave: send_dont_have,
                         cancel,
-                        priority: 1,
+                        priority,
                     }],
                     ..Default::default()
                 };
