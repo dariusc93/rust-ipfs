@@ -5,7 +5,7 @@ mod protocol;
 
 use std::{
     collections::{hash_map::Entry, BTreeSet, HashMap, HashSet, VecDeque},
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
     time::Duration,
 };
 
@@ -52,6 +52,7 @@ pub struct Config {
 #[derive(Debug)]
 pub enum Event {
     NeedBlock { cid: Cid },
+    BlockRetrieved { cid: Cid },
 }
 
 type StreamList = SelectAll<BoxStream<'static, TaskHandle>>;
@@ -86,6 +87,7 @@ pub struct Behaviour {
     have_block: HashMap<Cid, VecDeque<(PeerId, ConnectionId)>>,
     pending_have_block: HashMap<Cid, PeerId>,
     tasks: StreamMap<(PeerId, ConnectionId), StreamList>,
+    waker: Option<Waker>,
 }
 
 impl Behaviour {
@@ -100,6 +102,7 @@ impl Behaviour {
             sent_wants: Default::default(),
             pending_have_block: Default::default(),
             have_block: HashMap::new(),
+            waker: None,
         }
     }
 
@@ -171,6 +174,10 @@ impl Behaviour {
                 event: message,
             });
             wants.insert(*peer_id);
+        }
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
         }
     }
 
@@ -307,18 +314,17 @@ impl Behaviour {
         _: PeerId,
         connection_id: ConnectionId,
         handle: TaskHandle,
-    ) -> Poll<Option<ToSwarm<<Behaviour as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>>
-    {
+    ) -> Option<ToSwarm<<Behaviour as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>> {
         match handle {
             TaskHandle::SendResponse {
                 peer_id,
                 source: (cid, response),
             } => {
-                return Poll::Ready(Some(ToSwarm::NotifyHandler {
+                return Some(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(connection_id),
                     event: BitswapMessage::Response(cid, response),
-                }))
+                })
             }
             TaskHandle::HaveBlock { peer_id, cid } => {
                 if let Entry::Occupied(mut e) = self.sent_wants.entry(cid) {
@@ -332,25 +338,25 @@ impl Behaviour {
                     .entry(cid)
                     .or_default()
                     .push_back((peer_id, connection_id));
+
                 if let Entry::Vacant(e) = self.pending_have_block.entry(cid) {
                     let (next_peer_id, connection_id) = self
                         .have_block
-                        .entry(cid)
-                        .or_default()
-                        .pop_front()
+                        .get_mut(&cid)
+                        .and_then(|list| list.pop_front())
                         .expect("Valid entry");
 
                     e.insert(next_peer_id);
 
                     // f we dont have a pending request for a block that a peer stated they have
                     // we will request it
-                    return Poll::Ready(Some(ToSwarm::NotifyHandler {
+                    return Some(ToSwarm::NotifyHandler {
                         peer_id: next_peer_id,
                         handler: NotifyHandler::One(connection_id),
                         event: BitswapMessage::Request(
                             BitswapRequest::block(cid).send_dont_have(true),
                         ),
-                    }));
+                    });
                 }
             }
             TaskHandle::DontHaveBlock { peer_id, cid } => {
@@ -376,25 +382,25 @@ impl Behaviour {
                     let Some((next_peer_id, next_connection_id)) =
                         self.have_block.entry(cid).or_default().pop_front()
                     else {
-                        return Poll::Ready(None);
+                        return None;
                     };
 
                     self.pending_have_block.insert(cid, peer_id);
 
-                    return Poll::Ready(Some(ToSwarm::NotifyHandler {
+                    return Some(ToSwarm::NotifyHandler {
                         peer_id: next_peer_id,
                         handler: NotifyHandler::One(next_connection_id),
                         event: BitswapMessage::Request(
                             BitswapRequest::block(cid).send_dont_have(true),
                         ),
-                    }));
+                    });
                 }
 
                 // If there are no peers, notify swarm
                 if !self.pending_have_block.contains_key(&cid)
                     && !self.have_block.contains_key(&cid)
                 {
-                    return Poll::Ready(Some(ToSwarm::GenerateEvent(Event::NeedBlock { cid })));
+                    return Some(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
             }
             TaskHandle::BlockStored { cid } => {
@@ -408,10 +414,12 @@ impl Behaviour {
                         event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
                     });
                 }
+
+                return Some(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
             }
             TaskHandle::None => {}
         }
-        Poll::Ready(None)
+        None
     }
 }
 
@@ -571,10 +579,12 @@ impl NetworkBehaviour for Behaviour {
         while let Poll::Ready(Some(((peer_id, connection_id), handle))) =
             self.tasks.poll_next_unpin(ctx)
         {
-            if let Poll::Ready(Some(event)) = self.process_handle(peer_id, connection_id, handle) {
+            if let Some(event) = self.process_handle(peer_id, connection_id, handle) {
                 return Poll::Ready(event);
             }
         }
+
+        self.waker = Some(ctx.waker().clone());
 
         Poll::Pending
     }
@@ -629,5 +639,111 @@ pub async fn handle_inbound_request(
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use libipld::{
+        multihash::{Code, MultihashDigest},
+        Cid, IpldCodec,
+    };
+    use libp2p::{
+        swarm::{dial_opts::DialOpts, SwarmEvent},
+        Multiaddr, PeerId, Swarm, SwarmBuilder,
+    };
+
+    use crate::{repo::Repo, Block};
+
+    fn create_block() -> Block {
+        let data = b"hello block\n".to_vec();
+        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+
+        Block::new_unchecked(cid, data)
+    }
+
+    #[tokio::test]
+    async fn exchange_blocks() -> anyhow::Result<()> {
+        let (_, _, mut swarm1, repo) = build_swarm().await;
+        let (peer2, addr2, mut swarm2, repo2) = build_swarm().await;
+
+        let block = create_block();
+
+        let cid = *block.cid();
+
+        repo.put_block(block.clone()).await?;
+
+        let opt = DialOpts::peer_id(peer2)
+            .addresses(vec![addr2.clone()])
+            .build();
+
+        swarm1.dial(opt)?;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+
+        swarm2.behaviour_mut().get(&cid, &[peer2]);
+
+        loop {
+            tokio::select! {
+                _ = swarm1.next() => {}
+                e = swarm2.select_next_some() => {
+                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                        assert_eq!(inner_cid, cid);
+                    }
+                },
+                Ok(true) = repo2.contains(&cid) => {
+                    break;
+                }
+            }
+        }
+
+        let b = repo2
+            .get_block_now(&cid)
+            .await
+            .unwrap()
+            .expect("block exist");
+
+        assert_eq!(b, block);
+
+        Ok(())
+    }
+
+    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<super::Behaviour>, Repo) {
+        let repo = Repo::new_memory(None);
+
+        let mut swarm = SwarmBuilder::with_new_identity()
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                libp2p::noise::Config::new,
+                libp2p::yamux::Config::default,
+            )
+            .expect("")
+            .with_behaviour(|_| super::Behaviour::new(&repo))
+            .expect("")
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            .build();
+
+        Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
+
+        if let Some(SwarmEvent::NewListenAddr { address, .. }) = swarm.next().await {
+            let peer_id = swarm.local_peer_id();
+            return (*peer_id, address, swarm, repo);
+        }
+
+        panic!("no new addrs")
     }
 }
