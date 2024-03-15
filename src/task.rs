@@ -1037,7 +1037,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         kad.get_providers(key.into());
                     }
                 }
-                crate::p2p::bitswap::Event::BlockRetrieved { cid } => info!(%cid, "block retrieved"),
+                crate::p2p::bitswap::Event::BlockRetrieved { cid } => {
+                    info!(%cid, "block retrieved")
+                }
             },
             _ => debug!("Swarm event: {:?}", swarm_event),
         }
