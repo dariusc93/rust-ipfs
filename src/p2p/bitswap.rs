@@ -10,7 +10,10 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{
+    stream::{BoxStream, SelectAll},
+    StreamExt,
+};
 use libipld::Cid;
 use libp2p::{
     core::Endpoint,
@@ -51,7 +54,7 @@ pub enum Event {
     NeedBlock { cid: Cid },
 }
 
-type FuturesList = FuturesUnordered<BoxFuture<'static, TaskHandle>>;
+type StreamList = SelectAll<BoxStream<'static, TaskHandle>>;
 
 #[derive(Debug)]
 enum TaskHandle {
@@ -82,7 +85,7 @@ pub struct Behaviour {
     sent_wants: HashMap<Cid, HashSet<PeerId>>,
     have_block: HashMap<Cid, VecDeque<(PeerId, ConnectionId)>>,
     pending_have_block: HashMap<Cid, PeerId>,
-    tasks: StreamMap<(PeerId, ConnectionId), FuturesList>,
+    tasks: StreamMap<(PeerId, ConnectionId), StreamList>,
 }
 
 impl Behaviour {
@@ -212,9 +215,8 @@ impl Behaviour {
             .or_default()
             .insert((connection_id, address));
 
-        let futs = FuturesUnordered::new();
-        futs.push(futures::future::pending().boxed());
-
+        let mut futs = SelectAll::new();
+        futs.push(futures::stream::pending().boxed());
         self.tasks.insert((peer_id, connection_id), futs);
         self.send_wants(peer_id);
     }
@@ -507,16 +509,17 @@ impl NetworkBehaviour for Behaviour {
             .expect("connection exist");
 
         // process each message in its own task
-        for message in messages {
-            let repo = self.store.clone();
-            let task = async move {
+        let repo = self.store.clone();
+        let stream = async_stream::stream! {
+            for message in messages {
                 match message {
                     BitswapMessage::Request(request) => {
                         let Some(response) = handle_inbound_request(&repo, &request).await else {
-                            return TaskHandle::None;
+                            yield TaskHandle::None;
+                            continue;
                         };
 
-                        TaskHandle::SendResponse {
+                        yield TaskHandle::SendResponse {
                             peer_id,
                             source: (request.cid, response),
                         }
@@ -525,29 +528,30 @@ impl NetworkBehaviour for Behaviour {
                         match response {
                             BitswapResponse::Have(have) => {
                                 if have {
-                                    TaskHandle::HaveBlock { peer_id, cid }
+                                    yield TaskHandle::HaveBlock { peer_id, cid }
                                 } else {
-                                    TaskHandle::DontHaveBlock { peer_id, cid }
+                                    yield TaskHandle::DontHaveBlock { peer_id, cid }
                                 }
                             }
                             BitswapResponse::Block(data) => {
                                 let Ok(block) = Block::new(cid, data.to_vec()) else {
                                     // The block is invalid so we will notify the behaviour that we still dont have the block
                                     // from said peer
-                                    return TaskHandle::DontHaveBlock { peer_id, cid };
+                                    yield TaskHandle::DontHaveBlock { peer_id, cid };
+                                    continue;
                                 };
 
                                 _ = repo.put_block(block).await;
 
-                                TaskHandle::BlockStored { cid }
+                                yield TaskHandle::BlockStored { cid }
                             }
-                        }
+                        };
                     }
-                }
-            };
+                };
+            }
+        };
 
-            task_handler.push(task.boxed());
-        }
+        task_handler.push(stream.boxed());
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
