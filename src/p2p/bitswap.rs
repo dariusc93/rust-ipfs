@@ -59,22 +59,11 @@ type StreamList = SelectAll<BoxStream<'static, TaskHandle>>;
 
 #[derive(Debug)]
 enum TaskHandle {
-    SendResponse {
-        peer_id: PeerId,
-        source: (Cid, BitswapResponse),
-    },
-    HaveBlock {
-        peer_id: PeerId,
-        cid: Cid,
-    },
-    DontHaveBlock {
-        peer_id: PeerId,
-        cid: Cid,
-    },
-    BlockStored {
-        cid: Cid,
-    },
-    None,
+    SendResponse { source: (Cid, BitswapResponse) },
+    HaveBlock { cid: Cid },
+    DontHaveBlock { cid: Cid },
+    BlockStored { cid: Cid },
+    Cancel { cid: Cid },
 }
 
 pub struct Behaviour {
@@ -82,7 +71,7 @@ pub struct Behaviour {
     connections: HashMap<PeerId, HashSet<(ConnectionId, Multiaddr)>>,
     blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
     store: Repo,
-    wants_list: HashSet<Cid>,
+    local_wants_list: HashSet<Cid>,
     sent_wants: HashMap<Cid, HashSet<PeerId>>,
     have_block: HashMap<Cid, VecDeque<(PeerId, ConnectionId)>>,
     pending_have_block: HashMap<Cid, PeerId>,
@@ -98,7 +87,7 @@ impl Behaviour {
             blacklist_connections: Default::default(),
             store: store.clone(),
             tasks: StreamMap::new(),
-            wants_list: Default::default(),
+            local_wants_list: Default::default(),
             sent_wants: Default::default(),
             pending_have_block: Default::default(),
             have_block: HashMap::new(),
@@ -107,7 +96,7 @@ impl Behaviour {
     }
 
     pub fn get(&mut self, cid: &Cid, providers: &[PeerId]) {
-        self.wants_list.insert(*cid);
+        self.local_wants_list.insert(*cid);
 
         let wants = self.sent_wants.entry(*cid).or_default();
 
@@ -295,7 +284,7 @@ impl Behaviour {
     }
 
     fn send_wants(&mut self, peer_id: PeerId) {
-        let list = self.wants_list.iter().copied().collect::<Vec<_>>();
+        let list = self.local_wants_list.iter().copied().collect::<Vec<_>>();
 
         for cid in list {
             if !self
@@ -311,13 +300,12 @@ impl Behaviour {
 
     fn process_handle(
         &mut self,
-        _: PeerId,
+        peer_id: PeerId,
         connection_id: ConnectionId,
         handle: TaskHandle,
     ) -> Option<ToSwarm<<Behaviour as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>> {
         match handle {
             TaskHandle::SendResponse {
-                peer_id,
                 source: (cid, response),
             } => {
                 return Some(ToSwarm::NotifyHandler {
@@ -326,7 +314,7 @@ impl Behaviour {
                     event: BitswapMessage::Response(cid, response),
                 })
             }
-            TaskHandle::HaveBlock { peer_id, cid } => {
+            TaskHandle::HaveBlock { cid } => {
                 if let Entry::Occupied(mut e) = self.sent_wants.entry(cid) {
                     let list = e.get_mut();
                     list.remove(&peer_id);
@@ -359,7 +347,7 @@ impl Behaviour {
                     });
                 }
             }
-            TaskHandle::DontHaveBlock { peer_id, cid } => {
+            TaskHandle::DontHaveBlock { cid } => {
                 // Since peer does not have the block, we will remove them from the pending wants
 
                 if let Entry::Occupied(mut e) = self.sent_wants.entry(cid) {
@@ -379,8 +367,10 @@ impl Behaviour {
                     .unwrap_or_default()
                 {
                     self.pending_have_block.remove(&cid);
-                    let Some((next_peer_id, next_connection_id)) =
-                        self.have_block.entry(cid).or_default().pop_front()
+                    let Some((next_peer_id, next_connection_id)) = self
+                        .have_block
+                        .get_mut(&cid)
+                        .and_then(|list| list.pop_front())
                     else {
                         return None;
                     };
@@ -417,7 +407,9 @@ impl Behaviour {
 
                 return Some(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
             }
-            TaskHandle::None => {}
+            TaskHandle::Cancel { cid } => {
+                _ = cid;
+            }
         }
         None
     }
@@ -522,13 +514,16 @@ impl NetworkBehaviour for Behaviour {
             for message in messages {
                 match message {
                     BitswapMessage::Request(request) => {
+                        if request.cancel {
+                            yield TaskHandle::Cancel { cid: request.cid };
+                            continue;
+                        }
+
                         let Some(response) = handle_inbound_request(&repo, &request).await else {
-                            yield TaskHandle::None;
                             continue;
                         };
 
                         yield TaskHandle::SendResponse {
-                            peer_id,
                             source: (request.cid, response),
                         }
                     }
@@ -536,16 +531,16 @@ impl NetworkBehaviour for Behaviour {
                         match response {
                             BitswapResponse::Have(have) => {
                                 if have {
-                                    yield TaskHandle::HaveBlock { peer_id, cid }
+                                    yield TaskHandle::HaveBlock { cid }
                                 } else {
-                                    yield TaskHandle::DontHaveBlock { peer_id, cid }
+                                    yield TaskHandle::DontHaveBlock { cid }
                                 }
                             }
                             BitswapResponse::Block(data) => {
                                 let Ok(block) = Block::new(cid, data.to_vec()) else {
                                     // The block is invalid so we will notify the behaviour that we still dont have the block
                                     // from said peer
-                                    yield TaskHandle::DontHaveBlock { peer_id, cid };
+                                    yield TaskHandle::DontHaveBlock { cid };
                                     continue;
                                 };
 
