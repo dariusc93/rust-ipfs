@@ -22,9 +22,6 @@
 // the docs better.
 //#![allow(private_intra_doc_links)]
 
-#[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
-compile_error!("Requires bitswap to be enabled");
-
 pub mod config;
 pub mod dag;
 pub mod error;
@@ -596,6 +593,17 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             .with_pubsub(Default::default())
     }
 
+    #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+    /// Load default behaviour for basic functionality
+    pub fn with_default(self) -> Self {
+        self.with_identify(Default::default())
+            .with_autonat()
+            .with_bitswap()
+            .with_kademlia(Either::Left(Default::default()), Default::default())
+            .with_ping(Default::default())
+            .with_pubsub(Default::default())
+    }
+
     /// Enables kademlia
     pub fn with_kademlia(
         mut self,
@@ -618,6 +626,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     #[cfg(feature = "libp2p_bitswap")]
+    /// Enables bitswap
+    pub fn with_bitswap(mut self) -> Self {
+        self.options.protocols.bitswap = true;
+        self
+    }
+
+    #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
     /// Enables bitswap
     pub fn with_bitswap(mut self) -> Self {
         self.options.protocols.bitswap = true;
@@ -2490,6 +2505,8 @@ mod node {
             };
 
             let ipfs = uninit.start().await.unwrap();
+
+            ipfs.dht_mode(DhtMode::Server).await.unwrap();
 
             let id = ipfs.keypair().public().to_peer_id();
             for addr in list {

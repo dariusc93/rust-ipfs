@@ -17,6 +17,10 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     let peer_id = node_a.keypair().public().to_peer_id();
+    let peer_id_b = node_b.keypair().public().to_peer_id();
+
+    println!("Our Node (A): {peer_id}");
+    println!("Their Node (B): {peer_id_b}");
 
     let addrs = node_a.listening_addresses().await?;
 

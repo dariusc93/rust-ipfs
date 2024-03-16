@@ -16,6 +16,8 @@ use tracing::Span;
 
 pub(crate) mod addr;
 pub(crate) mod addressbook;
+#[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
+pub mod bitswap;
 pub(crate) mod peerbook;
 pub mod protocol;
 
