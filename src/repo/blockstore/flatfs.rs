@@ -1,229 +1,105 @@
 use crate::error::Error;
 use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
-use crate::repo::{BlockRm, BlockRmError};
 use crate::Block;
 use async_trait::async_trait;
-use futures::stream::BoxStream;
-use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt, TryStreamExt};
-use futures_timer::Delay;
+use futures::stream::{self, BoxStream};
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use libipld::Cid;
-use std::collections::{BTreeSet, HashMap};
 use std::io::{self, ErrorKind, Read};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::Arc;
 use tokio::fs;
+use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReadDirStream;
-
-use super::RepoBlockCommand;
 
 /// File system backed block store.
 ///
 /// For information on path mangling, please see `block_path` and `filestem_to_block_cid`.
 #[derive(Debug)]
 pub struct FsBlockStore {
-    path: PathBuf,
-    tx: futures::channel::mpsc::Sender<RepoBlockCommand>,
+    inner: Arc<RwLock<FsBlockStoreInner>>,
 }
 
-pub struct FsBlockStoreTask {
-    timeout: Duration,
-    temp: HashMap<Cid, Delay>,
+#[derive(Debug)]
+struct FsBlockStoreInner {
     path: PathBuf,
-    rx: futures::channel::mpsc::Receiver<RepoBlockCommand>,
 }
 
 impl FsBlockStore {
-    pub fn new(path: PathBuf, duration: Duration) -> Self {
-        let (tx, rx) = futures::channel::mpsc::channel(1);
-        let mut task = FsBlockStoreTask {
-            path: path.clone(),
-            timeout: duration,
-            temp: HashMap::new(),
-            rx,
-        };
+    pub fn new(path: PathBuf) -> Self {
+        let inner = Arc::new(RwLock::new(FsBlockStoreInner { path }));
 
-        tokio::spawn(async move {
-            task.start().await;
-        });
-
-        Self { path, tx }
+        FsBlockStore { inner }
     }
 }
 
 #[async_trait]
 impl BlockStore for FsBlockStore {
     async fn init(&self) -> Result<(), Error> {
-        fs::create_dir_all(self.path.clone()).await?;
+        let inner = &*self.inner.read().await;
+        fs::create_dir_all(inner.path.clone()).await?;
         Ok(())
     }
 
     async fn open(&self) -> Result<(), Error> {
-        // TODO: we probably want to cache the space usage?
         Ok(())
     }
 
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::Contains {
-                cid: *cid,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.contains(cid).await
     }
 
     async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::Get {
-                cid: *cid,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        inner.get(cid).await
     }
 
     async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::Size {
-                cid: cid.to_vec(),
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        Ok(inner.size(cid).await)
     }
 
     async fn total_size(&self) -> Result<usize, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::TotalSize { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &*self.inner.read().await;
+        Ok(inner.total_size().await)
     }
 
+    //TODO: Allow multiple puts without holding a lock. We could probably hold a read lock instead
+    //      and revert back to using a broadcast
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::PutBlock {
-                block,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let inner = &mut *self.inner.write().await;
+        inner.put(block).await
     }
 
-    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::Remove {
-                cid: *cid,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+    async fn remove(&self, cid: &Cid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.remove(cid).await
     }
 
-    async fn remove_garbage(&self, references: BoxStream<'static, Cid>) -> Result<Vec<Cid>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::Cleanup {
-                refs: references,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    async fn list(&self) -> Result<Vec<Cid>, Error> {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::List { response: tx })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
-    }
-
-    async fn wipe(&self) {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = self
-            .tx
-            .clone()
-            .send(RepoBlockCommand::Wipe { response: tx })
-            .await;
-        let _ = rx.await.map_err(anyhow::Error::from);
-    }
-}
-
-impl FsBlockStoreTask {
-    async fn start(&mut self) {
-        loop {
-            tokio::select! {
-                biased;
-                _ = futures::future::poll_fn(|cx| {
-                    self.temp.retain(|_, timer| timer.poll_unpin(cx).is_pending());
-                    std::task::Poll::Pending
-                }) => {}
-                Some(command) = self.rx.next() => {
-                    match command {
-                        RepoBlockCommand::Contains { cid, response } => {
-                            let _ = response.send(self.contains(&cid).await);
-                        }
-                        RepoBlockCommand::Get { cid, response } => {
-                            let _ = response.send(self.get(&cid).await);
-                        }
-                        RepoBlockCommand::PutBlock { block, response } => {
-                            let _ = response.send(self.put(block).await);
-                        }
-                        RepoBlockCommand::Size { cid, response } => {
-                            let _ = response.send(Ok(self.size(&cid).await));
-                        }
-                        RepoBlockCommand::TotalSize { response } => {
-                            let _ = response.send(Ok(self.total_size().await));
-                        }
-                        RepoBlockCommand::Remove { cid, response } => {
-                            let _ = response.send(self.remove(&cid).await);
-                        }
-                        RepoBlockCommand::Cleanup {
-                            refs,
-                            response,
-                        } => {
-                            let _ = response.send(self.cleanup(refs).await);
-                        },
-                        RepoBlockCommand::List { response } => {
-                            let _ = response.send(self.list().await);
-                        }
-                        RepoBlockCommand::Wipe { response } => {
-                            let _ = response.send({
-                                self.wipe().await;
-                                Ok(())
-                            });
-                        }
-                    }
+    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+        let inner = self.inner.clone();
+        let stream = async_stream::stream! {
+            let inner = &mut *inner.write().await;
+            let path = inner.path.clone();
+            for await cid in blocks
+                .map(move |cid| (cid, block_path(path.clone(), &cid)))
+                .filter_map(|(cid, path)| async move { fs::remove_file(path).await.ok().map(|_| cid) }) {
+                    yield cid;
                 }
-            }
-        }
+        };
+
+        stream.boxed()
+    }
+
+    async fn list(&self) -> BoxStream<'static, Cid> {
+        let inner = &*self.inner.read().await;
+        inner.list().await
     }
 }
 
-impl FsBlockStoreTask {
+impl FsBlockStoreInner {
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
         let path = block_path(self.path.clone(), cid);
 
@@ -306,7 +182,6 @@ impl FsBlockStoreTask {
         match je {
             Ok(Ok(written)) => {
                 trace!(bytes = written, "block writing succeeded");
-                self.temp.insert(cid, Delay::new(self.timeout));
                 Ok((cid, BlockPut::NewBlock))
             }
             Ok(Err(e)) => {
@@ -323,16 +198,16 @@ impl FsBlockStoreTask {
     }
 
     async fn size(&self, cids: &[Cid]) -> Option<usize> {
-        let mut block_sizes = HashMap::new();
+        let mut block_sizes = 0;
 
         for cid in cids {
             let path = block_path(self.path.clone(), cid);
             if let Ok(size) = fs::metadata(path).await.map(|m| m.len() as usize) {
-                block_sizes.insert(*cid, size);
+                block_sizes += size;
             }
         }
 
-        Some(block_sizes.values().sum())
+        Some(block_sizes)
     }
 
     async fn total_size(&self) -> usize {
@@ -352,41 +227,17 @@ impl FsBlockStoreTask {
             .unwrap_or_default()
     }
 
-    async fn remove(&mut self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error> {
+    async fn remove(&mut self, cid: &Cid) -> Result<(), Error> {
         let path = block_path(self.path.clone(), cid);
-
         trace!(cid = %cid, "removing block after synchronizing");
-        match fs::remove_file(path).await {
-            // FIXME: not sure if theres any point in taking cid ownership here?
-            Ok(()) => Ok(Ok(BlockRm::Removed(*cid))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(Err(BlockRmError::NotFound(*cid)))
-            }
-            Err(e) => Err(e.into()),
-        }
+        fs::remove_file(path).await.map_err(anyhow::Error::from)
     }
 
-    async fn cleanup(&mut self, refs: BoxStream<'_, Cid>) -> Result<Vec<Cid>, Error> {
-        let mut refs = refs.collect::<BTreeSet<_>>().await;
-        refs.extend(self.temp.keys().cloned());
-
-        let blocks = self.list_stream().await?;
-
-        let removed_blocks = blocks
-            .try_filter(|(cid, _)| futures::future::ready(!refs.contains(cid)))
-            .try_filter_map(|(cid, path)| async move {
-                fs::remove_file(path).await?;
-                Ok(Some(cid))
-            })
-            .try_collect()
-            .await?;
-
-        Ok(removed_blocks)
-    }
-
-    async fn list_stream(&self) -> Result<BoxStream<'_, Result<(Cid, PathBuf), io::Error>>, Error> {
+    async fn list_stream(
+        &self,
+    ) -> Result<BoxStream<'static, Result<(Cid, PathBuf), io::Error>>, Error> {
         let stream = ReadDirStream::new(fs::read_dir(&self.path).await?);
-
+        let path = self.path.clone();
         Ok(stream
             .try_filter_map(|d| async move {
                 // map over the shard directories
@@ -410,8 +261,8 @@ impl FsBlockStoreTask {
                     Ok(maybe_cid)
                 })
             })
-            .try_filter_map(|cid| {
-                let path = self.path.clone();
+            .try_filter_map(move |cid| {
+                let path = path.clone();
                 async move {
                     let path = block_path(path, &cid);
                     Ok(Some((cid, path)))
@@ -420,16 +271,13 @@ impl FsBlockStoreTask {
             .boxed())
     }
 
-    async fn list(&self) -> Result<Vec<Cid>, Error> {
-        let stream = self.list_stream().await?;
-        let vec = stream
+    async fn list(&self) -> BoxStream<'static, Cid> {
+        let stream = self.list_stream().await.unwrap_or(stream::empty().boxed());
+        stream
             .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
-            .try_collect()
-            .await?;
-        Ok(vec)
+            .filter_map(|cid| futures::future::ready(cid.ok()))
+            .boxed()
     }
-
-    async fn wipe(&mut self) {}
 }
 
 fn write_through_tempfile(
@@ -480,7 +328,7 @@ mod tests {
         let mut tmp = temp_dir();
         tmp.push("blockstore1");
         std::fs::remove_dir_all(tmp.clone()).ok();
-        let store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
+        let store = FsBlockStore::new(tmp.clone());
 
         let data = b"1".to_vec();
         let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
@@ -493,7 +341,7 @@ mod tests {
         assert!(!contains);
         let get = store.get(&cid).await.unwrap();
         assert_eq!(get, None);
-        if store.remove(&cid).await.unwrap().is_ok() {
+        if store.remove(&cid).await.is_ok() {
             panic!("block should not be found")
         }
 
@@ -504,7 +352,7 @@ mod tests {
         let get = store.get(&cid);
         assert_eq!(get.await.unwrap(), Some(block.clone()));
 
-        store.remove(&cid).await.unwrap().unwrap();
+        store.remove(&cid).await.unwrap();
         let contains = store.contains(&cid);
         assert!(!contains.await.unwrap());
         let get = store.get(&cid);
@@ -523,14 +371,14 @@ mod tests {
         let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
-        let block_store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
+        let block_store = FsBlockStore::new(tmp.clone());
         block_store.init().await.unwrap();
         block_store.open().await.unwrap();
 
         assert!(!block_store.contains(block.cid()).await.unwrap());
         block_store.put(block.clone()).await.unwrap();
 
-        let block_store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
+        let block_store = FsBlockStore::new(tmp.clone());
         block_store.open().await.unwrap();
         assert!(block_store.contains(block.cid()).await.unwrap());
         assert_eq!(block_store.get(block.cid()).await.unwrap().unwrap(), block);
@@ -544,7 +392,7 @@ mod tests {
         tmp.push("blockstore_list");
         std::fs::remove_dir_all(&tmp).ok();
 
-        let block_store = FsBlockStore::new(tmp.clone(), Duration::ZERO);
+        let block_store = FsBlockStore::new(tmp.clone());
         block_store.init().await.unwrap();
         block_store.open().await.unwrap();
 
@@ -555,7 +403,7 @@ mod tests {
             block_store.put(block.clone()).await.unwrap();
         }
 
-        let cids = block_store.list().await.unwrap();
+        let cids = block_store.list().await.collect::<Vec<_>>().await;
         assert_eq!(cids.len(), 3);
         for cid in cids.iter() {
             assert!(block_store.contains(cid).await.unwrap());
@@ -569,7 +417,7 @@ mod tests {
         tmp.push("race_to_insert_new");
         std::fs::remove_dir_all(&tmp).ok();
 
-        let single = FsBlockStore::new(tmp.clone(), Duration::ZERO);
+        let single = FsBlockStore::new(tmp.clone());
         single.init().await.unwrap();
 
         let single = Arc::new(single);
@@ -632,7 +480,7 @@ mod tests {
         tmp.push("remove");
         std::fs::remove_dir_all(&tmp).ok();
 
-        let single = FsBlockStore::new(tmp.clone(), Duration::ZERO);
+        let single = FsBlockStore::new(tmp.clone());
 
         single.init().await.unwrap();
 
@@ -641,14 +489,17 @@ mod tests {
 
         let block = Block::new(cid, data.into()).unwrap();
 
-        assert_eq!(single.list().await.unwrap().len(), 0);
+        assert_eq!(single.list().await.collect::<Vec<_>>().await.len(), 0);
 
         single.put(block).await.unwrap();
 
         // compare the multihash since we store the block named as cidv1
-        assert_eq!(single.list().await.unwrap()[0].hash(), cid.hash());
+        assert_eq!(
+            single.list().await.collect::<Vec<_>>().await[0].hash(),
+            cid.hash()
+        );
 
-        single.remove(&cid).await.unwrap().unwrap();
-        assert_eq!(single.list().await.unwrap().len(), 0);
+        single.remove(&cid).await.unwrap();
+        assert_eq!(single.list().await.collect::<Vec<_>>().await.len(), 0);
     }
 }

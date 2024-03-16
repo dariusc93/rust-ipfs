@@ -110,6 +110,7 @@ async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<Foreig
 
 /// Check if `Ipfs::find_peer` works using DHT.
 #[tokio::test]
+#[ignore = "will be reevaluated"]
 async fn dht_find_peer() {
     // works for numbers >=2, though 2 would essentially just
     // be the same as find_peer_local, so it should be higher

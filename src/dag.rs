@@ -439,6 +439,7 @@ impl IpldDag {
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagGet {
     dag_ipld: IpldDag,
     session: Option<u64>,
@@ -545,6 +546,7 @@ impl std::future::IntoFuture for DagGet {
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagGetDeserialize<D> {
     dag_get: DagGet,
     _marker: PhantomData<D>,
@@ -569,6 +571,7 @@ where
     }
 }
 
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagPut {
     dag_ipld: IpldDag,
     codec: IpldCodec,
@@ -648,6 +651,8 @@ impl std::future::IntoFuture for DagPut {
                 anyhow::bail!("Ipfs is offline");
             }
 
+            let _g = self.dag_ipld.repo.gc_guard().await;
+
             let data = (self.data)()?;
 
             let bytes = self.codec.encode(&data)?;
@@ -660,7 +665,7 @@ impl std::future::IntoFuture for DagPut {
             };
             let cid = Cid::new(version, self.codec.into(), hash)?;
             let block = Block::new(cid, bytes)?;
-            let (cid, _) = self.dag_ipld.repo.put_block(block).await?;
+            let cid = self.dag_ipld.repo.put_block(block).await?;
 
             if let Some(opt) = self.pinned {
                 if !self.dag_ipld.repo.is_pinned(&cid).await? {

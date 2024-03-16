@@ -7,7 +7,7 @@ use core::fmt::Debug;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::sink::SinkExt;
-use futures::stream::{BoxStream, FuturesOrdered};
+use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error, fmt, io};
+use tokio::sync::RwLockReadGuard;
 use tracing::{log, Span};
 use tracing_futures::Instrument;
 
@@ -77,13 +78,11 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     /// Inserts a block in the blockstore.
     async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error>;
     /// Removes a block from the blockstore.
-    async fn remove(&self, cid: &Cid) -> Result<Result<BlockRm, BlockRmError>, Error>;
-    /// Remove blocks while excluding references from the cleanup
-    async fn remove_garbage(&self, references: BoxStream<'static, Cid>) -> Result<Vec<Cid>, Error>;
+    async fn remove(&self, cid: &Cid) -> Result<(), Error>;
+    /// Remove multiple blocks from the blockstore
+    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid>;
     /// Returns a list of the blocks (Cids), in the blockstore.
-    async fn list(&self) -> Result<Vec<Cid>, Error>;
-    /// Wipes the blockstore.
-    async fn wipe(&self) {}
+    async fn list(&self) -> BoxStream<'static, Cid>;
 }
 
 #[async_trait]
@@ -101,8 +100,6 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn remove(&self, key: &[u8]) -> Result<(), Error>;
     /// Iterate over the k/v of the datastore
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>;
-    /// Wipes the datastore.
-    async fn wipe(&self) {}
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -413,10 +410,10 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(repo_type: &mut StoragePath, duration: Option<Duration>) -> Self {
+    pub fn new(repo_type: &mut StoragePath) -> Self {
         match repo_type {
-            StoragePath::Memory => Repo::new_memory(duration),
-            StoragePath::Disk(path) => Repo::new_fs(path, duration),
+            StoragePath::Memory => Repo::new_memory(),
+            StoragePath::Disk(path) => Repo::new_fs(path),
             StoragePath::Custom {
                 blockstore,
                 datastore,
@@ -451,9 +448,7 @@ impl Repo {
         }
     }
 
-    pub fn new_fs(path: impl AsRef<Path>, duration: impl Into<Option<Duration>>) -> Self {
-        let duration = duration.into();
-        let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
+    pub fn new_fs(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
@@ -462,10 +457,7 @@ impl Repo {
         datastore_path.push("datastore");
         lockfile_path.push("repo_lock");
 
-        let block_store = Box::new(blockstore::flatfs::FsBlockStore::new(
-            blockstore_path,
-            duration,
-        ));
+        let block_store = Box::new(blockstore::flatfs::FsBlockStore::new(blockstore_path));
         #[cfg(not(any(feature = "sled_data_store", feature = "redb_data_store")))]
         let data_store = Box::new(datastore::flatfs::FsDataStore::new(datastore_path));
         #[cfg(feature = "sled_data_store")]
@@ -476,13 +468,8 @@ impl Repo {
         Self::new_raw(block_store, data_store, lockfile)
     }
 
-    pub fn new_memory(duration: impl Into<Option<Duration>>) -> Self {
-        let duration = duration.into();
-        let duration = duration.unwrap_or(Duration::from_secs(60 * 2));
-        let block_store = Box::new(blockstore::memory::MemBlockStore::new(
-            Default::default(),
-            duration,
-        ));
+    pub fn new_memory() -> Self {
+        let block_store = Box::new(blockstore::memory::MemBlockStore::new(Default::default()));
         let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
         let lockfile = Box::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
@@ -502,16 +489,15 @@ impl Repo {
         }
         let block_migration = {
             async move {
-                if let Ok(list) = self.list_blocks().await {
-                    for cid in list {
-                        match self.get_block_now(&cid).await {
-                            Ok(Some(block)) => match repo.inner.block_store.put(block).await {
-                                Ok(_) => {}
-                                Err(e) => error!("Error migrating {cid}: {e}"),
-                            },
-                            Ok(None) => error!("{cid} doesnt exist"),
-                            Err(e) => error!("Error getting block {cid}: {e}"),
-                        }
+                let mut stream = self.list_blocks().await;
+                while let Some(cid) = stream.next().await {
+                    match self.get_block_now(&cid).await {
+                        Ok(Some(block)) => match repo.inner.block_store.put(block).await {
+                            Ok(_) => {}
+                            Err(e) => error!("Error migrating {cid}: {e}"),
+                        },
+                        Ok(None) => error!("{cid} doesnt exist"),
+                        Err(e) => error!("Error getting block {cid}: {e}"),
                     }
                 }
             }
@@ -660,7 +646,7 @@ impl Repo {
     }
 
     /// Puts a block into the block store.
-    pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+    pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
         let _guard = self.inner.gclock.read().await;
         let (cid, res) = self.inner.block_store.put(block.clone()).await?;
 
@@ -677,7 +663,7 @@ impl Repo {
             }
         }
 
-        Ok((cid, res))
+        Ok(cid)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
@@ -821,7 +807,7 @@ impl Repo {
     }
 
     /// Lists the blocks in the blockstore.
-    pub async fn list_blocks(&self) -> Result<Vec<Cid>, Error> {
+    pub async fn list_blocks(&self) -> BoxStream<'static, Cid> {
         self.inner.block_store.list().await
     }
 
@@ -833,8 +819,6 @@ impl Repo {
             return Err(anyhow::anyhow!("block to remove is pinned"));
         }
 
-        let mut removed = vec![];
-
         let list = match recursive {
             true => {
                 let mut list = self.recursive_collections(*cid).await?;
@@ -845,24 +829,28 @@ impl Repo {
             false => BTreeSet::from_iter(std::iter::once(*cid)),
         };
 
-        for cid in list {
-            if self.is_pinned(&cid).await? {
-                continue;
-            }
+        let list = stream::iter(
+            FuturesOrdered::from_iter(list.into_iter().map(|cid| async move { cid }))
+                .filter_map(|cid| async move {
+                    (!self.is_pinned(&cid).await.unwrap_or_default()).then_some(cid)
+                })
+                .collect::<Vec<Cid>>()
+                .await,
+        )
+        .boxed();
 
-            match self.inner.block_store.remove(&cid).await? {
-                Ok(success) => match success {
-                    BlockRm::Removed(_cid) => {
-                        // sending only fails if the background task has exited
-                        if let Some(mut events) = self.repo_channel() {
-                            let _ = events.send(RepoEvent::RemovedBlock(cid)).await;
-                        }
-                        removed.push(cid);
-                    }
-                },
-                Err(err) => match err {
-                    BlockRmError::NotFound(cid) => warn!("{cid} is not found to be removed"),
-                },
+        let removed = self
+            .inner
+            .block_store
+            .remove_many(list)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        for cid in &removed {
+            // notify ipfs task about the removed blocks
+            if let Some(mut events) = self.repo_channel() {
+                let _ = events.send(RepoEvent::RemovedBlock(*cid)).await;
             }
         }
         Ok(removed)
@@ -918,7 +906,7 @@ impl Repo {
     }
 
     /// Pins a given Cid recursively or directly (non-recursively).
-    pub async fn insert_pin(
+    pub(crate) async fn insert_pin(
         &self,
         cid: &Cid,
         recursive: bool,
@@ -964,17 +952,29 @@ impl Repo {
     }
 
     /// Function to perform a basic cleanup of unpinned blocks
-    pub async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
-        let pinned = self
-            .list_pins(None)
+    pub(crate) async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+        let repo = self.clone();
+
+        let blocks = repo.list_blocks().await;
+
+        let stream = async_stream::stream! {
+            for await cid in blocks {
+                if repo.is_pinned(&cid).await.unwrap_or_default() {
+                    continue;
+                }
+                yield cid;
+            }
+        }
+        .boxed();
+
+        let removed_blocks = self
+            .inner
+            .block_store
+            .remove_many(stream)
             .await
-            .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
-            .try_collect::<BTreeSet<_>>()
-            .await?;
+            .collect::<Vec<_>>()
+            .await;
 
-        let refs = futures::stream::iter(pinned);
-
-        let removed_blocks = self.inner.block_store.remove_garbage(refs.boxed()).await?;
         Ok(removed_blocks)
     }
 
@@ -1001,7 +1001,19 @@ impl Repo {
     }
 }
 
+pub struct GCGuard<'a> {
+    _g: RwLockReadGuard<'a, ()>,
+}
+
 impl Repo {
+    /// Hold a guard to prevent GC from running until this guard has dropped
+    /// Note: Until this guard drops, the GC task, if enabled, would not perform any cleanup.
+    ///       If the GC task is running, this guard will await until GC finishes
+    pub async fn gc_guard(&self) -> GCGuard {
+        let _g = self.inner.gclock.read().await;
+        GCGuard { _g }
+    }
+
     pub fn data_store(&self) -> &dyn DataStore {
         &*self.inner.data_store
     }
@@ -1089,8 +1101,9 @@ impl std::future::IntoFuture for RepoInsertPin {
         let repo = self.repo;
         let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
         async move {
-            let block = repo.get_block(&cid, &[], local).await?;
+            // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
+            let block = repo.get_block(&cid, &[], local).await?;
 
             if !recursive {
                 repo.insert_direct_pin(&cid).await?

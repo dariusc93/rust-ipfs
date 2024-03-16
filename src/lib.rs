@@ -850,7 +850,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             local_external_addr,
             repo_handle,
             gc_config,
-            gc_repo_duration,
             ..
         } = self;
 
@@ -886,7 +885,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         tokio::fs::create_dir_all(path).await?;
                     }
                 }
-                Repo::new(&mut options.ipfs_path, gc_repo_duration)
+                Repo::new(&mut options.ipfs_path)
             }
         };
 
@@ -940,7 +939,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         //TODO: Add persistent layer for kad store
         let blocks = match options.provider {
             RepoProvider::None => vec![],
-            RepoProvider::All => ipfs.repo.list_blocks().await.unwrap_or_default(),
+            RepoProvider::All => ipfs.repo.list_blocks().await.collect::<Vec<_>>().await,
             RepoProvider::Pinned => {
                 ipfs.repo
                     .list_pins(None)
@@ -1125,27 +1124,22 @@ impl Ipfs {
         &self.repo
     }
 
-    /// Returns an [`IpfsFiles`] for files operations
+    /// Returns an [`IpfsUnixfs`] for files operations
     pub fn unixfs(&self) -> IpfsUnixfs {
         IpfsUnixfs::new(self.clone())
     }
 
+    /// Returns a [`Ipns`] for ipns operations
     pub fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
     }
 
     /// Puts a block into the ipfs repo.
-    ///
-    /// # Forget safety
-    ///
-    /// Forgetting the returned future will not result in memory unsafety, but it can
-    /// deadlock other tasks.
     pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
         self.repo
             .put_block(block)
             .instrument(self.span.clone())
             .await
-            .map(|(cid, _put_status)| cid)
     }
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
@@ -1166,9 +1160,10 @@ impl Ipfs {
     }
 
     /// Cleans up of all unpinned blocks
-    /// Note: This is extremely basic and should not be relied on completely
-    ///       until there is additional or extended implementation for a gc
+    /// Note: This will prevent writing operations in [`Repo`] until it finish clearing unpinned
+    ///       blocks.
     pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
+        let _g = self.repo.inner.gclock.write().await;
         self.repo.cleanup().instrument(self.span.clone()).await
     }
 
@@ -1212,12 +1207,11 @@ impl Ipfs {
     /// # Crash unsafety
     ///
     /// Cannot currently detect partially written recursive pins. Those can happen if
-    /// `Ipfs::insert_pin(cid, true)` is interrupted by a crash for example.
+    /// [`Ipfs::insert_pin`] is interrupted by a crash for example.
     ///
     /// Works correctly only under no-crash situations. Workaround for hitting a crash is to re-pin
     /// any existing recursive pins.
     ///
-    // TODO: This operation could be provided as a `Ipfs::fix_pins()`.
     pub async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
         let span = debug_span!(parent: &self.span, "is_pinned", cid = %cid);
         self.repo.is_pinned(cid).instrument(span).await
@@ -1273,13 +1267,6 @@ impl Ipfs {
     /// will end without producing any bytes.
     pub fn cat_unixfs(&self, starting_point: impl Into<unixfs::StartingPoint>) -> UnixfsCat {
         self.unixfs().cat(starting_point).span(self.span.clone())
-    }
-
-    /// Add a file from a path to the blockstore
-    #[deprecated(note = "Use `Ipfs::add_unixfs` instead")]
-    pub fn add_file_unixfs<P: AsRef<std::path::Path>>(&self, path: P) -> UnixfsAdd {
-        let path = path.as_ref().to_path_buf();
-        self.add_unixfs(path)
     }
 
     /// Add a file through a stream of data to the blockstore
@@ -1698,11 +1685,13 @@ impl Ipfs {
     }
 
     /// Returns a list of local blocks
-    ///
-    /// This implementation is subject to change into a stream, which might only include the pinned
-    /// blocks.
-    pub async fn refs_local(&self) -> Result<Vec<Cid>, Error> {
-        self.repo.list_blocks().instrument(self.span.clone()).await
+    pub async fn refs_local(&self) -> Vec<Cid> {
+        self.repo
+            .list_blocks()
+            .instrument(self.span.clone())
+            .await
+            .collect::<Vec<_>>()
+            .await
     }
 
     /// Returns local listening addresses

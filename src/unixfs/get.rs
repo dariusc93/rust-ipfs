@@ -15,6 +15,7 @@ use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 use super::{StatusStreamState, TraversalFailed, UnixfsStatus};
 
+#[must_use = "do nothing unless you `.await` or poll the stream"]
 pub struct UnixfsGet {
     core: Option<Either<Ipfs, Repo>>,
     dest: PathBuf,
