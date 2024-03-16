@@ -22,9 +22,6 @@
 // the docs better.
 //#![allow(private_intra_doc_links)]
 
-// #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
-// compile_error!("Requires bitswap to be enabled");
-
 pub mod config;
 pub mod dag;
 pub mod error;
