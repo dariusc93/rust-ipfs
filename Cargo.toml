@@ -11,7 +11,7 @@ version = "0.10.4"
 
 [features]
 
-default = ["beetle_bitswap"]
+default = []
 
 experimental_stream = ["libp2p-stream"]
 
@@ -25,6 +25,8 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
+
+asynchronous-codec = "0.7.0"
 libp2p = { version = "0.53" }
 libp2p-stream = { version = "0.1.0-alpha" }
 beetle-bitswap-next = { version = "0.5.1", path = "packages/beetle-bitswap-next" }
@@ -40,7 +42,13 @@ redb = "1.3"
 futures-timer = "3.0"
 bytes = "1"
 
+quick-protobuf = { version = "0.8" }
+quick-protobuf-codec = "0.3"
+
+unsigned-varint = { version = "0.7.1", features = ["asynchronous_codec"] }
+
 [dependencies]
+asynchronous-codec.workspace = true
 anyhow = "1.0"
 async-stream = { version = "0.3" }
 async-trait = { version = "0.1" }
@@ -124,6 +132,10 @@ futures-timer.workspace = true
 rand = "0.8"
 
 zeroize = "1"
+
+quick-protobuf.workspace = true
+quick-protobuf-codec.workspace = true
+unsigned-varint.workspace = true
 
 [dev-dependencies]
 criterion = { default-features = false, version = "0.5" }
