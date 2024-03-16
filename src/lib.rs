@@ -1129,7 +1129,6 @@ impl Ipfs {
             .put_block(block)
             .instrument(self.span.clone())
             .await
-            .map(|(cid, _put_status)| cid)
     }
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an

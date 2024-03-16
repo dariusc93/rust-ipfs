@@ -646,7 +646,7 @@ impl Repo {
     }
 
     /// Puts a block into the block store.
-    pub async fn put_block(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+    pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
         let _guard = self.inner.gclock.read().await;
         let (cid, res) = self.inner.block_store.put(block.clone()).await?;
 
@@ -663,7 +663,7 @@ impl Repo {
             }
         }
 
-        Ok((cid, res))
+        Ok(cid)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
