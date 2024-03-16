@@ -906,7 +906,7 @@ impl Repo {
     }
 
     /// Pins a given Cid recursively or directly (non-recursively).
-    pub async fn insert_pin(
+    pub(crate) async fn insert_pin(
         &self,
         cid: &Cid,
         recursive: bool,
