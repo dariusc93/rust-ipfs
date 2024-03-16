@@ -865,7 +865,7 @@ mod test {
     }
 
     async fn build_swarm() -> (PeerId, Multiaddr, Swarm<super::Behaviour>, Repo) {
-        let repo = Repo::new_memory(None);
+        let repo = Repo::new_memory();
 
         let mut swarm = SwarmBuilder::with_new_identity()
             .with_tokio()
