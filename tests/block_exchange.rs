@@ -33,7 +33,7 @@ async fn two_node_put_get() {
 
 // check that a long line of nodes still works with get_block
 #[tokio::test]
-#[ignore]
+#[cfg_attr(any(feature = "libp2p_bitswap", feature = "beetle_bitswap"), ignore)]
 async fn long_get_block() {
     const N: usize = 10;
     let nodes = spawn_nodes::<N>(Topology::Line).await;
