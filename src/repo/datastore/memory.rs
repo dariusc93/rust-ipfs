@@ -361,11 +361,6 @@ impl DataStore for MemDataStore {
 
         stream.boxed()
     }
-
-    async fn wipe(&self) {
-        self.inner.lock().await.clear();
-        self.pin.lock().await.clear();
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

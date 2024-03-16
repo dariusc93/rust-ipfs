@@ -163,9 +163,6 @@ impl DataStore for RedbDataStore {
 
         UnboundedReceiverStream::new(rx).boxed()
     }
-
-    /// Wipes the datastore.
-    async fn wipe(&self) {}
 }
 
 #[async_trait]

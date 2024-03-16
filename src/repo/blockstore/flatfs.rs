@@ -87,11 +87,6 @@ impl BlockStore for FsBlockStore {
         let inner = &*self.inner.read().await;
         inner.list().await
     }
-
-    async fn wipe(&self) {
-        let inner = &mut *self.inner.write().await;
-        inner.wipe().await
-    }
 }
 
 impl FsBlockStoreInner {
@@ -300,8 +295,6 @@ impl FsBlockStoreInner {
             .await?;
         Ok(vec)
     }
-
-    async fn wipe(&mut self) {}
 }
 
 fn write_through_tempfile(

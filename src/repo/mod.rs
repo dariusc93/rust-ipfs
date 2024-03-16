@@ -83,8 +83,6 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     async fn remove_many(&self, blocks: &[Cid]) -> Result<BoxStream<'static, Cid>, Error>;
     /// Returns a list of the blocks (Cids), in the blockstore.
     async fn list(&self) -> Result<Vec<Cid>, Error>;
-    /// Wipes the blockstore.
-    async fn wipe(&self) {}
 }
 
 #[async_trait]
@@ -102,8 +100,6 @@ pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn remove(&self, key: &[u8]) -> Result<(), Error>;
     /// Iterate over the k/v of the datastore
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>;
-    /// Wipes the datastore.
-    async fn wipe(&self) {}
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

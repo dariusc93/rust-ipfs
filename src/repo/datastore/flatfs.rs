@@ -79,7 +79,6 @@ impl DataStore for FsDataStore {
         futures::stream::empty().boxed()
     }
 
-    async fn wipe(&self) {}
 }
 
 // PinStore is a trait from ipfs::repo implemented on FsDataStore defined at ipfs::repo::fs or

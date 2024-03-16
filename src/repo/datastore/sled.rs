@@ -115,9 +115,6 @@ impl DataStore for SledDataStore {
 
         stream.boxed()
     }
-
-    /// Wipes the datastore.
-    async fn wipe(&self) {}
 }
 
 // in the transactional parts of the [`Infallible`] is used to signal there is no additional

@@ -127,11 +127,6 @@ impl BlockStore for MemBlockStore {
         let inner = &*self.inner.read().await;
         Ok(inner.blocks.keys().copied().collect())
     }
-
-    async fn wipe(&self) {
-        let inner = &mut *self.inner.write().await;
-        inner.blocks.clear();
-    }
 }
 
 #[cfg(test)]
