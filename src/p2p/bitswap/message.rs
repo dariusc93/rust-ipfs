@@ -29,7 +29,7 @@ impl From<RequestType> for WantType {
 }
 
 /// `Bitswap` request type
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BitswapRequest {
     pub ty: RequestType,
     pub cid: Cid,

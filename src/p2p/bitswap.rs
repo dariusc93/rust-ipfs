@@ -53,6 +53,7 @@ pub struct Config {
 pub enum Event {
     NeedBlock { cid: Cid },
     BlockRetrieved { cid: Cid },
+    CancelBlock { cid: Cid },
 }
 
 type StreamList = SelectAll<BoxStream<'static, TaskHandle>>;
@@ -135,15 +136,6 @@ impl Behaviour {
             return;
         }
 
-        // We take the first peer in the list and ask for the block directly while the remaining peers
-        // we ask if they have said block
-        // let first_peer_id = peers.pop_front().expect("valid entry");
-
-        // let first_request = (
-        //     &first_peer_id,
-        //     BitswapMessage::Request(BitswapRequest::block(*cid).send_dont_have(true)),
-        // );
-
         let requests = peers
             .iter()
             .map(|peer_id| {
@@ -153,8 +145,6 @@ impl Behaviour {
                 )
             })
             .collect::<VecDeque<_>>();
-
-        // requests.push_front(first_request);
 
         for (peer_id, message) in requests {
             self.events.push_back(ToSwarm::NotifyHandler {
@@ -176,6 +166,55 @@ impl Behaviour {
         }
     }
 
+    // Note: This is called specifically to cancel the request and not just emitting a request
+    //       after receiving a request.
+    pub fn cancel(&mut self, cid: Cid) {
+        if !self.local_wants_list.remove(&cid) {
+            return;
+        }
+
+        let request = BitswapRequest::cancel(cid);
+
+        if let Some(peers) = self.sent_wants.remove(&cid) {
+            for peer_id in peers {
+                if !self.connections.contains_key(&peer_id) {
+                    continue;
+                }
+
+                self.events.push_front(ToSwarm::NotifyHandler {
+                    peer_id,
+                    handler: NotifyHandler::Any,
+                    event: BitswapMessage::Request(request),
+                });
+            }
+        }
+
+        if let Some(list) = self.have_block.remove(&cid) {
+            for (peer_id, connection_id) in list {
+                self.events.push_front(ToSwarm::NotifyHandler {
+                    peer_id,
+                    handler: NotifyHandler::One(connection_id),
+                    event: BitswapMessage::Request(request),
+                });
+            }
+        }
+
+        if let Some(peer_id) = self.pending_have_block.remove(&cid) {
+            if self.connections.contains_key(&peer_id) {
+                self.events.push_front(ToSwarm::NotifyHandler {
+                    peer_id,
+                    handler: NotifyHandler::Any,
+                    event: BitswapMessage::Request(request),
+                });
+            }
+        }
+
+        self.events
+            .push_front(ToSwarm::GenerateEvent(Event::CancelBlock { cid }));
+    }
+
+    // This will notify all connected peers who have the bitswap protocol that we have this block
+    // although we should probably reimplement a ledger and notify peers who have sent their want
     pub fn notify_new_blocks(&mut self, cid: impl IntoIterator<Item = Cid>) {
         let blocks = cid
             .into_iter()
@@ -336,7 +375,7 @@ impl Behaviour {
 
                     e.insert(next_peer_id);
 
-                    // f we dont have a pending request for a block that a peer stated they have
+                    // if we dont have a pending request for a block that a peer stated they have
                     // we will request it
                     return Some(ToSwarm::NotifyHandler {
                         peer_id: next_peer_id,
@@ -712,6 +751,31 @@ mod test {
             .expect("block exist");
 
         assert_eq!(b, block);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancel_block_exchange() -> anyhow::Result<()> {
+        let (_, _, mut swarm1, _) = build_swarm().await;
+
+        let block = create_block();
+
+        let cid = *block.cid();
+
+        swarm1.behaviour_mut().get(&cid, &[]);
+        swarm1.behaviour_mut().cancel(cid);
+
+        loop {
+            tokio::select! {
+                e = swarm1.select_next_some() => {
+                    if let SwarmEvent::Behaviour(super::Event::CancelBlock { cid: inner_cid }) = e {
+                        assert_eq!(inner_cid, cid);
+                        break;
+                    }
+                },
+            }
+        }
 
         Ok(())
     }
