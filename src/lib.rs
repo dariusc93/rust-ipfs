@@ -924,7 +924,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         //TODO: Add persistent layer for kad store
         let blocks = match options.provider {
             RepoProvider::None => vec![],
-            RepoProvider::All => ipfs.repo.list_blocks().await.unwrap_or_default(),
+            RepoProvider::All => ipfs.repo.list_blocks().await.collect::<Vec<_>>().await,
             RepoProvider::Pinned => {
                 ipfs.repo
                     .list_pins(None)
@@ -1683,11 +1683,13 @@ impl Ipfs {
     }
 
     /// Returns a list of local blocks
-    ///
-    /// This implementation is subject to change into a stream, which might only include the pinned
-    /// blocks.
-    pub async fn refs_local(&self) -> Result<Vec<Cid>, Error> {
-        self.repo.list_blocks().instrument(self.span.clone()).await
+    pub async fn refs_local(&self) -> Vec<Cid> {
+        self.repo
+            .list_blocks()
+            .instrument(self.span.clone())
+            .await
+            .collect::<Vec<_>>()
+            .await
     }
 
     /// Returns local listening addresses

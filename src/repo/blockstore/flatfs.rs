@@ -3,11 +3,12 @@ use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
 use async_trait::async_trait;
-use futures::stream::{BoxStream, FuturesUnordered};
+use futures::stream::{self, BoxStream};
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use libipld::Cid;
 use std::io::{self, ErrorKind, Read};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReadDirStream;
@@ -17,7 +18,7 @@ use tokio_stream::wrappers::ReadDirStream;
 /// For information on path mangling, please see `block_path` and `filestem_to_block_cid`.
 #[derive(Debug)]
 pub struct FsBlockStore {
-    inner: RwLock<FsBlockStoreInner>,
+    inner: Arc<RwLock<FsBlockStoreInner>>,
 }
 
 #[derive(Debug)]
@@ -27,7 +28,7 @@ struct FsBlockStoreInner {
 
 impl FsBlockStore {
     pub fn new(path: PathBuf) -> Self {
-        let inner = RwLock::new(FsBlockStoreInner { path });
+        let inner = Arc::new(RwLock::new(FsBlockStoreInner { path }));
 
         FsBlockStore { inner }
     }
@@ -77,13 +78,22 @@ impl BlockStore for FsBlockStore {
         inner.remove(cid).await
     }
 
-    async fn remove_many(&self, blocks: &[Cid]) -> Result<BoxStream<'static, Cid>, Error> {
-        let blocks = blocks.to_vec();
-        let inner = &mut *self.inner.write().await;
-        inner.remove_many(blocks).await
+    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+        let inner = self.inner.clone();
+        let stream = async_stream::stream! {
+            let inner = &mut *inner.write().await;
+            let path = inner.path.clone();
+            for await cid in blocks
+                .map(move |cid| (cid, block_path(path.clone(), &cid)))
+                .filter_map(|(cid, path)| async move { fs::remove_file(path).await.ok().map(|_| cid) }) {
+                    yield cid;
+                }
+        };
+
+        stream.boxed()
     }
 
-    async fn list(&self) -> Result<Vec<Cid>, Error> {
+    async fn list(&self) -> BoxStream<'static, Cid> {
         let inner = &*self.inner.read().await;
         inner.list().await
     }
@@ -223,37 +233,11 @@ impl FsBlockStoreInner {
         fs::remove_file(path).await.map_err(anyhow::Error::from)
     }
 
-    async fn remove_many(&self, blocks: Vec<Cid>) -> Result<BoxStream<'static, Cid>, Error> {
-        let path = self.path.clone();
-
-        let stream = FuturesUnordered::from_iter(blocks.into_iter().map(|cid| async move { cid }))
-            .map(move |cid| (cid, block_path(path.clone(), &cid)))
-            .filter_map(|(cid, path)| async move { fs::remove_file(path).await.ok().map(|_| cid) });
-
-        Ok(stream.boxed())
-    }
-
-    // async fn cleanup(&mut self, refs: BoxStream<'_, Cid>) -> Result<Vec<Cid>, Error> {
-    //     let mut refs = refs.collect::<BTreeSet<_>>().await;
-    //     refs.extend(self.temp.keys().cloned());
-
-    //     let blocks = self.list_stream().await?;
-
-    //     let removed_blocks = blocks
-    //         .try_filter(|(cid, _)| futures::future::ready(!refs.contains(cid)))
-    //         .try_filter_map(|(cid, path)| async move {
-    //             fs::remove_file(path).await?;
-    //             Ok(Some(cid))
-    //         })
-    //         .try_collect()
-    //         .await?;
-
-    //     Ok(removed_blocks)
-    // }
-
-    async fn list_stream(&self) -> Result<BoxStream<'_, Result<(Cid, PathBuf), io::Error>>, Error> {
+    async fn list_stream(
+        &self,
+    ) -> Result<BoxStream<'static, Result<(Cid, PathBuf), io::Error>>, Error> {
         let stream = ReadDirStream::new(fs::read_dir(&self.path).await?);
-
+        let path = self.path.clone();
         Ok(stream
             .try_filter_map(|d| async move {
                 // map over the shard directories
@@ -277,8 +261,8 @@ impl FsBlockStoreInner {
                     Ok(maybe_cid)
                 })
             })
-            .try_filter_map(|cid| {
-                let path = self.path.clone();
+            .try_filter_map(move |cid| {
+                let path = path.clone();
                 async move {
                     let path = block_path(path, &cid);
                     Ok(Some((cid, path)))
@@ -287,13 +271,12 @@ impl FsBlockStoreInner {
             .boxed())
     }
 
-    async fn list(&self) -> Result<Vec<Cid>, Error> {
-        let stream = self.list_stream().await?;
-        let vec = stream
+    async fn list(&self) -> BoxStream<'static, Cid> {
+        let stream = self.list_stream().await.unwrap_or(stream::empty().boxed());
+        stream
             .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
-            .try_collect()
-            .await?;
-        Ok(vec)
+            .filter_map(|cid| futures::future::ready(cid.ok()))
+            .boxed()
     }
 }
 
@@ -420,7 +403,7 @@ mod tests {
             block_store.put(block.clone()).await.unwrap();
         }
 
-        let cids = block_store.list().await.unwrap();
+        let cids = block_store.list().await.collect::<Vec<_>>().await;
         assert_eq!(cids.len(), 3);
         for cid in cids.iter() {
             assert!(block_store.contains(cid).await.unwrap());
@@ -506,14 +489,17 @@ mod tests {
 
         let block = Block::new(cid, data.into()).unwrap();
 
-        assert_eq!(single.list().await.unwrap().len(), 0);
+        assert_eq!(single.list().await.collect::<Vec<_>>().await.len(), 0);
 
         single.put(block).await.unwrap();
 
         // compare the multihash since we store the block named as cidv1
-        assert_eq!(single.list().await.unwrap()[0].hash(), cid.hash());
+        assert_eq!(
+            single.list().await.collect::<Vec<_>>().await[0].hash(),
+            cid.hash()
+        );
 
         single.remove(&cid).await.unwrap();
-        assert_eq!(single.list().await.unwrap().len(), 0);
+        assert_eq!(single.list().await.collect::<Vec<_>>().await.len(), 0);
     }
 }

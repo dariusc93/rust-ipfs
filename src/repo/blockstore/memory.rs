@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
 use async_trait::async_trait;
-use futures::stream::BoxStream;
+use futures::stream::{self, BoxStream};
 use futures::StreamExt;
 use libipld::Cid;
 use tokio::sync::RwLock;
@@ -107,25 +107,24 @@ impl BlockStore for MemBlockStore {
         }
     }
 
-    async fn remove_many(&self, blocks: &[Cid]) -> Result<BoxStream<'static, Cid>, Error> {
+    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
         let inner = self.inner.clone();
-        let blocks = blocks.to_vec();
 
         let stream = async_stream::stream! {
             let inner = &mut *inner.write().await;
-            for cid in blocks {
+            for await cid in blocks {
                 if inner.blocks.remove(&cid).is_some() {
                     yield cid;
                 }
             }
         };
 
-        Ok(stream.boxed())
+        stream.boxed()
     }
 
-    async fn list(&self) -> Result<Vec<Cid>, Error> {
+    async fn list(&self) -> BoxStream<'static, Cid> {
         let inner = &*self.inner.read().await;
-        Ok(inner.blocks.keys().copied().collect())
+        stream::iter(inner.blocks.keys().copied().collect::<Vec<_>>()).boxed()
     }
 }
 
@@ -187,7 +186,7 @@ mod tests {
             assert!(mem_store.contains(block.cid()).await.unwrap());
         }
 
-        let cids = mem_store.list().await.unwrap();
+        let cids = mem_store.list().await.collect::<Vec<_>>().await;
         assert_eq!(cids.len(), 3);
         for cid in cids.iter() {
             assert!(mem_store.contains(cid).await.unwrap());

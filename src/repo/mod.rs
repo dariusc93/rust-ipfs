@@ -7,7 +7,7 @@ use core::fmt::Debug;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::sink::SinkExt;
-use futures::stream::{BoxStream, FuturesOrdered};
+use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
@@ -80,9 +80,9 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     /// Removes a block from the blockstore.
     async fn remove(&self, cid: &Cid) -> Result<(), Error>;
     /// Remove multiple blocks from the blockstore
-    async fn remove_many(&self, blocks: &[Cid]) -> Result<BoxStream<'static, Cid>, Error>;
+    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid>;
     /// Returns a list of the blocks (Cids), in the blockstore.
-    async fn list(&self) -> Result<Vec<Cid>, Error>;
+    async fn list(&self) -> BoxStream<'static, Cid>;
 }
 
 #[async_trait]
@@ -489,16 +489,15 @@ impl Repo {
         }
         let block_migration = {
             async move {
-                if let Ok(list) = self.list_blocks().await {
-                    for cid in list {
-                        match self.get_block_now(&cid).await {
-                            Ok(Some(block)) => match repo.inner.block_store.put(block).await {
-                                Ok(_) => {}
-                                Err(e) => error!("Error migrating {cid}: {e}"),
-                            },
-                            Ok(None) => error!("{cid} doesnt exist"),
-                            Err(e) => error!("Error getting block {cid}: {e}"),
-                        }
+                let mut stream = self.list_blocks().await;
+                while let Some(cid) = stream.next().await {
+                    match self.get_block_now(&cid).await {
+                        Ok(Some(block)) => match repo.inner.block_store.put(block).await {
+                            Ok(_) => {}
+                            Err(e) => error!("Error migrating {cid}: {e}"),
+                        },
+                        Ok(None) => error!("{cid} doesnt exist"),
+                        Err(e) => error!("Error getting block {cid}: {e}"),
                     }
                 }
             }
@@ -808,7 +807,7 @@ impl Repo {
     }
 
     /// Lists the blocks in the blockstore.
-    pub async fn list_blocks(&self) -> Result<Vec<Cid>, Error> {
+    pub async fn list_blocks(&self) -> BoxStream<'static, Cid> {
         self.inner.block_store.list().await
     }
 
@@ -830,18 +829,21 @@ impl Repo {
             false => BTreeSet::from_iter(std::iter::once(*cid)),
         };
 
-        let list = FuturesOrdered::from_iter(list.into_iter().map(|cid| async move { cid }))
-            .filter_map(|cid| async move {
-                (!self.is_pinned(&cid).await.unwrap_or_default()).then_some(cid)
-            })
-            .collect::<Vec<Cid>>()
-            .await;
+        let list = stream::iter(
+            FuturesOrdered::from_iter(list.into_iter().map(|cid| async move { cid }))
+                .filter_map(|cid| async move {
+                    (!self.is_pinned(&cid).await.unwrap_or_default()).then_some(cid)
+                })
+                .collect::<Vec<Cid>>()
+                .await,
+        )
+        .boxed();
 
         let removed = self
             .inner
             .block_store
-            .remove_many(&list)
-            .await?
+            .remove_many(list)
+            .await
             .collect::<Vec<_>>()
             .await;
 
@@ -951,22 +953,25 @@ impl Repo {
 
     /// Function to perform a basic cleanup of unpinned blocks
     pub(crate) async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
-        let blocks = BTreeSet::from_iter(self.list_blocks().await.unwrap_or_default());
+        let repo = self.clone();
 
-        let pinned = self
-            .list_pins(None)
-            .await
-            .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
-            .try_collect::<BTreeSet<_>>()
-            .await?;
+        let blocks = repo.list_blocks().await;
 
-        let unpinned_blocks = blocks.difference(&pinned).copied().collect::<Vec<_>>();
+        let stream = async_stream::stream! {
+            for await cid in blocks {
+                if repo.is_pinned(&cid).await.unwrap_or_default() {
+                    continue;
+                }
+                yield cid;
+            }
+        }
+        .boxed();
 
         let removed_blocks = self
             .inner
             .block_store
-            .remove_many(&unpinned_blocks)
-            .await?
+            .remove_many(stream)
+            .await
             .collect::<Vec<_>>()
             .await;
 

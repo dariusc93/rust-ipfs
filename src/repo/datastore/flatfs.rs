@@ -78,7 +78,6 @@ impl DataStore for FsDataStore {
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)> {
         futures::stream::empty().boxed()
     }
-
 }
 
 // PinStore is a trait from ipfs::repo implemented on FsDataStore defined at ipfs::repo::fs or

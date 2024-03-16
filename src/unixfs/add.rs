@@ -111,6 +111,7 @@ impl Stream for UnixfsAdd {
                     let wrap = self.wrap;
 
                     let stream = async_stream::stream! {
+                        let _g = repo.gc_guard().await;
 
                         let mut written = 0;
 
@@ -249,7 +250,7 @@ impl Stream for UnixfsAdd {
 
                         if pin {
                             if let Ok(false) = repo.is_pinned(&cid).await {
-                                if let Err(e) = repo.insert_pin(&cid, true, true).await {
+                                if let Err(e) = repo.pin(&cid).recursive().await {
                                     error!("Unable to pin {cid}: {e}");
                                 }
                             }
