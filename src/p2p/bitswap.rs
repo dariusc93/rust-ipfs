@@ -756,6 +756,90 @@ mod test {
     }
 
     #[tokio::test]
+    async fn notify_after_block_exchange() -> anyhow::Result<()> {
+        let (peer1, _, mut swarm1, repo) = build_swarm().await;
+        let (peer2, addr2, mut swarm2, _) = build_swarm().await;
+        let (peer3, addr3, mut swarm3, repo3) = build_swarm().await;
+
+        let block = create_block();
+
+        let cid = *block.cid();
+
+        repo.put_block(block.clone()).await?;
+
+        let opt = DialOpts::peer_id(peer2)
+            .addresses(vec![addr2.clone()])
+            .build();
+        swarm1.dial(opt)?;
+
+        let opt = DialOpts::peer_id(peer3)
+            .addresses(vec![addr3.clone()])
+            .build();
+
+        swarm2.dial(opt)?;
+        let mut peer_1_connected = false;
+        let mut peer_2_connected = false;
+        let mut peer_3_connected = false;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { .. } = event {
+                        peer_1_connected = true;
+                    }
+                }
+                event = swarm2.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        if peer_id == peer1 {
+                            peer_2_connected = true;
+                        }
+                    }
+                }
+
+                event = swarm3.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        peer_3_connected = true;
+                    }
+                }
+            }
+            if peer_1_connected && peer_2_connected && peer_3_connected {
+                break;
+            }
+        }
+        swarm2.behaviour_mut().get(&cid, &[peer1]);
+        swarm3.behaviour_mut().get(&cid, &[]);
+
+        loop {
+            tokio::select! {
+                _ = swarm1.next() => {}
+                e = swarm2.select_next_some() => {
+                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                        assert_eq!(inner_cid, cid);
+                        swarm2.behaviour_mut().notify_new_blocks(std::iter::once(cid));
+                    }
+                },
+                e = swarm3.select_next_some() => {
+                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                        assert_eq!(inner_cid, cid);
+                        break;
+                    }
+                },
+            }
+        }
+
+        let b = repo3
+            .get_block_now(&cid)
+            .await
+            .unwrap()
+            .expect("block exist");
+
+        assert_eq!(b, block);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn cancel_block_exchange() -> anyhow::Result<()> {
         let (_, _, mut swarm1, _) = build_swarm().await;
 
