@@ -13,11 +13,11 @@ version = "0.10.4"
 
 default = []
 
-experimental_stream = ["libp2p-stream"]
+experimental_stream = ["dep:libp2p-stream"]
 
-beetle_bitswap = ["beetle-bitswap-next"]
-libp2p_bitswap = ["libp2p-bitswap-next"]
-libp2p_bitswap_compat = ["libp2p_bitswap", "libp2p-bitswap-next/compat"]
+beetle_bitswap = ["dep:beetle-bitswap-next"]
+libp2p_bitswap = ["dep:libp2p-bitswap-next"]
+libp2p_bitswap_compat = ["libp2p_bitswap", "libp2p-bitswap-next?/compat"]
 
 sled_data_store = ["dep:sled"]
 redb_data_store = ["dep:redb"]
