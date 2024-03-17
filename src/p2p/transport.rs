@@ -20,9 +20,6 @@ pub(crate) type TTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TransportConfig {
-    //TODO: Remove in the future
-    pub yamux_max_buffer_size: Option<usize>,
-    pub yamux_receive_window_size: Option<u32>,
     pub timeout: Duration,
     pub dns_resolver: Option<DnsResolver>,
     pub version: UpgradeVersion,
@@ -37,8 +34,6 @@ pub struct TransportConfig {
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
-            yamux_max_buffer_size: None,
-            yamux_receive_window_size: None,
             enable_quic: true,
             // enable_websocket: false,
             // enable_secure_websocket: false,
@@ -103,8 +98,6 @@ pub(crate) fn build_transport(
     relay: Option<ClientTransport>,
     TransportConfig {
         timeout,
-        yamux_max_buffer_size,
-        yamux_receive_window_size,
         dns_resolver,
         version,
         enable_quic,
@@ -116,17 +109,7 @@ pub(crate) fn build_transport(
     let noise_config =
         noise::Config::new(&keypair).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
-    #[allow(deprecated)]
-    let yamux_config = {
-        let mut config = YamuxConfig::default();
-        if let Some(max_buffer) = yamux_max_buffer_size {
-            config.set_max_buffer_size(max_buffer);
-        }
-        if let Some(receive_window) = yamux_receive_window_size {
-            config.set_receive_window_size(receive_window);
-        }
-        config
-    };
+    let yamux_config = YamuxConfig::default();
 
     let tcp_config = GenTcpConfig::default().nodelay(true).port_reuse(true);
 
