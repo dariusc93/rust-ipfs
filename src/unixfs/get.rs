@@ -5,7 +5,7 @@ use std::{
 };
 
 use either::Either;
-use futures::{future::BoxFuture, FutureExt, Stream, StreamExt};
+use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
@@ -264,5 +264,11 @@ impl std::future::IntoFuture for UnixfsGet {
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+impl FusedStream for UnixfsGet {
+    fn is_terminated(&self) -> bool {
+        matches!(self.stream, StatusStreamState::Done) && self.core.is_none()
     }
 }

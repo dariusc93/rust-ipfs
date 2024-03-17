@@ -3,7 +3,11 @@ use std::{path::PathBuf, task::Poll};
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
 use either::Either;
-use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt, TryFutureExt};
+use futures::{
+    future::BoxFuture,
+    stream::{BoxStream, FusedStream},
+    FutureExt, Stream, StreamExt, TryFutureExt,
+};
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use tokio_util::io::ReaderStream;
 use tracing::{Instrument, Span};
@@ -317,5 +321,11 @@ impl std::future::IntoFuture for UnixfsAdd {
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+impl FusedStream for UnixfsAdd {
+    fn is_terminated(&self) -> bool {
+        matches!(self.stream, StatusStreamState::Done) && self.core.is_none()
     }
 }

@@ -1,7 +1,11 @@
 use std::{task::Poll, time::Duration};
 
 use either::Either;
-use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream, StreamExt};
+use futures::{
+    future::BoxFuture,
+    stream::{BoxStream, FusedStream},
+    FutureExt, Stream, StreamExt,
+};
 use libipld::Cid;
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
@@ -214,5 +218,11 @@ impl std::future::IntoFuture for UnixfsLs {
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+impl FusedStream for UnixfsLs {
+    fn is_terminated(&self) -> bool {
+        self.stream.is_none() && self.core.is_none()
     }
 }

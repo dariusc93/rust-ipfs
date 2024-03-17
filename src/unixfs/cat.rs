@@ -3,7 +3,7 @@ use async_stream::stream;
 use bytes::Bytes;
 use either::Either;
 use futures::future::BoxFuture;
-use futures::stream::{BoxStream, Stream};
+use futures::stream::{BoxStream, FusedStream, Stream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
@@ -265,5 +265,11 @@ impl std::future::IntoFuture for UnixfsCat {
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+impl FusedStream for UnixfsCat {
+    fn is_terminated(&self) -> bool {
+        self.stream.is_none() && self.core.is_none()
     }
 }
