@@ -1,3 +1,6 @@
+# 0.4.1
+- chore: Remove deprecated calls
+
 # 0.4.0
 - chore: Switch to using vbor4ii. [PR 137](https://github.com/dariusc93/rust-ipfs/pull/137)
 

@@ -190,7 +190,7 @@ impl Ipns {
         let record = rust_ipns::Record::new(
             &keypair,
             path_bytes.as_bytes(),
-            chrono::Duration::hours(48),
+            chrono::Duration::try_hours(48).expect("shouldnt panic"),
             seq,
             60000,
         )?;
