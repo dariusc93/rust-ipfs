@@ -1,4 +1,4 @@
-# 0.4.1
+# 0.5.0
 - chore: Remove deprecated calls
 
 # 0.4.0
