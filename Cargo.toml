@@ -45,7 +45,7 @@ bytes = "1"
 quick-protobuf = { version = "0.8" }
 quick-protobuf-codec = "0.3"
 
-unsigned-varint = { version = "0.7.1", features = ["asynchronous_codec"] }
+unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
 
 [dependencies]
 asynchronous-codec.workspace = true

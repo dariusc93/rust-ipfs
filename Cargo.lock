@@ -637,7 +637,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "unsigned-varint 0.7.2",
+ "unsigned-varint 0.8.0",
  "wasm-timer",
 ]
 
@@ -4424,7 +4424,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-subscriber",
- "unsigned-varint 0.7.2",
+ "unsigned-varint 0.8.0",
  "void",
  "wasm-timer",
  "zeroize",
