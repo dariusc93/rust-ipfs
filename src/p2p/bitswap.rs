@@ -418,32 +418,30 @@ impl Behaviour {
                 {
                     tracing::info!(%peer_id, %connection_id, block = %cid, "unable to get request from peer. Removing from slot");
                     self.pending_have_block.remove(&cid);
-                    let Some((next_peer_id, next_connection_id)) = self
+                    if let Some((next_peer_id, next_connection_id)) = self
                         .have_block
                         .get_mut(&cid)
                         .and_then(|list| list.pop_front())
-                    else {
-                        tracing::warn!(%peer_id, %connection_id, block = %cid, "no available peers available who have block");
-                        return None;
-                    };
+                    {
+                        tracing::info!(peer_id=%next_peer_id, connection_id=%next_connection_id, block = %cid, "requesting block from next peer");
 
-                    tracing::info!(peer_id=%next_peer_id, connection_id=%next_connection_id, block = %cid, "requesting block from next peer");
+                        self.pending_have_block.insert(cid, peer_id);
 
-                    self.pending_have_block.insert(cid, peer_id);
-
-                    return Some(ToSwarm::NotifyHandler {
-                        peer_id: next_peer_id,
-                        handler: NotifyHandler::One(next_connection_id),
-                        event: BitswapMessage::Request(
-                            BitswapRequest::block(cid).send_dont_have(true),
-                        ),
-                    });
+                        return Some(ToSwarm::NotifyHandler {
+                            peer_id: next_peer_id,
+                            handler: NotifyHandler::One(next_connection_id),
+                            event: BitswapMessage::Request(
+                                BitswapRequest::block(cid).send_dont_have(true),
+                            ),
+                        });
+                    }
                 }
 
                 // If there are no peers, notify swarm
                 if !self.pending_have_block.contains_key(&cid)
                     && !self.have_block.contains_key(&cid)
                 {
+                    tracing::warn!(%peer_id, %connection_id, block = %cid, "no available peers available who have block");
                     return Some(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
             }
