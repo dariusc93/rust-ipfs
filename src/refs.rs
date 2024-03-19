@@ -4,6 +4,7 @@ use crate::repo::Repo;
 use async_stream::stream;
 use futures::stream::Stream;
 use libipld::{Cid, Ipld, IpldCodec};
+use libp2p::PeerId;
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -44,6 +45,7 @@ pub(crate) struct IpldRefs {
     unique: bool,
     download_blocks: bool,
     exit_on_error: bool,
+    providers: Vec<PeerId>,
     timeout: Option<Duration>,
 }
 
@@ -54,6 +56,7 @@ impl Default for IpldRefs {
             unique: false,
             download_blocks: true,
             exit_on_error: false,
+            providers: vec![],
             timeout: None,
         }
     }
@@ -87,6 +90,18 @@ impl IpldRefs {
     /// timing out
     pub fn with_timeout(mut self, duration: Duration) -> IpldRefs {
         self.timeout = Some(duration);
+        self
+    }
+
+    /// Peer that may contain the block
+    pub fn provider(mut self, peer_id: PeerId) -> Self {
+        self.providers.push(peer_id);
+        self
+    }
+
+    /// List of peers that may contain the block
+    pub fn providers(mut self, providers: &[PeerId]) -> Self {
+        self.providers = providers.to_vec();
         self
     }
 
@@ -143,6 +158,7 @@ where
         unique,
         download_blocks: true,
         timeout: None,
+        providers: vec![],
         exit_on_error: true,
     };
     iplds_refs_inner(repo, iplds, opts).map_err(|e| match e {
@@ -172,6 +188,7 @@ where
         download_blocks,
         timeout,
         exit_on_error,
+        providers,
     } = opts;
 
     let empty_stream = max_depth.map(|n| n == 0).unwrap_or(false);
@@ -213,7 +230,7 @@ where
             let borrowed = repo.borrow();
 
             let block = if download_blocks {
-                match borrowed.get_block_with_session(None, &cid, &[], !download_blocks, timeout).await {
+                match borrowed.get_block_with_session(None, &cid, &providers, !download_blocks, timeout).await {
                     Ok(block) => block,
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);

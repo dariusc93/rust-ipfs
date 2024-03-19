@@ -61,7 +61,9 @@ use p2p::{
     IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig, RelayConfig,
     SwarmConfig, TransportConfig,
 };
-use repo::{BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoInsertPin, RepoRemovePin};
+use repo::{
+    BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
+};
 use tokio::task::JoinHandle;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Span;
@@ -1845,6 +1847,11 @@ impl Ipfs {
             Ok(_) => unreachable!(),
             Err(e) => Err(anyhow!(e)),
         }
+    }
+
+    /// Fetches the block, and, if set, recursively walk the graph loading all the blocks to the blockstore.
+    pub fn fetch(&self, cid: &Cid) -> RepoFetch {
+        self.repo.fetch(cid).span(self.span.clone())
     }
 
     /// Returns a list of peers closest to the given `PeerId`, as suggested by the DHT. The

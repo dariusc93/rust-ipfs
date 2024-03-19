@@ -1,5 +1,6 @@
 # 0.11.1
 - chore: Add logging to bitswap protocol and additional checks.
+- feat: Implemented Ipfs::fetch. 
 
 # 0.11.0
 - feat: Implemented basic bitswap protocol internally. [PR 156](httops://github.com/dariusc93/rust-ipfs/pull/156)

@@ -905,6 +905,10 @@ impl Repo {
         RepoRemovePin::new(self.clone(), *cid)
     }
 
+    pub fn fetch(&self, cid: &Cid) -> RepoFetch {
+        RepoFetch::new(self.clone(), *cid)
+    }
+
     /// Pins a given Cid recursively or directly (non-recursively).
     pub(crate) async fn insert_pin(
         &self,
@@ -1016,6 +1020,112 @@ impl Repo {
 
     pub fn data_store(&self) -> &dyn DataStore {
         &*self.inner.data_store
+    }
+}
+
+pub struct RepoFetch {
+    repo: Repo,
+    cid: Cid,
+    span: Option<Span>,
+    providers: Vec<PeerId>,
+    recursive: bool,
+    refs: crate::refs::IpldRefs,
+}
+
+impl RepoFetch {
+    pub fn new(repo: Repo, cid: Cid) -> Self {
+        Self {
+            repo,
+            cid,
+            recursive: false,
+            providers: vec![],
+            refs: Default::default(),
+            span: None,
+        }
+    }
+
+    /// Fetch blocks recursively
+    pub fn recursive(mut self) -> Self {
+        self.recursive = true;
+        self
+    }
+
+    /// Peer that may contain the block
+    pub fn provider(mut self, peer_id: PeerId) -> Self {
+        self.providers.push(peer_id);
+        self.refs = self.refs.provider(peer_id);
+        self
+    }
+
+    /// List of peers that may contain the block
+    pub fn providers(mut self, providers: &[PeerId]) -> Self {
+        self.providers = providers.to_vec();
+        self.refs = self.refs.providers(providers);
+        self
+    }
+
+    /// Fetch blocks to a specific depth
+    pub fn depth(mut self, depth: u64) -> Self {
+        self.refs = self.refs.with_max_depth(depth);
+        self
+    }
+
+    /// Duration to fetch the block from the network before
+    /// timing out
+    pub fn timeout(mut self, duration: Duration) -> Self {
+        self.refs = self.refs.with_timeout(duration);
+        self
+    }
+
+    ///
+    pub fn exit_on_error(mut self) -> Self {
+        self.refs = self.refs.with_exit_on_error();
+        self
+    }
+
+    /// Set tracing span
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+}
+
+impl std::future::IntoFuture for RepoFetch {
+    type Output = Result<(), anyhow::Error>;
+
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let cid = self.cid;
+        let span = self.span.unwrap_or(Span::current());
+        let recursive = self.recursive;
+        let repo = self.repo;
+        let span = debug_span!(parent: &span, "fetch", cid = %cid, recursive);
+        let providers = self.providers;
+        async move {
+            // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
+            let _g = repo.inner.gclock.read().await;
+            let block = repo.get_block(&cid, &providers, false).await?;
+
+            if !recursive {
+                return Ok(());
+            }
+            let ipld = block.decode::<IpldCodec, Ipld>()?;
+
+            let mut st = self
+                .refs
+                .with_only_unique()
+                .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
+                .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                .into_stream()
+                .boxed();
+
+            while let Some(_c) = st.try_next().await? {}
+
+            Ok(())
+        }
+        .instrument(span)
+        .boxed()
     }
 }
 
