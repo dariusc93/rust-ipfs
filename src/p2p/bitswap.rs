@@ -356,11 +356,17 @@ impl Behaviour {
             TaskHandle::HaveBlock { cid } => {
                 if let Entry::Occupied(mut e) = self.sent_wants.entry(cid) {
                     let list = e.get_mut();
-                    list.remove(&peer_id);
+
+                    if !list.remove(&peer_id) {
+                        tracing::warn!(%peer_id, %connection_id, block = %cid, "did not request block from peer.");
+                        return None;
+                    }
+
                     if list.is_empty() {
                         e.remove();
                     }
                 }
+
                 self.have_block
                     .entry(cid)
                     .or_default()
@@ -375,6 +381,7 @@ impl Behaviour {
 
                     e.insert(next_peer_id);
 
+                    tracing::info!(%peer_id, %connection_id, block = %cid, "requesting block");
                     // if we dont have a pending request for a block that a peer stated they have
                     // we will request it
                     return Some(ToSwarm::NotifyHandler {
@@ -391,7 +398,11 @@ impl Behaviour {
 
                 if let Entry::Occupied(mut e) = self.sent_wants.entry(cid) {
                     let list = e.get_mut();
-                    list.remove(&peer_id);
+
+                    if !list.remove(&peer_id) {
+                        tracing::warn!(%peer_id, %connection_id, block = %cid, "did not request block from peer.");
+                    }
+
                     if list.is_empty() {
                         e.remove();
                     }
@@ -405,14 +416,18 @@ impl Behaviour {
                     .map(|pid| *pid == peer_id)
                     .unwrap_or_default()
                 {
+                    tracing::info!(%peer_id, %connection_id, block = %cid, "unable to get request from peer. Removing from slot");
                     self.pending_have_block.remove(&cid);
                     let Some((next_peer_id, next_connection_id)) = self
                         .have_block
                         .get_mut(&cid)
                         .and_then(|list| list.pop_front())
                     else {
+                        tracing::warn!(%peer_id, %connection_id, block = %cid, "no available peers available who have block");
                         return None;
                     };
+
+                    tracing::info!(peer_id=%next_peer_id, connection_id=%next_connection_id, block = %cid, "requesting block from next peer");
 
                     self.pending_have_block.insert(cid, peer_id);
 
@@ -505,6 +520,7 @@ impl NetworkBehaviour for Behaviour {
     ) {
         let message = match event {
             Ok(Message::Receive { message }) => {
+                tracing::trace!(%peer_id, %connection_id, "message received");
                 if let Entry::Occupied(mut e) = self.blacklist_connections.entry(peer_id) {
                     let list = e.get_mut();
                     list.remove(&connection_id);
@@ -516,6 +532,7 @@ impl NetworkBehaviour for Behaviour {
                 message
             }
             Ok(Message::Sent) => {
+                tracing::trace!(%peer_id, %connection_id, "message sent");
                 if let Entry::Occupied(mut e) = self.blacklist_connections.entry(peer_id) {
                     let list = e.get_mut();
                     list.remove(&connection_id);
@@ -525,7 +542,8 @@ impl NetworkBehaviour for Behaviour {
                 }
                 return;
             }
-            Err(_) => {
+            Err(e) => {
+                tracing::error!(%peer_id, %connection_id, error = %e, "error sending or receiving message");
                 //TODO: Depending on the underlining error, maybe blacklist the peer from further sending/receiving
                 //      until a valid response or request is produced?
                 self.blacklist_connections
@@ -553,22 +571,28 @@ impl NetworkBehaviour for Behaviour {
             for message in messages {
                 match message {
                     BitswapMessage::Request(request) => {
+                        tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
                         if request.cancel {
+                            tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive cancel request");
                             yield TaskHandle::Cancel { cid: request.cid };
                             continue;
                         }
 
                         let Some(response) = handle_inbound_request(&repo, &request).await else {
+                            tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "unable to handle inbound request or the request has been canceled");
                             continue;
                         };
 
+                        tracing::trace!(request_cid = %request.cid, %peer_id, %connection_id, ?response, "sending response");
                         yield TaskHandle::SendResponse {
                             source: (request.cid, response),
                         }
                     }
                     BitswapMessage::Response(cid, response) => {
+                        tracing::info!(%cid, %peer_id, %connection_id, "received response");
                         match response {
                             BitswapResponse::Have(have) => {
+                                tracing::info!(%cid, %peer_id, %connection_id, have_block=have);
                                 if have {
                                     yield TaskHandle::HaveBlock { cid }
                                 } else {
@@ -576,16 +600,31 @@ impl NetworkBehaviour for Behaviour {
                                 }
                             }
                             BitswapResponse::Block(data) => {
+                                tracing::info!(block = %cid, %peer_id, %connection_id, block_size=data.len(), "received block");
+                                if repo.contains(&cid).await.unwrap_or_default() {
+                                    tracing::info!(block = %cid, %peer_id, %connection_id, "block exist locally. skipping");
+                                    continue;
+                                }
+
                                 let Ok(block) = Block::new(cid, data.to_vec()) else {
                                     // The block is invalid so we will notify the behaviour that we still dont have the block
                                     // from said peer
+                                    tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
                                     yield TaskHandle::DontHaveBlock { cid };
                                     continue;
                                 };
 
-                                _ = repo.put_block(block).await;
-
-                                yield TaskHandle::BlockStored { cid }
+                                match repo.put_block(block).await {
+                                    Ok(local_cid) => {
+                                        tracing::info!(block = %local_cid, %peer_id, %connection_id, "block stored in block store.");
+                                        yield TaskHandle::BlockStored { cid }
+                                    },
+                                    Err(e) => {
+                                        tracing::error!(block = %cid, %peer_id, %connection_id, error = %e, "error inserting block into block store");
+                                        yield TaskHandle::DontHaveBlock { cid };
+                                        continue;
+                                    }
+                                }
                             }
                         };
                     }

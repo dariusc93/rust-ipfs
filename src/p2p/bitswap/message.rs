@@ -2,7 +2,7 @@ use super::{bitswap_pb, pb::bitswap_pb::mod_Message::mod_Wantlist::WantType, pre
 use bitswap_pb::message::{BlockPresenceType, Wantlist};
 use bytes::Bytes;
 use libipld::Cid;
-use std::io;
+use std::{fmt::Debug, io};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RequestType {
@@ -81,10 +81,19 @@ impl BitswapRequest {
 }
 
 /// `Bitswap` response type
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum BitswapResponse {
     Have(bool),
     Block(Bytes),
+}
+
+impl Debug for BitswapResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BitswapResponse::Have(have) => write!(f, "Have({have})"),
+            BitswapResponse::Block(block) => write!(f, "Block({} bytes)", block.len()),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
