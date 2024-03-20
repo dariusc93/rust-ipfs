@@ -1,5 +1,5 @@
 # 0.11.2
-- feat: Implement basic bitswap ledger for tracking wantlist and requests. [PR XXX](httops://github.com/dariusc93/rust-ipfs/pull/XXX)
+- feat: Implement basic bitswap ledger for tracking wantlist and requests. [PR 169](httops://github.com/dariusc93/rust-ipfs/pull/169)
 
 # 0.11.1
 - chore: Add logging to bitswap protocol and additional checks.
