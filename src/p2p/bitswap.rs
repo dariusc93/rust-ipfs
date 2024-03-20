@@ -329,6 +329,8 @@ impl Behaviour {
                 list.retain(|(peer, id)| *peer != peer_id && *id != connection_id);
                 !list.is_empty()
             });
+
+            ledger.peer_wantlist.remove(&peer_id);
         }
     }
 
