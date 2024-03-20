@@ -248,26 +248,6 @@ impl Behaviour {
         }
     }
 
-    pub fn notify_peer_waitlist(&mut self, cid: impl IntoIterator<Item = Cid>) {
-        let blocks = cid
-            .into_iter()
-            .map(|cid| BitswapMessage::Response(cid, BitswapResponse::Have(true)))
-            .collect::<Vec<_>>();
-
-        for block in &blocks {
-            self.events.extend(
-                self.connections
-                    .keys()
-                    .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
-                    .map(|peer_id| ToSwarm::NotifyHandler {
-                        peer_id: *peer_id,
-                        handler: NotifyHandler::Any,
-                        event: block.clone(),
-                    }),
-            )
-        }
-    }
-
     fn on_connection_established(
         &mut self,
         ConnectionEstablished {
