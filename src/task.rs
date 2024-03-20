@@ -1320,8 +1320,15 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
                 #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
                 {
-                    _ = peer;
-                    let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                    let Some(bitswap) = self.swarm.behaviour().bitswap.as_ref() else {
+                        let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                        return;
+                    };
+                    let list = match peer {
+                        Some(peer_id) => bitswap.peer_wantlist(peer_id),
+                        None => bitswap.local_wantlist(),
+                    };
+                    let _ = ret.send(Ok(futures::future::ready(list).boxed()));
                 }
             }
             IpfsEvent::GetBitswapPeers(ret) => {
