@@ -493,7 +493,7 @@ impl Behaviour {
                     });
                 }
 
-                // Third notify the peers who we asked for have request but never responsed 
+                // Third notify the peers who we asked for have request but never responsed
                 let list = ledger.sent_wants.remove(&cid).unwrap_or_default();
 
                 for peer_id in list {
