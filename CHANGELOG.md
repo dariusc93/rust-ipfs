@@ -1,3 +1,6 @@
+# 0.11.3
+- fix: Use peer wantlist when notifying peers of blocks and misc cleanup
+
 # 0.11.2
 - fix: Emit event if no peers dont have a specific block.
 - feat: Implement basic bitswap ledger for tracking wantlist and requests. [PR 169](httops://github.com/dariusc93/rust-ipfs/pull/169)

@@ -226,8 +226,8 @@ impl Behaviour {
             .push_back(ToSwarm::GenerateEvent(Event::CancelBlock { cid }));
     }
 
-    // This will notify all connected peers who have the bitswap protocol that we have this block
-    // although we should probably reimplement a ledger and notify peers who have sent their want
+    // This will notify connected peers who have the bitswap protocol that we have this block
+    // if they wanted it
     pub fn notify_new_blocks(&mut self, cid: impl IntoIterator<Item = Cid>) {
         let blocks = cid.into_iter().collect::<Vec<_>>();
         //    .map(|cid| BitswapMessage::Response(cid, BitswapResponse::Have(true)))
@@ -471,7 +471,18 @@ impl Behaviour {
                 }
             }
             TaskHandle::BlockStored { cid } => {
-                ledger.pending_have_block.remove(&cid);
+                // First notify the peer that we sent a block request too
+                let peer_id = ledger.pending_have_block.remove(&cid);
+
+                if let Some(peer_id) = peer_id {
+                    self.events.push_back(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
+                    });
+                }
+
+                // Second notify the peers we who have notified us that they have the block
                 let list = ledger.have_block.remove(&cid).unwrap_or_default();
 
                 for (peer_id, connection_id) in list {
@@ -482,6 +493,18 @@ impl Behaviour {
                     });
                 }
 
+                // Third notify the peers who we asked for have request but never responsed 
+                let list = ledger.sent_wants.remove(&cid).unwrap_or_default();
+
+                for peer_id in list {
+                    self.events.push_back(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
+                    });
+                }
+
+                // Finally notify the swarm
                 return Some(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
             }
             TaskHandle::Cancel { cid } => {
