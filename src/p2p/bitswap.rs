@@ -194,7 +194,7 @@ impl Behaviour {
                     continue;
                 }
 
-                self.events.push_front(ToSwarm::NotifyHandler {
+                self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::Any,
                     event: BitswapMessage::Request(request),
@@ -204,7 +204,7 @@ impl Behaviour {
 
         if let Some(list) = ledger.have_block.remove(&cid) {
             for (peer_id, connection_id) in list {
-                self.events.push_front(ToSwarm::NotifyHandler {
+                self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(connection_id),
                     event: BitswapMessage::Request(request),
@@ -214,7 +214,7 @@ impl Behaviour {
 
         if let Some(peer_id) = ledger.pending_have_block.remove(&cid) {
             if self.connections.contains_key(&peer_id) {
-                self.events.push_front(ToSwarm::NotifyHandler {
+                self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::Any,
                     event: BitswapMessage::Request(request),
@@ -223,28 +223,40 @@ impl Behaviour {
         }
 
         self.events
-            .push_front(ToSwarm::GenerateEvent(Event::CancelBlock { cid }));
+            .push_back(ToSwarm::GenerateEvent(Event::CancelBlock { cid }));
     }
 
     // This will notify all connected peers who have the bitswap protocol that we have this block
     // although we should probably reimplement a ledger and notify peers who have sent their want
     pub fn notify_new_blocks(&mut self, cid: impl IntoIterator<Item = Cid>) {
-        let blocks = cid
-            .into_iter()
-            .map(|cid| BitswapMessage::Response(cid, BitswapResponse::Have(true)))
-            .collect::<Vec<_>>();
+        let blocks = cid.into_iter().collect::<Vec<_>>();
+        //    .map(|cid| BitswapMessage::Response(cid, BitswapResponse::Have(true)))
+        let ledger = &*self.ledger.read();
 
-        for block in &blocks {
-            self.events.extend(
-                self.connections
-                    .keys()
-                    .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
-                    .map(|peer_id| ToSwarm::NotifyHandler {
-                        peer_id: *peer_id,
-                        handler: NotifyHandler::Any,
-                        event: block.clone(),
-                    }),
-            )
+        for (peer_id, wantlist) in &ledger.peer_wantlist {
+            if !self.connections.contains_key(peer_id) {
+                continue;
+            }
+            let mut pending_wantlist = BTreeSet::new();
+            for block in &blocks {
+                if !wantlist.contains_key(block) {
+                    continue;
+                }
+
+                pending_wantlist.insert(*block);
+            }
+
+            if pending_wantlist.is_empty() {
+                continue;
+            }
+
+            for block in pending_wantlist {
+                self.events.push_back(ToSwarm::NotifyHandler {
+                    peer_id: *peer_id,
+                    handler: NotifyHandler::Any,
+                    event: BitswapMessage::Response(block, BitswapResponse::Have(true)),
+                });
+            }
         }
     }
 
@@ -463,7 +475,7 @@ impl Behaviour {
                 let list = ledger.have_block.remove(&cid).unwrap_or_default();
 
                 for (peer_id, connection_id) in list {
-                    self.events.push_front(ToSwarm::NotifyHandler {
+                    self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::One(connection_id),
                         event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
@@ -476,6 +488,7 @@ impl Behaviour {
                 if let Entry::Occupied(mut e) = ledger.peer_wantlist.entry(peer_id) {
                     let list = e.get_mut();
                     list.remove(&cid);
+                    tracing::info!(cid= %cid, %peer_id, %connection_id, "canceled block");
                     if list.is_empty() {
                         e.remove();
                     }
