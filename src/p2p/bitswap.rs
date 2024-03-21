@@ -471,6 +471,8 @@ impl Behaviour {
                 }
             }
             TaskHandle::BlockStored { cid } => {
+                ledger.local_want_list.remove(&cid);
+
                 // First notify the peer that we sent a block request too
                 let peer_id = ledger.pending_have_block.remove(&cid);
 

@@ -1,5 +1,6 @@
 # 0.11.3
 - fix: Use peer wantlist when notifying peers of blocks and misc cleanup
+- chore: Send cancel request on error or timeout
 
 # 0.11.2
 - fix: Emit event if no peers dont have a specific block.

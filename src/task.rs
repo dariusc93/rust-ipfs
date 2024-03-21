@@ -1868,7 +1868,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 };
                 bs.gets(cids, &peers);
             }
-            RepoEvent::UnwantBlock(_) => {}
+            RepoEvent::UnwantBlock(cid) => {
+                let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
+                    return;
+                };
+                bs.cancel(cid);
+            }
             RepoEvent::NewBlock(block) => {
                 let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
                     return;

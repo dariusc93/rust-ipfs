@@ -8,7 +8,7 @@ use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::BoxFuture;
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
-use futures::{FutureExt, StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
@@ -736,6 +736,13 @@ impl Repo {
             anyhow::bail!("Unable to locate missing blocks {missing:?}");
         }
 
+        // sending only fails if no one is listening anymore
+        // and that is okay with us.
+
+        let mut events = self
+            .repo_channel()
+            .ok_or(anyhow::anyhow!("Channel is not available"))?;
+
         for cid in &missing {
             let cid = *cid;
             let (tx, rx) = futures::channel::oneshot::channel();
@@ -747,6 +754,7 @@ impl Repo {
                 .push(tx);
 
             let timeout = timeout.unwrap_or(Duration::from_secs(60));
+            let mut events = events.clone();
             let task = async move {
                 let block = tokio::time::timeout(timeout, rx)
                     .await
@@ -754,16 +762,13 @@ impl Repo {
                     .map_err(|e| anyhow!("{e}"))?;
                 Ok::<_, anyhow::Error>(block)
             }
+            .map_err(move |e| {
+                _ = events.try_send(RepoEvent::UnwantBlock(cid));
+                e
+            })
             .boxed();
             blocks.push_back(task);
         }
-
-        // sending only fails if no one is listening anymore
-        // and that is okay with us.
-
-        let mut events = self
-            .repo_channel()
-            .ok_or(anyhow::anyhow!("Channel is not available"))?;
 
         events
             .send(RepoEvent::WantBlock(
