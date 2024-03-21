@@ -773,7 +773,7 @@ impl Repo {
         events
             .send(RepoEvent::WantBlock(
                 session.into(),
-                cids.to_vec(),
+                missing,
                 peers.to_vec(),
             ))
             .await
