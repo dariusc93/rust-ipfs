@@ -40,6 +40,7 @@ impl Lock for FsLock {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&self.path)?;
 
         file.try_lock_exclusive()?;
