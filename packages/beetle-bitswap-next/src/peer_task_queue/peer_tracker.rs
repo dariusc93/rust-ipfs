@@ -555,7 +555,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
@@ -635,7 +635,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
@@ -671,7 +671,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
@@ -717,7 +717,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
@@ -764,7 +764,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
@@ -798,7 +798,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
@@ -843,7 +843,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
@@ -888,7 +888,7 @@ mod tests {
             MAX_ACTIVE_WORK_PER_PEER,
         );
 
-        let tasks = vec![
+        let tasks = [
             Task {
                 topic: 1,
                 priority: 10,
