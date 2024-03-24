@@ -212,11 +212,11 @@ impl Behaviour {
             }
         }
 
-        if let Some(peer_id) = ledger.pending_have_block.remove(&cid) {
+        if let Some((peer_id, connection_id)) = ledger.pending_have_block.remove(&cid) {
             if self.connections.contains_key(&peer_id) {
                 self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
-                    handler: NotifyHandler::Any,
+                    handler: NotifyHandler::One(connection_id),
                     event: BitswapMessage::Request(request),
                 });
             }
@@ -404,7 +404,7 @@ impl Behaviour {
                         .and_then(|list| list.pop_front())
                         .expect("Valid entry");
 
-                    e.insert(next_peer_id);
+                    e.insert((next_peer_id, connection_id));
 
                     tracing::info!(%peer_id, %connection_id, block = %cid, "requesting block");
                     // if we dont have a pending request for a block that a peer stated they have
@@ -438,7 +438,7 @@ impl Behaviour {
                 if ledger
                     .pending_have_block
                     .get(&cid)
-                    .map(|pid| *pid == peer_id)
+                    .map(|(pid, cid)| *pid == peer_id && *cid == connection_id)
                     .unwrap_or_default()
                 {
                     tracing::info!(%peer_id, %connection_id, block = %cid, "unable to get request from peer. Removing from slot");
@@ -450,7 +450,9 @@ impl Behaviour {
                     {
                         tracing::info!(peer_id=%next_peer_id, connection_id=%next_connection_id, block = %cid, "requesting block from next peer");
 
-                        ledger.pending_have_block.insert(cid, peer_id);
+                        ledger
+                            .pending_have_block
+                            .insert(cid, (next_peer_id, connection_id));
 
                         return Some(ToSwarm::NotifyHandler {
                             peer_id: next_peer_id,
@@ -476,10 +478,10 @@ impl Behaviour {
                 // First notify the peer that we sent a block request too
                 let peer_id = ledger.pending_have_block.remove(&cid);
 
-                if let Some(peer_id) = peer_id {
+                if let Some((peer_id, connection_id)) = peer_id {
                     self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id,
-                        handler: NotifyHandler::Any,
+                        handler: NotifyHandler::One(connection_id),
                         event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
                     });
                 }
@@ -727,18 +729,6 @@ pub enum BitswapError {
     MaxEntryExceeded,
 }
 
-pub enum BitswapResult {
-    Response {
-        peer_id: PeerId,
-        connection_id: ConnectionId,
-        message: bitswap_pb::Message,
-    },
-    Cancel {
-        message: bitswap_pb::Message,
-    },
-    EmptyResponse,
-}
-
 pub async fn handle_inbound_request(
     from: PeerId,
     repo: &Repo,
@@ -790,7 +780,7 @@ pub struct LedgerInner {
     pub peer_wantlist: HashMap<PeerId, HashMap<Cid, i32>>,
     pub sent_wants: HashMap<Cid, HashSet<PeerId>>,
     pub have_block: HashMap<Cid, VecDeque<(PeerId, ConnectionId)>>,
-    pub pending_have_block: HashMap<Cid, PeerId>,
+    pub pending_have_block: HashMap<Cid, (PeerId, ConnectionId)>,
 }
 
 impl core::ops::Deref for Ledger {
