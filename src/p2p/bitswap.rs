@@ -406,7 +406,7 @@ impl Behaviour {
 
                     e.insert((next_peer_id, connection_id));
 
-                    tracing::info!(%peer_id, %connection_id, block = %cid, "requesting block");
+                    tracing::info!(%next_peer_id, %connection_id, block = %cid, "requesting block");
                     // if we dont have a pending request for a block that a peer stated they have
                     // we will request it
                     return Some(ToSwarm::NotifyHandler {
