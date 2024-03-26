@@ -62,11 +62,21 @@ type StreamList = SelectAll<BoxStream<'static, TaskHandle>>;
 
 #[derive(Debug)]
 enum TaskHandle {
-    SendResponse { source: (Cid, BitswapResponse) },
-    HaveBlock { cid: Cid },
-    DontHaveBlock { cid: Cid },
-    BlockStored { cid: Cid },
-    Cancel { cid: Cid },
+    SendResponse {
+        responses: Vec<(Cid, BitswapResponse)>,
+    },
+    HaveBlock {
+        cid: Cid,
+    },
+    DontHaveBlock {
+        cid: Cid,
+    },
+    BlockStored {
+        cid: Cid,
+    },
+    Cancel {
+        cid: Cid,
+    },
 }
 
 pub struct Behaviour {
@@ -375,14 +385,12 @@ impl Behaviour {
     ) -> Option<ToSwarm<<Behaviour as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>> {
         let ledger = &mut *self.ledger.write();
         match handle {
-            TaskHandle::SendResponse {
-                source: (cid, response),
-            } => {
+            TaskHandle::SendResponse { responses } => {
                 return Some(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(connection_id),
-                    event: BitswapMessage::Responses(vec![(cid, response)]),
-                })
+                    event: BitswapMessage::Responses(responses),
+                });
             }
             TaskHandle::HaveBlock { cid } => {
                 if let Entry::Occupied(mut e) = ledger.sent_wants.entry(cid) {
@@ -630,6 +638,7 @@ impl NetworkBehaviour for Behaviour {
             for message in messages {
                 match message {
                     BitswapMessage::Requests(requests) => {
+                        let mut responses = vec![];
                         for request in requests {
                             tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
                             if request.cancel {
@@ -642,11 +651,12 @@ impl NetworkBehaviour for Behaviour {
                                 tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "unable to handle inbound request or the request has been canceled");
                                 continue;
                             };
-
                             tracing::trace!(request_cid = %request.cid, %peer_id, %connection_id, ?response, "sending response");
-                            yield TaskHandle::SendResponse {
-                                source: (request.cid, response),
-                            }
+                            responses.push((request.cid, response));
+                        }
+
+                        yield TaskHandle::SendResponse {
+                            responses,
                         }
                     }
                     BitswapMessage::Responses(responses) => {
