@@ -93,11 +93,23 @@ impl Behaviour {
     }
 
     pub fn get(&mut self, cid: &Cid, providers: &[PeerId]) {
+        self.gets(vec![*cid], providers)
+    }
+
+    pub fn gets(&mut self, cids: Vec<Cid>, providers: &[PeerId]) {
         let ledger = &mut *self.ledger.write();
 
-        ledger.local_want_list.insert(*cid, 1);
-
-        let wants = ledger.sent_wants.entry(*cid).or_default();
+        let requests = cids
+            .iter()
+            .map(|cid| {
+                let request = BitswapRequest::have(*cid).send_dont_have(true);
+                if ledger.local_want_list.contains_key(cid) {
+                    return request;
+                }
+                ledger.local_want_list.insert(*cid, 1);
+                request
+            })
+            .collect::<Vec<_>>();
 
         let peers = match providers.is_empty() {
             true => {
@@ -128,19 +140,23 @@ impl Behaviour {
 
         if peers.is_empty() {
             // Since no connections, peers or providers are provided, we need to notify swarm to attempt a form of content discovery
-            self.events
-                .push_back(ToSwarm::GenerateEvent(Event::NeedBlock { cid: *cid }));
+            for cid in cids {
+                self.events
+                    .push_back(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
+            }
             return;
+        }
+
+        for cid in cids {
+            let wants = ledger.sent_wants.entry(cid).or_default();
+            for peer_id in &peers {
+                wants.insert(*peer_id);
+            }
         }
 
         let requests = peers
             .iter()
-            .map(|peer_id| {
-                (
-                    peer_id,
-                    BitswapMessage::Request(BitswapRequest::have(*cid).send_dont_have(true)),
-                )
-            })
+            .map(|peer_id| (peer_id, BitswapMessage::Requests(requests.clone())))
             .collect::<VecDeque<_>>();
 
         for (peer_id, message) in requests {
@@ -149,17 +165,10 @@ impl Behaviour {
                 handler: NotifyHandler::Any,
                 event: message,
             });
-            wants.insert(*peer_id);
         }
 
         if let Some(waker) = self.waker.take() {
             waker.wake();
-        }
-    }
-
-    pub fn gets(&mut self, cid: Vec<Cid>, providers: &[PeerId]) {
-        for cid in cid {
-            self.get(&cid, providers)
         }
     }
 
@@ -197,7 +206,7 @@ impl Behaviour {
                 self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::Any,
-                    event: BitswapMessage::Request(request),
+                    event: BitswapMessage::Requests(vec![request]),
                 });
             }
         }
@@ -207,7 +216,7 @@ impl Behaviour {
                 self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(connection_id),
-                    event: BitswapMessage::Request(request),
+                    event: BitswapMessage::Requests(vec![request]),
                 });
             }
         }
@@ -217,7 +226,7 @@ impl Behaviour {
                 self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(connection_id),
-                    event: BitswapMessage::Request(request),
+                    event: BitswapMessage::Requests(vec![request]),
                 });
             }
         }
@@ -237,26 +246,24 @@ impl Behaviour {
             if !self.connections.contains_key(peer_id) {
                 continue;
             }
-            let mut pending_wantlist = BTreeSet::new();
+            let mut pending_wantlist = Vec::new();
             for block in &blocks {
                 if !wantlist.contains_key(block) {
                     continue;
                 }
 
-                pending_wantlist.insert(*block);
+                pending_wantlist.push((*block, BitswapResponse::Have(true)));
             }
 
             if pending_wantlist.is_empty() {
                 continue;
             }
 
-            for block in pending_wantlist {
-                self.events.push_back(ToSwarm::NotifyHandler {
-                    peer_id: *peer_id,
-                    handler: NotifyHandler::Any,
-                    event: BitswapMessage::Response(block, BitswapResponse::Have(true)),
-                });
-            }
+            self.events.push_back(ToSwarm::NotifyHandler {
+                peer_id: *peer_id,
+                handler: NotifyHandler::Any,
+                event: BitswapMessage::Responses(Vec::from_iter(pending_wantlist)),
+            });
         }
     }
 
@@ -374,7 +381,7 @@ impl Behaviour {
                 return Some(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(connection_id),
-                    event: BitswapMessage::Response(cid, response),
+                    event: BitswapMessage::Responses(vec![(cid, response)]),
                 })
             }
             TaskHandle::HaveBlock { cid } => {
@@ -412,9 +419,9 @@ impl Behaviour {
                     return Some(ToSwarm::NotifyHandler {
                         peer_id: next_peer_id,
                         handler: NotifyHandler::One(connection_id),
-                        event: BitswapMessage::Request(
-                            BitswapRequest::block(cid).send_dont_have(true),
-                        ),
+                        event: BitswapMessage::Requests(vec![
+                            BitswapRequest::block(cid).send_dont_have(true)
+                        ]),
                     });
                 }
             }
@@ -457,9 +464,9 @@ impl Behaviour {
                         return Some(ToSwarm::NotifyHandler {
                             peer_id: next_peer_id,
                             handler: NotifyHandler::One(next_connection_id),
-                            event: BitswapMessage::Request(
-                                BitswapRequest::block(cid).send_dont_have(true),
-                            ),
+                            event: BitswapMessage::Requests(vec![
+                                BitswapRequest::block(cid).send_dont_have(true)
+                            ]),
                         });
                     }
                 }
@@ -482,7 +489,7 @@ impl Behaviour {
                     self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::One(connection_id),
-                        event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
+                        event: BitswapMessage::Requests(vec![BitswapRequest::cancel(cid)]),
                     });
                 }
 
@@ -493,7 +500,7 @@ impl Behaviour {
                     self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::One(connection_id),
-                        event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
+                        event: BitswapMessage::Requests(vec![BitswapRequest::cancel(cid)]),
                     });
                 }
 
@@ -504,7 +511,7 @@ impl Behaviour {
                     self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
-                        event: BitswapMessage::Request(BitswapRequest::cancel(cid)),
+                        event: BitswapMessage::Requests(vec![BitswapRequest::cancel(cid)]),
                     });
                 }
 
@@ -622,67 +629,71 @@ impl NetworkBehaviour for Behaviour {
         let stream = async_stream::stream! {
             for message in messages {
                 match message {
-                    BitswapMessage::Request(request) => {
-                        tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
-                        if request.cancel {
-                            tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive cancel request");
-                            yield TaskHandle::Cancel { cid: request.cid };
-                            continue;
-                        }
+                    BitswapMessage::Requests(requests) => {
+                        for request in requests {
+                            tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
+                            if request.cancel {
+                                tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive cancel request");
+                                yield TaskHandle::Cancel { cid: request.cid };
+                                continue;
+                            }
 
-                        let Some(response) = handle_inbound_request(peer_id, &repo, &ledger, &request).await else {
-                            tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "unable to handle inbound request or the request has been canceled");
-                            continue;
-                        };
+                            let Some(response) = handle_inbound_request(peer_id, &repo, &ledger, &request).await else {
+                                tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "unable to handle inbound request or the request has been canceled");
+                                continue;
+                            };
 
-                        tracing::trace!(request_cid = %request.cid, %peer_id, %connection_id, ?response, "sending response");
-                        yield TaskHandle::SendResponse {
-                            source: (request.cid, response),
+                            tracing::trace!(request_cid = %request.cid, %peer_id, %connection_id, ?response, "sending response");
+                            yield TaskHandle::SendResponse {
+                                source: (request.cid, response),
+                            }
                         }
                     }
-                    BitswapMessage::Response(cid, response) => {
-                        tracing::info!(%cid, %peer_id, %connection_id, "received response");
-                        if !ledger.read().local_want_list.contains_key(&cid) {
-                            tracing::info!(%cid, %peer_id, %connection_id, "did not request block. Ignoring response.");
-                            continue;
-                        }
-                        match response {
-                            BitswapResponse::Have(have) => {
-                                tracing::info!(%cid, %peer_id, %connection_id, have_block=have);
-                                if have {
-                                    yield TaskHandle::HaveBlock { cid }
-                                } else {
-                                    yield TaskHandle::DontHaveBlock { cid }
-                                }
+                    BitswapMessage::Responses(responses) => {
+                        for (cid, response) in responses {
+                            tracing::info!(%cid, %peer_id, %connection_id, "received response");
+                            if !ledger.read().local_want_list.contains_key(&cid) {
+                                tracing::info!(%cid, %peer_id, %connection_id, "did not request block. Ignoring response.");
+                                continue;
                             }
-                            BitswapResponse::Block(data) => {
-                                tracing::info!(block = %cid, %peer_id, %connection_id, block_size=data.len(), "received block");
-                                if repo.contains(&cid).await.unwrap_or_default() {
-                                    tracing::info!(block = %cid, %peer_id, %connection_id, "block exist locally. skipping");
-                                    continue;
-                                }
-
-                                let Ok(block) = Block::new(cid, data.to_vec()) else {
-                                    // The block is invalid so we will notify the behaviour that we still dont have the block
-                                    // from said peer
-                                    tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
-                                    yield TaskHandle::DontHaveBlock { cid };
-                                    continue;
-                                };
-
-                                match repo.put_block(block).await {
-                                    Ok(local_cid) => {
-                                        tracing::info!(block = %local_cid, %peer_id, %connection_id, "block stored in block store.");
-                                        yield TaskHandle::BlockStored { cid }
-                                    },
-                                    Err(e) => {
-                                        tracing::error!(block = %cid, %peer_id, %connection_id, error = %e, "error inserting block into block store");
-                                        yield TaskHandle::DontHaveBlock { cid };
-                                        continue;
+                            match response {
+                                BitswapResponse::Have(have) => {
+                                    tracing::info!(%cid, %peer_id, %connection_id, have_block=have);
+                                    if have {
+                                        yield TaskHandle::HaveBlock { cid }
+                                    } else {
+                                        yield TaskHandle::DontHaveBlock { cid }
                                     }
                                 }
-                            }
-                        };
+                                BitswapResponse::Block(data) => {
+                                    tracing::info!(block = %cid, %peer_id, %connection_id, block_size=data.len(), "received block");
+                                    if repo.contains(&cid).await.unwrap_or_default() {
+                                        tracing::info!(block = %cid, %peer_id, %connection_id, "block exist locally. skipping");
+                                        continue;
+                                    }
+
+                                    let Ok(block) = Block::new(cid, data.to_vec()) else {
+                                        // The block is invalid so we will notify the behaviour that we still dont have the block
+                                        // from said peer
+                                        tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
+                                        yield TaskHandle::DontHaveBlock { cid };
+                                        continue;
+                                    };
+
+                                    match repo.put_block(block).await {
+                                        Ok(local_cid) => {
+                                            tracing::info!(block = %local_cid, %peer_id, %connection_id, "block stored in block store.");
+                                            yield TaskHandle::BlockStored { cid }
+                                        },
+                                        Err(e) => {
+                                            tracing::error!(block = %cid, %peer_id, %connection_id, error = %e, "error inserting block into block store");
+                                            yield TaskHandle::DontHaveBlock { cid };
+                                            continue;
+                                        }
+                                    }
+                                }
+                            };
+                        }
                     }
                 };
             }
