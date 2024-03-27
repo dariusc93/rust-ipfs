@@ -283,7 +283,7 @@ impl Behaviour {
             self.events.push_back(ToSwarm::NotifyHandler {
                 peer_id: *peer_id,
                 handler: NotifyHandler::Any,
-                event: BitswapMessage::Responses(Vec::from_iter(pending_wantlist)),
+                event: BitswapMessage::Responses(pending_wantlist),
             });
         }
     }
