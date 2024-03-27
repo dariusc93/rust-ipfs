@@ -231,7 +231,18 @@ impl Behaviour {
             }
         }
 
-        if let Some((peer_id, connection_id)) = ledger.pending_have_block.remove(&cid) {
+        let mut pending = vec![];
+
+        ledger
+            .pending_have_block
+            .retain(|(peer_id, connection_id), list| {
+                if list.remove(&cid) {
+                    pending.push((*peer_id, *connection_id));
+                }
+                !list.is_empty()
+            });
+
+        for (peer_id, connection_id) in pending {
             if self.connections.contains_key(&peer_id) {
                 self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
@@ -283,6 +294,7 @@ impl Behaviour {
             connection_id,
             peer_id,
             endpoint,
+            other_established,
             ..
         }: ConnectionEstablished,
     ) {
@@ -295,6 +307,10 @@ impl Behaviour {
         let mut futs = SelectAll::new();
         futs.push(futures::stream::pending().boxed());
         self.tasks.insert((peer_id, connection_id), futs);
+
+        if other_established > 0 {
+            return;
+        }
         self.send_wants(peer_id);
     }
 
@@ -371,22 +387,14 @@ impl Behaviour {
 
     fn send_wants(&mut self, peer_id: PeerId) {
         let list = Vec::from_iter(self.ledger.read().local_want_list.keys().copied());
-
-        for cid in list {
-            self.get(&cid, &[peer_id]);
-        }
+        self.gets(list, &[peer_id]);
     }
 
-    fn process_handle(
-        &mut self,
-        peer_id: PeerId,
-        connection_id: ConnectionId,
-        handle: TaskHandle,
-    ) -> Option<ToSwarm<<Behaviour as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>> {
+    fn process_handle(&mut self, peer_id: PeerId, connection_id: ConnectionId, handle: TaskHandle) {
         let ledger = &mut *self.ledger.write();
         match handle {
             TaskHandle::SendResponse { responses } => {
-                return Some(ToSwarm::NotifyHandler {
+                self.events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(connection_id),
                     event: BitswapMessage::Responses(responses),
@@ -396,15 +404,14 @@ impl Behaviour {
                 if let Entry::Occupied(mut e) = ledger.sent_wants.entry(cid) {
                     let list = e.get_mut();
 
-                    if !list.remove(&peer_id) {
-                        tracing::warn!(%peer_id, %connection_id, block = %cid, "did not request block from peer.");
-                        return None;
-                    }
+                    list.remove(&peer_id);
 
                     if list.is_empty() {
                         e.remove();
                     }
                 }
+
+                tracing::info!(%peer_id, %connection_id, block = %cid, "has block. Pushing into queue");
 
                 ledger
                     .have_block
@@ -412,25 +419,36 @@ impl Behaviour {
                     .or_default()
                     .push_back((peer_id, connection_id));
 
-                if let Entry::Vacant(e) = ledger.pending_have_block.entry(cid) {
+                if !ledger
+                    .pending_have_block
+                    .iter()
+                    .any(|((_, _), list)| list.contains(&cid))
+                {
                     let (next_peer_id, connection_id) = ledger
                         .have_block
                         .get_mut(&cid)
                         .and_then(|list| list.pop_front())
                         .expect("Valid entry");
 
-                    e.insert((next_peer_id, connection_id));
+                    tracing::debug!(%peer_id, %connection_id, %cid, ?ledger.pending_have_block, "pending have block");
 
-                    tracing::info!(%next_peer_id, %connection_id, block = %cid, "requesting block");
-                    // if we dont have a pending request for a block that a peer stated they have
-                    // we will request it
-                    return Some(ToSwarm::NotifyHandler {
-                        peer_id: next_peer_id,
-                        handler: NotifyHandler::One(connection_id),
-                        event: BitswapMessage::Requests(vec![
-                            BitswapRequest::block(cid).send_dont_have(true)
-                        ]),
-                    });
+                    if ledger
+                        .pending_have_block
+                        .entry((peer_id, connection_id))
+                        .or_default()
+                        .insert(cid)
+                    {
+                        tracing::info!(%next_peer_id, %connection_id, block = %cid, "requesting block");
+                        // if we dont have a pending request for a block that a peer stated they have
+                        // we will request it
+                        self.events.push_back(ToSwarm::NotifyHandler {
+                            peer_id: next_peer_id,
+                            handler: NotifyHandler::One(connection_id),
+                            event: BitswapMessage::Requests(vec![
+                                BitswapRequest::block(cid).send_dont_have(true)
+                            ]),
+                        });
+                    }
                 }
             }
             TaskHandle::DontHaveBlock { cid } => {
@@ -450,14 +468,29 @@ impl Behaviour {
 
                 // If the peer for whatever reason sent this after stating they did have the block, remove their pending status,
                 // and move to the next available peer in the have list
-                if ledger
-                    .pending_have_block
-                    .get(&cid)
-                    .map(|(pid, cid)| *pid == peer_id && *cid == connection_id)
-                    .unwrap_or_default()
+                tracing::info!(%peer_id, %connection_id, block = %cid, "doesnt have block");
+
+                let mut change_provider = false;
+
+                if let Entry::Occupied(mut e) =
+                    ledger.pending_have_block.entry((peer_id, connection_id))
                 {
-                    tracing::info!(%peer_id, %connection_id, block = %cid, "unable to get request from peer. Removing from slot");
-                    ledger.pending_have_block.remove(&cid);
+                    let list = e.get_mut();
+                    if list.remove(&cid) {
+                        change_provider = true;
+                        tracing::info!(%peer_id, %connection_id, block = %cid, "canceling request from peer");
+                        self.events.push_back(ToSwarm::NotifyHandler {
+                            peer_id,
+                            handler: NotifyHandler::One(connection_id),
+                            event: BitswapMessage::Requests(vec![BitswapRequest::cancel(cid)]),
+                        });
+                    }
+                    if list.is_empty() {
+                        e.remove();
+                    }
+                };
+
+                if change_provider {
                     if let Some((next_peer_id, next_connection_id)) = ledger
                         .have_block
                         .get_mut(&cid)
@@ -467,9 +500,11 @@ impl Behaviour {
 
                         ledger
                             .pending_have_block
-                            .insert(cid, (next_peer_id, connection_id));
+                            .entry((next_peer_id, next_connection_id))
+                            .or_default()
+                            .insert(cid);
 
-                        return Some(ToSwarm::NotifyHandler {
+                        self.events.push_back(ToSwarm::NotifyHandler {
                             peer_id: next_peer_id,
                             handler: NotifyHandler::One(next_connection_id),
                             event: BitswapMessage::Requests(vec![
@@ -480,31 +515,46 @@ impl Behaviour {
                 }
 
                 // If there are no peers, notify swarm
-                if !ledger.pending_have_block.contains_key(&cid)
-                    && !ledger.have_block.contains_key(&cid)
-                {
-                    tracing::warn!(%peer_id, %connection_id, block = %cid, "no available peers available who have block");
-                    return Some(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
+                if !change_provider && !ledger.have_block.contains_key(&cid) {
+                    tracing::warn!(block = %cid, "no available peers available who have block");
+                    self.events
+                        .push_back(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
             }
             TaskHandle::BlockStored { cid } => {
+                tracing::info!(%peer_id, %connection_id, block = %cid, "block is received by peer. removing from local wantlist");
                 ledger.local_want_list.remove(&cid);
 
+                tracing::debug!(block = %cid, "notifying pending_have_block");
                 // First notify the peer that we sent a block request too
-                let peer_id = ledger.pending_have_block.remove(&cid);
+                let mut pending = vec![];
 
-                if let Some((peer_id, connection_id)) = peer_id {
-                    self.events.push_back(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::One(connection_id),
-                        event: BitswapMessage::Requests(vec![BitswapRequest::cancel(cid)]),
+                ledger
+                    .pending_have_block
+                    .retain(|(peer_id, connection_id), list| {
+                        if list.remove(&cid) {
+                            pending.push((*peer_id, *connection_id));
+                        }
+                        !list.is_empty()
                     });
+
+                for (peer_id, connection_id) in pending {
+                    if self.connections.contains_key(&peer_id) {
+                        tracing::info!(%peer_id, %connection_id, block = %cid, "sending cancel request to pending_have_block");
+                        self.events.push_back(ToSwarm::NotifyHandler {
+                            peer_id,
+                            handler: NotifyHandler::One(connection_id),
+                            event: BitswapMessage::Requests(vec![BitswapRequest::cancel(cid)]),
+                        });
+                    }
                 }
 
                 // Second notify the peers we who have notified us that they have the block
                 let list = ledger.have_block.remove(&cid).unwrap_or_default();
 
                 for (peer_id, connection_id) in list {
+                    tracing::debug!(%peer_id, %connection_id, block = %cid, "canceling request");
+
                     self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::One(connection_id),
@@ -516,6 +566,7 @@ impl Behaviour {
                 let list = ledger.sent_wants.remove(&cid).unwrap_or_default();
 
                 for peer_id in list {
+                    tracing::info!(%peer_id, block = %cid, "canceling request");
                     self.events.push_back(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
@@ -524,7 +575,8 @@ impl Behaviour {
                 }
 
                 // Finally notify the swarm
-                return Some(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
+                self.events
+                    .push_back(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
             }
             TaskHandle::Cancel { cid } => {
                 if let Entry::Occupied(mut e) = ledger.peer_wantlist.entry(peer_id) {
@@ -537,7 +589,11 @@ impl Behaviour {
                 }
             }
         }
-        None
+
+        // wake task to progress
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
     }
 }
 
@@ -639,9 +695,15 @@ impl NetworkBehaviour for Behaviour {
                 match message {
                     BitswapMessage::Requests(requests) => {
                         let mut responses = vec![];
+                        let mut cancelled = HashSet::new();
                         for request in requests {
-                            tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
+                            tracing::debug!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
+                            if cancelled.contains(&request.cid) {
+                                tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "request was previously cancelled. skipping");
+                                continue;
+                            }
                             if request.cancel {
+                                cancelled.insert(request.cid);
                                 tracing::info!(request_cid = %request.cid, %peer_id, %connection_id, "receive cancel request");
                                 yield TaskHandle::Cancel { cid: request.cid };
                                 continue;
@@ -679,6 +741,7 @@ impl NetworkBehaviour for Behaviour {
                                     tracing::info!(block = %cid, %peer_id, %connection_id, block_size=data.len(), "received block");
                                     if repo.contains(&cid).await.unwrap_or_default() {
                                         tracing::info!(block = %cid, %peer_id, %connection_id, "block exist locally. skipping");
+                                        yield TaskHandle::BlockStored { cid };
                                         continue;
                                     }
 
@@ -729,9 +792,7 @@ impl NetworkBehaviour for Behaviour {
         while let Poll::Ready(Some(((peer_id, connection_id), handle))) =
             self.tasks.poll_next_unpin(ctx)
         {
-            if let Some(event) = self.process_handle(peer_id, connection_id, handle) {
-                return Poll::Ready(event);
-            }
+            self.process_handle(peer_id, connection_id, handle);
         }
 
         self.waker = Some(ctx.waker().clone());
@@ -801,7 +862,7 @@ pub struct LedgerInner {
     pub peer_wantlist: HashMap<PeerId, HashMap<Cid, i32>>,
     pub sent_wants: HashMap<Cid, HashSet<PeerId>>,
     pub have_block: HashMap<Cid, VecDeque<(PeerId, ConnectionId)>>,
-    pub pending_have_block: HashMap<Cid, (PeerId, ConnectionId)>,
+    pub pending_have_block: HashMap<(PeerId, ConnectionId), HashSet<Cid>>,
 }
 
 impl core::ops::Deref for Ledger {
