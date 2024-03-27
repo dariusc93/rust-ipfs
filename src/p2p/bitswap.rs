@@ -434,7 +434,7 @@ impl Behaviour {
 
                     if ledger
                         .pending_have_block
-                        .entry((peer_id, connection_id))
+                        .entry((next_peer_id, connection_id))
                         .or_default()
                         .insert(cid)
                     {
