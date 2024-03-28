@@ -127,19 +127,14 @@ impl BitswapMessage {
             responses.push((cid, BitswapResponse::Block(Bytes::from(payload.data))))
         }
 
-        if !responses.is_empty() {
-            messages.push(BitswapMessage::Responses(responses));
-        }
-
-        let mut presences = vec![];
         for presence in message.blockPresences {
             let cid = Cid::try_from(presence.cid).map_err(io::Error::other)?;
             let have = presence.type_pb == BlockPresenceType::Have;
-            presences.push((cid, BitswapResponse::Have(have)));
+            responses.push((cid, BitswapResponse::Have(have)));
         }
 
-        if !presences.is_empty() {
-            messages.push(BitswapMessage::Responses(presences));
+        if !responses.is_empty() {
+            messages.push(BitswapMessage::Responses(responses));
         }
 
         Ok(messages)
