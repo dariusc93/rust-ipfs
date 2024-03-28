@@ -96,20 +96,41 @@ impl Debug for BitswapResponse {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum BitswapMessage {
-    Requests(Vec<BitswapRequest>),
-    Responses(Vec<(Cid, BitswapResponse)>),
+#[derive(Default, Clone, Debug)]
+pub struct BitswapMessage {
+    pub requests: Vec<BitswapRequest>,
+    pub responses: Vec<(Cid, BitswapResponse)>,
 }
 
 impl BitswapMessage {
-    pub fn from_proto(message: bitswap_pb::Message) -> io::Result<Vec<BitswapMessage>> {
-        let mut messages = vec![];
+    pub fn add_request(mut self, request: BitswapRequest) -> Self {
+        self.requests.push(request);
+        self
+    }
+
+    pub fn set_requests(mut self, requests: Vec<BitswapRequest>) -> Self {
+        self.requests = requests;
+        self
+    }
+
+    pub fn add_response(mut self, cid: Cid, response: BitswapResponse) -> Self {
+        self.responses.push((cid, response));
+        self
+    }
+
+    pub fn set_responses(mut self, responses: Vec<(Cid, BitswapResponse)>) -> Self {
+        self.responses = responses;
+        self
+    }
+}
+
+impl BitswapMessage {
+    pub fn from_proto(message: bitswap_pb::Message) -> io::Result<BitswapMessage> {
+        let mut bitswap_message = Self::default();
         if let Some(list) = message.wantlist {
-            let mut requests = vec![];
             for entry in list.entries {
                 let cid = Cid::try_from(entry.block).map_err(io::Error::other)?;
-                requests.push(BitswapRequest {
+                bitswap_message.requests.push(BitswapRequest {
                     ty: entry.wantType.into(),
                     cid,
                     send_dont_have: entry.sendDontHave,
@@ -117,76 +138,75 @@ impl BitswapMessage {
                     priority: entry.priority,
                 });
             }
-            messages.push(BitswapMessage::Requests(requests));
         }
 
-        let mut responses = vec![];
         for payload in message.payload {
             let prefix = Prefix::new(&payload.prefix).map_err(io::Error::other)?;
             let cid = prefix.to_cid(&payload.data).map_err(io::Error::other)?;
-            responses.push((cid, BitswapResponse::Block(Bytes::from(payload.data))))
+            bitswap_message
+                .responses
+                .push((cid, BitswapResponse::Block(Bytes::from(payload.data))));
         }
 
         for presence in message.blockPresences {
             let cid = Cid::try_from(presence.cid).map_err(io::Error::other)?;
             let have = presence.type_pb == BlockPresenceType::Have;
-            responses.push((cid, BitswapResponse::Have(have)));
+            bitswap_message
+                .responses
+                .push((cid, BitswapResponse::Have(have)));
         }
 
-        if !responses.is_empty() {
-            messages.push(BitswapMessage::Responses(responses));
-        }
-
-        Ok(messages)
+        Ok(bitswap_message)
     }
 
     pub fn into_proto(self) -> std::io::Result<bitswap_pb::Message> {
         let mut msg = bitswap_pb::Message::default();
-        match self {
-            Self::Requests(requests) => {
-                let mut wantlist = Wantlist::default();
-                for BitswapRequest {
-                    ty,
-                    cid,
-                    send_dont_have,
-                    cancel,
-                    priority,
-                } in requests
-                {
-                    wantlist.entries.push(bitswap_pb::message::wantlist::Entry {
-                        block: cid.to_bytes(),
-                        wantType: ty.into(),
-                        sendDontHave: send_dont_have,
-                        cancel,
-                        priority,
+        let BitswapMessage {
+            requests,
+            responses,
+        } = self;
+
+        let mut wantlist = Wantlist::default();
+        for BitswapRequest {
+            ty,
+            cid,
+            send_dont_have,
+            cancel,
+            priority,
+        } in requests
+        {
+            wantlist.entries.push(bitswap_pb::message::wantlist::Entry {
+                block: cid.to_bytes(),
+                wantType: ty.into(),
+                sendDontHave: send_dont_have,
+                cancel,
+                priority,
+            });
+        }
+
+        msg.wantlist = Some(wantlist);
+
+        for (cid, response) in responses {
+            match response {
+                BitswapResponse::Have(have) => {
+                    msg.blockPresences.push(bitswap_pb::message::BlockPresence {
+                        cid: cid.to_bytes(),
+                        type_pb: if have {
+                            BlockPresenceType::Have
+                        } else {
+                            BlockPresenceType::DontHave
+                        },
                     });
                 }
-
-                msg.wantlist = Some(wantlist);
-            }
-            Self::Responses(responses) => {
-                for (cid, response) in responses {
-                    match response {
-                        BitswapResponse::Have(have) => {
-                            msg.blockPresences.push(bitswap_pb::message::BlockPresence {
-                                cid: cid.to_bytes(),
-                                type_pb: if have {
-                                    BlockPresenceType::Have
-                                } else {
-                                    BlockPresenceType::DontHave
-                                },
-                            });
-                        }
-                        BitswapResponse::Block(bytes) => {
-                            msg.payload.push(bitswap_pb::message::Block {
-                                prefix: Prefix::from(cid).to_bytes(),
-                                data: bytes.to_vec(),
-                            });
-                        }
-                    }
+                BitswapResponse::Block(bytes) => {
+                    msg.payload.push(bitswap_pb::message::Block {
+                        prefix: Prefix::from(cid).to_bytes(),
+                        data: bytes.to_vec(),
+                    });
                 }
             }
-        };
+        }
+
         Ok(msg)
     }
 }
