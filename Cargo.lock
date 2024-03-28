@@ -4394,6 +4394,7 @@ dependencies = [
  "either",
  "fs2",
  "futures",
+ "futures-bounded",
  "futures-timer",
  "hex-literal",
  "hickory-resolver",
