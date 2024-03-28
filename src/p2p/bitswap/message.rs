@@ -127,7 +127,9 @@ impl BitswapMessage {
             responses.push((cid, BitswapResponse::Block(Bytes::from(payload.data))))
         }
 
-        messages.push(BitswapMessage::Responses(responses));
+        if !responses.is_empty() {
+            messages.push(BitswapMessage::Responses(responses));
+        }
 
         let mut presences = vec![];
         for presence in message.blockPresences {
@@ -136,7 +138,9 @@ impl BitswapMessage {
             presences.push((cid, BitswapResponse::Have(have)));
         }
 
-        messages.push(BitswapMessage::Responses(presences));
+        if !presences.is_empty() {
+            messages.push(BitswapMessage::Responses(presences));
+        }
 
         Ok(messages)
     }
