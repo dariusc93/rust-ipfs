@@ -817,16 +817,6 @@ impl NetworkBehaviour for Behaviour {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum BitswapError {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error("Supplied wantlist is empty")]
-    EmptyWantList,
-    #[error("Entries exceeded max")]
-    MaxEntryExceeded,
-}
-
 pub async fn handle_inbound_request(
     from: PeerId,
     repo: &Repo,
