@@ -258,6 +258,7 @@ impl Behaviour {
 
         for (peer_id, wantlist) in &ledger.peer_wantlist {
             if !self.connections.contains_key(peer_id) {
+                tracing::warn!(%peer_id, "peer is unexpectedly not connected");
                 continue;
             }
             let mut message = BitswapMessage::default();
@@ -336,9 +337,9 @@ impl Behaviour {
             }
         }
 
-        self.tasks.remove(&peer_id);
-
         if remaining_established == 0 {
+            self.tasks.remove(&peer_id);
+
             ledger.sent_wants.retain(|_, list| {
                 list.remove(&peer_id);
                 !list.is_empty()
@@ -688,19 +689,9 @@ impl NetworkBehaviour for Behaviour {
             self.process_handle(peer_id, TaskHandle::Cancel { cid: request.cid });
         }
 
-        // let (responses, unwanted_responses): (Vec<_>, Vec<_>) = responses
-        //     .into_iter()
-        //     .partition(|(cid, _)| ledger.read().local_want_list.contains_key(cid));
-
-        // if !unwanted_responses.is_empty() {
-        //     // TODO: if the responses exceed a specific num we should blacklist this peer
-        //     println!("{:?}", unwanted_responses);
-        //     tracing::warn!(%peer_id, %connection_id, unwanted_responses=unwanted_responses.len(), "received unwanted responses from peer");
-        // }
-
         // We check again in case the intended requests and responses are actually empty after filtering
         if requests.is_empty() && responses.is_empty() {
-            tracing::warn!(%peer_id, %connection_id, "received an empty message after filtering");
+            tracing::warn!(%peer_id, %connection_id, "no request or responses available");
             return;
         }
 
