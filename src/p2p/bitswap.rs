@@ -98,20 +98,6 @@ impl Behaviour {
     }
 
     pub fn gets(&mut self, cids: Vec<Cid>, providers: &[PeerId]) {
-        let ledger = &mut *self.ledger.write();
-
-        let requests = cids
-            .iter()
-            .map(|cid| {
-                let request = BitswapRequest::have(*cid).send_dont_have(true);
-                if ledger.local_want_list.contains_key(cid) {
-                    return request;
-                }
-                ledger.local_want_list.insert(*cid, 1);
-                request
-            })
-            .collect::<Vec<_>>();
-
         let peers = match providers.is_empty() {
             true => {
                 //If no providers are provided, we can send requests connected peers
@@ -119,7 +105,7 @@ impl Behaviour {
                     .keys()
                     .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
                     .copied()
-                    .collect::<VecDeque<_>>()
+                    .collect::<Vec<_>>()
             }
             false => {
                 let mut connected = VecDeque::new();
@@ -135,9 +121,13 @@ impl Behaviour {
 
                     self.events.push_back(ToSwarm::Dial { opts });
                 }
-                connected
+                Vec::from_iter(connected)
             }
         };
+
+        for cid in &cids {
+            self.ledger.write().local_want_list.insert(*cid, 1);
+        }
 
         if peers.is_empty() {
             // Since no connections, peers or providers are provided, we need to notify swarm to attempt a form of content discovery
@@ -148,34 +138,7 @@ impl Behaviour {
             return;
         }
 
-        for cid in cids {
-            let wants = ledger.sent_wants.entry(cid).or_default();
-            for peer_id in &peers {
-                wants.insert(*peer_id);
-            }
-        }
-
-        let requests = peers
-            .iter()
-            .map(|peer_id| {
-                (
-                    peer_id,
-                    BitswapMessage::default().set_requests(requests.clone()),
-                )
-            })
-            .collect::<VecDeque<_>>();
-
-        for (peer_id, message) in requests {
-            self.events.push_back(ToSwarm::NotifyHandler {
-                peer_id: *peer_id,
-                handler: NotifyHandler::Any,
-                event: message,
-            });
-        }
-
-        if let Some(waker) = self.waker.take() {
-            waker.wake();
-        }
+        self.send_wants(peers)
     }
 
     pub fn local_wantlist(&self) -> Vec<Cid> {
@@ -306,7 +269,7 @@ impl Behaviour {
         futs.push(futures::stream::pending().boxed());
         self.tasks.insert(peer_id, futs);
 
-        self.send_wants(peer_id);
+        self.send_wants(vec![peer_id]);
     }
 
     fn on_connection_close(
@@ -380,9 +343,47 @@ impl Behaviour {
         }
     }
 
-    fn send_wants(&mut self, peer_id: PeerId) {
-        let list = Vec::from_iter(self.ledger.read().local_want_list.keys().copied());
-        self.gets(list, &[peer_id]);
+    fn send_wants(&mut self, peers: Vec<PeerId>) {
+        let ledger = &mut *self.ledger.write();
+        let list = Vec::from_iter(ledger.local_want_list.keys().copied());
+
+        if list.is_empty() {
+            return;
+        }
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
+
+        let requests = list
+            .iter()
+            .map(|cid| BitswapRequest::have(*cid).send_dont_have(true))
+            .collect::<Vec<_>>();
+
+        for cid in list {
+            let wants = ledger.sent_wants.entry(cid).or_default();
+            for peer_id in &peers {
+                wants.insert(*peer_id);
+            }
+        }
+
+        let requests = peers
+            .into_iter()
+            .map(|peer_id| {
+                (
+                    peer_id,
+                    BitswapMessage::default().set_requests(requests.clone()),
+                )
+            })
+            .collect::<VecDeque<_>>();
+
+        for (peer_id, message) in requests {
+            self.events.push_back(ToSwarm::NotifyHandler {
+                peer_id,
+                handler: NotifyHandler::Any,
+                event: message,
+            });
+        }
     }
 
     fn process_handle(&mut self, peer_id: PeerId, handle: TaskHandle) {
@@ -822,14 +823,13 @@ pub async fn handle_inbound_request(
         RequestType::Have => {
             let have = repo.contains(&request.cid).await.unwrap_or_default();
 
-            ledger
-                .write()
-                .peer_wantlist
-                .entry(from)
-                .or_default()
-                .insert(request.cid, request.priority);
-
             if have || request.send_dont_have {
+                ledger
+                    .write()
+                    .peer_wantlist
+                    .entry(from)
+                    .or_default()
+                    .insert(request.cid, request.priority);
                 Some(BitswapResponse::Have(have))
             } else {
                 None
