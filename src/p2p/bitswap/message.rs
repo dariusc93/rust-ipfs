@@ -2,7 +2,7 @@ use super::{bitswap_pb, pb::bitswap_pb::mod_Message::mod_Wantlist::WantType, pre
 use bitswap_pb::message::{BlockPresenceType, Wantlist};
 use bytes::Bytes;
 use libipld::Cid;
-use std::{fmt::Debug, io};
+use std::{fmt::Debug, hash::Hash, io};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RequestType {
@@ -29,13 +29,31 @@ impl From<RequestType> for WantType {
 }
 
 /// `Bitswap` request type
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq)]
 pub struct BitswapRequest {
     pub ty: RequestType,
     pub cid: Cid,
     pub send_dont_have: bool,
     pub cancel: bool,
     pub priority: i32,
+}
+
+impl Hash for BitswapRequest {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Hash::hash(&self.cid, state)
+    }
+}
+
+impl PartialEq for BitswapRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.cid.eq(&other.cid)
+    }
+}
+
+impl PartialOrd for BitswapRequest {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.priority.cmp(&other.priority))
+    }
 }
 
 impl BitswapRequest {
