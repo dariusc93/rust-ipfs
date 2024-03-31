@@ -697,7 +697,7 @@ impl NetworkBehaviour for Behaviour {
         }
 
         // split the haves and blocks from the responses
-        let (haves, blocks): (Vec<_>, Vec<_>) = responses
+        let (haves, blocks): (HashMap<_, _>, HashMap<_, _>) = responses
             .into_iter()
             .partition(|(_, res)| matches!(res, BitswapResponse::Have(_)));
 
@@ -823,17 +823,15 @@ pub async fn handle_inbound_request(
         RequestType::Have => {
             let have = repo.contains(&request.cid).await.unwrap_or_default();
 
-            if have || request.send_dont_have {
+            (have || request.send_dont_have).then(|| {
                 ledger
                     .write()
                     .peer_wantlist
                     .entry(from)
                     .or_default()
                     .insert(request.cid, request.priority);
-                Some(BitswapResponse::Have(have))
-            } else {
-                None
-            }
+                BitswapResponse::Have(have)
+            })
         }
         RequestType::Block => {
             let block = repo.get_block_now(&request.cid).await.unwrap_or_default();

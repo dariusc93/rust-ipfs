@@ -2,7 +2,7 @@ use super::{bitswap_pb, pb::bitswap_pb::mod_Message::mod_Wantlist::WantType, pre
 use bitswap_pb::message::{BlockPresenceType, Wantlist};
 use bytes::Bytes;
 use libipld::Cid;
-use std::{fmt::Debug, hash::Hash, io};
+use std::{collections::HashMap, fmt::Debug, hash::Hash, io};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RequestType {
@@ -117,7 +117,7 @@ impl Debug for BitswapResponse {
 #[derive(Default, Clone, Debug)]
 pub struct BitswapMessage {
     pub requests: Vec<BitswapRequest>,
-    pub responses: Vec<(Cid, BitswapResponse)>,
+    pub responses: HashMap<Cid, BitswapResponse>,
 }
 
 impl BitswapMessage {
@@ -132,12 +132,12 @@ impl BitswapMessage {
     }
 
     pub fn add_response(mut self, cid: Cid, response: BitswapResponse) -> Self {
-        self.responses.push((cid, response));
+        self.responses.insert(cid, response);
         self
     }
 
     pub fn set_responses(mut self, responses: Vec<(Cid, BitswapResponse)>) -> Self {
-        self.responses = responses;
+        self.responses = HashMap::from_iter(responses);
         self
     }
 }
@@ -163,7 +163,7 @@ impl BitswapMessage {
             let cid = prefix.to_cid(&payload.data).map_err(io::Error::other)?;
             bitswap_message
                 .responses
-                .push((cid, BitswapResponse::Block(Bytes::from(payload.data))));
+                .insert(cid, BitswapResponse::Block(Bytes::from(payload.data)));
         }
 
         for presence in message.blockPresences {
@@ -171,7 +171,7 @@ impl BitswapMessage {
             let have = presence.type_pb == BlockPresenceType::Have;
             bitswap_message
                 .responses
-                .push((cid, BitswapResponse::Have(have)));
+                .insert(cid, BitswapResponse::Have(have));
         }
 
         Ok(bitswap_message)
