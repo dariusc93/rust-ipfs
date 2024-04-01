@@ -67,7 +67,6 @@ enum TaskHandle {
     HaveBlock { cid: Cid },
     DontHaveBlock { cid: Cid },
     BlockStored { cid: Cid },
-    Cancel { cid: Cid },
 }
 
 pub struct Behaviour {
@@ -504,7 +503,9 @@ impl Behaviour {
             }
             TaskHandle::BlockStored { cid } => {
                 tracing::info!(%peer_id, block = %cid, "block is received by peer. removing from local wantlist");
-                ledger.local_want_list.remove(&cid);
+                if ledger.local_want_list.remove(&cid).is_none() {
+                    return;
+                }
 
                 let message = BitswapMessage::default().add_request(BitswapRequest::cancel(cid));
 
@@ -556,16 +557,6 @@ impl Behaviour {
                 // Finally notify the swarm
                 self.events
                     .push_back(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
-            }
-            TaskHandle::Cancel { cid } => {
-                if let Entry::Occupied(mut e) = ledger.peer_wantlist.entry(peer_id) {
-                    let list = e.get_mut();
-                    list.remove(&cid);
-                    tracing::info!(cid= %cid, %peer_id, "canceled block");
-                    if list.is_empty() {
-                        e.remove();
-                    }
-                }
             }
         }
 
@@ -685,9 +676,45 @@ impl NetworkBehaviour for Behaviour {
         let (requests, canceled_requests): (Vec<_>, Vec<_>) =
             requests.into_iter().partition(|req| !req.cancel);
 
+        // Remove cid from peer wantlist if cancelled
+        let mut cancelled = HashSet::new();
+
+        // Note: If the cancel request is sent along side a have request, it will cancel both out.
         for request in canceled_requests {
+            if !cancelled.insert(request.cid) {
+                continue;
+            }
             tracing::info!(cid = %request.cid, %peer_id, %connection_id, "receive cancel request");
-            self.process_handle(peer_id, TaskHandle::Cancel { cid: request.cid });
+            if let Entry::Occupied(mut e) = ledger.write().peer_wantlist.entry(peer_id) {
+                let list = e.get_mut();
+                list.remove(&request.cid);
+                tracing::info!(cid= %request.cid, %peer_id, "canceled block");
+                if list.is_empty() {
+                    e.remove();
+                }
+            }
+        }
+
+        let requests = requests
+            .into_iter()
+            .filter(|req| !cancelled.contains(&req.cid))
+            .collect::<Vec<_>>();
+
+        let responses = responses
+            .into_iter()
+            .filter(|(cid, _)| !cancelled.contains(cid))
+            .collect::<Vec<_>>();
+
+        // add peer wantlist into ledger
+        for request in &requests {
+            if request.ty == RequestType::Have {
+                ledger
+                    .write()
+                    .peer_wantlist
+                    .entry(peer_id)
+                    .or_default()
+                    .insert(request.cid, request.priority);
+            }
         }
 
         // We check again in case the intended requests and responses are actually empty after filtering
@@ -702,15 +729,20 @@ impl NetworkBehaviour for Behaviour {
             .partition(|(_, res)| matches!(res, BitswapResponse::Have(_)));
 
         for (cid, response) in haves {
-            match response {
-                BitswapResponse::Have(true) => {
-                    self.process_handle(peer_id, TaskHandle::HaveBlock { cid })
+            if let BitswapResponse::Have(have) = response {
+                match have {
+                    true => self.process_handle(peer_id, TaskHandle::HaveBlock { cid }),
+                    false => self.process_handle(peer_id, TaskHandle::DontHaveBlock { cid }),
                 }
-                BitswapResponse::Have(false) => {
-                    self.process_handle(peer_id, TaskHandle::DontHaveBlock { cid })
-                }
-                _ => unreachable!("blocks filtered out from haves"),
             }
+        }
+
+        let (blocks, unwanted_blocks): (HashMap<_, _>, HashMap<_, _>) = blocks
+            .into_iter()
+            .partition(|(cid, _)| ledger.read().local_want_list.contains_key(cid));
+
+        for (cid, _) in unwanted_blocks {
+            tracing::info!(%cid, %peer_id, %connection_id, "did not request block. Ignoring response.");
         }
 
         let task_handler = self
@@ -721,65 +753,55 @@ impl NetworkBehaviour for Behaviour {
             .expect("connection exist");
 
         let stream = async_stream::stream! {
-
-                let mut message = BitswapMessage::default();
-                for request in requests {
-                    tracing::debug!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
-                    if request.cancel {
-                        tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "receive cancel request although it was previous filtered out");
-                        continue;
-                    }
-
-                    let Some(response) = handle_inbound_request(peer_id, &repo, &ledger, &request).await else {
-                        tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "unable to handle inbound request or the request has been canceled");
-                        continue;
-                    };
-                    tracing::trace!(request_cid = %request.cid, %peer_id, %connection_id, ?response, "sending response");
-                    message = message.add_response(request.cid, response);
+            let mut message = BitswapMessage::default();
+            for request in requests {
+                tracing::debug!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
+                if request.cancel {
+                    tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "receive cancel request although it was previous filtered out");
+                    continue;
                 }
 
-                for (cid, response) in blocks {
-                    tracing::info!(%cid, %peer_id, %connection_id, "received response");
-                    if !ledger.read().local_want_list.contains_key(&cid) {
-                        tracing::info!(%cid, %peer_id, %connection_id, "did not request block. Ignoring response.");
+                let Some(response) = handle_inbound_request(&repo, &request).await else {
+                    tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "unable to handle inbound request or the request has been canceled");
+                    continue;
+                };
+                tracing::trace!(request_cid = %request.cid, %peer_id, %connection_id, ?response, "sending response");
+                message = message.add_response(request.cid, response);
+            }
+
+            yield TaskHandle::SendMessage { message };
+
+            for (cid, response) in blocks {
+                tracing::info!(%cid, %peer_id, %connection_id, "received response");
+                if let BitswapResponse::Block(data) = response {
+                    tracing::info!(block = %cid, %peer_id, %connection_id, block_size=data.len(), "received block");
+                    if repo.contains(&cid).await.unwrap_or_default() {
+                        tracing::info!(block = %cid, %peer_id, %connection_id, "block exist locally. skipping");
+                        yield TaskHandle::BlockStored { cid };
                         continue;
                     }
-                    match response {
-                        BitswapResponse::Have(_) => unreachable!(),
-                        BitswapResponse::Block(data) => {
-                            tracing::info!(block = %cid, %peer_id, %connection_id, block_size=data.len(), "received block");
-                            if repo.contains(&cid).await.unwrap_or_default() {
-                                tracing::info!(block = %cid, %peer_id, %connection_id, "block exist locally. skipping");
-                                yield TaskHandle::BlockStored { cid };
-                                continue;
-                            }
 
-                            let Ok(block) = Block::new(cid, data.to_vec()) else {
-                                // The block is invalid so we will notify the behaviour that we still dont have the block
-                                // from said peer
-                                tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
-                                yield TaskHandle::DontHaveBlock { cid };
-                                continue;
-                            };
+                    let Ok(block) = Block::new(cid, data.to_vec()) else {
+                        // The block is invalid so we will notify the behaviour that we still dont have the block
+                        // from said peer
+                        tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
+                        yield TaskHandle::DontHaveBlock { cid };
+                        continue;
+                    };
 
-                            match repo.put_block(block).await {
-                                Ok(local_cid) => {
-                                    tracing::info!(block = %local_cid, %peer_id, %connection_id, "block stored in block store.");
-                                    yield TaskHandle::BlockStored { cid }
-                                },
-                                Err(e) => {
-                                    tracing::error!(block = %cid, %peer_id, %connection_id, error = %e, "error inserting block into block store");
-                                    yield TaskHandle::DontHaveBlock { cid };
-                                    continue;
-                                }
-                            }
+                    match repo.put_block(block).await {
+                        Ok(local_cid) => {
+                            tracing::info!(block = %local_cid, %peer_id, %connection_id, "block stored in block store.");
+                            yield TaskHandle::BlockStored { cid }
+                        },
+                        Err(e) => {
+                            tracing::error!(block = %cid, %peer_id, %connection_id, error = %e, "error inserting block into block store");
+                            yield TaskHandle::DontHaveBlock { cid };
+                            continue;
                         }
-                    };
+                    }
                 }
-
-                yield TaskHandle::SendMessage {
-                    message,
-                }
+            }
         };
 
         task_handler.push(stream.boxed());
@@ -810,9 +832,7 @@ impl NetworkBehaviour for Behaviour {
 }
 
 pub async fn handle_inbound_request(
-    from: PeerId,
     repo: &Repo,
-    ledger: &Ledger,
     request: &BitswapRequest,
 ) -> Option<BitswapResponse> {
     if request.cancel {
@@ -822,16 +842,7 @@ pub async fn handle_inbound_request(
     match request.ty {
         RequestType::Have => {
             let have = repo.contains(&request.cid).await.unwrap_or_default();
-
-            (have || request.send_dont_have).then(|| {
-                ledger
-                    .write()
-                    .peer_wantlist
-                    .entry(from)
-                    .or_default()
-                    .insert(request.cid, request.priority);
-                BitswapResponse::Have(have)
-            })
+            (have || request.send_dont_have).then(|| BitswapResponse::Have(have))
         }
         RequestType::Block => {
             let block = repo.get_block_now(&request.cid).await.unwrap_or_default();
