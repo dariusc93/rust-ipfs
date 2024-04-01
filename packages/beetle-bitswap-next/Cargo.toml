@@ -15,7 +15,7 @@ async-broadcast = "0.5.1"
 async-channel = "1.8.0"
 async-stream = "0.3.5"
 async-trait = "0.1.68"
-asynchronous-codec = "0.6"
+asynchronous-codec = "0.7"
 
 bytes = "1.4"
 cid = "0.10"
