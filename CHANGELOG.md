@@ -1,3 +1,6 @@
+# 0.11.5
+- fix: Check for relay when storing address based on connection. [PR 170](httops://github.com/dariusc93/rust-ipfs/pull/170)
+
 # 0.11.4
 - fix: Send a wantlist of missing blocks.
 
