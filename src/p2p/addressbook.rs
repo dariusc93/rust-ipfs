@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
 
@@ -7,8 +7,9 @@ use libp2p::{
     core::{ConnectedPoint, Endpoint},
     multiaddr::Protocol,
     swarm::{
-        self, dummy::ConnectionHandler as DummyConnectionHandler, AddressChange, ConnectionDenied,
-        ConnectionId, FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
+        self, behaviour::ConnectionEstablished, dummy::ConnectionHandler as DummyConnectionHandler,
+        AddressChange, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
+        THandlerInEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -22,7 +23,7 @@ pub struct Config {
 #[derive(Default, Debug)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
-    peer_addresses: HashMap<PeerId, Vec<Multiaddr>>,
+    peer_addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     config: Config,
 }
 
@@ -38,29 +39,20 @@ impl Behaviour {
             addr.pop();
         }
 
-        match self.peer_addresses.entry(peer_id) {
-            Entry::Occupied(mut e) => {
-                let entry = e.get_mut();
-                if entry.contains(&addr) {
-                    return false;
-                }
-
-                entry.push(addr);
-            }
-            Entry::Vacant(e) => {
-                e.insert(vec![addr]);
-            }
-        }
-        true
+        self.peer_addresses.entry(peer_id).or_default().insert(addr)
     }
 
     pub fn remove_address(&mut self, peer_id: &PeerId, addr: &Multiaddr) -> bool {
         if let Entry::Occupied(mut e) = self.peer_addresses.entry(*peer_id) {
             let entry = e.get_mut();
-            if !entry.contains(addr) {
+
+            if !entry.remove(addr) {
                 return false;
             }
-            entry.retain(|item| addr.ne(item));
+
+            if entry.is_empty() {
+                e.remove();
+            }
         }
         true
     }
@@ -70,16 +62,20 @@ impl Behaviour {
     }
 
     pub fn contains(&self, peer_id: &PeerId, addr: &Multiaddr) -> bool {
-        self.get_peer_addresses(peer_id)
-            .map(|list| !list.is_empty() && list.contains(addr))
+        self.peer_addresses
+            .get(peer_id)
+            .map(|list| list.contains(addr))
             .unwrap_or_default()
     }
 
-    pub fn get_peer_addresses(&self, peer_id: &PeerId) -> Option<&Vec<Multiaddr>> {
-        self.peer_addresses.get(peer_id)
+    pub fn get_peer_addresses(&self, peer_id: &PeerId) -> Option<Vec<Multiaddr>> {
+        self.peer_addresses
+            .get(peer_id)
+            .cloned()
+            .map(Vec::from_iter)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&PeerId, &Vec<Multiaddr>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&PeerId, &HashSet<Multiaddr>)> {
         self.peer_addresses.iter()
     }
 }
@@ -88,15 +84,6 @@ impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = DummyConnectionHandler;
     type ToSwarm = void::Void;
 
-    fn handle_pending_inbound_connection(
-        &mut self,
-        _: ConnectionId,
-        _: &Multiaddr,
-        _: &Multiaddr,
-    ) -> Result<(), ConnectionDenied> {
-        Ok(())
-    }
-
     fn handle_pending_outbound_connection(
         &mut self,
         _: ConnectionId,
@@ -104,65 +91,36 @@ impl NetworkBehaviour for Behaviour {
         _: &[Multiaddr],
         _: Endpoint,
     ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
-        if let Some(peer_id) = peer_id {
-            if let Entry::Occupied(e) = self.peer_addresses.entry(peer_id) {
-                return Ok(e.get().clone());
-            }
-        }
-        Ok(vec![])
+        let Some(peer_id) = peer_id else {
+            return Ok(vec![]);
+        };
+
+        let list = self
+            .peer_addresses
+            .get(&peer_id)
+            .map(|list| Vec::from_iter(list.clone()))
+            .unwrap_or_default();
+
+        Ok(list)
     }
 
     fn handle_established_inbound_connection(
         &mut self,
         _: ConnectionId,
-        peer_id: PeerId,
+        _: PeerId,
         _: &Multiaddr,
-        remote: &Multiaddr,
+        _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        if self.config.store_on_connection {
-            let mut addr = remote.clone();
-            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-                addr.pop();
-            }
-            match self.peer_addresses.entry(peer_id) {
-                Entry::Occupied(mut e) => {
-                    let entry = e.get_mut();
-                    if !entry.contains(&addr) {
-                        entry.push(addr);
-                    }
-                }
-                Entry::Vacant(e) => {
-                    e.insert(vec![addr]);
-                }
-            }
-        }
         Ok(DummyConnectionHandler)
     }
 
     fn handle_established_outbound_connection(
         &mut self,
         _: ConnectionId,
-        peer_id: PeerId,
-        addr: &Multiaddr,
+        _: PeerId,
+        _: &Multiaddr,
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        if self.config.store_on_connection {
-            let mut addr = addr.clone();
-            if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-                addr.pop();
-            }
-            match self.peer_addresses.entry(peer_id) {
-                Entry::Occupied(mut e) => {
-                    let entry = e.get_mut();
-                    if !entry.contains(&addr) {
-                        entry.push(addr);
-                    }
-                }
-                Entry::Vacant(e) => {
-                    e.insert(vec![addr]);
-                }
-            }
-        }
         Ok(DummyConnectionHandler)
     }
 
@@ -181,6 +139,9 @@ impl NetworkBehaviour for Behaviour {
             }) => {
                 let mut old = match old {
                     ConnectedPoint::Dialer { address, .. } => address.clone(),
+                    ConnectedPoint::Listener { local_addr, .. } if old.is_relayed() => {
+                        local_addr.clone()
+                    }
                     ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
                 };
 
@@ -190,6 +151,9 @@ impl NetworkBehaviour for Behaviour {
 
                 let mut new = match new {
                     ConnectedPoint::Dialer { address, .. } => address.clone(),
+                    ConnectedPoint::Listener { local_addr, .. } if new.is_relayed() => {
+                        local_addr.clone()
+                    }
                     ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
                 };
 
@@ -199,16 +163,27 @@ impl NetworkBehaviour for Behaviour {
 
                 if let Entry::Occupied(mut e) = self.peer_addresses.entry(peer_id) {
                     let entry = e.get_mut();
-                    if !entry.contains(&new) {
-                        entry.push(new);
-                    }
-
-                    if entry.contains(&old) {
-                        entry.retain(|addr| addr != &old);
-                    }
+                    entry.insert(new);
+                    entry.remove(&old);
                 }
             }
-            FromSwarm::ConnectionEstablished(_) => {}
+            FromSwarm::ConnectionEstablished(ConnectionEstablished {
+                peer_id, endpoint, ..
+            }) => {
+                if !self.config.store_on_connection {
+                    return;
+                }
+
+                let addr = match endpoint {
+                    ConnectedPoint::Dialer { address, .. } => address.clone(),
+                    ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
+                        local_addr.clone()
+                    }
+                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
+                };
+
+                self.peer_addresses.entry(peer_id).or_default().insert(addr);
+            }
             FromSwarm::ConnectionClosed(_) => {}
             FromSwarm::DialFailure(_) => {}
             FromSwarm::ListenFailure(_) => {}
@@ -333,7 +308,6 @@ mod test {
         let addrs = swarm1
             .behaviour()
             .get_peer_addresses(&peer2)
-            .cloned()
             .expect("Exist");
 
         for addr in addrs {
