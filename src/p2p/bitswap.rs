@@ -5,7 +5,6 @@ mod protocol;
 
 use std::{
     collections::{hash_map::Entry, BTreeSet, HashMap, HashSet, VecDeque},
-    sync::Arc,
     task::{Context, Poll, Waker},
     time::Duration,
 };
@@ -26,7 +25,6 @@ use libp2p::{
     },
     Multiaddr, PeerId,
 };
-use parking_lot::RwLock;
 use tokio_stream::StreamMap;
 
 mod bitswap_pb {
@@ -125,7 +123,7 @@ impl Behaviour {
         };
 
         for cid in &cids {
-            self.ledger.write().local_want_list.insert(*cid, 1);
+            self.ledger.local_want_list.insert(*cid, 1);
         }
 
         if peers.is_empty() {
@@ -141,12 +139,12 @@ impl Behaviour {
     }
 
     pub fn local_wantlist(&self) -> Vec<Cid> {
-        let ledger = &*self.ledger.read();
+        let ledger = &self.ledger;
         ledger.local_want_list.keys().copied().collect()
     }
 
     pub fn peer_wantlist(&self, peer_id: PeerId) -> Vec<Cid> {
-        let ledger = &*self.ledger.read();
+        let ledger = &self.ledger;
         ledger
             .peer_wantlist
             .get(&peer_id)
@@ -157,7 +155,7 @@ impl Behaviour {
     // Note: This is called specifically to cancel the request and not just emitting a request
     //       after receiving a request.
     pub fn cancel(&mut self, cid: Cid) {
-        let ledger = &mut *self.ledger.write();
+        let ledger = &mut self.ledger;
 
         if ledger.local_want_list.remove(&cid).is_none() {
             return;
@@ -216,7 +214,7 @@ impl Behaviour {
     // if they wanted it
     pub fn notify_new_blocks(&mut self, cid: impl IntoIterator<Item = Cid>) {
         let blocks = cid.into_iter().collect::<Vec<_>>();
-        let ledger = &*self.ledger.read();
+        let ledger = &self.ledger;
 
         for (peer_id, wantlist) in &ledger.peer_wantlist {
             if !self.connections.contains_key(peer_id) {
@@ -281,7 +279,7 @@ impl Behaviour {
             ..
         }: ConnectionClosed,
     ) {
-        let ledger = &mut *self.ledger.write();
+        let ledger = &mut self.ledger;
         let address = endpoint.get_remote_address().clone();
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let list = entry.get_mut();
@@ -334,7 +332,7 @@ impl Behaviour {
             return;
         }
 
-        let ledger = &mut *self.ledger.write();
+        let ledger = &mut self.ledger;
 
         // Remove entry from all wants
         for list in ledger.sent_wants.values_mut() {
@@ -343,7 +341,7 @@ impl Behaviour {
     }
 
     fn send_wants(&mut self, peers: Vec<PeerId>) {
-        let ledger = &mut *self.ledger.write();
+        let ledger = &mut self.ledger;
         let list = Vec::from_iter(ledger.local_want_list.keys().copied());
 
         if list.is_empty() {
@@ -386,7 +384,7 @@ impl Behaviour {
     }
 
     fn process_handle(&mut self, peer_id: PeerId, handle: TaskHandle) {
-        let ledger = &mut *self.ledger.write();
+        let ledger = &mut self.ledger;
         match handle {
             TaskHandle::SendMessage { message } => {
                 self.events.push_back(ToSwarm::NotifyHandler {
@@ -658,7 +656,6 @@ impl NetworkBehaviour for Behaviour {
         };
 
         let repo = self.store.clone();
-        let ledger = self.ledger.clone();
 
         let BitswapMessage {
             requests,
@@ -685,7 +682,7 @@ impl NetworkBehaviour for Behaviour {
                 continue;
             }
             tracing::info!(cid = %request.cid, %peer_id, %connection_id, "receive cancel request");
-            if let Entry::Occupied(mut e) = ledger.write().peer_wantlist.entry(peer_id) {
+            if let Entry::Occupied(mut e) = self.ledger.peer_wantlist.entry(peer_id) {
                 let list = e.get_mut();
                 list.remove(&request.cid);
                 tracing::info!(cid= %request.cid, %peer_id, "canceled block");
@@ -708,8 +705,7 @@ impl NetworkBehaviour for Behaviour {
         // add peer wantlist into ledger
         for request in &requests {
             if request.ty == RequestType::Have {
-                ledger
-                    .write()
+                self.ledger
                     .peer_wantlist
                     .entry(peer_id)
                     .or_default()
@@ -739,7 +735,7 @@ impl NetworkBehaviour for Behaviour {
 
         let (blocks, unwanted_blocks): (HashMap<_, _>, HashMap<_, _>) = blocks
             .into_iter()
-            .partition(|(cid, _)| ledger.read().local_want_list.contains_key(cid));
+            .partition(|(cid, _)| self.ledger.local_want_list.contains_key(cid));
 
         for (cid, _) in unwanted_blocks {
             tracing::info!(%cid, %peer_id, %connection_id, "did not request block. Ignoring response.");
@@ -857,25 +853,13 @@ pub async fn handle_inbound_request(
     }
 }
 
-#[derive(Default, Clone)]
-pub struct Ledger {
-    inner: Arc<RwLock<LedgerInner>>,
-}
-
 #[derive(Default)]
-pub struct LedgerInner {
+pub struct Ledger {
     pub local_want_list: HashMap<Cid, i32>,
     pub peer_wantlist: HashMap<PeerId, HashMap<Cid, i32>>,
     pub sent_wants: HashMap<Cid, HashSet<PeerId>>,
     pub have_block: HashMap<Cid, VecDeque<PeerId>>,
     pub pending_have_block: HashMap<PeerId, HashSet<Cid>>,
-}
-
-impl core::ops::Deref for Ledger {
-    type Target = Arc<RwLock<LedgerInner>>;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
 }
 
 #[cfg(test)]
