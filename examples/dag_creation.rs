@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Create a DAG
-    let cid1: libipld::cid::CidGeneric<64> = ipfs.put_dag(ipld!("block1")).await?;
+    let cid1 = ipfs.put_dag(ipld!("block1")).await?;
     let cid2 = ipfs.put_dag(ipld!("block2")).await?;
     let root = ipld!([cid1, cid2]);
     let cid = ipfs.put_dag(root).await?;

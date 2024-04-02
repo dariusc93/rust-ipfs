@@ -1394,7 +1394,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         .behaviour()
                         .addressbook
                         .get_peer_addresses(&peer_id)
-                        .cloned()
                         .unwrap_or_default()
                 };
 

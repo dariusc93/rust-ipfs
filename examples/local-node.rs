@@ -19,7 +19,6 @@ async fn main() -> anyhow::Result<()> {
         .with_relay(true)
         .with_relay_server(Default::default())
         .with_upnp()
-        .with_rendezvous_server()
         .with_custom_behaviour(ext_behaviour::Behaviour::new(local_peer_id))
         .listen_as_external_addr()
         .fd_limit(rust_ipfs::FDLimit::Max)
