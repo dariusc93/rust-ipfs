@@ -174,13 +174,17 @@ impl NetworkBehaviour for Behaviour {
                     return;
                 }
 
-                let addr = match endpoint {
+                let mut addr = match endpoint {
                     ConnectedPoint::Dialer { address, .. } => address.clone(),
                     ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
                         local_addr.clone()
                     }
                     ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
                 };
+
+                if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                    addr.pop();
+                }
 
                 self.peer_addresses.entry(peer_id).or_default().insert(addr);
             }
