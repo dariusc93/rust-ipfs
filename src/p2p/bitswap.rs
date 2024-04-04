@@ -660,7 +660,12 @@ impl NetworkBehaviour for Behaviour {
         let BitswapMessage {
             requests,
             responses,
-        } = BitswapMessage::from_proto(message).unwrap_or_default();
+        } = BitswapMessage::from_proto(message)
+            .map_err(|e| {
+                tracing::error!(error = %e, %peer_id, "unable to parse message");
+                e
+            })
+            .unwrap_or_default();
 
         if requests.is_empty() && responses.is_empty() {
             tracing::warn!(%peer_id, %connection_id, "received an empty message");
@@ -715,7 +720,6 @@ impl NetworkBehaviour for Behaviour {
 
         // We check again in case the intended requests and responses are actually empty after filtering
         if requests.is_empty() && responses.is_empty() {
-            tracing::warn!(%peer_id, %connection_id, "no request or responses available");
             return;
         }
 
@@ -765,7 +769,9 @@ impl NetworkBehaviour for Behaviour {
                 message = message.add_response(request.cid, response);
             }
 
-            yield TaskHandle::SendMessage { message };
+            if !message.is_empty() {
+                yield TaskHandle::SendMessage { message };
+            }
 
             for (cid, response) in blocks {
                 tracing::info!(%cid, %peer_id, %connection_id, "received response");
