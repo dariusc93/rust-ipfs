@@ -826,7 +826,7 @@ impl Repo {
 
         let list = match recursive {
             true => {
-                let mut list = self.recursive_collections(*cid).await?;
+                let mut list = self.recursive_collections(*cid).await;
                 // ensure the first root block is apart of the list
                 list.insert(*cid);
                 list
@@ -861,25 +861,27 @@ impl Repo {
         Ok(removed)
     }
 
-    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, anyhow::Result<BTreeSet<Cid>>> {
+    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, BTreeSet<Cid>> {
         async move {
-            let block = self
-                .get_block_now(&cid)
-                .await?
-                .ok_or(anyhow::anyhow!("Block does not exist"))?;
+            let block = match self.get_block_now(&cid).await {
+                Ok(Some(block)) => block,
+                _ => return BTreeSet::default(),
+            };
 
             let mut references: BTreeSet<Cid> = BTreeSet::new();
-            block.references(&mut references)?;
+            if block.references(&mut references).is_err() {
+                return BTreeSet::default();
+            }
 
             let mut list = BTreeSet::new();
 
             for cid in &references {
-                let mut inner_list = self.recursive_collections(*cid).await?;
+                let mut inner_list = self.recursive_collections(*cid).await;
                 list.append(&mut inner_list);
             }
 
             references.append(&mut list);
-            Ok(references)
+            references
         }
         .boxed()
     }
