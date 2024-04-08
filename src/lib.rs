@@ -1140,7 +1140,7 @@ impl Ipfs {
     pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
         self.repo
             .put_block(block)
-            .instrument(self.span.clone())
+            .span(self.span.clone())
             .await
     }
 

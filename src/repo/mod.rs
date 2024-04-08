@@ -15,6 +15,7 @@ use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
+use std::future::IntoFuture;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -646,24 +647,8 @@ impl Repo {
     }
 
     /// Puts a block into the block store.
-    pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
-        let _guard = self.inner.gclock.read().await;
-        let (cid, res) = self.inner.block_store.put(block.clone()).await?;
-
-        if let BlockPut::NewBlock = res {
-            if let Some(mut event) = self.repo_channel() {
-                _ = event.send(RepoEvent::NewBlock(block.clone())).await;
-            }
-            let list = self.inner.subscriptions.lock().remove(&cid);
-            if let Some(mut list) = list {
-                for ch in list.drain(..) {
-                    let block = block.clone();
-                    let _ = ch.send(Ok(block));
-                }
-            }
-        }
-
-        Ok(cid)
+    pub fn put_block(&self, block: Block) -> RepoPutBlock {
+        RepoPutBlock::new(self, block).broadcast_on_new_block(true)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
@@ -1027,6 +1012,67 @@ impl Repo {
 
     pub fn data_store(&self) -> &dyn DataStore {
         &*self.inner.data_store
+    }
+}
+
+pub struct RepoPutBlock {
+    repo: Repo,
+    block: Block,
+    span: Option<Span>,
+    broadcast_on_new_block: bool,
+}
+
+impl RepoPutBlock {
+    fn new(repo: &Repo, block: Block) -> Self {
+        Self {
+            repo: repo.clone(),
+            block,
+            span: None,
+            broadcast_on_new_block: true,
+        }
+    }
+
+    pub fn broadcast_on_new_block(mut self, v: bool) -> Self {
+        self.broadcast_on_new_block = v;
+        self
+    }
+
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+}
+
+impl IntoFuture for RepoPutBlock {
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    type Output = Result<Cid, Error>;
+    fn into_future(self) -> Self::IntoFuture {
+        let block = self.block;
+        let span = self.span.unwrap_or(Span::current());
+        let span = debug_span!(parent: &span, "put_block", cid = %block.cid());
+        async move {
+            let _guard = self.repo.inner.gclock.read().await;
+            let (cid, res) = self.repo.inner.block_store.put(block.clone()).await?;
+
+            if let BlockPut::NewBlock = res {
+                if self.broadcast_on_new_block {
+                    if let Some(mut event) = self.repo.repo_channel() {
+                        _ = event.send(RepoEvent::NewBlock(block.clone())).await;
+                    }
+                }
+                let list = self.repo.inner.subscriptions.lock().remove(&cid);
+                if let Some(mut list) = list {
+                    for ch in list.drain(..) {
+                        let block = block.clone();
+                        let _ = ch.send(Ok(block));
+                    }
+                }
+            }
+
+            Ok(cid)
+        }
+        .instrument(span)
+        .boxed()
     }
 }
 
