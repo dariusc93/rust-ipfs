@@ -70,8 +70,22 @@ impl From<Vec<u8>> for AddOpt {
     }
 }
 
+impl From<&'static [u8]> for AddOpt {
+    fn from(bytes: &'static [u8]) -> Self {
+        let bytes: Bytes = bytes.into();
+        Self::from(bytes)
+    }
+}
+
 impl From<(String, Vec<u8>)> for AddOpt {
     fn from((name, bytes): (String, Vec<u8>)) -> Self {
+        let bytes: Bytes = bytes.into();
+        Self::from((name, bytes))
+    }
+}
+
+impl From<(String, &'static [u8])> for AddOpt {
+    fn from((name, bytes): (String, &'static [u8])) -> Self {
         let bytes: Bytes = bytes.into();
         Self::from((name, bytes))
     }

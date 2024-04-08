@@ -1,4 +1,4 @@
-use std::{path::PathBuf, task::Poll};
+use std::{path::{Path, PathBuf}, task::Poll};
 
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
@@ -28,6 +28,12 @@ pub enum AddOpt {
 impl From<PathBuf> for AddOpt {
     fn from(path: PathBuf) -> Self {
         AddOpt::File(path)
+    }
+}
+
+impl From<&Path> for AddOpt {
+    fn from(path: &Path) -> Self {
+        AddOpt::File(path.to_path_buf())
     }
 }
 
