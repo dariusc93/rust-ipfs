@@ -5,15 +5,16 @@ mod protocol;
 
 use std::{
     collections::{hash_map::Entry, BTreeSet, HashMap, HashSet, VecDeque},
+    fmt::Debug,
+    future::IntoFuture,
+    pin::Pin,
     task::{Context, Poll, Waker},
     time::Duration,
 };
 
 use bytes::Bytes;
-use futures::{
-    stream::{BoxStream, SelectAll},
-    StreamExt,
-};
+use futures::{future::BoxFuture, ready, stream::FusedStream, FutureExt, Stream, StreamExt};
+use futures_timer::Delay;
 use libipld::Cid;
 use libp2p::{
     core::Endpoint,
@@ -57,23 +58,13 @@ pub enum Event {
     CancelBlock { cid: Cid },
 }
 
-type StreamList = SelectAll<BoxStream<'static, TaskHandle>>;
-
-#[derive(Debug)]
-enum TaskHandle {
-    SendMessage { message: BitswapMessage },
-    HaveBlock { cid: Cid },
-    DontHaveBlock { cid: Cid },
-    BlockStored { cid: Cid },
-}
-
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<(ConnectionId, Multiaddr)>>,
     blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
     store: Repo,
-    ledger: Ledger,
-    tasks: StreamMap<PeerId, StreamList>,
+    want_session: StreamMap<Cid, Session>,
+    have_session: StreamMap<Cid, HaveSession>,
     waker: Option<Waker>,
 }
 
@@ -84,8 +75,8 @@ impl Behaviour {
             connections: Default::default(),
             blacklist_connections: Default::default(),
             store: store.clone(),
-            ledger: Ledger::default(),
-            tasks: StreamMap::new(),
+            want_session: StreamMap::new(),
+            have_session: StreamMap::new(),
             waker: None,
         }
     }
@@ -123,7 +114,8 @@ impl Behaviour {
         };
 
         for cid in &cids {
-            self.ledger.local_want_list.insert(*cid, 1);
+            let session = Session::new(&self.store);
+            self.want_session.insert(*cid, session);
         }
 
         if peers.is_empty() {
@@ -139,71 +131,26 @@ impl Behaviour {
     }
 
     pub fn local_wantlist(&self) -> Vec<Cid> {
-        let ledger = &self.ledger;
-        ledger.local_want_list.keys().copied().collect()
+        self.want_session.keys().copied().collect()
     }
 
     pub fn peer_wantlist(&self, peer_id: PeerId) -> Vec<Cid> {
-        let ledger = &self.ledger;
-        ledger
-            .peer_wantlist
-            .get(&peer_id)
-            .map(|list| list.keys().copied().collect())
-            .unwrap_or_default()
+        let mut blocks = HashSet::new();
+
+        for (cid, session) in self.have_session.iter() {
+            if session.has_peer(peer_id) {
+                blocks.insert(*cid);
+            }
+        }
+
+        Vec::from_iter(blocks)
     }
 
     // Note: This is called specifically to cancel the request and not just emitting a request
     //       after receiving a request.
     pub fn cancel(&mut self, cid: Cid) {
-        let ledger = &mut self.ledger;
-
-        if ledger.local_want_list.remove(&cid).is_none() {
+        if self.want_session.remove(&cid).is_none() {
             return;
-        }
-
-        let request = BitswapMessage::default().add_request(BitswapRequest::cancel(cid));
-
-        if let Some(peers) = ledger.sent_wants.remove(&cid) {
-            for peer_id in peers {
-                if !self.connections.contains_key(&peer_id) {
-                    continue;
-                }
-
-                self.events.push_back(ToSwarm::NotifyHandler {
-                    peer_id,
-                    handler: NotifyHandler::Any,
-                    event: request.clone(),
-                });
-            }
-        }
-
-        if let Some(list) = ledger.have_block.remove(&cid) {
-            for peer_id in list {
-                self.events.push_back(ToSwarm::NotifyHandler {
-                    peer_id,
-                    handler: NotifyHandler::Any,
-                    event: request.clone(),
-                });
-            }
-        }
-
-        let mut pending = vec![];
-
-        ledger.pending_have_block.retain(|peer_id, list| {
-            if list.remove(&cid) {
-                pending.push(*peer_id);
-            }
-            !list.is_empty()
-        });
-
-        for peer_id in pending {
-            if self.connections.contains_key(&peer_id) {
-                self.events.push_back(ToSwarm::NotifyHandler {
-                    peer_id,
-                    handler: NotifyHandler::Any,
-                    event: request.clone(),
-                });
-            }
         }
 
         self.events
@@ -212,33 +159,17 @@ impl Behaviour {
 
     // This will notify connected peers who have the bitswap protocol that we have this block
     // if they wanted it
+    // TODO: Maybe have a general `Session` where we could collectively notify a peer of new blocks
+    //       in a single message
     pub fn notify_new_blocks(&mut self, cid: impl IntoIterator<Item = Cid>) {
         let blocks = cid.into_iter().collect::<Vec<_>>();
-        let ledger = &self.ledger;
 
-        for (peer_id, wantlist) in &ledger.peer_wantlist {
-            if !self.connections.contains_key(peer_id) {
-                tracing::warn!(%peer_id, "peer is unexpectedly not connected");
-                continue;
-            }
-            let mut message = BitswapMessage::default();
-            for block in &blocks {
-                if !wantlist.contains_key(block) {
-                    continue;
-                }
-
-                message = message.add_response(*block, BitswapResponse::Have(true));
-            }
-
-            if message.responses.is_empty() {
+        for (cid, session) in self.have_session.iter_mut() {
+            if !blocks.contains(cid) {
                 continue;
             }
 
-            self.events.push_back(ToSwarm::NotifyHandler {
-                peer_id: *peer_id,
-                handler: NotifyHandler::Any,
-                event: message,
-            });
+            session.reset();
         }
     }
 
@@ -262,10 +193,6 @@ impl Behaviour {
             return;
         }
 
-        let mut futs = SelectAll::new();
-        futs.push(futures::stream::pending().boxed());
-        self.tasks.insert(peer_id, futs);
-
         self.send_wants(vec![peer_id]);
     }
 
@@ -279,7 +206,6 @@ impl Behaviour {
             ..
         }: ConnectionClosed,
     ) {
-        let ledger = &mut self.ledger;
         let address = endpoint.get_remote_address().clone();
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let list = entry.get_mut();
@@ -298,19 +224,9 @@ impl Behaviour {
         }
 
         if remaining_established == 0 {
-            self.tasks.remove(&peer_id);
-
-            ledger.sent_wants.retain(|_, list| {
-                list.remove(&peer_id);
-                !list.is_empty()
-            });
-
-            ledger.have_block.retain(|_, list| {
-                list.retain(|peer| *peer != peer_id);
-                !list.is_empty()
-            });
-
-            ledger.peer_wantlist.remove(&peer_id);
+            for (_, session) in self.want_session.iter_mut() {
+                session.remove_peer(peer_id);
+            }
         }
     }
 
@@ -332,235 +248,24 @@ impl Behaviour {
             return;
         }
 
-        let ledger = &mut self.ledger;
+        for session in self.want_session.values_mut() {
+            session.remove_peer(peer_id);
+        }
 
-        // Remove entry from all wants
-        for list in ledger.sent_wants.values_mut() {
-            list.remove(&peer_id);
+        for session in self.have_session.values_mut() {
+            session.remove_peer(peer_id);
         }
     }
 
     fn send_wants(&mut self, peers: Vec<PeerId>) {
-        let ledger = &mut self.ledger;
-        let list = Vec::from_iter(ledger.local_want_list.keys().copied());
-
-        if list.is_empty() {
-            return;
-        }
-
         if let Some(waker) = self.waker.take() {
             waker.wake();
         }
 
-        let requests = list
-            .iter()
-            .map(|cid| BitswapRequest::have(*cid).send_dont_have(true))
-            .collect::<Vec<_>>();
-
-        for cid in list {
-            let wants = ledger.sent_wants.entry(cid).or_default();
+        for (_, session) in self.want_session.iter_mut() {
             for peer_id in &peers {
-                wants.insert(*peer_id);
+                session.send_have_block(*peer_id)
             }
-        }
-
-        let requests = peers
-            .into_iter()
-            .map(|peer_id| {
-                (
-                    peer_id,
-                    BitswapMessage::default().set_requests(requests.clone()),
-                )
-            })
-            .collect::<VecDeque<_>>();
-
-        for (peer_id, message) in requests {
-            self.events.push_back(ToSwarm::NotifyHandler {
-                peer_id,
-                handler: NotifyHandler::Any,
-                event: message,
-            });
-        }
-    }
-
-    fn process_handle(&mut self, peer_id: PeerId, handle: TaskHandle) {
-        let ledger = &mut self.ledger;
-        match handle {
-            TaskHandle::SendMessage { message } => {
-                self.events.push_back(ToSwarm::NotifyHandler {
-                    peer_id,
-                    handler: NotifyHandler::Any,
-                    event: message,
-                });
-            }
-            TaskHandle::HaveBlock { cid } => {
-                if let Entry::Occupied(mut e) = ledger.sent_wants.entry(cid) {
-                    let list = e.get_mut();
-
-                    list.remove(&peer_id);
-
-                    if list.is_empty() {
-                        e.remove();
-                    }
-                }
-
-                tracing::info!(%peer_id, block = %cid, "has block. Pushing into queue");
-
-                let have_block = ledger.have_block.entry(cid).or_default();
-
-                have_block.push_back(peer_id);
-
-                if !ledger
-                    .pending_have_block
-                    .iter()
-                    .any(|(_, list)| list.contains(&cid))
-                {
-                    let next_peer_id = have_block.pop_front().expect("Valid entry");
-
-                    tracing::debug!(%peer_id, %cid, ?ledger.pending_have_block, "pending have block");
-
-                    if ledger
-                        .pending_have_block
-                        .entry(next_peer_id)
-                        .or_default()
-                        .insert(cid)
-                    {
-                        tracing::info!(%next_peer_id, block = %cid, "requesting block");
-                        // if we dont have a pending request for a block that a peer stated they have
-                        // we will request it
-                        self.events.push_back(ToSwarm::NotifyHandler {
-                            peer_id: next_peer_id,
-                            handler: NotifyHandler::Any,
-                            event: BitswapMessage::default()
-                                .add_request(BitswapRequest::block(cid).send_dont_have(true)),
-                        });
-                    } else {
-                        have_block.push_back(peer_id);
-                    }
-                }
-            }
-            TaskHandle::DontHaveBlock { cid } => {
-                // Since peer does not have the block, we will remove them from the pending wants
-
-                if let Entry::Occupied(mut e) = ledger.sent_wants.entry(cid) {
-                    let list = e.get_mut();
-
-                    if !list.remove(&peer_id) {
-                        tracing::warn!(%peer_id, block = %cid, "did not request block from peer.");
-                    }
-
-                    if list.is_empty() {
-                        e.remove();
-                    }
-                }
-
-                // If the peer for whatever reason sent this after stating they did have the block, remove their pending status,
-                // and move to the next available peer in the have list
-                tracing::info!(%peer_id, block = %cid, "doesnt have block");
-
-                if let Entry::Occupied(mut e) = ledger.pending_have_block.entry(peer_id) {
-                    let list = e.get_mut();
-                    list.remove(&cid);
-
-                    tracing::info!(%peer_id, block = %cid, "canceling request from peer");
-                    self.events.push_back(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default().add_request(BitswapRequest::cancel(cid)),
-                    });
-
-                    if list.is_empty() {
-                        e.remove();
-                    }
-                };
-
-                if let Some(next_peer_id) = ledger
-                    .have_block
-                    .get_mut(&cid)
-                    .and_then(|list| list.pop_front())
-                {
-                    tracing::info!(peer_id=%next_peer_id, block = %cid, "requesting block from next peer");
-
-                    ledger
-                        .pending_have_block
-                        .entry(next_peer_id)
-                        .or_default()
-                        .insert(cid);
-
-                    self.events.push_back(ToSwarm::NotifyHandler {
-                        peer_id: next_peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_request(BitswapRequest::block(cid).send_dont_have(true)),
-                    });
-                } else {
-                    tracing::warn!(block = %cid, "no available peers available who have block");
-                    self.events
-                        .push_back(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
-                }
-            }
-            TaskHandle::BlockStored { cid } => {
-                tracing::info!(%peer_id, block = %cid, "block is received by peer. removing from local wantlist");
-                if ledger.local_want_list.remove(&cid).is_none() {
-                    return;
-                }
-
-                let message = BitswapMessage::default().add_request(BitswapRequest::cancel(cid));
-
-                tracing::debug!(block = %cid, "notifying pending_have_block");
-                // First notify the peer that we sent a block request too
-                let mut pending = vec![];
-
-                ledger.pending_have_block.retain(|peer_id, list| {
-                    if list.remove(&cid) {
-                        pending.push(*peer_id);
-                    }
-                    !list.is_empty()
-                });
-
-                for peer_id in pending {
-                    tracing::info!(%peer_id, block = %cid, "sending cancel request to pending_have_block");
-                    self.events.push_back(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: message.clone(),
-                    });
-                }
-
-                // Second notify the peers we who have notified us that they have the block
-                let list = ledger.have_block.remove(&cid).unwrap_or_default();
-
-                for peer_id in list {
-                    tracing::debug!(%peer_id, block = %cid, "canceling request");
-
-                    self.events.push_back(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: message.clone(),
-                    });
-                }
-
-                // Third notify the peers who we asked for have request but never responsed
-                let list = ledger.sent_wants.remove(&cid).unwrap_or_default();
-
-                for peer_id in list {
-                    tracing::info!(%peer_id, block = %cid, "canceling request");
-                    self.events.push_back(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: message.clone(),
-                    });
-                }
-
-                // Finally notify the swarm
-                self.events
-                    .push_back(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
-            }
-        }
-
-        // wake task to progress
-        if let Some(w) = self.waker.take() {
-            w.wake();
         }
     }
 }
@@ -655,8 +360,6 @@ impl NetworkBehaviour for Behaviour {
             }
         };
 
-        let repo = self.store.clone();
-
         let BitswapMessage {
             requests,
             responses,
@@ -687,14 +390,6 @@ impl NetworkBehaviour for Behaviour {
                 continue;
             }
             tracing::info!(cid = %request.cid, %peer_id, %connection_id, "receive cancel request");
-            if let Entry::Occupied(mut e) = self.ledger.peer_wantlist.entry(peer_id) {
-                let list = e.get_mut();
-                list.remove(&request.cid);
-                tracing::info!(cid= %request.cid, %peer_id, "canceled block");
-                if list.is_empty() {
-                    e.remove();
-                }
-            }
         }
 
         let requests = requests
@@ -707,14 +402,15 @@ impl NetworkBehaviour for Behaviour {
             .filter(|(cid, _)| !cancelled.contains(cid))
             .collect::<Vec<_>>();
 
-        // add peer wantlist into ledger
+        // Lets build out have new sessions
         for request in &requests {
-            if request.ty == RequestType::Have {
-                self.ledger
-                    .peer_wantlist
-                    .entry(peer_id)
-                    .or_default()
-                    .insert(request.cid, request.priority);
+            if request.ty == RequestType::Have && !request.cancel {
+                if self.have_session.contains_key(&request.cid) {
+                    continue;
+                }
+
+                let have_session = HaveSession::new(&self.store, request.cid);
+                self.have_session.insert(request.cid, have_session);
             }
         }
 
@@ -723,90 +419,82 @@ impl NetworkBehaviour for Behaviour {
             return;
         }
 
+        for BitswapRequest {
+            ty,
+            cid,
+            send_dont_have,
+            cancel,
+            priority: _,
+        } in requests
+        {
+            let Some(session) = self
+                .have_session
+                .iter_mut()
+                .find(|(session_cid, _)| *session_cid == cid)
+                .map(|(_, session)| session)
+            else {
+                continue;
+            };
+
+            if cancel {
+                session.cancel(peer_id);
+                continue;
+            }
+
+            match ty {
+                RequestType::Have => {
+                    session.want_block(peer_id, send_dont_have);
+                }
+                RequestType::Block => {
+                    session.need_block(peer_id);
+                }
+            }
+        }
         // split the haves and blocks from the responses
         let (haves, blocks): (HashMap<_, _>, HashMap<_, _>) = responses
             .into_iter()
             .partition(|(_, res)| matches!(res, BitswapResponse::Have(_)));
 
         for (cid, response) in haves {
+            let Some(session) = self
+                .want_session
+                .iter_mut()
+                .find(|(session_cid, _)| *session_cid == cid)
+                .map(|(_, session)| session)
+            else {
+                continue;
+            };
             if let BitswapResponse::Have(have) = response {
                 match have {
-                    true => self.process_handle(peer_id, TaskHandle::HaveBlock { cid }),
-                    false => self.process_handle(peer_id, TaskHandle::DontHaveBlock { cid }),
+                    true => {
+                        session.has_block(peer_id);
+                    }
+                    false => {
+                        session.dont_have_block(peer_id);
+                    }
                 }
             }
         }
 
-        let (blocks, unwanted_blocks): (HashMap<_, _>, HashMap<_, _>) = blocks
-            .into_iter()
-            .partition(|(cid, _)| self.ledger.local_want_list.contains_key(cid));
-
-        for (cid, _) in unwanted_blocks {
-            tracing::info!(%cid, %peer_id, %connection_id, "did not request block. Ignoring response.");
-        }
-
-        let task_handler = self
-            .tasks
-            .iter_mut()
-            .find(|(internal_peer_id, _)| peer_id == *internal_peer_id)
-            .map(|(_, futs)| futs)
-            .expect("connection exist");
-
-        let stream = async_stream::stream! {
-            let mut message = BitswapMessage::default();
-            for request in requests {
-                tracing::debug!(request_cid = %request.cid, %peer_id, %connection_id, "receive request");
-                if request.cancel {
-                    tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "receive cancel request although it was previous filtered out");
-                    continue;
-                }
-
-                let Some(response) = handle_inbound_request(&repo, &request).await else {
-                    tracing::warn!(request_cid = %request.cid, %peer_id, %connection_id, "unable to handle inbound request or the request has been canceled");
+        for (cid, response) in blocks {
+            let Some(session) = self
+                .want_session
+                .iter_mut()
+                .find(|(session_cid, _)| *session_cid == cid)
+                .map(|(_, session)| session)
+            else {
+                continue;
+            };
+            if let BitswapResponse::Block(bytes) = response {
+                let Ok(block) = Block::new(cid, bytes.to_vec()) else {
+                    // The block is invalid so we will notify the behaviour that we still dont have the block
+                    // from said peer
+                    tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
                     continue;
                 };
-                tracing::trace!(request_cid = %request.cid, %peer_id, %connection_id, ?response, "sending response");
-                message = message.add_response(request.cid, response);
+                session.put_block(peer_id, block);
             }
-
-            if !message.is_empty() {
-                yield TaskHandle::SendMessage { message };
-            }
-
-            for (cid, response) in blocks {
-                tracing::info!(%cid, %peer_id, %connection_id, "received response");
-                if let BitswapResponse::Block(data) = response {
-                    tracing::info!(block = %cid, %peer_id, %connection_id, block_size=data.len(), "received block");
-                    if repo.contains(&cid).await.unwrap_or_default() {
-                        tracing::info!(block = %cid, %peer_id, %connection_id, "block exist locally. skipping");
-                        yield TaskHandle::BlockStored { cid };
-                        continue;
-                    }
-
-                    let Ok(block) = Block::new(cid, data.to_vec()) else {
-                        // The block is invalid so we will notify the behaviour that we still dont have the block
-                        // from said peer
-                        tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
-                        yield TaskHandle::DontHaveBlock { cid };
-                        continue;
-                    };
-
-                    match repo.put_block(block).await {
-                        Ok(local_cid) => {
-                            tracing::info!(block = %local_cid, %peer_id, %connection_id, "block stored in block store.");
-                            yield TaskHandle::BlockStored { cid }
-                        },
-                        Err(e) => {
-                            tracing::error!(block = %cid, %peer_id, %connection_id, error = %e, "error inserting block into block store");
-                            yield TaskHandle::DontHaveBlock { cid };
-                            continue;
-                        }
-                    }
-                }
-            }
-        };
-
-        task_handler.push(stream.boxed());
+        }
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
@@ -823,8 +511,87 @@ impl NetworkBehaviour for Behaviour {
             return Poll::Ready(event);
         }
 
-        while let Poll::Ready(Some((peer_id, handle))) = self.tasks.poll_next_unpin(ctx) {
-            self.process_handle(peer_id, handle);
+        while let Poll::Ready(Some((cid, event))) = self.want_session.poll_next_unpin(ctx) {
+            match event {
+                SessionEvent::SendWant { peer_id } => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::default()
+                            .add_request(BitswapRequest::have(cid).send_dont_have(true)),
+                    });
+                }
+                SessionEvent::SendCancels { peers } => {
+                    for peer_id in peers {
+                        self.events.push_back(ToSwarm::NotifyHandler {
+                            peer_id,
+                            handler: NotifyHandler::Any,
+                            event: BitswapMessage::default()
+                                .add_request(BitswapRequest::cancel(cid)),
+                        });
+                    }
+                }
+                SessionEvent::SendWants { peers } => {
+                    for peer_id in peers {
+                        self.events.push_back(ToSwarm::NotifyHandler {
+                            peer_id,
+                            handler: NotifyHandler::Any,
+                            event: BitswapMessage::default()
+                                .add_request(BitswapRequest::have(cid).send_dont_have(true)),
+                        });
+                    }
+                }
+                SessionEvent::SendBlock { peer_id } => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::default()
+                            .add_request(BitswapRequest::block(cid).send_dont_have(true)),
+                    });
+                }
+                SessionEvent::NeedBlock => {
+                    return Poll::Ready(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
+                }
+                SessionEvent::BlockStored => {
+                    return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }))
+                }
+            }
+        }
+
+        while let Poll::Ready(Some((cid, event))) = self.have_session.poll_next_unpin(ctx) {
+            match event {
+                HaveSessionEvent::Have { peer_id } => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::default()
+                            .add_response(cid, BitswapResponse::Have(true)),
+                    })
+                }
+                HaveSessionEvent::DontHave { peer_id } => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::default()
+                            .add_response(cid, BitswapResponse::Have(false)),
+                    })
+                }
+                HaveSessionEvent::Block { peer_id, bytes } => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::default()
+                            .add_response(cid, BitswapResponse::Block(bytes)),
+                    })
+                }
+                HaveSessionEvent::Cancelled => {
+                    // return Poll::Ready(ToSwarm::NotifyHandler {
+                    //     peer_id,
+                    //     handler: NotifyHandler::Any,
+                    //     event: BitswapMessage::default().add_request(BitswapResponse::Have(true)),
+                    // })
+                }
+            };
         }
 
         self.waker = Some(ctx.waker().clone());
@@ -859,13 +626,498 @@ pub async fn handle_inbound_request(
     }
 }
 
-#[derive(Default)]
-pub struct Ledger {
-    pub local_want_list: HashMap<Cid, i32>,
-    pub peer_wantlist: HashMap<PeerId, HashMap<Cid, i32>>,
-    pub sent_wants: HashMap<Cid, HashSet<PeerId>>,
-    pub have_block: HashMap<Cid, VecDeque<PeerId>>,
-    pub pending_have_block: HashMap<PeerId, HashSet<Cid>>,
+#[allow(dead_code)]
+enum SessionEvent {
+    SendWant { peer_id: PeerId },
+    SendCancels { peers: VecDeque<PeerId> },
+    SendWants { peers: VecDeque<PeerId> },
+    SendBlock { peer_id: PeerId },
+    BlockStored,
+    NeedBlock,
+}
+
+enum SessionState {
+    Idle,
+    NextBlock,
+    NextBlockPending {
+        timer: Delay,
+    },
+    PutBlock {
+        fut: BoxFuture<'static, Result<Cid, anyhow::Error>>,
+    },
+    Complete,
+}
+
+impl Debug for SessionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SessionState")
+    }
+}
+
+#[derive(Debug)]
+struct Session {
+    sending_wants: VecDeque<PeerId>,
+    sent_wants: VecDeque<PeerId>,
+    have_block: VecDeque<PeerId>,
+    failed_block: VecDeque<PeerId>,
+    sent_have_block: Option<PeerId>,
+    requested_block: bool,
+    received: bool,
+    waker: Option<Waker>,
+    repo: Repo,
+    state: SessionState,
+    timeout: Option<Duration>,
+}
+
+impl Session {
+    pub fn new(repo: &Repo) -> Self {
+        Self {
+            sending_wants: Default::default(),
+            sent_wants: Default::default(),
+            have_block: Default::default(),
+            sent_have_block: Default::default(),
+            failed_block: Default::default(),
+            received: false,
+            requested_block: false,
+            repo: repo.clone(),
+            waker: None,
+            state: SessionState::Idle,
+            timeout: None,
+        }
+    }
+
+    pub fn send_have_block(&mut self, peer_id: PeerId) {
+        if !self.sent_wants.contains(&peer_id)
+            && !self.sending_wants.contains(&peer_id)
+            && !self.have_block.contains(&peer_id)
+        {
+            self.requested_block = false;
+            self.sending_wants.push_back(peer_id);
+            if let Some(w) = self.waker.take() {
+                w.wake();
+            }
+        }
+    }
+
+    pub fn has_block(&mut self, peer_id: PeerId) {
+        if !self.have_block.contains(&peer_id) {
+            self.have_block.push_back(peer_id);
+        }
+
+        self.sending_wants.retain(|pid| *pid != peer_id);
+        self.sent_wants.retain(|pid| *pid != peer_id);
+
+        if !matches!(self.state, SessionState::NextBlock) {
+            self.requested_block = false;
+            self.state = SessionState::NextBlock;
+        }
+
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+    pub fn dont_have_block(&mut self, peer_id: PeerId) {
+        self.sending_wants.retain(|pid| *pid != peer_id);
+        self.sent_wants.retain(|pid| *pid != peer_id);
+
+        if !self.is_empty()
+            && !matches!(
+                self.state,
+                SessionState::NextBlock | SessionState::NextBlockPending { .. }
+            )
+        {
+            return;
+        }
+
+        // change state to next block so it will perform another request if possible,
+        // otherwise notify swarm if no request been sent
+        self.state = SessionState::NextBlock;
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+    pub fn put_block(&mut self, peer_id: PeerId, block: Block) {
+        if matches!(self.state, SessionState::PutBlock { .. }) {
+            return;
+        }
+
+        if let Some(pending_peer_id) = self.sent_have_block {
+            if pending_peer_id != peer_id {
+                return;
+            }
+        };
+
+        let fut = self.repo.put_block(block).into_future();
+        self.state = SessionState::PutBlock { fut };
+
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+    pub fn remove_peer(&mut self, peer_id: PeerId) {
+        self.sending_wants.retain(|pid| *pid != peer_id);
+        self.sent_wants.retain(|pid| *pid != peer_id);
+        self.have_block.retain(|pid| *pid != peer_id);
+        if matches!(self.sent_have_block, Some(p) if p == peer_id) {
+            self.sent_have_block.take();
+            self.state = SessionState::NextBlock;
+        }
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+    #[allow(dead_code)]
+    fn is_empty(&self) -> bool {
+        self.sending_wants.is_empty() && self.sent_wants.is_empty() && self.have_block.is_empty()
+    }
+}
+
+impl Unpin for Session {}
+
+impl Stream for Session {
+    type Item = SessionEvent;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.received {
+            return Poll::Ready(None);
+        }
+
+        if let Some(peer_id) = self.sending_wants.pop_front() {
+            self.sent_wants.push_back(peer_id);
+            return Poll::Ready(Some(SessionEvent::SendWant { peer_id }));
+        }
+        loop {
+            match &mut self.state {
+                SessionState::Idle => {
+                    self.waker = Some(cx.waker().clone());
+                    return Poll::Pending;
+                }
+                SessionState::NextBlock => {
+                    if let Some(peer_id) = self.sent_have_block.take() {
+                        self.failed_block.push_back(peer_id);
+                    }
+
+                    if let Some(next_peer_id) = self.have_block.pop_front() {
+                        self.sent_have_block = Some(next_peer_id);
+                        let timeout = match self.timeout {
+                            Some(timeout) if !timeout.is_zero() => timeout,
+                            _ => Duration::from_secs(15),
+                        };
+                        let timer = Delay::new(timeout);
+                        self.state = SessionState::NextBlockPending { timer };
+
+                        return Poll::Ready(Some(SessionEvent::SendBlock {
+                            peer_id: next_peer_id,
+                        }));
+                    }
+
+                    self.state = SessionState::Idle;
+
+                    if self.is_empty() && !self.requested_block {
+                        self.requested_block = true;
+                        return Poll::Ready(Some(SessionEvent::NeedBlock));
+                    }
+                }
+                SessionState::NextBlockPending { timer } => {
+                    ready!(timer.poll_unpin(cx));
+                    self.state = SessionState::NextBlock;
+                }
+                SessionState::PutBlock { fut } => match ready!(fut.poll_unpin(cx)) {
+                    Ok(cid) => {
+                        tracing::info!(%cid, "block stored in block store");
+                        self.state = SessionState::Complete;
+                        self.received = true;
+                        return Poll::Ready(Some(SessionEvent::BlockStored));
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "error storing block in store");
+                        self.state = SessionState::NextBlock;
+                    }
+                },
+                SessionState::Complete => {
+                    let mut peers = HashSet::new();
+                    // although this should be empty by the time we reach here, its best to clear it anyway since nothing was ever sent
+                    self.sending_wants.clear();
+
+                    peers.extend(std::mem::take(&mut self.sent_wants));
+                    peers.extend(std::mem::take(&mut self.have_block));
+                    peers.extend(std::mem::take(&mut self.failed_block));
+
+                    if let Some(peer_id) = self.sent_have_block.take() {
+                        peers.insert(peer_id);
+                    };
+
+                    let peers = VecDeque::from_iter(peers);
+
+                    return Poll::Ready(Some(SessionEvent::SendCancels { peers }));
+                }
+            }
+        }
+    }
+}
+
+impl FusedStream for Session {
+    fn is_terminated(&self) -> bool {
+        self.received
+    }
+}
+
+pub enum HaveSessionEvent {
+    Have { peer_id: PeerId },
+    DontHave { peer_id: PeerId },
+    Block { peer_id: PeerId, bytes: Bytes },
+    Cancelled,
+}
+
+enum HaveSessionState {
+    Idle,
+    ContainBlock {
+        fut: BoxFuture<'static, Result<bool, anyhow::Error>>,
+    },
+    GetBlock {
+        fut: BoxFuture<'static, Result<Option<Block>, anyhow::Error>>,
+    },
+    Block {
+        bytes: Bytes,
+    },
+    Complete,
+}
+
+enum HaveWantState {
+    Pending,
+    Sent,
+    Block,
+    BlockSent,
+}
+
+pub struct HaveSession {
+    cid: Cid,
+    want: HashMap<PeerId, HaveWantState>,
+    send_dont_have: HashSet<PeerId>,
+    have: Option<bool>,
+    repo: Repo,
+    waker: Option<Waker>,
+    state: HaveSessionState,
+}
+
+impl HaveSession {
+    pub fn new(repo: &Repo, cid: Cid) -> Self {
+        let mut session = Self {
+            cid,
+            want: HashMap::new(),
+            send_dont_have: HashSet::new(),
+            have: None,
+            repo: repo.clone(),
+            waker: None,
+            state: HaveSessionState::Idle,
+        };
+        let repo = session.repo.clone();
+        let fut = async move { repo.contains(&cid).await }.boxed();
+
+        session.state = HaveSessionState::ContainBlock { fut };
+
+        session
+    }
+
+    pub fn peers(&self) -> Vec<PeerId> {
+        self.want.keys().copied().collect()
+    }
+
+    pub fn has_peer(&self, peer_id: PeerId) -> bool {
+        self.want.contains_key(&peer_id)
+    }
+
+    pub fn want_block(&mut self, peer_id: PeerId, send_dont_have: bool) {
+        if self.want.contains_key(&peer_id) {
+            return;
+        }
+
+        if send_dont_have {
+            self.send_dont_have.insert(peer_id);
+        }
+        self.want.insert(peer_id, HaveWantState::Pending);
+
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+    pub fn notify_peer(&mut self, _: PeerId) {}
+
+    pub fn need_block(&mut self, peer_id: PeerId) {
+        if !self.want.contains_key(&peer_id)
+            || self
+                .want
+                .get(&peer_id)
+                .map(|state| matches!(state, HaveWantState::Block))
+                .unwrap_or_default()
+        {
+            return;
+        }
+
+        self.want
+            .entry(peer_id)
+            .and_modify(|state| *state = HaveWantState::Block)
+            .or_insert(HaveWantState::Block);
+
+        if !matches!(
+            self.state,
+            HaveSessionState::GetBlock { .. } | HaveSessionState::Block { .. }
+        ) {
+            let repo = self.repo.clone();
+            let cid = self.cid;
+            let fut = async move { repo.get_block_now(&cid).await }.boxed();
+
+            self.state = HaveSessionState::GetBlock { fut };
+
+            if let Some(w) = self.waker.take() {
+                w.wake();
+            }
+        }
+    }
+
+    pub fn remove_peer(&mut self, peer_id: PeerId) {
+        self.want.remove(&peer_id);
+        self.send_dont_have.remove(&peer_id);
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+    pub fn reset(&mut self) {
+        // Only reset if we have not resolve block
+        if self.have.is_none() || self.have.unwrap_or_default() {
+            return;
+        }
+
+        for state in self.want.values_mut() {
+            *state = HaveWantState::Pending;
+        }
+        let repo = self.repo.clone();
+        let cid = self.cid;
+        let fut = async move { repo.contains(&cid).await }.boxed();
+
+        self.state = HaveSessionState::ContainBlock { fut };
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+    pub fn cancel(&mut self, peer_id: PeerId) {
+        self.remove_peer(peer_id)
+    }
+}
+
+impl Unpin for HaveSession {}
+
+impl Stream for HaveSession {
+    type Item = HaveSessionEvent;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        // Since our state contains a block, we can attempt to provide it to peers who requests it
+        if let HaveSessionState::Block { bytes } = &this.state {
+            if let Some(next_peer_id) = this
+                .want
+                .iter()
+                .filter(|(_, state)| matches!(state, HaveWantState::Block))
+                .map(|(peer_id, _)| peer_id)
+                .copied()
+                .next()
+            {
+                this.want.remove(&next_peer_id);
+                return Poll::Ready(Some(HaveSessionEvent::Block {
+                    peer_id: next_peer_id,
+                    bytes: bytes.clone(),
+                }));
+            }
+
+            if this.want.is_empty() {
+                // Since we have no more peers who want the block, we will finalize the session
+                this.state = HaveSessionState::Complete;
+                return Poll::Ready(None);
+            }
+            return Poll::Pending;
+        }
+
+        loop {
+            match &mut this.state {
+                HaveSessionState::Idle => {
+                    if let Some(have) = this.have {
+                        if let Some((peer_id, state)) = this
+                            .want
+                            .iter_mut()
+                            .find(|(_, state)| matches!(state, HaveWantState::Pending))
+                        {
+                            let peer_id = *peer_id;
+                            *state = HaveWantState::Sent;
+
+                            return match have {
+                                true => Poll::Ready(Some(HaveSessionEvent::Have { peer_id })),
+                                false => Poll::Ready(Some(HaveSessionEvent::DontHave { peer_id })),
+                            };
+                        }
+                    }
+                    return Poll::Pending;
+                }
+                HaveSessionState::ContainBlock { fut } => {
+                    let have = ready!(fut.poll_unpin(cx)).unwrap_or_default();
+                    this.have = Some(have);
+                    this.state = HaveSessionState::Idle;
+                }
+                //Maybe we should have a lock on a single lock to prevent GC from cleaning it up or being removed while waiting for it to be
+                //exchanged. This could probably be done through a temporary pin
+                HaveSessionState::GetBlock { fut } => {
+                    let result = ready!(fut.poll_unpin(cx));
+                    let block = match result.as_ref() {
+                        Ok(Some(block)) => block.data(),
+                        _ => {
+                            this.state = HaveSessionState::Idle;
+                            this.have = Some(false);
+                            continue;
+                        }
+                    };
+                    let bytes = Bytes::copy_from_slice(block);
+                    // In case we are sent a block request
+                    this.have = Some(true);
+
+                    this.state = HaveSessionState::Block {
+                        bytes: bytes.clone(),
+                    };
+                }
+                HaveSessionState::Block { bytes } => {
+                    // Lets start providing the blocks to peers
+                    match this
+                        .want
+                        .iter_mut()
+                        .find(|(_, state)| matches!(state, HaveWantState::Block))
+                    {
+                        Some((peer_id, state)) => {
+                            *state = HaveWantState::BlockSent;
+                            return Poll::Ready(Some(HaveSessionEvent::Block {
+                                peer_id: *peer_id,
+                                bytes: bytes.clone(),
+                            }));
+                        }
+                        None => return Poll::Pending,
+                    }
+                }
+                HaveSessionState::Complete => {
+                    return Poll::Ready(None);
+                }
+            }
+        }
+    }
+}
+
+impl FusedStream for HaveSession {
+    fn is_terminated(&self) -> bool {
+        matches!(self.state, HaveSessionState::Complete)
+    }
 }
 
 #[cfg(test)]
