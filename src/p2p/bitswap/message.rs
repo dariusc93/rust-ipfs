@@ -182,10 +182,12 @@ impl BitswapMessage {
     }
 
     pub fn into_proto(self) -> std::io::Result<bitswap_pb::Message> {
-
         // We shouldnt be reaching the point where we are sending an empty message. In such case, we should return an error
         if self.is_empty() {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "message is empty"))
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "message is empty",
+            ));
         }
 
         let mut msg = bitswap_pb::Message::default();
