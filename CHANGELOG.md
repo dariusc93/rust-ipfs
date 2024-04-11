@@ -2,6 +2,7 @@
 - fix: Check for relay when storing address based on connection. [PR 170](httops://github.com/dariusc93/rust-ipfs/pull/170)
 - chore: Add conversions for references
 - chore: Remove `Result<T>` from Repo::recursive_collections.
+- chore: Split requests into their own sessiosn. [PR 172](https://github.com/dariusc93/rust-ipfs/pull/172)
 
 # 0.11.4
 - fix: Send a wantlist of missing blocks.
