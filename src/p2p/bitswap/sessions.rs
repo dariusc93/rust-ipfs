@@ -1,4 +1,10 @@
-use std::{collections::{HashMap, HashSet, VecDeque}, future::IntoFuture, pin::Pin, task::{Context, Poll, Waker}, time::Duration};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    future::IntoFuture,
+    pin::Pin,
+    task::{Context, Poll, Waker},
+    time::Duration,
+};
 
 use bytes::Bytes;
 use futures::{future::BoxFuture, ready, stream::FusedStream, FutureExt, Stream};
@@ -9,11 +15,9 @@ use std::fmt::Debug;
 
 use crate::{repo::Repo, Block};
 
-#[allow(dead_code)]
 pub enum WantSessionEvent {
     SendWant { peer_id: PeerId },
     SendCancels { peers: VecDeque<PeerId> },
-    SendWants { peers: VecDeque<PeerId> },
     SendBlock { peer_id: PeerId },
     BlockStored,
     NeedBlock,

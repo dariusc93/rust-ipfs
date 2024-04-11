@@ -526,16 +526,6 @@ impl NetworkBehaviour for Behaviour {
                         });
                     }
                 }
-                WantSessionEvent::SendWants { peers } => {
-                    for peer_id in peers {
-                        self.events.push_back(ToSwarm::NotifyHandler {
-                            peer_id,
-                            handler: NotifyHandler::Any,
-                            event: BitswapMessage::default()
-                                .add_request(BitswapRequest::have(cid).send_dont_have(true)),
-                        });
-                    }
-                }
                 WantSessionEvent::SendBlock { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
