@@ -63,7 +63,7 @@ pub struct Behaviour {
     connections: HashMap<PeerId, HashSet<(ConnectionId, Multiaddr)>>,
     blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
     store: Repo,
-    want_session: StreamMap<Cid, Session>,
+    want_session: StreamMap<Cid, WantSession>,
     have_session: StreamMap<Cid, HaveSession>,
     waker: Option<Waker>,
 }
@@ -117,7 +117,7 @@ impl Behaviour {
             if self.want_session.contains_key(cid) {
                 continue;
             }
-            let session = Session::new(&self.store, *cid);
+            let session = WantSession::new(&self.store, *cid);
             self.want_session.insert(*cid, session);
         }
 
@@ -509,7 +509,7 @@ impl NetworkBehaviour for Behaviour {
 
         while let Poll::Ready(Some((cid, event))) = self.want_session.poll_next_unpin(ctx) {
             match event {
-                SessionEvent::SendWant { peer_id } => {
+                WantSessionEvent::SendWant { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
@@ -517,7 +517,7 @@ impl NetworkBehaviour for Behaviour {
                             .add_request(BitswapRequest::have(cid).send_dont_have(true)),
                     });
                 }
-                SessionEvent::SendCancels { peers } => {
+                WantSessionEvent::SendCancels { peers } => {
                     for peer_id in peers {
                         self.events.push_back(ToSwarm::NotifyHandler {
                             peer_id,
@@ -527,7 +527,7 @@ impl NetworkBehaviour for Behaviour {
                         });
                     }
                 }
-                SessionEvent::SendWants { peers } => {
+                WantSessionEvent::SendWants { peers } => {
                     for peer_id in peers {
                         self.events.push_back(ToSwarm::NotifyHandler {
                             peer_id,
@@ -537,7 +537,7 @@ impl NetworkBehaviour for Behaviour {
                         });
                     }
                 }
-                SessionEvent::SendBlock { peer_id } => {
+                WantSessionEvent::SendBlock { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
@@ -545,10 +545,10 @@ impl NetworkBehaviour for Behaviour {
                             .add_request(BitswapRequest::block(cid).send_dont_have(true)),
                     });
                 }
-                SessionEvent::NeedBlock => {
+                WantSessionEvent::NeedBlock => {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
-                SessionEvent::BlockStored => {
+                WantSessionEvent::BlockStored => {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }))
                 }
             }
@@ -587,7 +587,7 @@ pub async fn handle_inbound_request(
 }
 
 #[allow(dead_code)]
-enum SessionEvent {
+enum WantSessionEvent {
     SendWant { peer_id: PeerId },
     SendCancels { peers: VecDeque<PeerId> },
     SendWants { peers: VecDeque<PeerId> },
@@ -596,7 +596,7 @@ enum SessionEvent {
     NeedBlock,
 }
 
-enum SessionState {
+enum WantSessionState {
     Idle,
     NextBlock,
     NextBlockPending {
@@ -608,14 +608,14 @@ enum SessionState {
     Complete,
 }
 
-impl Debug for SessionState {
+impl Debug for WantSessionState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SessionState")
     }
 }
 
 #[derive(Debug)]
-struct Session {
+struct WantSession {
     cid: Cid,
     sending_wants: VecDeque<PeerId>,
     sent_wants: VecDeque<PeerId>,
@@ -626,11 +626,11 @@ struct Session {
     received: bool,
     waker: Option<Waker>,
     repo: Repo,
-    state: SessionState,
+    state: WantSessionState,
     timeout: Option<Duration>,
 }
 
-impl Session {
+impl WantSession {
     pub fn new(repo: &Repo, cid: Cid) -> Self {
         Self {
             cid,
@@ -643,7 +643,7 @@ impl Session {
             requested_block: false,
             repo: repo.clone(),
             waker: None,
-            state: SessionState::Idle,
+            state: WantSessionState::Idle,
             timeout: None,
         }
     }
@@ -671,9 +671,9 @@ impl Session {
         self.sending_wants.retain(|pid| *pid != peer_id);
         self.sent_wants.retain(|pid| *pid != peer_id);
 
-        if !matches!(self.state, SessionState::NextBlock) {
+        if !matches!(self.state, WantSessionState::NextBlock) {
             tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "change state to next_block");
-            self.state = SessionState::NextBlock;
+            self.state = WantSessionState::NextBlock;
         }
 
         if let Some(w) = self.waker.take() {
@@ -689,7 +689,7 @@ impl Session {
         if !self.is_empty()
             && !matches!(
                 self.state,
-                SessionState::NextBlock | SessionState::NextBlockPending { .. }
+                WantSessionState::NextBlock | WantSessionState::NextBlockPending { .. }
             )
         {
             tracing::warn!(session = %self.cid, %peer_id, name = "want_session", "session is empty");
@@ -699,21 +699,21 @@ impl Session {
         // change state to next block so it will perform another request if possible,
         // otherwise notify swarm if no request been sent
         tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "next_block state");
-        self.state = SessionState::NextBlock;
+        self.state = WantSessionState::NextBlock;
         if let Some(w) = self.waker.take() {
             w.wake();
         }
     }
 
     pub fn put_block(&mut self, peer_id: PeerId, block: Block) {
-        if matches!(self.state, SessionState::PutBlock { .. }) {
+        if matches!(self.state, WantSessionState::PutBlock { .. }) {
             tracing::warn!(session = %self.cid, %peer_id, cid = %block.cid(), name = "want_session", "state already putting block into store");
             return;
         }
 
         tracing::info!(%peer_id, cid = %block.cid(), name = "want_session", "storing block");
         let fut = self.repo.put_block(block).into_future();
-        self.state = SessionState::PutBlock { fut };
+        self.state = WantSessionState::PutBlock { fut };
 
         if let Some(w) = self.waker.take() {
             w.wake();
@@ -730,7 +730,7 @@ impl Session {
         self.have_block.retain(|pid| *pid != peer_id);
         if matches!(self.sent_have_block, Some(p) if p == peer_id) {
             self.sent_have_block.take();
-            self.state = SessionState::NextBlock;
+            self.state = WantSessionState::NextBlock;
         }
         if let Some(w) = self.waker.take() {
             w.wake();
@@ -743,10 +743,10 @@ impl Session {
     }
 }
 
-impl Unpin for Session {}
+impl Unpin for WantSession {}
 
-impl Stream for Session {
-    type Item = SessionEvent;
+impl Stream for WantSession {
+    type Item = WantSessionEvent;
 
     #[tracing::instrument(level = "trace", name = "Session::poll_next", skip(self, cx))]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -757,16 +757,16 @@ impl Stream for Session {
         if let Some(peer_id) = self.sending_wants.pop_front() {
             self.sent_wants.push_back(peer_id);
             tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "sent want block");
-            return Poll::Ready(Some(SessionEvent::SendWant { peer_id }));
+            return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id }));
         }
 
         loop {
             match &mut self.state {
-                SessionState::Idle => {
+                WantSessionState::Idle => {
                     self.waker = Some(cx.waker().clone());
                     return Poll::Pending;
                 }
-                SessionState::NextBlock => {
+                WantSessionState::NextBlock => {
                     if let Some(peer_id) = self.sent_have_block.take() {
                         tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "failed block");
                         self.failed_block.push_back(peer_id);
@@ -781,40 +781,40 @@ impl Stream for Session {
                             _ => Duration::from_secs(15),
                         };
                         let timer = Delay::new(timeout);
-                        self.state = SessionState::NextBlockPending { timer };
+                        self.state = WantSessionState::NextBlockPending { timer };
 
-                        return Poll::Ready(Some(SessionEvent::SendBlock {
+                        return Poll::Ready(Some(WantSessionEvent::SendBlock {
                             peer_id: next_peer_id,
                         }));
                     }
 
                     tracing::debug!(session = %self.cid, name = "want_session", "session is idle");
-                    self.state = SessionState::Idle;
+                    self.state = WantSessionState::Idle;
 
                     if self.is_empty() && !self.requested_block {
                         self.requested_block = true;
-                        return Poll::Ready(Some(SessionEvent::NeedBlock));
+                        return Poll::Ready(Some(WantSessionEvent::NeedBlock));
                     }
                 }
-                SessionState::NextBlockPending { timer } => {
+                WantSessionState::NextBlockPending { timer } => {
                     ready!(timer.poll_unpin(cx));
                     tracing::warn!(session = %self.cid, name = "want_session", "request timeout attempting to get next block");
-                    self.state = SessionState::NextBlock;
+                    self.state = WantSessionState::NextBlock;
                 }
-                SessionState::PutBlock { fut } => match ready!(fut.poll_unpin(cx)) {
+                WantSessionState::PutBlock { fut } => match ready!(fut.poll_unpin(cx)) {
                     Ok(cid) => {
                         tracing::info!(session = %self.cid, block = %cid, name = "want_session", "block stored in block store");
-                        self.state = SessionState::Complete;
+                        self.state = WantSessionState::Complete;
 
                         cx.waker().wake_by_ref();
-                        return Poll::Ready(Some(SessionEvent::BlockStored));
+                        return Poll::Ready(Some(WantSessionEvent::BlockStored));
                     }
                     Err(e) => {
                         tracing::error!(session = %self.cid, error = %e, name = "want_session", "error storing block in store");
-                        self.state = SessionState::NextBlock;
+                        self.state = WantSessionState::NextBlock;
                     }
                 },
-                SessionState::Complete => {
+                WantSessionState::Complete => {
                     self.received = true;
                     let mut peers = HashSet::new();
                     // although this should be empty by the time we reach here, its best to clear it anyway since nothing was ever sent
@@ -832,14 +832,14 @@ impl Stream for Session {
 
                     tracing::info!(session = %self.cid, pending_cancellation = peers.len());
 
-                    return Poll::Ready(Some(SessionEvent::SendCancels { peers }));
+                    return Poll::Ready(Some(WantSessionEvent::SendCancels { peers }));
                 }
             }
         }
     }
 }
 
-impl FusedStream for Session {
+impl FusedStream for WantSession {
     fn is_terminated(&self) -> bool {
         self.received
     }
