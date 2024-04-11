@@ -47,8 +47,6 @@ quick-protobuf-codec = "0.3"
 
 unsigned-varint = { version = "0.7.1", features = ["asynchronous_codec"] }
 
-futures-bounded = { version = "0.2" }
-
 [dependencies]
 asynchronous-codec.workspace = true
 anyhow = "1.0"
@@ -63,7 +61,6 @@ libipld.workspace = true
 hickory-resolver = "0.24.0"
 either = { version = "1" }
 futures = { version = "0.3" }
-futures-bounded.workspace = true
 
 redb = { workspace = true, optional = true }
 rust-unixfs = { workspace = true }
