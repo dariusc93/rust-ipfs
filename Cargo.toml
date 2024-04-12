@@ -62,7 +62,6 @@ hickory-resolver = "0.24.0"
 either = { version = "1" }
 futures = { version = "0.3" }
 
-
 redb = { workspace = true, optional = true }
 rust-unixfs = { workspace = true }
 

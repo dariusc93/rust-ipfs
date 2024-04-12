@@ -1,4 +1,7 @@
-use std::{path::{Path, PathBuf}, task::Poll};
+use std::{
+    path::{Path, PathBuf},
+    task::Poll,
+};
 
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
