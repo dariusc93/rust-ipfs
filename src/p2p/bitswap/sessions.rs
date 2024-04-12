@@ -15,6 +15,8 @@ use std::fmt::Debug;
 
 use crate::{repo::Repo, Block};
 
+const CAP_THRESHOLD: usize = 100;
+
 pub enum WantSessionEvent {
     SendWant { peer_id: PeerId },
     SendCancels { peers: VecDeque<PeerId> },
@@ -185,6 +187,8 @@ impl Stream for WantSession {
             self.sent_wants.push_back(peer_id);
             tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "sent want block");
             return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id }));
+        } else if self.sending_wants.capacity() > CAP_THRESHOLD {
+            self.sending_wants.shrink_to_fit()
         }
 
         loop {
