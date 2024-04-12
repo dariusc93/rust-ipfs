@@ -183,12 +183,14 @@ impl Stream for WantSession {
             return Poll::Ready(None);
         }
 
-        if let Some(peer_id) = self.sending_wants.pop_front() {
-            self.sent_wants.push_back(peer_id);
-            tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "sent want block");
-            return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id }));
-        } else if self.sending_wants.capacity() > CAP_THRESHOLD {
-            self.sending_wants.shrink_to_fit()
+        if !matches!(self.state, WantSessionState::Complete) {
+            if let Some(peer_id) = self.sending_wants.pop_front() {
+                self.sent_wants.push_back(peer_id);
+                tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "sent want block");
+                return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id }));
+            } else if self.sending_wants.capacity() > CAP_THRESHOLD {
+                self.sending_wants.shrink_to_fit()
+            }
         }
 
         loop {
