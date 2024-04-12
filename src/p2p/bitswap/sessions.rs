@@ -15,6 +15,8 @@ use std::fmt::Debug;
 
 use crate::{repo::Repo, Block};
 
+const CAP_THRESHOLD: usize = 100;
+
 pub enum WantSessionEvent {
     SendWant { peer_id: PeerId },
     SendCancels { peers: VecDeque<PeerId> },
@@ -181,10 +183,14 @@ impl Stream for WantSession {
             return Poll::Ready(None);
         }
 
-        if let Some(peer_id) = self.sending_wants.pop_front() {
-            self.sent_wants.push_back(peer_id);
-            tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "sent want block");
-            return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id }));
+        if !matches!(self.state, WantSessionState::Complete) {
+            if let Some(peer_id) = self.sending_wants.pop_front() {
+                self.sent_wants.push_back(peer_id);
+                tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "sent want block");
+                return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id }));
+            } else if self.sending_wants.capacity() > CAP_THRESHOLD {
+                self.sending_wants.shrink_to_fit()
+            }
         }
 
         loop {
@@ -357,7 +363,7 @@ impl HaveSession {
         if self
             .want
             .get(&peer_id)
-            .map(|state| matches!(state, HaveWantState::Block))
+            .map(|state| matches!(state, HaveWantState::Block | HaveWantState::BlockSent))
             .unwrap_or_default()
         {
             tracing::warn!(session = %self.cid, %peer_id, name = "have_session", "already sending block to peer");
@@ -442,24 +448,27 @@ impl Stream for HaveSession {
         // Since our state contains a block, we can attempt to provide it to peers who requests it then we will
         // reset the state back to idle until the wants are empty
         if let HaveSessionState::Block { bytes } = &this.state {
-            if let Some(next_peer_id) = this
+            if let Some((next_peer_id, state)) = this
                 .want
-                .iter()
-                .filter(|(_, state)| matches!(state, HaveWantState::Block))
-                .map(|(peer_id, _)| peer_id)
-                .copied()
-                .next()
+                .iter_mut()
+                .find(|(_, state)| matches!(state, HaveWantState::Block))
             {
-                this.want.remove(&next_peer_id);
+                *state = HaveWantState::BlockSent;
                 return Poll::Ready(Some(HaveSessionEvent::Block {
-                    peer_id: next_peer_id,
+                    peer_id: *next_peer_id,
                     bytes: bytes.clone(),
                 }));
             }
 
-            if this.want.is_empty() {
+            if this
+                .want
+                .iter()
+                .all(|(_, state)| matches!(state, HaveWantState::BlockSent))
+                || this.want.is_empty()
+            {
                 // Since we have no more peers who want the block, we will finalize the session
                 this.state = HaveSessionState::Complete;
+                this.want.clear();
                 return Poll::Ready(Some(HaveSessionEvent::Cancelled));
             }
 
@@ -508,9 +517,7 @@ impl Stream for HaveSession {
                     // In case we are sent a block request
                     this.have = Some(true);
 
-                    this.state = HaveSessionState::Block {
-                        bytes: bytes.clone(),
-                    };
+                    this.state = HaveSessionState::Block { bytes };
                 }
                 HaveSessionState::Block { bytes } => {
                     // This will kick start the providing process to the peer
