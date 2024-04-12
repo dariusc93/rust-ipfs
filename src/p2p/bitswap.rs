@@ -404,12 +404,15 @@ impl NetworkBehaviour for Behaviour {
                 self.have_session.insert(cid, have_session);
             }
 
-            let session = self
+            let Some(session) = self
                 .have_session
                 .iter_mut()
                 .find(|(session_cid, _)| *session_cid == cid)
                 .map(|(_, session)| session)
-                .expect("session exist");
+            else {
+                tracing::warn!(block = %cid, %peer_id, %connection_id, "want session does not exist. Skipping request");
+                continue;
+            };
 
             if cancel {
                 session.cancel(peer_id);
