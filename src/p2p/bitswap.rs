@@ -11,7 +11,6 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
 use futures::StreamExt;
 use libipld::Cid;
 use libp2p::{
@@ -43,6 +42,8 @@ use self::{
     protocol::{BitswapProtocol, Message},
     sessions::{HaveSession, HaveSessionEvent, WantSession, WantSessionEvent},
 };
+
+const CAP_THRESHOLD: usize = 100;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Config {
@@ -471,6 +472,8 @@ impl NetworkBehaviour for Behaviour {
     fn poll(&mut self, ctx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
+        } else if self.events.capacity() > CAP_THRESHOLD {
+            self.events.shrink_to_fit();
         }
 
         while let Poll::Ready(Some((cid, event))) = self.have_session.poll_next_unpin(ctx) {
@@ -546,32 +549,6 @@ impl NetworkBehaviour for Behaviour {
         self.waker = Some(ctx.waker().clone());
 
         Poll::Pending
-    }
-}
-
-pub async fn handle_inbound_request(
-    repo: &Repo,
-    request: &BitswapRequest,
-) -> Option<BitswapResponse> {
-    if request.cancel {
-        return None;
-    }
-
-    match request.ty {
-        RequestType::Have => {
-            let have = repo.contains(&request.cid).await.unwrap_or_default();
-            (have || request.send_dont_have).then(|| BitswapResponse::Have(have))
-        }
-        RequestType::Block => {
-            let block = repo.get_block_now(&request.cid).await.unwrap_or_default();
-            if let Some(data) = block.map(|b| Bytes::copy_from_slice(b.data())) {
-                Some(BitswapResponse::Block(data))
-            } else if request.send_dont_have {
-                Some(BitswapResponse::Have(false))
-            } else {
-                None
-            }
-        }
     }
 }
 
