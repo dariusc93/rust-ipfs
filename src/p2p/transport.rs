@@ -29,7 +29,7 @@ pub struct TransportConfig {
     pub enable_websocket: bool,
     pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
-    // pub enable_webrtc: bool,
+    pub enable_webrtc: bool,
 }
 
 impl Default for TransportConfig {
@@ -39,7 +39,7 @@ impl Default for TransportConfig {
             enable_websocket: false,
             enable_secure_websocket: true,
             support_quic_draft_29: false,
-            // enable_webrtc: false,
+            enable_webrtc: false,
             timeout: Duration::from_secs(30),
             quic_max_idle_timeout: Duration::from_secs(10),
             dns_resolver: None,
@@ -94,6 +94,7 @@ impl From<UpgradeVersion> for Version {
 /// Builds the transport that serves as a common ground for all connections.
 ///
 /// Set up an encrypted TCP transport over the Yamux and Mplex protocol.
+#[allow(unused_variables)]
 pub(crate) fn build_transport(
     keypair: identity::Keypair,
     relay: Option<ClientTransport>,
@@ -106,7 +107,7 @@ pub(crate) fn build_transport(
         quic_max_idle_timeout,
         enable_websocket,
         enable_secure_websocket,
-        ..
+        enable_webrtc,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     let noise_config =
@@ -118,7 +119,6 @@ pub(crate) fn build_transport(
 
     let transport = TokioTcpTransport::new(tcp_config.clone());
 
-    //TODO: Make togglable by flag in config
     let transport = match enable_websocket {
         true => {
             let mut ws_transport =
@@ -136,7 +136,7 @@ pub(crate) fn build_transport(
                     .map_err(io::Error::other)?;
                 ws_transport.set_tls_config(tls_config);
             }
-            let transport = transport.or_transport(ws_transport);
+            let transport = ws_transport.or_transport(transport);
             Either::Left(transport)
         }
         false => Either::Right(transport),
@@ -164,6 +164,24 @@ pub(crate) fn build_transport(
             .multiplex(yamux_config)
             .timeout(timeout)
             .boxed(),
+    };
+
+    #[cfg(feature = "webrtc_transport")]
+    let transport = match enable_webrtc {
+        true => {
+            let cert = libp2p_webrtc::tokio::Certificate::generate(&mut rand::thread_rng())
+                .map_err(std::io::Error::other)?;
+            let kp = keypair.clone();
+            let wrtc_tp = libp2p_webrtc::tokio::Transport::new(kp, cert);
+            wrtc_tp
+                .or_transport(transport)
+                .map(|either_output, _| match either_output {
+                    FutureEither::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                    FutureEither::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                })
+                .boxed()
+        }
+        false => transport.boxed(),
     };
 
     let transport = match enable_quic {
