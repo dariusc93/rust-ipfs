@@ -34,9 +34,9 @@ libp2p-bitswap-next = { version = "0.26.1", path = "packages/libp2p-bitswap-next
 rust-unixfs = { version = "0.4.1", path = "unixfs" }
 libipld = { version = "0.16", features = ["serde-codec"] }
 clap = { version = "4.3", features = ["derive"] }
-rust-ipns = { version = "0.5", path = "packages/rust-ipns" }
+rust-ipns = { version = "0.5.1", path = "packages/rust-ipns" }
 chrono = { version = "0.4.35" }
-libp2p-relay-manager = { version = "0.2.1", path = "packages/libp2p-relay-manager" }
+libp2p-relay-manager = { version = "0.2.2", path = "packages/libp2p-relay-manager" }
 
 redb = { version = "1.3" }
 futures-timer = "3.0"

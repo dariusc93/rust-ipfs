@@ -1,3 +1,6 @@
+# 0.5.1
+- chore: Add wasm support
+
 # 0.5.0
 - chore: Remove deprecated calls
 

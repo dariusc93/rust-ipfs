@@ -59,7 +59,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
- "getrandom 0.2.12",
+ "getrandom 0.2.14",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -1806,9 +1806,9 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.2.12"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "190092ea657667030ac6a35e305e62fc4dd69fd98ac98631e5d3a2b1575a12b5"
+checksum = "94b22e06ecb0110981051723910cbf0b5f5e09a2062dd7663334ee79a9d1286c"
 dependencies = [
  "cfg-if",
  "js-sys",
@@ -2442,7 +2442,7 @@ dependencies = [
  "either",
  "futures",
  "futures-timer",
- "getrandom 0.2.12",
+ "getrandom 0.2.14",
  "instant",
  "libp2p-allow-block-list",
  "libp2p-autonat",
@@ -2655,7 +2655,7 @@ dependencies = [
  "fnv",
  "futures",
  "futures-ticker",
- "getrandom 0.2.12",
+ "getrandom 0.2.14",
  "hex_fmt",
  "instant",
  "libp2p-core",
@@ -2936,7 +2936,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-relay-manager"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-std",
@@ -2944,6 +2944,7 @@ dependencies = [
  "env_logger",
  "futures",
  "futures-timer",
+ "getrandom 0.2.14",
  "libp2p",
  "log",
  "rand 0.8.5",
@@ -3024,7 +3025,7 @@ dependencies = [
  "fnv",
  "futures",
  "futures-timer",
- "getrandom 0.2.12",
+ "getrandom 0.2.14",
  "instant",
  "libp2p-core",
  "libp2p-identity",
@@ -4196,7 +4197,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
- "getrandom 0.2.12",
+ "getrandom 0.2.14",
 ]
 
 [[package]]
@@ -4354,7 +4355,7 @@ checksum = "c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom 0.2.12",
+ "getrandom 0.2.14",
  "libc",
  "spin 0.9.8",
  "untrusted 0.9.0",
@@ -4444,13 +4445,14 @@ dependencies = [
 
 [[package]]
 name = "rust-ipns"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cbor4ii",
  "chrono",
  "cid",
  "clap 4.5.3",
  "derive_more",
+ "getrandom 0.2.14",
  "libp2p-identity",
  "multihash 0.18.1",
  "quick-protobuf",
