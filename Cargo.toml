@@ -210,7 +210,7 @@ clap = { workspace = true }
 debug = true
 
 [workspace]
-members = ["packages/*", "unixfs"]
+members = ["packages/*", "unixfs", "examples/*"]
 exclude = ["archived", "deprecated/*"]
 
 resolver = "2"
