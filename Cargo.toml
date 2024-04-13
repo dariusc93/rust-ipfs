@@ -142,6 +142,7 @@ sled = { version = "0.34", optional = true }
 rlimit = "0.10"
 hickory-resolver = "0.24.0"
 beetle-bitswap-next = { workspace = true, optional = true }
+rcgen = "0.13.1"
 
 [dev-dependencies]
 criterion = { default-features = false, version = "0.5" }

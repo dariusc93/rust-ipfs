@@ -1,3 +1,4 @@
+use either::Either;
 use futures::future::Either as FutureEither;
 use hickory_resolver::system_conf;
 use libp2p::core::muxing::StreamMuxerBox;
@@ -25,8 +26,8 @@ pub struct TransportConfig {
     pub version: UpgradeVersion,
     pub enable_quic: bool,
     pub quic_max_idle_timeout: Duration,
-    // pub enable_websocket: bool,
-    // pub enable_secure_websocket: bool,
+    pub enable_websocket: bool,
+    pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
     // pub enable_webrtc: bool,
 }
@@ -35,8 +36,8 @@ impl Default for TransportConfig {
     fn default() -> Self {
         Self {
             enable_quic: true,
-            // enable_websocket: false,
-            // enable_secure_websocket: false,
+            enable_websocket: false,
+            enable_secure_websocket: true,
             support_quic_draft_29: false,
             // enable_webrtc: false,
             timeout: Duration::from_secs(30),
@@ -103,6 +104,8 @@ pub(crate) fn build_transport(
         enable_quic,
         support_quic_draft_29,
         quic_max_idle_timeout,
+        enable_websocket,
+        enable_secure_websocket,
         ..
     }: TransportConfig,
 ) -> io::Result<TTransport> {
@@ -113,10 +116,31 @@ pub(crate) fn build_transport(
 
     let tcp_config = GenTcpConfig::default().nodelay(true).port_reuse(true);
 
-    let transport = TokioTcpTransport::new(tcp_config);
+    let transport = TokioTcpTransport::new(tcp_config.clone());
 
     //TODO: Make togglable by flag in config
-    // let ws_transport = libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
+    let transport = match enable_websocket {
+        true => {
+            let mut ws_transport =
+                libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
+            if enable_secure_websocket {
+                let rcgen::CertifiedKey {
+                    cert: self_cert,
+                    key_pair,
+                } = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+                    .map_err(io::Error::other)?;
+
+                let priv_key = libp2p::websocket::tls::PrivateKey::new(key_pair.serialize_der());
+                let self_cert = libp2p::websocket::tls::Certificate::new(self_cert.der().to_vec());
+                let tls_config = libp2p::websocket::tls::Config::new(priv_key, [self_cert])
+                    .map_err(io::Error::other)?;
+                ws_transport.set_tls_config(tls_config);
+            }
+            let transport = transport.or_transport(ws_transport);
+            Either::Left(transport)
+        }
+        false => Either::Right(transport),
+    };
 
     let transport_timeout = TransportTimeout::new(transport, timeout);
 
