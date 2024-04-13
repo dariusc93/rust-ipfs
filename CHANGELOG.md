@@ -4,6 +4,7 @@
 - chore: Remove `Result<T>` from Repo::recursive_collections.
 - chore: Split requests into their own sessiosn. [PR 172](https://github.com/dariusc93/rust-ipfs/pull/172)
 - chore: Optimize bitswap sessions to reduce messages and memory footprint. [PR 173](https://github.com/dariusc93/rust-ipfs/pull/173)
+- chore: Use futures-timeout in-place of tokio::time::timeout. [PR xxx](https://github.com/dariusc93/rust-ipfs/pull/xxx)
 
 # 0.11.4
 - fix: Send a wantlist of missing blocks.

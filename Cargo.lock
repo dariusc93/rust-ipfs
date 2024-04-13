@@ -1735,6 +1735,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures-timeout"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0df42ecbd26959d3706c799927b575678eabfa63f2be7c53ed7a6e43097dc53b"
+dependencies = [
+ "futures",
+ "futures-timer",
+ "pin-project",
+]
+
+[[package]]
 name = "futures-timer"
 version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4394,6 +4405,7 @@ dependencies = [
  "either",
  "fs2",
  "futures",
+ "futures-timeout",
  "futures-timer",
  "hex-literal",
  "hickory-resolver",
