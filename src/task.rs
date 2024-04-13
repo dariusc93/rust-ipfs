@@ -243,7 +243,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 },
                 _ = &mut event_cleanup => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
-                    event_cleanup.reset(Duration::from_secs(5 * 60));
+                    event_cleanup.reset(Duration::from_secs(60));
                 }
                 _ = &mut session_cleanup => {
                     #[cfg(feature = "beetle_bitswap")]
@@ -268,7 +268,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             self.destroy_bs_session(id, tx);
                         }
                     }
-                    event_cleanup.reset(Duration::from_secs(5 * 60));
+                    session_cleanup.reset(Duration::from_secs(5 * 60));
                 }
             }
         }
