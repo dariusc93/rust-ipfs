@@ -1,7 +1,7 @@
+use futures_timeout::TimeoutExt;
 use libp2p::multiaddr::Protocol;
 use rust_ipfs::Node;
 use std::time::Duration;
-use tokio::time::timeout;
 
 #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
 mod common;
@@ -20,7 +20,9 @@ async fn connect_two_nodes_by_addr() {
     #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
     let node_b = ForeignNode::new();
 
-    timeout(TIMEOUT, node_a.connect(node_b.addrs[0].clone()))
+    node_a
+        .connect(node_b.addrs[0].clone())
+        .timeout(TIMEOUT)
         .await
         .expect("timeout")
         .expect("should have connected");
@@ -49,7 +51,9 @@ async fn connect_duplicate_multiaddr() {
     // test duplicate connections by address
     for _ in 0..3 {
         // final success or failure doesn't matter, there should be no timeout
-        let _ = timeout(TIMEOUT, node_a.connect(node_b.addrs[0].clone()))
+        let _ = node_a
+            .connect(node_b.addrs[0].clone())
+            .timeout(TIMEOUT)
             .await
             .unwrap();
     }
@@ -73,7 +77,9 @@ async fn connect_two_nodes_with_two_connections_doesnt_panic() {
     for mut addr in addresses.into_iter() {
         addr.push(Protocol::P2p(node_a.id));
 
-        timeout(TIMEOUT, node_b.connect(addr))
+        node_b
+            .connect(addr)
+            .timeout(TIMEOUT)
             .await
             .expect("timeout")
             .expect("should have connected");
@@ -111,7 +117,7 @@ async fn connect_to_wrong_peer() {
     wrong_addr.push(Protocol::P2p(c.id));
 
     // timeout of one is not great, but it's enough to make the connection.
-    let connection_result = timeout(Duration::from_secs(1), a.connect(wrong_addr)).await;
+    let connection_result = a.connect(wrong_addr).timeout(Duration::from_secs(1)).await;
 
     for &(node, name) in &[(&c, "c"), (&b, "b"), (&a, "a")] {
         let peers = node.connected().await.unwrap();
