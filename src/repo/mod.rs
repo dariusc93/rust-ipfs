@@ -9,6 +9,7 @@ use futures::future::BoxFuture;
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures_timeout::TimeoutExt;
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
@@ -741,7 +742,8 @@ impl Repo {
             let timeout = timeout.unwrap_or(Duration::from_secs(60));
             let mut events = events.clone();
             let task = async move {
-                let block = tokio::time::timeout(timeout, rx)
+                let block = rx
+                    .timeout(timeout)
                     .await
                     .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
                     .map_err(|e| anyhow!("{e}"))?;

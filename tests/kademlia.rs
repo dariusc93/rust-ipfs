@@ -1,11 +1,11 @@
 use futures::{pin_mut, StreamExt};
+use futures_timeout::TimeoutExt;
 use libipld::{
     multihash::{Code, MultihashDigest},
     Cid, IpldCodec,
 };
 use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
 use rust_ipfs::{p2p::MultiaddrExt, Block, Node};
-use tokio::time::timeout;
 
 use std::time::Duration;
 
@@ -150,7 +150,9 @@ async fn dht_popular_content_discovery() {
         .parse()
         .unwrap();
 
-    assert!(timeout(Duration::from_secs(10), peer.get_block(&cid))
+    assert!(peer
+        .get_block(&cid)
+        .timeout(Duration::from_secs(10))
         .await
         .is_ok());
 }

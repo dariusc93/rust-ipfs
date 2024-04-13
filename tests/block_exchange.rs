@@ -1,10 +1,10 @@
+use futures_timeout::TimeoutExt;
 use libipld::{
     multihash::{Code, MultihashDigest},
     Cid, IpldCodec,
 };
 use rust_ipfs::Block;
 use std::time::Duration;
-use tokio::time::timeout;
 
 mod common;
 use common::{spawn_nodes, Topology};
@@ -23,7 +23,9 @@ async fn two_node_put_get() {
     let block = create_block();
 
     nodes[0].put_block(block.clone()).await.unwrap();
-    let found_block = timeout(Duration::from_secs(10), nodes[1].get_block(block.cid()))
+    let found_block = nodes[1]
+        .get_block(block.cid())
+        .timeout(Duration::from_secs(10))
         .await
         .expect("get_block did not complete in time")
         .unwrap();
@@ -33,7 +35,6 @@ async fn two_node_put_get() {
 
 // check that a long line of nodes still works with get_block
 #[tokio::test]
-#[cfg_attr(any(feature = "libp2p_bitswap", feature = "beetle_bitswap"), ignore)]
 async fn long_get_block() {
     const N: usize = 10;
     let nodes = spawn_nodes::<N>(Topology::Line).await;

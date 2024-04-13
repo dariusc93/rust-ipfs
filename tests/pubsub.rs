@@ -1,8 +1,8 @@
 use futures::future::pending;
 use futures::stream::StreamExt;
+use futures_timeout::TimeoutExt;
 use rust_ipfs::Node;
 use std::time::Duration;
-use tokio::time::timeout;
 
 mod common;
 use common::{spawn_nodes, Topology};
@@ -90,7 +90,8 @@ async fn publish_between_two_nodes_single_topic() {
             appeared = true;
             break;
         }
-        timeout(Duration::from_millis(100), pending::<()>())
+        pending::<()>()
+            .timeout(Duration::from_millis(100))
             .await
             .unwrap_err();
     }
@@ -134,14 +135,13 @@ async fn publish_between_two_nodes_single_topic() {
         (b_msgs.by_ref(), nodes[1].id),
         (a_msgs.by_ref(), nodes[0].id),
     ] {
-        let received = timeout(
-            Duration::from_secs(2),
-            st.take(1)
-                .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
-                .collect::<Vec<_>>(),
-        )
-        .await
-        .unwrap();
+        let received = st
+            .take(1)
+            .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
+            .collect::<Vec<_>>()
+            .timeout(Duration::from_secs(2))
+            .await
+            .unwrap();
 
         actual.extend(received);
     }
@@ -170,7 +170,8 @@ async fn publish_between_two_nodes_single_topic() {
             disappeared = true;
             break;
         }
-        timeout(Duration::from_millis(100), pending::<()>())
+        pending::<()>()
+            .timeout(Duration::from_millis(100))
             .await
             .unwrap_err();
     }
@@ -211,7 +212,8 @@ async fn publish_between_two_nodes_different_topics() {
             appeared = true;
             break;
         }
-        timeout(Duration::from_millis(100), pending::<()>())
+        pending::<()>()
+            .timeout(Duration::from_millis(100))
             .await
             .unwrap_err();
     }
@@ -257,15 +259,14 @@ async fn publish_between_two_nodes_different_topics() {
 
     let mut actual = Vec::new();
     for (st, own_peer_id) in &mut [(b_msgs.by_ref(), node_b.id), (a_msgs.by_ref(), node_a.id)] {
-        let received = timeout(
-            Duration::from_secs(2),
-            st.take(1)
-                .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
-                .next(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let received = st
+            .take(1)
+            .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
+            .next()
+            .timeout(Duration::from_secs(2))
+            .await
+            .unwrap()
+            .unwrap();
         actual.push(received);
     }
 
@@ -286,7 +287,8 @@ async fn publish_between_two_nodes_different_topics() {
             disappeared = true;
             break;
         }
-        timeout(Duration::from_millis(100), pending::<()>())
+        pending::<()>()
+            .timeout(Duration::from_millis(100))
             .await
             .unwrap_err();
     }
