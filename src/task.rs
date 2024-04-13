@@ -223,8 +223,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self) {
-        let mut session_cleanup = tokio::time::interval(Duration::from_secs(5 * 60));
-        let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
+        let mut session_cleanup = futures_timer::Delay::new(Duration::from_secs(5 * 60));
+        let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
 
         loop {
             tokio::select! {
@@ -241,10 +241,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                     self.handle_event(event);
                 },
-                _ = event_cleanup.tick() => {
+                _ = &mut event_cleanup => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+                    event_cleanup.reset(Duration::from_secs(5 * 60));
                 }
-                _ = session_cleanup.tick() => {
+                _ = &mut session_cleanup => {
                     #[cfg(feature = "beetle_bitswap")]
                     {
                         let mut to_remove = Vec::new();
@@ -267,6 +268,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             self.destroy_bs_session(id, tx);
                         }
                     }
+                    event_cleanup.reset(Duration::from_secs(5 * 60));
                 }
             }
         }

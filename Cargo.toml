@@ -155,7 +155,6 @@ tokio-util = { version = "0.7", default-features = false }
 tokio = { default-features = false, features = [
     "sync",
     "macros",
-    "time",
 ], version = "1" }
 wasm-bindgen-futures = { version = "0.4" }
 getrandom = { version = "0.2.14", features = ["js"] }
