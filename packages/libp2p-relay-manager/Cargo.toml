@@ -1,6 +1,6 @@
 [package]
 name = "libp2p-relay-manager"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 description = "(WIP) Implementation of a relay-manager"
@@ -22,7 +22,10 @@ log = "0.4"
 void = "1.0"
 rand = "0.8"
 
-[dev-dependencies]
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2.14", features = ["js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 libp2p = { workspace = true, features = ["full"] }
 async-std = { version = "1", features = ["attributes"] }
 clap = { version = "4.0", features = ["derive"] }

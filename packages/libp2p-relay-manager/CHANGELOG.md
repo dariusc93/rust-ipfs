@@ -1,3 +1,6 @@
+# 0.2.2
+- chore: Add wasm support
+
 # 0.2.1
 - chore: Update libp2p to 0.53 [PR 116]
 - chore: Ignore deprecation warnings [PR 112]
