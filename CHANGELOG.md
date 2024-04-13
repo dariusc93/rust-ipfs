@@ -8,6 +8,7 @@
 - chore: Update Cargo.toml to gate non-wasm dependencies. [PR 176](https://github.com/dariusc93/rust-ipfs/pull/176)
 - chore: Reenable websocket support and add support for secured websockets.
 - feat: Implmenets webrtc transport and add a new feature. [PR 177](https://github.com/dariusc93/rust-ipfs/pull/177)
+- refactor: Remove async-broadcast and stream clones. [PR 174](httops://github.com/dariusc93/rust-ipfs/pull/174)
 
 # 0.11.4
 - fix: Send a wantlist of missing blocks.

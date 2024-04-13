@@ -141,7 +141,6 @@ libp2p-webrtc = { version = "=0.7.1-alpha", features = [
     "tokio",
 ], optional = true }
 
-async-broadcast = "0.6"
 fs2 = "0.4"
 sled = { version = "0.34", optional = true }
 
