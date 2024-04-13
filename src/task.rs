@@ -386,6 +386,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Err(error.into()));
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
@@ -530,7 +531,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                         {
                                             let providers = providers.clone();
                                             let mut tx = entry.get().clone();
-                                            tokio::spawn(async move {
+                                            rt::spawn(async move {
                                                 let _ = tx.send(Ok(providers)).await;
                                             });
                                         }

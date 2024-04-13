@@ -415,6 +415,7 @@ impl Repo {
     pub fn new(repo_type: &mut StoragePath) -> Self {
         match repo_type {
             StoragePath::Memory => Repo::new_memory(),
+            #[cfg(not(target_arch = "wasm32"))]
             StoragePath::Disk(path) => Repo::new_fs(path),
             StoragePath::Custom {
                 blockstore,
@@ -450,6 +451,7 @@ impl Repo {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_fs(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();

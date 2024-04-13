@@ -3261,6 +3261,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-webrtc-websys"
+version = "0.3.0-alpha"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0831af98b9a29453c72e5f0973d8af8abc94ec8937cafae848a9bd7c97b6747"
+dependencies = [
+ "bytes",
+ "futures",
+ "getrandom 0.2.14",
+ "hex",
+ "js-sys",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-webrtc-utils",
+ "send_wrapper 0.6.0",
+ "thiserror",
+ "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "libp2p-websocket"
 version = "0.43.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4647,6 +4669,7 @@ dependencies = [
  "futures",
  "futures-timeout",
  "futures-timer",
+ "getrandom 0.2.14",
  "hex-literal",
  "hickory-resolver",
  "libipld",
@@ -4656,6 +4679,7 @@ dependencies = [
  "libp2p-relay-manager",
  "libp2p-stream",
  "libp2p-webrtc",
+ "libp2p-webrtc-websys",
  "parking_lot 0.12.1",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1",
@@ -4680,6 +4704,7 @@ dependencies = [
  "tracing-subscriber",
  "unsigned-varint 0.7.2",
  "void",
+ "wasm-bindgen-futures",
  "wasm-timer",
  "zeroize",
 ]

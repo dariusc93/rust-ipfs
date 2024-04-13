@@ -31,6 +31,7 @@ pub mod p2p;
 pub mod path;
 pub mod refs;
 pub mod repo;
+pub(crate) mod rt;
 mod task;
 pub mod unixfs;
 
@@ -64,11 +65,13 @@ use p2p::{
 use repo::{
     BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
 };
-use tokio::task::JoinHandle;
+
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
+
+use unixfs::UnixfsGet;
+use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsLs};
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -127,6 +130,7 @@ pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default, Debug)]
 pub enum StoragePath {
+    #[cfg(not(target_arch = "wasm32"))]
     Disk(PathBuf),
     #[default]
     Memory,
@@ -140,6 +144,7 @@ pub enum StoragePath {
 impl PartialEq for StoragePath {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            #[cfg(not(target_arch = "wasm32"))]
             (StoragePath::Disk(left_path), StoragePath::Disk(right_path)) => {
                 left_path.eq(right_path)
             }
@@ -642,6 +647,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable mdns
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_mdns(mut self) -> Self {
         self.options.protocols.mdns = true;
         self
@@ -662,6 +668,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable port mapping (AKA UPnP)
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_upnp(mut self) -> Self {
         self.options.protocols.upnp = true;
         self
@@ -732,6 +739,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Sets a path
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
         self.options.ipfs_path = StoragePath::Disk(path);
@@ -882,6 +890,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 repo
             }
             None => {
+                #[cfg(not(target_arch = "wasm32"))]
                 if let StoragePath::Disk(path) = &options.ipfs_path {
                     if !path.is_dir() {
                         tokio::fs::create_dir_all(path).await?;
@@ -989,7 +998,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         } = options;
 
         if let Some(config) = gc_config {
-            tokio::spawn({
+            rt::spawn({
                 let repo = ipfs.repo.clone();
                 let token = token.clone();
                 async move {
@@ -1005,8 +1014,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         false => Duration::from_secs(60 * 60),
                     };
 
-                    let mut interval =
-                        tokio::time::interval_at(tokio::time::Instant::now() + time, time);
+                    let mut interval = futures_timer::Delay::new(time);
 
                     loop {
                         tokio::select! {
@@ -1014,7 +1022,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                 tracing::debug!("gc task cancelled");
                                 break
                             },
-                            _ = interval.tick() => {
+                            _ = &mut interval => {
                                 let _g = repo.inner.gclock.write().await;
                                 tracing::debug!("preparing gc operation");
                                 let pinned = repo
@@ -1056,6 +1064,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                     tracing::debug!(removed_blocks = blocks.len(), "blocks removed");
                                     tracing::debug!("cleanup finished");
                                 }
+
+                                interval.reset(time);
                             }
                         }
                     }
@@ -1093,7 +1103,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        tokio::spawn({
+        rt::spawn({
             async move {
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
@@ -2246,16 +2256,19 @@ impl Ipfs {
     /// known in order for the process to succeed. Subsequently, additional queries are
     /// ran with random keys so that the buckets farther from the closest neighbor also
     /// get refreshed.
-    pub async fn bootstrap(&self) -> Result<JoinHandle<Result<KadResult, Error>>, Error> {
+    pub async fn bootstrap(&self) -> Result<oneshot::Receiver<Result<KadResult, Error>>, Error> {
         let (tx, rx) = oneshot_channel();
 
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
         let fut = rx.await??;
 
-        let bootstrap_task =
-            tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)).and_then(|res| res) });
+        let (tx, rx) = oneshot::channel();
+        rt::spawn(async move {
+            let result = fut.await.map_err(|e| anyhow!(e)).and_then(|res| res);
+            _ = tx.send(result);
+        });
 
-        Ok(bootstrap_task)
+        Ok(rx)
     }
 
     /// Add address of a peer to the address book

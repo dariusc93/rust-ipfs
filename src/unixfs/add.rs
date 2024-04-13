@@ -129,6 +129,7 @@ impl Stream for UnixfsAdd {
                         let mut written = 0;
 
                         let (name, total_size, mut stream) = match option {
+                            #[cfg(not(target_arch = "wasm32"))]
                             AddOpt::File(path) => match tokio::fs::File::open(path.clone())
                                 .and_then(|file| async move {
                                     let size = file.metadata().await?.len() as usize;
@@ -145,6 +146,11 @@ impl Stream for UnixfsAdd {
                                         return;
                                     }
                                 },
+                            #[cfg(target_arch = "wasm32")]
+                            AddOpt::File(_) => {
+                                yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
+                                return;
+                            },
                             AddOpt::Stream { name, total, stream } => (name, total, stream),
                         };
 

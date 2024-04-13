@@ -4,6 +4,7 @@ use crate::path::IpfsPath;
 use std::str::FromStr;
 use tracing_futures::Instrument;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn resolve<'a>(
     resolver: DnsResolver,
     domain: &str,

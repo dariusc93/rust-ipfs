@@ -120,6 +120,7 @@ impl Stream for UnixfsGet {
                     let timeout = self.timeout;
                     let dest = self.dest.clone();
 
+                    #[cfg(not(target_arch = "wasm32"))]
                     let stream = async_stream::stream! {
 
 
@@ -212,6 +213,12 @@ impl Stream for UnixfsGet {
 
                         yield UnixfsStatus::CompletedStatus { path, written, total_size }
                     };
+
+                    #[cfg(target_arch = "wasm32")]
+                    let stream = async_stream::stream! {
+                        yield UnixfsStatus::FailedStatus { written: 0, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
+                    };
+
 
                     self.stream = StatusStreamState::Pending {
                         stream: stream.boxed(),

@@ -5,11 +5,9 @@ use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
-use libp2p::dns::{tokio::Transport as TokioDnsConfig, ResolverConfig, ResolverOpts};
-use libp2p::quic::tokio::Transport as TokioQuicTransport;
-use libp2p::quic::Config as QuicConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use libp2p::dns::{ResolverConfig, ResolverOpts};
 use libp2p::relay::client::Transport as ClientTransport;
-use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
 use libp2p::yamux::Config as YamuxConfig;
 use libp2p::{identity, noise};
 use libp2p::{PeerId, Transport};
@@ -61,6 +59,7 @@ pub enum DnsResolver {
     None,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<DnsResolver> for (ResolverConfig, ResolverOpts) {
     fn from(value: DnsResolver) -> Self {
         match value {
@@ -92,8 +91,7 @@ impl From<UpgradeVersion> for Version {
 }
 
 /// Builds the transport that serves as a common ground for all connections.
-///
-/// Set up an encrypted TCP transport over the Yamux and Mplex protocol.
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_variables)]
 pub(crate) fn build_transport(
     keypair: identity::Keypair,
@@ -110,6 +108,11 @@ pub(crate) fn build_transport(
         enable_webrtc,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
+    use libp2p::dns::tokio::Transport as TokioDnsConfig;
+    use libp2p::quic::tokio::Transport as TokioQuicTransport;
+    use libp2p::quic::Config as QuicConfig;
+    use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
+
     let noise_config =
         noise::Config::new(&keypair).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
@@ -203,6 +206,15 @@ pub(crate) fn build_transport(
     };
 
     Ok(transport)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn build_transport(
+    keypair: identity::Keypair,
+    relay: Option<ClientTransport>,
+    TransportConfig { .. }: TransportConfig,
+) -> io::Result<TTransport> {
+    memory_transport(&keypair, relay)
 }
 
 #[allow(dead_code)]
