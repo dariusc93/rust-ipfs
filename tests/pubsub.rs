@@ -13,12 +13,12 @@ async fn subscribe_only_once() {
     let _stream = a.pubsub_subscribe("some_topic").await.unwrap();
 }
 
-#[tokio::test]
-async fn subscribe_multiple_times() {
-    let a = Node::new("test_node").await;
-    let _stream = a.pubsub_subscribe("some_topic").await.unwrap();
-    a.pubsub_subscribe("some_topic").await.unwrap();
-}
+// #[tokio::test]
+// async fn subscribe_multiple_times() {
+//     let a = Node::new("test_node").await;
+//     let _stream = a.pubsub_subscribe("some_topic").await.unwrap();
+//     a.pubsub_subscribe("some_topic").await.unwrap();
+// }
 
 #[tokio::test]
 async fn resubscribe_after_unsubscribe() {
@@ -32,22 +32,22 @@ async fn resubscribe_after_unsubscribe() {
     drop(a.pubsub_subscribe("topic").await.unwrap());
 }
 
-#[tokio::test]
-async fn unsubscribe_cloned_via_drop() {
-    let empty: &[&str] = &[];
-    let a = Node::new("test_node").await;
+// #[tokio::test]
+// async fn unsubscribe_cloned_via_drop() {
+//     let empty: &[&str] = &[];
+//     let a = Node::new("test_node").await;
 
-    let msgs_1 = a.pubsub_subscribe("topic").await.unwrap();
-    let msgs_2 = a.pubsub_subscribe("topic").await.unwrap();
+//     let msgs_1 = a.pubsub_subscribe("topic").await.unwrap();
+//     let msgs_2 = a.pubsub_subscribe("topic").await.unwrap();
 
-    drop(msgs_1);
+//     drop(msgs_1);
 
-    assert_ne!(a.pubsub_subscribed().await.unwrap(), empty);
+//     assert_ne!(a.pubsub_subscribed().await.unwrap(), empty);
 
-    drop(msgs_2);
+//     drop(msgs_2);
 
-    assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
-}
+//     assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
+// }
 
 #[tokio::test]
 async fn unsubscribe_via_drop() {

@@ -117,8 +117,6 @@ tracing-futures = { default-features = false, features = [
     "futures-03",
 ], version = "0.2" }
 
-async-broadcast = "0.6"
-
 void = { default-features = false, version = "1.0" }
 fs2 = "0.4"
 sled = { version = "0.34", optional = true }
