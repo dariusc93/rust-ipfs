@@ -1,6 +1,6 @@
 [package]
 name = "libp2p-bitswap-next"
-version = "0.26.1"
+version = "0.26.2"
 authors = ["Darius C", "David Craven <david@craven.ch>"]
 edition = "2018"
 description = "Implementation of the ipfs bitswap protocol."
@@ -26,6 +26,9 @@ quick-protobuf = { version = "0.8.1", optional = true }
 quick-protobuf-codec = { version = "0.3", optional = true }
 asynchronous-codec = { version = "0.7", optional = true }
 bytes = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2.14", features = ["js"] }
 
 [dev-dependencies]
 async-std = { version = "1.12.0", features = ["attributes"] }

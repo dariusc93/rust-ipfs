@@ -2516,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-bitswap-next"
-version = "0.26.1"
+version = "0.26.2"
 dependencies = [
  "async-std",
  "async-trait",
@@ -2525,6 +2525,7 @@ dependencies = [
  "env_logger",
  "fnv",
  "futures",
+ "getrandom 0.2.14",
  "lazy_static",
  "libipld",
  "libp2p",
