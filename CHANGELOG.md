@@ -1,3 +1,6 @@
+# next
+- refactor: Add wasm support. [PR XXX](httops://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.11.5
 - fix: Check for relay when storing address based on connection. [PR 170](httops://github.com/dariusc93/rust-ipfs/pull/170)
 - chore: Add conversions for references
