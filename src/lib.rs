@@ -2258,19 +2258,19 @@ impl Ipfs {
     /// known in order for the process to succeed. Subsequently, additional queries are
     /// ran with random keys so that the buckets farther from the closest neighbor also
     /// get refreshed.
-    pub async fn bootstrap(&self) -> Result<oneshot::Receiver<Result<KadResult, Error>>, Error> {
+    pub async fn bootstrap(&self) -> Result<(), Error> {
         let (tx, rx) = oneshot_channel();
 
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
         let fut = rx.await??;
 
-        let (tx, rx) = oneshot::channel();
         rt::spawn(async move {
-            let result = fut.await.map_err(|e| anyhow!(e)).and_then(|res| res);
-            _ = tx.send(result);
+            if let Err(e) = fut.await.map_err(|e| anyhow!(e)) {
+                tracing::error!(error = %e, "failed to bootstrap");
+            }
         });
 
-        Ok(rx)
+        Ok(())
     }
 
     /// Add address of a peer to the address book
@@ -2461,8 +2461,6 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
-    use futures::TryFutureExt;
-
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
@@ -2548,11 +2546,8 @@ mod node {
         /// known in order for the process to succeed. Subsequently, additional queries are
         /// ran with random keys so that the buckets farther from the closest neighbor also
         /// get refreshed.
-        pub async fn bootstrap(&self) -> Result<KadResult, Error> {
-            self.ipfs
-                .bootstrap()
-                .and_then(|fut| async { fut.await.map_err(anyhow::Error::from) })
-                .await?
+        pub async fn bootstrap(&self) -> Result<(), Error> {
+            self.ipfs.bootstrap().await
         }
 
         pub async fn add_node(&self, node: &Self) -> Result<(), Error> {
