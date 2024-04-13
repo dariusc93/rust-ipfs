@@ -77,7 +77,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
     ops::{Deref, DerefMut},
-    path::{Path, PathBuf},
+    path::Path,
     sync::atomic::AtomicU64,
     sync::Arc,
     time::Duration,
@@ -131,7 +131,7 @@ pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Default, Debug)]
 pub enum StoragePath {
     #[cfg(not(target_arch = "wasm32"))]
-    Disk(PathBuf),
+    Disk(std::path::PathBuf),
     #[default]
     Memory,
     Custom {
@@ -239,11 +239,13 @@ pub(crate) struct Libp2pProtocol {
     pub(crate) relay_client: bool,
     pub(crate) relay_server: bool,
     pub(crate) dcutr: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) mdns: bool,
     pub(crate) identify: bool,
     pub(crate) autonat: bool,
     pub(crate) rendezvous_client: bool,
     pub(crate) rendezvous_server: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) upnp: bool,
     pub(crate) ping: bool,
     #[cfg(feature = "experimental_stream")]

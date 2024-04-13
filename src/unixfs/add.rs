@@ -6,12 +6,14 @@ use std::{
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
 use either::Either;
+#[allow(unused_imports)]
 use futures::{
     future::BoxFuture,
     stream::{BoxStream, FusedStream},
     FutureExt, Stream, StreamExt, TryFutureExt,
 };
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::io::ReaderStream;
 use tracing::{Instrument, Span};
 

@@ -7,12 +7,15 @@ use std::{
 use either::Either;
 use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
 use libp2p::PeerId;
+#[allow(unused_imports)]
 use rust_unixfs::walk::{ContinuedWalk, Walker};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Span};
 
 use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
+#[allow(unused_imports)]
 use super::{StatusStreamState, TraversalFailed, UnixfsStatus};
 
 #[must_use = "do nothing unless you `.await` or poll the stream"]
@@ -216,6 +219,14 @@ impl Stream for UnixfsGet {
 
                     #[cfg(target_arch = "wasm32")]
                     let stream = async_stream::stream! {
+                        _ = repo;
+                        _ = dag;
+                        _ = session;
+                        _ = path;
+                        _ = providers;
+                        _ = local_only;
+                        _ = timeout;
+                        _ = dest;
                         yield UnixfsStatus::FailedStatus { written: 0, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
                     };
 

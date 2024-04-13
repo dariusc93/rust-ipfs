@@ -60,10 +60,12 @@ use libp2p::{
         GetClosestPeersError, GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError,
         GetRecordOk, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
-    mdns::Event as MdnsEvent,
     rendezvous::{Cookie, Namespace},
     swarm::{ConnectionId, SwarmEvent},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use libp2p::mdns::Event as MdnsEvent;
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.

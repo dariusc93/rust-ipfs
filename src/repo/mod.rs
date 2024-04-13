@@ -17,6 +17,7 @@ use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
 use std::future::IntoFuture;
+#[allow(unused_imports)]
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -35,6 +36,7 @@ pub mod datastore;
 pub mod lock;
 
 /// Path mangling done for pins and blocks
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod paths;
 
 /// Describes the outcome of `BlockStore::put_block`.
@@ -251,6 +253,7 @@ impl From<Option<PinMode>> for PinModeRequirement {
     }
 }
 
+#[allow(dead_code)]
 impl PinModeRequirement {
     fn is_indirect_or_any(&self) -> bool {
         use PinModeRequirement::*;

@@ -1,7 +1,9 @@
+#[allow(unused_imports)]
 use either::Either;
+#[allow(unused_imports)]
 use futures::future::Either as FutureEither;
-use hickory_resolver::system_conf;
 use libp2p::core::muxing::StreamMuxerBox;
+#[allow(unused_imports)]
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
@@ -65,7 +67,7 @@ impl From<DnsResolver> for (ResolverConfig, ResolverOpts) {
         match value {
             DnsResolver::Google => (ResolverConfig::google(), Default::default()),
             DnsResolver::Cloudflare => (ResolverConfig::cloudflare(), Default::default()),
-            DnsResolver::Local => system_conf::read_system_conf().unwrap_or_default(),
+            DnsResolver::Local => hickory_resolver::system_conf::read_system_conf().unwrap_or_default(),
             DnsResolver::None => (ResolverConfig::new(), Default::default()),
         }
     }

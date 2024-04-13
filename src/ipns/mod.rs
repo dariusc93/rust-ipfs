@@ -126,14 +126,9 @@ impl Ipns {
                         Ok(internal_path)
                     })
             }
-            #[cfg(not(target_arch = "wasm32"))]
             PathRoot::Dns(domain) => {
                 let path_iter = path.iter();
                 Ok(dnslink::resolve(self.resolver.unwrap_or_default(), domain, path_iter).await?)
-            }
-            #[cfg(target_arch = "wasm32")]
-            PathRoot::Dns(_) => {
-                anyhow::bail!("unimplemented")
             }
         }
     }
