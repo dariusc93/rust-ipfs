@@ -149,6 +149,45 @@ hickory-resolver = "0.24.0"
 beetle-bitswap-next = { workspace = true, optional = true }
 rcgen = "0.13.1"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio-stream = { version = "0.1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+tokio = { default-features = false, features = [
+    "sync",
+    "macros",
+], version = "1" }
+wasm-bindgen-futures = { version = "0.4" }
+getrandom = { version = "0.2.14", features = ["js"] }
+libp2p = { features = [
+    "gossipsub",
+    "autonat",
+    "relay",
+    "dcutr",
+    "identify",
+    "kad",
+    "websocket-websys",
+    "webtransport-websys",
+    "macros",
+    "noise",
+    "ping",
+    "yamux",
+    "dns",
+    "ed25519",
+    "secp256k1",
+    "ecdsa",
+    "serde",
+    "request-response",
+    "json",
+    "cbor",
+    "rendezvous",
+    "wasm-bindgen",
+], workspace = true }
+
+libp2p-webrtc-websys = "0.3.0-alpha"
+
+serde-wasm-bindgen = "0.6"
+idb = "0.6"
+
 [dev-dependencies]
 criterion = { default-features = false, version = "0.5" }
 hex-literal = { default-features = false, version = "0.4" }
@@ -173,7 +212,7 @@ clap = { workspace = true }
 debug = true
 
 [workspace]
-members = ["packages/*", "unixfs"]
+members = ["packages/*", "unixfs", "examples/*"]
 exclude = ["archived", "deprecated/*"]
 
 resolver = "2"

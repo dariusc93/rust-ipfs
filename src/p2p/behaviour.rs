@@ -32,6 +32,7 @@ use libp2p::kad::{
     Behaviour as Kademlia, BucketInserts as KademliaBucketInserts, Config as KademliaConfig,
     Record, StoreInserts as KademliaStoreInserts,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::tokio::Behaviour as Mdns;
 use libp2p::ping::Behaviour as Ping;
 use libp2p::relay::client::Behaviour as RelayClient;
@@ -52,6 +53,7 @@ where
     C: NetworkBehaviour,
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
+    #[cfg(not(target_arch = "wasm32"))]
     pub mdns: Toggle<Mdns>,
     #[cfg(feature = "libp2p_bitswap")]
     pub bitswap: Toggle<Bitswap<DefaultParams>>,
@@ -64,6 +66,7 @@ where
     pub identify: Toggle<Identify>,
     pub pubsub: Toggle<GossipsubStream>,
     pub autonat: Toggle<autonat::Behaviour>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
     pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
     pub relay: Toggle<Relay>,
@@ -400,6 +403,7 @@ where
 
         info!("net: starting with peer id {}", peer_id);
 
+        #[cfg(not(target_arch = "wasm32"))]
         let mdns = if protocols.mdns {
             Mdns::new(Default::default(), peer_id).ok()
         } else {
@@ -453,7 +457,7 @@ where
                     Default::default(),
                     repo.clone(),
                     Box::new(|fut| {
-                        tokio::spawn(fut);
+                        crate::rt::spawn(fut);
                     }),
                 )
             })
@@ -522,6 +526,7 @@ where
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
+        #[cfg(not(target_arch = "wasm32"))]
         let upnp = Toggle::from(protocols.upnp.then(libp2p::upnp::tokio::Behaviour::default));
 
         let (transport, relay_client, relay_manager) = match protocols.relay_client {
@@ -556,6 +561,7 @@ where
 
         Ok((
             Behaviour {
+                #[cfg(not(target_arch = "wasm32"))]
                 mdns,
                 kademlia,
                 bitswap,
@@ -570,6 +576,7 @@ where
                 block_list,
                 #[cfg(feature = "experimental_stream")]
                 stream,
+                #[cfg(not(target_arch = "wasm32"))]
                 upnp,
                 peerbook,
                 addressbook,

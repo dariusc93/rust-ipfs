@@ -60,10 +60,12 @@ use libp2p::{
         GetClosestPeersError, GetClosestPeersOk, GetProvidersError, GetProvidersOk, GetRecordError,
         GetRecordOk, PutRecordError, PutRecordOk, QueryId, QueryResult::*, Record,
     },
-    mdns::Event as MdnsEvent,
     rendezvous::{Cookie, Namespace},
     swarm::{ConnectionId, SwarmEvent},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use libp2p::mdns::Event as MdnsEvent;
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
@@ -221,8 +223,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self) {
-        let mut session_cleanup = tokio::time::interval(Duration::from_secs(5 * 60));
-        let mut event_cleanup = tokio::time::interval(Duration::from_secs(60));
+        let mut session_cleanup = futures_timer::Delay::new(Duration::from_secs(5 * 60));
+        let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
 
         loop {
             tokio::select! {
@@ -239,10 +241,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                     self.handle_event(event);
                 },
-                _ = event_cleanup.tick() => {
+                _ = &mut event_cleanup => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+                    event_cleanup.reset(Duration::from_secs(60));
                 }
-                _ = session_cleanup.tick() => {
+                _ = &mut session_cleanup => {
                     #[cfg(feature = "beetle_bitswap")]
                     {
                         let mut to_remove = Vec::new();
@@ -265,6 +268,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             self.destroy_bs_session(id, tx);
                         }
                     }
+                    session_cleanup.reset(Duration::from_secs(5 * 60));
                 }
             }
         }
@@ -386,6 +390,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Err(error.into()));
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
@@ -530,7 +535,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                         {
                                             let providers = providers.clone();
                                             let mut tx = entry.get().clone();
-                                            tokio::spawn(async move {
+                                            rt::spawn(async move {
                                                 let _ = tx.send(Ok(providers)).await;
                                             });
                                         }

@@ -1,9 +1,10 @@
 use crate::error::Error;
 use crate::p2p::DnsResolver;
 use crate::path::IpfsPath;
-use std::str::FromStr;
+
 use tracing_futures::Instrument;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn resolve<'a>(
     resolver: DnsResolver,
     domain: &str,
@@ -11,6 +12,7 @@ pub async fn resolve<'a>(
 ) -> Result<IpfsPath, Error> {
     use hickory_resolver::AsyncResolver;
     use std::borrow::Cow;
+    use std::str::FromStr;
 
     let span = tracing::trace_span!("dnslink", %domain);
 
@@ -82,6 +84,18 @@ pub async fn resolve<'a>(
     }
     .instrument(span)
     .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn resolve<'a>(
+    _: DnsResolver,
+    domain: &str,
+    _: impl Iterator<Item = &'a str>,
+) -> Result<IpfsPath, Error> {
+    let span = tracing::trace_span!("dnslink", %domain);
+    async move { anyhow::bail!("failed to resolve {domain}: unimplemented") }
+        .instrument(span)
+        .await
 }
 
 #[cfg(test)]
