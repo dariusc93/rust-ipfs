@@ -7,7 +7,7 @@ use super::{Lock, LockError};
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct FsLock {
-    file: parking_lot::Mutex<Option< std::fs::File>>,
+    file: parking_lot::Mutex<Option<std::fs::File>>,
     path: std::path::PathBuf,
     state: parking_lot::Mutex<State>,
 }

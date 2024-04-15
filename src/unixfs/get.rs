@@ -230,7 +230,6 @@ impl Stream for UnixfsGet {
                         yield UnixfsStatus::FailedStatus { written: 0, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
                     };
 
-
                     self.stream = StatusStreamState::Pending {
                         stream: stream.boxed(),
                     };
