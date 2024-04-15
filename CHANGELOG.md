@@ -1,6 +1,3 @@
-# next
-- refactor: Add wasm support. [PR XXX](httops://github.com/dariusc93/rust-ipfs/pull/XXX)
-
 # 0.11.5
 - fix: Check for relay when storing address based on connection. [PR 170](httops://github.com/dariusc93/rust-ipfs/pull/170)
 - chore: Add conversions for references
@@ -12,6 +9,7 @@
 - chore: Reenable websocket support and add support for secured websockets.
 - feat: Implmenets webrtc transport and add a new feature. [PR 177](https://github.com/dariusc93/rust-ipfs/pull/177)
 - refactor: Remove async-broadcast and stream clones. [PR 174](httops://github.com/dariusc93/rust-ipfs/pull/174)
+- refactor: Add wasm support. [PR 178](httops://github.com/dariusc93/rust-ipfs/pull/178)
 
 # 0.11.4
 - fix: Send a wantlist of missing blocks.
