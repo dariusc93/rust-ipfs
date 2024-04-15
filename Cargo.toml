@@ -185,6 +185,9 @@ libp2p = { features = [
 
 libp2p-webrtc-websys = "0.3.0-alpha"
 
+serde-wasm-bindgen = "0.6"
+idb = "0.6"
+
 [dev-dependencies]
 criterion = { default-features = false, version = "0.5" }
 hex-literal = { default-features = false, version = "0.4" }

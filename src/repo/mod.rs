@@ -482,6 +482,14 @@ impl Repo {
         Self::new_raw(block_store, data_store, lockfile)
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_idb(namespace: Option<String>) -> Self {
+        let block_store = Box::new(blockstore::idb::IdbBlockStore::new(namespace));
+        let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
+        let lockfile = Box::new(lock::MemLock);
+        Self::new_raw(block_store, data_store, lockfile)
+    }
+
     pub fn set_max_storage_size(&self, size: usize) {
         self.inner.max_storage_size.store(size, Ordering::SeqCst);
     }

@@ -2180,6 +2180,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "idb"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5da868258c196c03097e145e10a8b12d6d719d80e9cdd6d5e3d61a5ca0972019"
+dependencies = [
+ "js-sys",
+ "num-traits",
+ "thiserror",
+ "tokio",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "idna"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4650,6 +4664,7 @@ dependencies = [
  "getrandom 0.2.14",
  "hex-literal",
  "hickory-resolver",
+ "idb",
  "libipld",
  "libp2p",
  "libp2p-allow-block-list",
@@ -4669,6 +4684,7 @@ dependencies = [
  "rust-unixfs",
  "rustyline-async",
  "serde",
+ "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.10.8",
  "sled",
@@ -4935,6 +4951,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd31f59f6fe2b0c055371bb2f16d7f0aa7d8881676c04a55b1596d1a17cd10a4"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
