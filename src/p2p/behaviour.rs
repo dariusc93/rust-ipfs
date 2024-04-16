@@ -158,7 +158,6 @@ impl RelayConfig {
             max_reservations_per_peer: usize::MAX,
             reservation_rate_limiters: vec![],
             circuit_src_rate_limiters: vec![],
-            ..Default::default()
         }
     }
 }
