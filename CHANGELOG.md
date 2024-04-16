@@ -1,6 +1,7 @@
 # 0.11.6
 - feat: Add RepoInsertPin::provider and RepoInsertPin::providers. [PR 180](https://github.com/dariusc93/rust-ipfs/pull/180)
 - chore: Add RelayConfig::unbounded. [PR 181](https://github.com/dariusc93/rust-ipfs/pull/181)
+- fix: Timeout when fetching initial block
 
 # 0.11.5
 - fix: Check for relay when storing address based on connection. [PR 170](https://github.com/dariusc93/rust-ipfs/pull/170)

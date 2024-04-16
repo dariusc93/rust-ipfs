@@ -1097,6 +1097,7 @@ pub struct RepoFetch {
     span: Option<Span>,
     providers: Vec<PeerId>,
     recursive: bool,
+    timeout: Option<Duration>,
     refs: crate::refs::IpldRefs,
 }
 
@@ -1107,6 +1108,7 @@ impl RepoFetch {
             cid,
             recursive: false,
             providers: vec![],
+            timeout: None,
             refs: Default::default(),
             span: None,
         }
@@ -1141,6 +1143,7 @@ impl RepoFetch {
     /// Duration to fetch the block from the network before
     /// timing out
     pub fn timeout(mut self, duration: Duration) -> Self {
+        self.timeout.replace(duration);
         self.refs = self.refs.with_timeout(duration);
         self
     }
@@ -1170,10 +1173,13 @@ impl std::future::IntoFuture for RepoFetch {
         let repo = self.repo;
         let span = debug_span!(parent: &span, "fetch", cid = %cid, recursive);
         let providers = self.providers;
+        let timeout = self.timeout;
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo.get_block(&cid, &providers, false).await?;
+            let block = repo
+                .get_block_with_session(None, &cid, &providers, false, timeout)
+                .await?;
 
             if !recursive {
                 return Ok(());
@@ -1204,6 +1210,7 @@ pub struct RepoInsertPin {
     span: Option<Span>,
     providers: Vec<PeerId>,
     recursive: bool,
+    timeout: Option<Duration>,
     local: bool,
     refs: crate::refs::IpldRefs,
 }
@@ -1216,6 +1223,7 @@ impl RepoInsertPin {
             recursive: false,
             providers: vec![],
             local: false,
+            timeout: None,
             refs: Default::default(),
             span: None,
         }
@@ -1266,6 +1274,7 @@ impl RepoInsertPin {
     /// Duration to fetch the block from the network before
     /// timing out
     pub fn timeout(mut self, duration: Duration) -> Self {
+        self.timeout.replace(duration);
         self.refs = self.refs.with_timeout(duration);
         self
     }
@@ -1296,10 +1305,13 @@ impl std::future::IntoFuture for RepoInsertPin {
         let repo = self.repo;
         let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
         let providers = self.providers;
+        let timeout = self.timeout;
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo.get_block(&cid, &providers, local).await?;
+            let block = repo
+                .get_block_with_session(None, &cid, &providers, local, timeout)
+                .await?;
 
             if !recursive {
                 repo.insert_direct_pin(&cid).await?
