@@ -479,13 +479,15 @@ impl DagGet {
 
     /// Peer that may contain the block
     pub fn provider(mut self, peer_id: PeerId) -> Self {
-        self.providers.push(peer_id);
+        if !self.providers.contains(&peer_id) {
+            self.providers.push(peer_id);
+        }
         self
     }
 
     /// List of peers that may contain the block
-    pub fn providers(mut self, providers: &[PeerId]) -> Self {
-        self.providers = providers.to_vec();
+    pub fn providers(mut self, providers: impl Into<Vec<PeerId>>) -> Self {
+        self.providers = providers.into();
         self
     }
 
