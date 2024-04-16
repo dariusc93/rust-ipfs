@@ -100,8 +100,8 @@ impl IpldRefs {
     }
 
     /// List of peers that may contain the block
-    pub fn providers(mut self, providers: &[PeerId]) -> Self {
-        self.providers = providers.to_vec();
+    pub fn providers(mut self, providers: impl Into<Vec<PeerId>>) -> Self {
+        self.providers = providers.into();
         self
     }
 
