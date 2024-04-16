@@ -1,5 +1,5 @@
 # 0.11.6
-- feat: Add RepoInsertPin::provider and RepoInsertPin::providers. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- feat: Add RepoInsertPin::provider and RepoInsertPin::providers. [PR 180](https://github.com/dariusc93/rust-ipfs/pull/180)
 
 # 0.11.5
 - fix: Check for relay when storing address based on connection. [PR 170](https://github.com/dariusc93/rust-ipfs/pull/170)
