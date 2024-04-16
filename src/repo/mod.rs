@@ -1183,7 +1183,7 @@ impl std::future::IntoFuture for RepoFetch {
             let mut st = self
                 .refs
                 .with_only_unique()
-                .providers(providers)
+                .providers(&providers)
                 .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
                 .map_ok(|crate::refs::Edge { destination, .. }| destination)
                 .into_stream()
@@ -1252,7 +1252,7 @@ impl RepoInsertPin {
     }
 
     /// List of peers that may contain the block to pin
-    pub fn providers(mut self, providers: impl Into<Vec<PeerId>>) -> Self {
+    pub fn providers(mut self, providers: &[PeerId]) -> Self {
         self.providers = providers.into();
         self
     }
@@ -1309,7 +1309,7 @@ impl std::future::IntoFuture for RepoInsertPin {
                 let st = self
                     .refs
                     .with_only_unique()
-                    .providers(providers)
+                    .providers(&providers)
                     .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()

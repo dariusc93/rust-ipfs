@@ -67,8 +67,8 @@ impl UnixfsCat {
         self
     }
 
-    pub fn providers(mut self, list: impl Into<Vec<PeerId>>) -> Self {
-        self.providers = list.into();
+    pub fn providers(mut self, list: &[PeerId]) -> Self {
+        self.providers = list.to_vec();
         self
     }
 
