@@ -152,8 +152,10 @@ impl RelayConfig {
             max_circuits: usize::MAX,
             max_circuit_bytes: u64::MAX,
             max_circuit_duration: Duration::MAX,
+            max_circuits_per_peer: usize::MAX,
             max_reservations: usize::MAX,
             reservation_duration: Duration::MAX,
+            max_reservations_per_peer: usize::MAX,
             reservation_rate_limiters: vec![],
             circuit_src_rate_limiters: vec![],
             ..Default::default()
