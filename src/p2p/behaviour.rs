@@ -100,12 +100,12 @@ pub enum KadResult {
 pub struct RelayConfig {
     pub max_reservations: usize,
     pub max_reservations_per_peer: usize,
-    pub reservation_duration: std::time::Duration,
+    pub reservation_duration: Duration,
     pub reservation_rate_limiters: Vec<RateLimit>,
 
     pub max_circuits: usize,
     pub max_circuits_per_peer: usize,
-    pub max_circuit_duration: std::time::Duration,
+    pub max_circuit_duration: Duration,
     pub max_circuit_bytes: u64,
     pub circuit_src_rate_limiters: Vec<RateLimit>,
 }
@@ -141,6 +141,22 @@ impl Default for RelayConfig {
                     interval: Duration::from_secs(60),
                 },
             ],
+        }
+    }
+}
+
+impl RelayConfig {
+    /// Configuration to allow a connection to the relay without limits
+    pub fn unbounded() -> Self {
+        Self {
+            max_circuits: usize::MAX,
+            max_circuit_bytes: u64::MAX,
+            max_circuit_duration: Duration::MAX,
+            max_reservations: usize::MAX,
+            reservation_duration: Duration::MAX,
+            reservation_rate_limiters: vec![],
+            circuit_src_rate_limiters: vec![],
+            ..Default::default()
         }
     }
 }
