@@ -8,8 +8,8 @@
 - chore: Update Cargo.toml to gate non-wasm dependencies. [PR 176](https://github.com/dariusc93/rust-ipfs/pull/176)
 - chore: Reenable websocket support and add support for secured websockets.
 - feat: Implmenets webrtc transport and add a new feature. [PR 177](https://github.com/dariusc93/rust-ipfs/pull/177)
-- refactor: Remove async-broadcast and stream clones. [PR 174](httops://github.com/dariusc93/rust-ipfs/pull/174)
-- refactor: Add wasm support. [PR 178](httops://github.com/dariusc93/rust-ipfs/pull/178)
+- refactor: Remove async-broadcast and stream clones. [PR 174](https://github.com/dariusc93/rust-ipfs/pull/174)
+- refactor: Add wasm support. [PR 178](https://github.com/dariusc93/rust-ipfs/pull/178)
 
 # 0.11.4
 - fix: Send a wantlist of missing blocks.
@@ -20,14 +20,14 @@
 
 # 0.11.2
 - fix: Emit event if no peers dont have a specific block.
-- feat: Implement basic bitswap ledger for tracking wantlist and requests. [PR 169](httops://github.com/dariusc93/rust-ipfs/pull/169)
+- feat: Implement basic bitswap ledger for tracking wantlist and requests. [PR 169](https://github.com/dariusc93/rust-ipfs/pull/169)
 
 # 0.11.1
 - chore: Add logging to bitswap protocol and additional checks.
 - feat: Implemented Ipfs::fetch. 
 
 # 0.11.0
-- feat: Implemented basic bitswap protocol internally. [PR 156](httops://github.com/dariusc93/rust-ipfs/pull/156)
+- feat: Implemented basic bitswap protocol internally. [PR 156](https://github.com/dariusc93/rust-ipfs/pull/156)
 - chore: Feature gate sled and redb datastores. [PR 162](https://github.com/dariusc93/rust-ipfs/pull/162)
 - refactor: Revamp Repo and BlockStore API. [PR 163](https://github.com/dariusc93/rust-ipfs/pull/163)
 - refactor: Remove deprecated yamux fields.
