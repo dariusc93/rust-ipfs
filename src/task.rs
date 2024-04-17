@@ -535,7 +535,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                         {
                                             let providers = providers.clone();
                                             let mut tx = entry.get().clone();
-                                            rt::spawn(async move {
+                                            crate::rt::spawn(async move {
                                                 let _ = tx.send(Ok(providers)).await;
                                             });
                                         }
