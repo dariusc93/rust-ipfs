@@ -179,18 +179,12 @@ impl GossipsubStream {
     }
 
     /// Returns the peers known to subscribe to the given topic
-    pub fn subscribed_peers(&self, topic: &str) -> Vec<PeerId> {
+    pub fn subscribed_peers(&self, topic: impl Into<String>) -> Vec<PeerId> {
         let topic = Topic::new(topic);
         self.all_peers()
             .filter(|(_, list)| list.contains(&&topic.hash()))
             .map(|(peer_id, _)| *peer_id)
             .collect()
-    }
-
-    /// Returns the list of currently subscribed topics. This can contain topics for which stream
-    /// has been dropped but no messages have yet been received on the topics after the drop.
-    pub fn subscribed_topics(&self) -> Vec<String> {
-        self.streams.keys().map(|t| t.to_string()).collect()
     }
 }
 

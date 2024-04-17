@@ -1165,7 +1165,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     return;
                 };
 
-                let _ = ret.send(Ok(pubsub.subscribed_peers(&topic)));
+                let _ = ret.send(Ok(pubsub.subscribed_peers(topic)));
             }
             IpfsEvent::PubsubPeers(None, ret) => {
                 let Some(pubsub) = self.swarm.behaviour_mut().pubsub.as_mut() else {
@@ -1180,8 +1180,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Err(anyhow!("pubsub protocol is disabled")));
                     return;
                 };
-
-                let _ = ret.send(Ok(pubsub.subscribed_topics()));
+                let list = pubsub.topics().map(|t| t.to_string()).collect();
+                let _ = ret.send(Ok(list));
             }
             // IpfsEvent::WantList(peer, ret) => {
             //     let list = if let Some(peer) = peer {
