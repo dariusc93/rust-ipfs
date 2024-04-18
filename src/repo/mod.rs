@@ -475,7 +475,6 @@ impl Repo {
         Self::new_raw(block_store, data_store, lockfile)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_memory() -> Self {
         let block_store = Box::new(blockstore::memory::MemBlockStore::new(Default::default()));
         let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
