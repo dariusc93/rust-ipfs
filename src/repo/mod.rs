@@ -967,10 +967,16 @@ impl Repo {
         let repo = self.clone();
 
         let blocks = repo.list_blocks().await;
+        let pins = repo
+            .list_pins(None)
+            .await
+            .filter_map(|result| futures::future::ready(result.map(|(cid, _)| cid).ok()))
+            .collect::<Vec<_>>()
+            .await;
 
         let stream = async_stream::stream! {
             for await cid in blocks {
-                if repo.is_pinned(&cid).await.unwrap_or_default() {
+                if pins.contains(&cid) {
                     continue;
                 }
                 yield cid;
