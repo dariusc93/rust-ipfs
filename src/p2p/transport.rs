@@ -13,7 +13,7 @@ use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::yamux::Config as YamuxConfig;
 use libp2p::{identity, noise};
 use libp2p::{PeerId, Transport};
-use std::io::{self, ErrorKind};
+use std::io;
 use std::time::Duration;
 
 /// Transport type.
@@ -27,6 +27,8 @@ pub struct TransportConfig {
     pub enable_quic: bool,
     pub quic_max_idle_timeout: Duration,
     pub enable_websocket: bool,
+    pub enable_dns: bool,
+    pub enable_memory_transport: bool,
     pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
     pub enable_webrtc: bool,
@@ -38,7 +40,9 @@ impl Default for TransportConfig {
             enable_quic: true,
             enable_websocket: false,
             enable_secure_websocket: true,
+            enable_memory_transport: false,
             support_quic_draft_29: false,
+            enable_dns: true,
             enable_webrtc: false,
             timeout: Duration::from_secs(30),
             quic_max_idle_timeout: Duration::from_secs(10),
@@ -105,8 +109,10 @@ pub(crate) fn build_transport(
         dns_resolver,
         version,
         enable_quic,
+        enable_memory_transport,
         support_quic_draft_29,
         quic_max_idle_timeout,
+        enable_dns,
         enable_websocket,
         enable_secure_websocket,
         enable_webrtc,
@@ -117,14 +123,21 @@ pub(crate) fn build_transport(
     use libp2p::quic::Config as QuicConfig;
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
 
-    let noise_config =
-        noise::Config::new(&keypair).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+    let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
 
     let yamux_config = YamuxConfig::default();
 
     let tcp_config = GenTcpConfig::default().nodelay(true).port_reuse(true);
 
     let transport = TokioTcpTransport::new(tcp_config.clone());
+
+    let transport = match enable_memory_transport {
+        true => {
+            let mem_ts = MemoryTransport::new();
+            Either::Left(mem_ts.or_transport(transport))
+        }
+        false => Either::Right(transport),
+    };
 
     let transport = match enable_websocket {
         true => {
@@ -151,9 +164,14 @@ pub(crate) fn build_transport(
 
     let transport_timeout = TransportTimeout::new(transport, timeout);
 
-    let (cfg, opts) = dns_resolver.unwrap_or_default().into();
-
-    let transport = TokioDnsConfig::custom(transport_timeout, cfg, opts);
+    let transport = match enable_dns {
+        true => {
+            let (cfg, opts) = dns_resolver.unwrap_or_default().into();
+            let dns_transport = TokioDnsConfig::custom(transport_timeout, cfg, opts);
+            Either::Left(dns_transport)
+        }
+        false => Either::Right(transport_timeout),
+    };
 
     let transport = match relay {
         Some(relay) => {
@@ -221,6 +239,8 @@ pub(crate) fn build_transport(
         dns_resolver: _,
         version,
         enable_quic,
+        enable_dns: _,
+        enable_memory_transport: _,
         support_quic_draft_29: _,
         quic_max_idle_timeout: _,
         enable_websocket,
@@ -282,32 +302,6 @@ pub(crate) fn build_transport(
                 .boxed()
         }
         false => transport,
-    };
-
-    Ok(transport)
-}
-
-#[allow(dead_code)]
-pub(crate) fn memory_transport(
-    keypair: &identity::Keypair,
-    relay: Option<ClientTransport>,
-) -> io::Result<TTransport> {
-    let noise_config =
-        noise::Config::new(keypair).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
-
-    let transport = match relay {
-        Some(relay) => OrTransport::new(relay, MemoryTransport::default())
-            .upgrade(Version::V1)
-            .authenticate(noise_config)
-            .multiplex(YamuxConfig::default())
-            .timeout(Duration::from_secs(20))
-            .boxed(),
-        None => MemoryTransport::default()
-            .upgrade(Version::V1)
-            .authenticate(noise_config)
-            .multiplex(YamuxConfig::default())
-            .timeout(Duration::from_secs(20))
-            .boxed(),
     };
 
     Ok(transport)
