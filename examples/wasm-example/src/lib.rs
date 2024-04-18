@@ -6,6 +6,7 @@ use web_sys::{Document, HtmlElement};
 
 #[wasm_bindgen]
 pub async fn run() -> Result<(), JsError> {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let body = Body::from_current_window()?;
     body.append_p("Ipfs block exchange test")?;
 
