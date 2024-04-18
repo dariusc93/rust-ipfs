@@ -2,6 +2,7 @@
 - fix: Use rt import path when using beetle bitswap feature.
 - feat: Add in-memory transport.
 - feat: Add options to disable dns transport.
+- refactor: Spawn local task for idb operation instead of using channels. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 
 # 0.11.6
 - feat: Add RepoInsertPin::provider and RepoInsertPin::providers. [PR 180](https://github.com/dariusc93/rust-ipfs/pull/180)
