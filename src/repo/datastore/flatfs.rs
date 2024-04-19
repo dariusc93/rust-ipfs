@@ -161,9 +161,12 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
                     continue;
                 }
 
-                let key = raw_key[..5].as_bytes().to_vec();
+                let Some(key) = raw_key.get(0..raw_key.len() - 5) else {
+                    continue;
+                };
 
                 if let Ok(bytes) = tokio::fs::read(path).await {
+                    let key = key.as_bytes().to_vec();
                     yield (key, bytes)
                 }
             }
