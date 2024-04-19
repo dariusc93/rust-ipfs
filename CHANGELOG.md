@@ -4,7 +4,7 @@
 - feat: Add options to disable dns transport.
 - refactor: Spawn local task for idb operation instead of using channels. [PR 182](https://github.com/dariusc93/rust-ipfs/pull/182)
 - fix: Improve performance by collecting the pinned blocks then compare.
-- feat: Add logic to FsDataStore for K/V storage. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- feat: Add logic to FsDataStore for K/V storage. [PR 183](https://github.com/dariusc93/rust-ipfs/pull/183)
 
 # 0.11.6
 - feat: Add RepoInsertPin::provider and RepoInsertPin::providers. [PR 180](https://github.com/dariusc93/rust-ipfs/pull/180)
