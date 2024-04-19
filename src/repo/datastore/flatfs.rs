@@ -88,7 +88,8 @@ impl FsDataStore {
         let path = path.join(key);
 
         if path.is_dir() {
-            // The only reason why this would be a directory is if the key didnt exist or is invalid
+            // The only reason why this would be a directory is if the key didnt exist, is invalid, or the item was
+            // actually a directory in which case we return an error here.
             return Err(std::io::ErrorKind::Other.into());
         }
 
