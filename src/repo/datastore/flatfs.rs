@@ -49,16 +49,22 @@ impl FsDataStore {
 
     // Instead of having the file be the key itself, we would split the key into segements with all but the last representing as a directory
     // with the final item being a file.
-    fn key(&self, key: &[u8]) -> Option<(PathBuf, PathBuf)> {
+    fn key(&self, key: &[u8]) -> Option<(String, String)> {
         let key = String::from_utf8_lossy(key);
         let mut key_segments = key.split('/').collect::<VecDeque<_>>();
 
         let key_val = key_segments
             .pop_back()
             .map(PathBuf::from)
-            .map(|path| path.with_extension("data"))?;
+            .map(|path| path.with_extension("data"))
+            .map(|path| path.to_string_lossy().to_string())?;
 
-        let key_path = PathBuf::from(Vec::from_iter(key_segments).join("/"));
+        let key_path_raw = Vec::from_iter(key_segments).join("/");
+
+        let key_path = match key_path_raw.starts_with('/') {
+            true => key_path_raw[1..].to_string(),
+            false => key_path_raw
+        };
 
         Some((key_path, key_val))
     }
