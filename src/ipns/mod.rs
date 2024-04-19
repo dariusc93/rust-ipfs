@@ -164,7 +164,7 @@ impl Ipns {
 
         let datastore = repo.data_store();
 
-        let record_data = datastore.get(mb.as_bytes()).await?;
+        let record_data = datastore.get(mb.as_bytes()).await.unwrap_or_default();
 
         let mut seq = 0;
 
