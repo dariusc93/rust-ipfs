@@ -1,13 +1,13 @@
 use std::{rc::Rc, str::FromStr, sync::OnceLock};
 
-use async_trait::async_trait;
-use futures::{channel::oneshot, stream::BoxStream, SinkExt, StreamExt};
-use idb::{Database, DatabaseEvent, Factory, ObjectStoreParams, TransactionMode};
-use libipld::Cid;
 use crate::{
     repo::{BlockPut, BlockStore},
     Block, Error,
 };
+use async_trait::async_trait;
+use futures::{channel::oneshot, stream::BoxStream, SinkExt, StreamExt};
+use idb::{Database, DatabaseEvent, Factory, ObjectStoreParams, TransactionMode};
+use libipld::Cid;
 use send_wrapper::SendWrapper;
 use wasm_bindgen_futures::wasm_bindgen::JsValue;
 
