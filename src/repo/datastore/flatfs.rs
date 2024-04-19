@@ -7,7 +7,7 @@ use core::convert::TryFrom;
 use futures::stream::{BoxStream, TryStreamExt};
 use futures::StreamExt;
 use libipld::Cid;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
@@ -51,19 +51,19 @@ impl FsDataStore {
     // with the final item being a file.
     fn key(&self, key: &[u8]) -> Option<(String, String)> {
         let key = String::from_utf8_lossy(key);
-        let mut key_segments = key.split('/').collect::<VecDeque<_>>();
+        let mut key_segments = key.split('/').collect::<Vec<_>>();
 
         let key_val = key_segments
-            .pop_back()
+            .pop()
             .map(PathBuf::from)
             .map(|path| path.with_extension("data"))
             .map(|path| path.to_string_lossy().to_string())?;
 
-        let key_path_raw = Vec::from_iter(key_segments).join("/");
+        let key_path_raw = key_segments.join("/");
 
         let key_path = match key_path_raw.starts_with('/') {
             true => key_path_raw[1..].to_string(),
-            false => key_path_raw
+            false => key_path_raw,
         };
 
         Some((key_path, key_val))
