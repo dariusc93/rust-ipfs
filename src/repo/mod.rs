@@ -484,8 +484,8 @@ impl Repo {
 
     #[cfg(target_arch = "wasm32")]
     pub fn new_idb(namespace: Option<String>) -> Self {
-        let block_store = Box::new(blockstore::idb::IdbBlockStore::new(namespace));
-        let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
+        let block_store = Box::new(blockstore::idb::IdbBlockStore::new(namespace.clone()));
+        let data_store = Box::new(datastore::idb::IdbDataStore::new(namespace));
         let lockfile = Box::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
     }
