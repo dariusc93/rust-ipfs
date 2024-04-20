@@ -242,7 +242,7 @@ impl PinStore for IdbDataStore {
         wasm_bindgen_futures::spawn_local(async move {
             let res = async {
                 let transaction =
-                    database.transaction(&["pinestore"], TransactionMode::ReadOnly)?;
+                    database.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
 
                 let store = transaction.object_store("pinstore")?;
 
@@ -267,9 +267,9 @@ impl PinStore for IdbDataStore {
         let (tx, rx) = oneshot::channel();
         wasm_bindgen_futures::spawn_local(async move {
             let res = async {
-                let transaction = db.transaction(&["pinestore"], TransactionMode::ReadWrite)?;
+                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-                let store = transaction.object_store("pinestore")?;
+                let store = transaction.object_store("pinstore")?;
 
                 let already_pinned = get_pinned_mode(&transaction, &store, &target).await?;
 
@@ -321,9 +321,9 @@ impl PinStore for IdbDataStore {
         // the transaction is not infallible but there is no additional error we return
         wasm_bindgen_futures::spawn_local(async move {
             let res = async {
-                let transaction = db.transaction(&["pinestore"], TransactionMode::ReadWrite)?;
+                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-                let store = transaction.object_store("pinestore")?;
+                let store = transaction.object_store("pinstore")?;
 
                 let already_pinned = get_pinned_mode(&transaction, &store, &target).await?;
 
@@ -379,9 +379,9 @@ impl PinStore for IdbDataStore {
 
         wasm_bindgen_futures::spawn_local(async move {
             let res = async {
-                let transaction = db.transaction(&["pinestore"], TransactionMode::ReadWrite)?;
+                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-                let store = transaction.object_store("pinestore")?;
+                let store = transaction.object_store("pinstore")?;
 
                 if is_not_pinned_or_pinned_indirectly(&transaction, &store, &target).await? {
                     let r = || Err(anyhow::anyhow!("not pinned or pinned indirectly"));
@@ -419,9 +419,9 @@ impl PinStore for IdbDataStore {
 
         wasm_bindgen_futures::spawn_local(async move {
             let res = async {
-                let transaction = db.transaction(&["pinestore"], TransactionMode::ReadWrite)?;
+                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-                let store = transaction.object_store("pinestore")?;
+                let store = transaction.object_store("pinstore")?;
 
                 if is_not_pinned_or_pinned_indirectly(&transaction, &store, &target).await? {
                     let r = || Err(anyhow::anyhow!("not pinned or pinned indirectly"));
@@ -525,7 +525,7 @@ impl PinStore for IdbDataStore {
         let (tx, rx) = oneshot::channel();
         wasm_bindgen_futures::spawn_local(async move {
             let res = async {
-                let transaction = db.transaction(&["pinestore"], TransactionMode::ReadOnly)?;
+                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
 
                 let store = transaction.object_store("pinstore")?;
 
