@@ -420,6 +420,8 @@ impl Repo {
             StorageType::Memory => Repo::new_memory(),
             #[cfg(not(target_arch = "wasm32"))]
             StorageType::Disk(path) => Repo::new_fs(path),
+            #[cfg(target_arch = "wasm32")]
+            StorageType::IndexedDb { namespace } => Repo::new_idb(namespace.take()),
             StorageType::Custom {
                 blockstore,
                 datastore,

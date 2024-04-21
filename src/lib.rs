@@ -154,6 +154,11 @@ impl PartialEq for StorageType {
             (StorageType::Disk(left_path), StorageType::Disk(right_path)) => {
                 left_path.eq(right_path)
             }
+            #[cfg(target_arch = "wasm32")]
+            (
+                StorageType::IndexedDb { namespace: left },
+                StorageType::IndexedDb { namespace: right },
+            ) => left.eq(right),
             (StorageType::Memory, StorageType::Memory) => true,
             (StorageType::Custom { .. }, StorageType::Custom { .. }) => {
                 //Do we really care if they equal?
@@ -556,6 +561,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
         ])
+    }
+
+    /// Set storage type for the repo.
+    pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
+        self.options.ipfs_path = storage_type;
+        self
     }
 
     /// Adds a listening address
