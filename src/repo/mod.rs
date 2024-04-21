@@ -1,6 +1,6 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
-use crate::{Block, StoragePath};
+use crate::{Block, StorageType};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use core::fmt::Debug;
@@ -415,12 +415,14 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(repo_type: &mut StoragePath) -> Self {
+    pub fn new(repo_type: &mut StorageType) -> Self {
         match repo_type {
-            StoragePath::Memory => Repo::new_memory(),
+            StorageType::Memory => Repo::new_memory(),
             #[cfg(not(target_arch = "wasm32"))]
-            StoragePath::Disk(path) => Repo::new_fs(path),
-            StoragePath::Custom {
+            StorageType::Disk(path) => Repo::new_fs(path),
+            #[cfg(target_arch = "wasm32")]
+            StorageType::IndexedDb { namespace } => Repo::new_idb(namespace.take()),
+            StorageType::Custom {
                 blockstore,
                 datastore,
                 lock,
@@ -484,8 +486,8 @@ impl Repo {
 
     #[cfg(target_arch = "wasm32")]
     pub fn new_idb(namespace: Option<String>) -> Self {
-        let block_store = Box::new(blockstore::idb::IdbBlockStore::new(namespace));
-        let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
+        let block_store = Box::new(blockstore::idb::IdbBlockStore::new(namespace.clone()));
+        let data_store = Box::new(datastore::idb::IdbDataStore::new(namespace));
         let lockfile = Box::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
     }
