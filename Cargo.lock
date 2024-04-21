@@ -4653,7 +4653,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ipfs"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "anyhow",
  "async-stream",
