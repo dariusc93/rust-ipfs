@@ -269,11 +269,9 @@ impl Stream for UnixfsAdd {
 
                         let cid = path.root().cid().copied().expect("Cid is apart of the path");
 
-                        if pin {
-                            if let Ok(false) = repo.is_pinned(&cid).await {
-                                if let Err(e) = repo.pin(&cid).recursive().await {
-                                    error!("Unable to pin {cid}: {e}");
-                                }
+                        if pin && !repo.is_pinned(&cid).await.unwrap_or_default() {
+                            if let Err(e) = repo.pin(&cid).recursive().await {
+                                error!("Unable to pin {cid}: {e}");
                             }
                         }
 
