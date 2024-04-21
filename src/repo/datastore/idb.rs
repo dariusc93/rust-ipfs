@@ -472,9 +472,9 @@ impl PinStore for IdbDataStore {
 
         wasm_bindgen_futures::spawn_local(async move {
             let transaction = db
-                .transaction(&["datastore"], TransactionMode::ReadOnly)
+                .transaction(&["pinstore"], TransactionMode::ReadOnly)
                 .unwrap();
-            let store = transaction.object_store("datastore").unwrap();
+            let store = transaction.object_store("pinstore").unwrap();
 
             let res = store.get_all_keys(None, None).unwrap().await.unwrap();
 
