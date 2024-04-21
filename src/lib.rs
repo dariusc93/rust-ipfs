@@ -128,12 +128,18 @@ use libp2p::{
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
+#[allow(dead_code)]
+#[deprecated(note = "Use `StoreageType` instead")]
+type StoragePath = StorageType;
+
 #[derive(Default, Debug)]
-pub enum StoragePath {
+pub enum StorageType {
     #[cfg(not(target_arch = "wasm32"))]
     Disk(std::path::PathBuf),
     #[default]
     Memory,
+    #[cfg(target_arch = "wasm32")]
+    IndexedDb { namespace: Option<String> },
     Custom {
         blockstore: Option<Box<dyn BlockStore>>,
         datastore: Option<Box<dyn DataStore>>,
@@ -141,15 +147,15 @@ pub enum StoragePath {
     },
 }
 
-impl PartialEq for StoragePath {
+impl PartialEq for StorageType {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             #[cfg(not(target_arch = "wasm32"))]
-            (StoragePath::Disk(left_path), StoragePath::Disk(right_path)) => {
+            (StorageType::Disk(left_path), StorageType::Disk(right_path)) => {
                 left_path.eq(right_path)
             }
-            (StoragePath::Memory, StoragePath::Memory) => true,
-            (StoragePath::Custom { .. }, StoragePath::Custom { .. }) => {
+            (StorageType::Memory, StorageType::Memory) => true,
+            (StorageType::Custom { .. }, StorageType::Custom { .. }) => {
                 //Do we really care if they equal?
                 //TODO: Possibly implement PartialEq/Eq for the traits so we could make sure
                 //      that they do or dont eq each other. For now this will always be true
@@ -160,7 +166,7 @@ impl PartialEq for StoragePath {
     }
 }
 
-impl Eq for StoragePath {}
+impl Eq for StorageType {}
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
 pub struct IpfsOptions {
@@ -173,7 +179,7 @@ pub struct IpfsOptions {
     ///
     /// It is **not** recommended to set this to IPFS_PATH without first at least backing up your
     /// existing repository.
-    pub ipfs_path: StoragePath,
+    pub ipfs_path: StorageType,
 
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
@@ -271,7 +277,7 @@ pub enum RepoProvider {
 impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
-            ipfs_path: StoragePath::Memory,
+            ipfs_path: StorageType::Memory,
             bootstrap: Default::default(),
             #[cfg(feature = "beetle_bitswap")]
             bitswap_config: Default::default(),
@@ -744,7 +750,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
-        self.options.ipfs_path = StoragePath::Disk(path);
+        self.options.ipfs_path = StorageType::Disk(path);
         self
     }
 
@@ -893,7 +899,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
             None => {
                 #[cfg(not(target_arch = "wasm32"))]
-                if let StoragePath::Disk(path) = &options.ipfs_path {
+                if let StorageType::Disk(path) = &options.ipfs_path {
                     if !path.is_dir() {
                         tokio::fs::create_dir_all(path).await?;
                     }

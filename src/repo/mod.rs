@@ -1,6 +1,6 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
-use crate::{Block, StoragePath};
+use crate::{Block, StorageType};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use core::fmt::Debug;
@@ -415,12 +415,12 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(repo_type: &mut StoragePath) -> Self {
+    pub fn new(repo_type: &mut StorageType) -> Self {
         match repo_type {
-            StoragePath::Memory => Repo::new_memory(),
+            StorageType::Memory => Repo::new_memory(),
             #[cfg(not(target_arch = "wasm32"))]
-            StoragePath::Disk(path) => Repo::new_fs(path),
-            StoragePath::Custom {
+            StorageType::Disk(path) => Repo::new_fs(path),
+            StorageType::Custom {
                 blockstore,
                 datastore,
                 lock,
