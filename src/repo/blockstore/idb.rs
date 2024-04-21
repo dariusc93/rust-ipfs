@@ -22,7 +22,10 @@ pub struct IdbBlockStore {
 
 impl IdbBlockStore {
     pub fn new(namespace: Option<String>) -> Self {
-        let namespace = namespace.unwrap_or_else(|| NAMESPACE.to_string());
+        let namespace = match namespace {
+            Some(ns) => format!("{NAMESPACE}-{ns}"),
+            None => NAMESPACE.to_string()
+        };
 
         let factory = Factory::new().unwrap();
 
