@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use libipld::{cid, Cid};
 use std::path::PathBuf;
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::{OwnedRwLockWriteGuard, RwLock};
 
 use std::collections::hash_map::Entry;
 
@@ -16,10 +16,10 @@ use std::sync::Arc;
 /// Describes an in-memory `DataStore`.
 #[derive(Debug, Default)]
 pub struct MemDataStore {
-    inner: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
+    inner: RwLock<HashMap<Vec<u8>, Vec<u8>>>,
     // this could also be PinDocument however doing any serialization allows to see the required
     // error types easier
-    pin: Arc<Mutex<HashMap<Vec<u8>, Vec<u8>>>>,
+    pin: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
 }
 
 impl MemDataStore {
@@ -29,7 +29,7 @@ impl MemDataStore {
 
     /// Returns true if the pin document was changed, false otherwise.
     fn insert_pin<'a>(
-        g: &mut OwnedMutexGuard<HashMap<Vec<u8>, Vec<u8>>>,
+        g: &mut OwnedRwLockWriteGuard<HashMap<Vec<u8>, Vec<u8>>>,
         target: &'a Cid,
         kind: &'a PinKind<&'_ Cid>,
     ) -> Result<bool, Error> {
@@ -75,7 +75,7 @@ impl MemDataStore {
 
     /// Returns true if the pin document was changed, false otherwise.
     fn remove_pin<'a>(
-        g: &mut OwnedMutexGuard<HashMap<Vec<u8>, Vec<u8>>>,
+        g: &mut OwnedRwLockWriteGuard<HashMap<Vec<u8>, Vec<u8>>>,
         target: &'a Cid,
         kind: &'a PinKind<&'_ Cid>,
     ) -> Result<bool, Error> {
@@ -110,7 +110,7 @@ impl PinStore for MemDataStore {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         let key = block.to_bytes();
 
-        let g = self.pin.lock().await;
+        let g = self.pin.read().await;
 
         // the use of PinKind::RecursiveIntention necessitates the only return fast for
         // only the known pins; we should somehow now query to see if there are any
@@ -123,13 +123,13 @@ impl PinStore for MemDataStore {
     }
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
+        let mut g = RwLock::write_owned(Arc::clone(&self.pin)).await;
         Self::insert_pin(&mut g, target, &PinKind::Direct)?;
         Ok(())
     }
 
     async fn remove_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
+        let mut g = RwLock::write_owned(Arc::clone(&self.pin)).await;
         Self::remove_pin(&mut g, target, &PinKind::Direct)?;
         Ok(())
     }
@@ -141,7 +141,7 @@ impl PinStore for MemDataStore {
     ) -> Result<(), Error> {
         use futures::stream::TryStreamExt;
 
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
+        let mut g = RwLock::write_owned(Arc::clone(&self.pin)).await;
 
         // this must fail if it is already fully pinned
         Self::insert_pin(&mut g, target, &PinKind::RecursiveIntention)?;
@@ -178,7 +178,7 @@ impl PinStore for MemDataStore {
     ) -> Result<(), Error> {
         use futures::TryStreamExt;
 
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
+        let mut g = RwLock::write_owned(Arc::clone(&self.pin)).await;
 
         let doc: PinDocument = match g.get(&target.to_bytes()) {
             Some(raw) => match serde_json::from_slice(raw) {
@@ -228,7 +228,7 @@ impl PinStore for MemDataStore {
     ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>> {
         use futures::stream::StreamExt;
         use std::convert::TryFrom;
-        let g = self.pin.lock().await;
+        let g = self.pin.read().await;
 
         let requirement = PinModeRequirement::from(requirement);
 
@@ -258,7 +258,7 @@ impl PinStore for MemDataStore {
         cids: Vec<Cid>,
         requirement: Option<PinMode>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
-        let g = self.pin.lock().await;
+        let g = self.pin.read().await;
 
         let requirement = PinModeRequirement::from(requirement);
 
@@ -323,14 +323,14 @@ impl DataStore for MemDataStore {
     }
 
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
-        let contains = self.inner.lock().await.contains_key(key);
+        let contains = self.inner.read().await.contains_key(key);
         Ok(contains)
     }
 
     async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         let value = self
             .inner
-            .lock()
+            .read()
             .await
             .get(key)
             .map(|value| value.to_owned());
@@ -339,19 +339,19 @@ impl DataStore for MemDataStore {
 
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
         self.inner
-            .lock()
+            .write()
             .await
             .insert(key.to_owned(), value.to_owned());
         Ok(())
     }
 
     async fn remove(&self, key: &[u8]) -> Result<(), Error> {
-        self.inner.lock().await.remove(key);
+        self.inner.write().await.remove(key);
         Ok(())
     }
 
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)> {
-        let list = self.inner.lock().await.clone();
+        let list = self.inner.read().await.clone();
 
         let stream = async_stream::stream! {
             for (k, v) in list {
