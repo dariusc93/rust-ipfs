@@ -29,7 +29,7 @@ test_js_interop = []
 [workspace.dependencies]
 
 asynchronous-codec = "0.7.0"
-libp2p = { version = "0.53" }
+libp2p = { version = "0.54" }
 libp2p-stream = { version = "0.1.0-alpha" }
 beetle-bitswap-next = { version = "0.5.1", path = "packages/beetle-bitswap-next" }
 libp2p-bitswap-next = { version = "0.26.2", path = "packages/libp2p-bitswap-next" }
@@ -217,3 +217,9 @@ members = ["packages/*", "unixfs", "examples/*"]
 exclude = ["archived", "deprecated/*"]
 
 resolver = "2"
+
+[patch.crates-io]
+libp2p = { git = "https://github.com/libp2p/rust-libp2p" }
+libp2p-allow-block-list = { git = "https://github.com/libp2p/rust-libp2p" }
+libp2p-webrtc-websys = { git = "https://github.com/libp2p/rust-libp2p" }
+libp2p-webrtc = { git = "https://github.com/libp2p/rust-libp2p" }

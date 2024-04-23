@@ -304,6 +304,8 @@ impl From<KadInserts> for KademliaBucketInserts {
     }
 }
 
+//TODO: Refactor to only use a single protocol
+#[allow(deprecated)]
 impl From<KadConfig> for KademliaConfig {
     fn from(config: KadConfig) -> Self {
         let mut kad_config = KademliaConfig::default();
