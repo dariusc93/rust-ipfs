@@ -54,9 +54,9 @@ asynchronous-codec.workspace = true
 anyhow = "1.0"
 async-stream = { version = "0.3" }
 async-trait = { version = "0.1" }
-base64 = { default-features = false, features = ["alloc"], version = "0.21" }
 
-libp2p-bitswap-next = { workspace = true, optional = true }
+base64 = { default-features = false, features = ["alloc"], version = "0.22" }
+beetle-bitswap-next = { workspace = true, optional = true }
 
 byteorder = { default-features = false, version = "1" }
 bytes = { workspace = true }
