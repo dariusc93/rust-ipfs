@@ -31,6 +31,7 @@ pub mod p2p;
 pub mod path;
 pub mod refs;
 pub mod repo;
+pub(crate) mod rt;
 mod task;
 pub mod unixfs;
 
@@ -64,17 +65,19 @@ use p2p::{
 use repo::{
     BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
 };
-use tokio::task::JoinHandle;
+
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Span;
 use tracing_futures::Instrument;
-use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsGet, UnixfsLs};
+
+use unixfs::UnixfsGet;
+use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsLs};
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
     ops::{Deref, DerefMut},
-    path::{Path, PathBuf},
+    path::Path,
     sync::atomic::AtomicU64,
     sync::Arc,
     time::Duration,
@@ -125,11 +128,18 @@ use libp2p::{
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
+#[allow(dead_code)]
+#[deprecated(note = "Use `StoreageType` instead")]
+type StoragePath = StorageType;
+
 #[derive(Default, Debug)]
-pub enum StoragePath {
-    Disk(PathBuf),
+pub enum StorageType {
+    #[cfg(not(target_arch = "wasm32"))]
+    Disk(std::path::PathBuf),
     #[default]
     Memory,
+    #[cfg(target_arch = "wasm32")]
+    IndexedDb { namespace: Option<String> },
     Custom {
         blockstore: Option<Box<dyn BlockStore>>,
         datastore: Option<Box<dyn DataStore>>,
@@ -137,14 +147,20 @@ pub enum StoragePath {
     },
 }
 
-impl PartialEq for StoragePath {
+impl PartialEq for StorageType {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (StoragePath::Disk(left_path), StoragePath::Disk(right_path)) => {
+            #[cfg(not(target_arch = "wasm32"))]
+            (StorageType::Disk(left_path), StorageType::Disk(right_path)) => {
                 left_path.eq(right_path)
             }
-            (StoragePath::Memory, StoragePath::Memory) => true,
-            (StoragePath::Custom { .. }, StoragePath::Custom { .. }) => {
+            #[cfg(target_arch = "wasm32")]
+            (
+                StorageType::IndexedDb { namespace: left },
+                StorageType::IndexedDb { namespace: right },
+            ) => left.eq(right),
+            (StorageType::Memory, StorageType::Memory) => true,
+            (StorageType::Custom { .. }, StorageType::Custom { .. }) => {
                 //Do we really care if they equal?
                 //TODO: Possibly implement PartialEq/Eq for the traits so we could make sure
                 //      that they do or dont eq each other. For now this will always be true
@@ -155,7 +171,7 @@ impl PartialEq for StoragePath {
     }
 }
 
-impl Eq for StoragePath {}
+impl Eq for StorageType {}
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
 pub struct IpfsOptions {
@@ -168,7 +184,7 @@ pub struct IpfsOptions {
     ///
     /// It is **not** recommended to set this to IPFS_PATH without first at least backing up your
     /// existing repository.
-    pub ipfs_path: StoragePath,
+    pub ipfs_path: StorageType,
 
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
@@ -234,11 +250,13 @@ pub(crate) struct Libp2pProtocol {
     pub(crate) relay_client: bool,
     pub(crate) relay_server: bool,
     pub(crate) dcutr: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) mdns: bool,
     pub(crate) identify: bool,
     pub(crate) autonat: bool,
     pub(crate) rendezvous_client: bool,
     pub(crate) rendezvous_server: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) upnp: bool,
     pub(crate) ping: bool,
     #[cfg(feature = "experimental_stream")]
@@ -264,7 +282,7 @@ pub enum RepoProvider {
 impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
-            ipfs_path: StoragePath::Memory,
+            ipfs_path: StorageType::Memory,
             bootstrap: Default::default(),
             #[cfg(feature = "beetle_bitswap")]
             bitswap_config: Default::default(),
@@ -545,6 +563,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         ])
     }
 
+    /// Set storage type for the repo.
+    pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
+        self.options.ipfs_path = storage_type;
+        self
+    }
+
     /// Adds a listening address
     pub fn add_listening_addr(mut self, addr: Multiaddr) -> Self {
         if !self.options.listening_addrs.contains(&addr) {
@@ -642,6 +666,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable mdns
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_mdns(mut self) -> Self {
         self.options.protocols.mdns = true;
         self
@@ -662,6 +687,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Enable port mapping (AKA UPnP)
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_upnp(mut self) -> Self {
         self.options.protocols.upnp = true;
         self
@@ -732,9 +758,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     }
 
     /// Sets a path
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
-        self.options.ipfs_path = StoragePath::Disk(path);
+        self.options.ipfs_path = StorageType::Disk(path);
         self
     }
 
@@ -882,7 +909,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 repo
             }
             None => {
-                if let StoragePath::Disk(path) = &options.ipfs_path {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let StorageType::Disk(path) = &options.ipfs_path {
                     if !path.is_dir() {
                         tokio::fs::create_dir_all(path).await?;
                     }
@@ -989,7 +1017,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         } = options;
 
         if let Some(config) = gc_config {
-            tokio::spawn({
+            rt::spawn({
                 let repo = ipfs.repo.clone();
                 let token = token.clone();
                 async move {
@@ -1005,8 +1033,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         false => Duration::from_secs(60 * 60),
                     };
 
-                    let mut interval =
-                        tokio::time::interval_at(tokio::time::Instant::now() + time, time);
+                    let mut interval = futures_timer::Delay::new(time);
 
                     loop {
                         tokio::select! {
@@ -1014,7 +1041,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                 tracing::debug!("gc task cancelled");
                                 break
                             },
-                            _ = interval.tick() => {
+                            _ = &mut interval => {
                                 let _g = repo.inner.gclock.write().await;
                                 tracing::debug!("preparing gc operation");
                                 let pinned = repo
@@ -1056,6 +1083,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                                     tracing::debug!(removed_blocks = blocks.len(), "blocks removed");
                                     tracing::debug!("cleanup finished");
                                 }
+
+                                interval.reset(time);
                             }
                         }
                     }
@@ -1093,7 +1122,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        tokio::spawn({
+        rt::spawn({
             async move {
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
@@ -1138,10 +1167,7 @@ impl Ipfs {
 
     /// Puts a block into the ipfs repo.
     pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
-        self.repo
-            .put_block(block)
-            .instrument(self.span.clone())
-            .await
+        self.repo.put_block(block).span(self.span.clone()).await
     }
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
@@ -2249,16 +2275,19 @@ impl Ipfs {
     /// known in order for the process to succeed. Subsequently, additional queries are
     /// ran with random keys so that the buckets farther from the closest neighbor also
     /// get refreshed.
-    pub async fn bootstrap(&self) -> Result<JoinHandle<Result<KadResult, Error>>, Error> {
+    pub async fn bootstrap(&self) -> Result<(), Error> {
         let (tx, rx) = oneshot_channel();
 
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
         let fut = rx.await??;
 
-        let bootstrap_task =
-            tokio::spawn(async move { fut.await.map_err(|e| anyhow!(e)).and_then(|res| res) });
+        rt::spawn(async move {
+            if let Err(e) = fut.await.map_err(|e| anyhow!(e)) {
+                tracing::error!(error = %e, "failed to bootstrap");
+            }
+        });
 
-        Ok(bootstrap_task)
+        Ok(())
     }
 
     /// Add address of a peer to the address book
@@ -2449,8 +2478,6 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
-    use futures::TryFutureExt;
-
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
@@ -2489,7 +2516,12 @@ mod node {
         pub async fn with_options(span: Option<Span>, addr: Option<Vec<Multiaddr>>) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let mut uninit = UninitializedIpfsNoop::new().with_default();
+            let mut uninit = UninitializedIpfsNoop::new()
+                .with_default()
+                .set_transport_configuration(TransportConfig {
+                    enable_memory_transport: true,
+                    ..Default::default()
+                });
 
             if let Some(span) = span {
                 uninit = uninit.set_span(span);
@@ -2497,7 +2529,7 @@ mod node {
 
             let list = match addr {
                 Some(addr) => addr,
-                None => vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()],
+                None => vec![Multiaddr::empty().with(Protocol::Memory(0))],
             };
 
             let ipfs = uninit.start().await.unwrap();
@@ -2536,11 +2568,8 @@ mod node {
         /// known in order for the process to succeed. Subsequently, additional queries are
         /// ran with random keys so that the buckets farther from the closest neighbor also
         /// get refreshed.
-        pub async fn bootstrap(&self) -> Result<KadResult, Error> {
-            self.ipfs
-                .bootstrap()
-                .and_then(|fut| async { fut.await.map_err(anyhow::Error::from) })
-                .await?
+        pub async fn bootstrap(&self) -> Result<(), Error> {
+            self.ipfs.bootstrap().await
         }
 
         pub async fn add_node(&self, node: &Self) -> Result<(), Error> {

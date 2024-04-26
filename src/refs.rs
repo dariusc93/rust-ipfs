@@ -93,15 +93,9 @@ impl IpldRefs {
         self
     }
 
-    /// Peer that may contain the block
-    pub fn provider(mut self, peer_id: PeerId) -> Self {
-        self.providers.push(peer_id);
-        self
-    }
-
     /// List of peers that may contain the block
     pub fn providers(mut self, providers: &[PeerId]) -> Self {
-        self.providers = providers.to_vec();
+        self.providers = providers.into();
         self
     }
 

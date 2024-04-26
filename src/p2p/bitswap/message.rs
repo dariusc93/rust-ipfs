@@ -2,7 +2,7 @@ use super::{bitswap_pb, pb::bitswap_pb::mod_Message::mod_Wantlist::WantType, pre
 use bitswap_pb::message::{BlockPresenceType, Wantlist};
 use bytes::Bytes;
 use libipld::Cid;
-use std::{fmt::Debug, io};
+use std::{collections::HashMap, fmt::Debug, hash::Hash, io};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RequestType {
@@ -29,13 +29,31 @@ impl From<RequestType> for WantType {
 }
 
 /// `Bitswap` request type
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq)]
 pub struct BitswapRequest {
     pub ty: RequestType,
     pub cid: Cid,
     pub send_dont_have: bool,
     pub cancel: bool,
     pub priority: i32,
+}
+
+impl Hash for BitswapRequest {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Hash::hash(&self.cid, state)
+    }
+}
+
+impl PartialEq for BitswapRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.cid.eq(&other.cid)
+    }
+}
+
+impl PartialOrd for BitswapRequest {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.priority.cmp(&other.priority))
+    }
 }
 
 impl BitswapRequest {
@@ -96,86 +114,129 @@ impl Debug for BitswapResponse {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum BitswapMessage {
-    Request(BitswapRequest),
-    Response(Cid, BitswapResponse),
+#[derive(Default, Clone, Debug)]
+pub struct BitswapMessage {
+    pub requests: Vec<BitswapRequest>,
+    pub responses: HashMap<Cid, BitswapResponse>,
 }
 
 impl BitswapMessage {
-    pub fn from_proto(message: bitswap_pb::Message) -> io::Result<Vec<BitswapMessage>> {
-        let mut messages = vec![];
+    pub fn add_request(mut self, request: BitswapRequest) -> Self {
+        self.requests.push(request);
+        self
+    }
+
+    pub fn set_requests(mut self, requests: Vec<BitswapRequest>) -> Self {
+        self.requests = requests;
+        self
+    }
+
+    pub fn add_response(mut self, cid: Cid, response: BitswapResponse) -> Self {
+        self.responses.insert(cid, response);
+        self
+    }
+
+    pub fn set_responses(mut self, responses: Vec<(Cid, BitswapResponse)>) -> Self {
+        self.responses = HashMap::from_iter(responses);
+        self
+    }
+}
+
+impl BitswapMessage {
+    pub fn from_proto(message: bitswap_pb::Message) -> io::Result<BitswapMessage> {
+        let mut bitswap_message = Self::default();
         if let Some(list) = message.wantlist {
             for entry in list.entries {
                 let cid = Cid::try_from(entry.block).map_err(io::Error::other)?;
-                messages.push(BitswapMessage::Request(BitswapRequest {
+                bitswap_message.requests.push(BitswapRequest {
                     ty: entry.wantType.into(),
                     cid,
                     send_dont_have: entry.sendDontHave,
                     cancel: entry.cancel,
                     priority: entry.priority,
-                }));
+                });
             }
         }
 
         for payload in message.payload {
             let prefix = Prefix::new(&payload.prefix).map_err(io::Error::other)?;
             let cid = prefix.to_cid(&payload.data).map_err(io::Error::other)?;
-            messages.push(BitswapMessage::Response(
-                cid,
-                BitswapResponse::Block(Bytes::from(payload.data)),
-            ));
+            bitswap_message
+                .responses
+                .insert(cid, BitswapResponse::Block(Bytes::from(payload.data)));
         }
 
         for presence in message.blockPresences {
             let cid = Cid::try_from(presence.cid).map_err(io::Error::other)?;
             let have = presence.type_pb == BlockPresenceType::Have;
-            messages.push(BitswapMessage::Response(cid, BitswapResponse::Have(have)));
+            bitswap_message
+                .responses
+                .insert(cid, BitswapResponse::Have(have));
         }
 
-        Ok(messages)
+        Ok(bitswap_message)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.requests.is_empty() && self.responses.is_empty()
     }
 
     pub fn into_proto(self) -> std::io::Result<bitswap_pb::Message> {
+        // We shouldnt be reaching the point where we are sending an empty message. In such case, we should return an error
+        if self.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "message is empty",
+            ));
+        }
+
         let mut msg = bitswap_pb::Message::default();
-        match self {
-            Self::Request(BitswapRequest {
-                ty,
-                cid,
-                send_dont_have,
+        let BitswapMessage {
+            requests,
+            responses,
+        } = self;
+
+        let mut wantlist = Wantlist::default();
+        for BitswapRequest {
+            ty,
+            cid,
+            send_dont_have,
+            cancel,
+            priority,
+        } in requests
+        {
+            wantlist.entries.push(bitswap_pb::message::wantlist::Entry {
+                block: cid.to_bytes(),
+                wantType: ty.into(),
+                sendDontHave: send_dont_have,
                 cancel,
                 priority,
-            }) => {
-                let wantlist = Wantlist {
-                    entries: vec![bitswap_pb::message::wantlist::Entry {
-                        block: cid.to_bytes(),
-                        wantType: ty.into(),
-                        sendDontHave: send_dont_have,
-                        cancel,
-                        priority,
-                    }],
-                    ..Default::default()
-                };
+            });
+        }
 
-                msg.wantlist = Some(wantlist);
-            }
-            Self::Response(cid, BitswapResponse::Have(have)) => {
-                msg.blockPresences.push(bitswap_pb::message::BlockPresence {
-                    cid: cid.to_bytes(),
-                    type_pb: if have {
-                        BlockPresenceType::Have
-                    } else {
-                        BlockPresenceType::DontHave
-                    },
-                });
-            }
-            Self::Response(cid, BitswapResponse::Block(bytes)) => {
-                msg.payload.push(bitswap_pb::message::Block {
-                    prefix: Prefix::from(cid).to_bytes(),
-                    data: bytes.to_vec(),
-                });
+        msg.wantlist = Some(wantlist);
+
+        for (cid, response) in responses {
+            match response {
+                BitswapResponse::Have(have) => {
+                    msg.blockPresences.push(bitswap_pb::message::BlockPresence {
+                        cid: cid.to_bytes(),
+                        type_pb: if have {
+                            BlockPresenceType::Have
+                        } else {
+                            BlockPresenceType::DontHave
+                        },
+                    });
+                }
+                BitswapResponse::Block(bytes) => {
+                    msg.payload.push(bitswap_pb::message::Block {
+                        prefix: Prefix::from(cid).to_bytes(),
+                        data: bytes.to_vec(),
+                    });
+                }
             }
         }
+
         Ok(msg)
     }
 }

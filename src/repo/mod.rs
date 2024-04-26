@@ -1,6 +1,6 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
-use crate::{Block, StoragePath};
+use crate::{Block, StorageType};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use core::fmt::Debug;
@@ -9,12 +9,15 @@ use futures::future::BoxFuture;
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures_timeout::TimeoutExt;
 use libipld::cid::Cid;
 use libipld::{Ipld, IpldCodec};
 use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
+use std::future::IntoFuture;
+#[allow(unused_imports)]
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -33,6 +36,7 @@ pub mod datastore;
 pub mod lock;
 
 /// Path mangling done for pins and blocks
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod paths;
 
 /// Describes the outcome of `BlockStore::put_block`.
@@ -249,6 +253,7 @@ impl From<Option<PinMode>> for PinModeRequirement {
     }
 }
 
+#[allow(dead_code)]
 impl PinModeRequirement {
     fn is_indirect_or_any(&self) -> bool {
         use PinModeRequirement::*;
@@ -410,11 +415,14 @@ pub enum RepoEvent {
 }
 
 impl Repo {
-    pub fn new(repo_type: &mut StoragePath) -> Self {
+    pub fn new(repo_type: &mut StorageType) -> Self {
         match repo_type {
-            StoragePath::Memory => Repo::new_memory(),
-            StoragePath::Disk(path) => Repo::new_fs(path),
-            StoragePath::Custom {
+            StorageType::Memory => Repo::new_memory(),
+            #[cfg(not(target_arch = "wasm32"))]
+            StorageType::Disk(path) => Repo::new_fs(path),
+            #[cfg(target_arch = "wasm32")]
+            StorageType::IndexedDb { namespace } => Repo::new_idb(namespace.take()),
+            StorageType::Custom {
                 blockstore,
                 datastore,
                 lock,
@@ -448,6 +456,7 @@ impl Repo {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_fs(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
@@ -471,6 +480,14 @@ impl Repo {
     pub fn new_memory() -> Self {
         let block_store = Box::new(blockstore::memory::MemBlockStore::new(Default::default()));
         let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
+        let lockfile = Box::new(lock::MemLock);
+        Self::new_raw(block_store, data_store, lockfile)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_idb(namespace: Option<String>) -> Self {
+        let block_store = Box::new(blockstore::idb::IdbBlockStore::new(namespace.clone()));
+        let data_store = Box::new(datastore::idb::IdbDataStore::new(namespace));
         let lockfile = Box::new(lock::MemLock);
         Self::new_raw(block_store, data_store, lockfile)
     }
@@ -646,24 +663,8 @@ impl Repo {
     }
 
     /// Puts a block into the block store.
-    pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
-        let _guard = self.inner.gclock.read().await;
-        let (cid, res) = self.inner.block_store.put(block.clone()).await?;
-
-        if let BlockPut::NewBlock = res {
-            if let Some(mut event) = self.repo_channel() {
-                _ = event.send(RepoEvent::NewBlock(block.clone())).await;
-            }
-            let list = self.inner.subscriptions.lock().remove(&cid);
-            if let Some(mut list) = list {
-                for ch in list.drain(..) {
-                    let block = block.clone();
-                    let _ = ch.send(Ok(block));
-                }
-            }
-        }
-
-        Ok(cid)
+    pub fn put_block(&self, block: Block) -> RepoPutBlock {
+        RepoPutBlock::new(self, block).broadcast_on_new_block(true)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
@@ -756,7 +757,8 @@ impl Repo {
             let timeout = timeout.unwrap_or(Duration::from_secs(60));
             let mut events = events.clone();
             let task = async move {
-                let block = tokio::time::timeout(timeout, rx)
+                let block = rx
+                    .timeout(timeout)
                     .await
                     .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
                     .map_err(|e| anyhow!("{e}"))?;
@@ -826,7 +828,7 @@ impl Repo {
 
         let list = match recursive {
             true => {
-                let mut list = self.recursive_collections(*cid).await?;
+                let mut list = self.recursive_collections(*cid).await;
                 // ensure the first root block is apart of the list
                 list.insert(*cid);
                 list
@@ -861,25 +863,27 @@ impl Repo {
         Ok(removed)
     }
 
-    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, anyhow::Result<BTreeSet<Cid>>> {
+    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, BTreeSet<Cid>> {
         async move {
-            let block = self
-                .get_block_now(&cid)
-                .await?
-                .ok_or(anyhow::anyhow!("Block does not exist"))?;
+            let block = match self.get_block_now(&cid).await {
+                Ok(Some(block)) => block,
+                _ => return BTreeSet::default(),
+            };
 
             let mut references: BTreeSet<Cid> = BTreeSet::new();
-            block.references(&mut references)?;
+            if block.references(&mut references).is_err() {
+                return BTreeSet::default();
+            }
 
             let mut list = BTreeSet::new();
 
             for cid in &references {
-                let mut inner_list = self.recursive_collections(*cid).await?;
+                let mut inner_list = self.recursive_collections(*cid).await;
                 list.append(&mut inner_list);
             }
 
             references.append(&mut list);
-            Ok(references)
+            references
         }
         .boxed()
     }
@@ -965,10 +969,16 @@ impl Repo {
         let repo = self.clone();
 
         let blocks = repo.list_blocks().await;
+        let pins = repo
+            .list_pins(None)
+            .await
+            .filter_map(|result| futures::future::ready(result.map(|(cid, _)| cid).ok()))
+            .collect::<Vec<_>>()
+            .await;
 
         let stream = async_stream::stream! {
             for await cid in blocks {
-                if repo.is_pinned(&cid).await.unwrap_or_default() {
+                if pins.contains(&cid) {
                     continue;
                 }
                 yield cid;
@@ -1028,12 +1038,74 @@ impl Repo {
     }
 }
 
+pub struct RepoPutBlock {
+    repo: Repo,
+    block: Block,
+    span: Option<Span>,
+    broadcast_on_new_block: bool,
+}
+
+impl RepoPutBlock {
+    fn new(repo: &Repo, block: Block) -> Self {
+        Self {
+            repo: repo.clone(),
+            block,
+            span: None,
+            broadcast_on_new_block: true,
+        }
+    }
+
+    pub fn broadcast_on_new_block(mut self, v: bool) -> Self {
+        self.broadcast_on_new_block = v;
+        self
+    }
+
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+}
+
+impl IntoFuture for RepoPutBlock {
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    type Output = Result<Cid, Error>;
+    fn into_future(self) -> Self::IntoFuture {
+        let block = self.block;
+        let span = self.span.unwrap_or(Span::current());
+        let span = debug_span!(parent: &span, "put_block", cid = %block.cid());
+        async move {
+            let _guard = self.repo.inner.gclock.read().await;
+            let (cid, res) = self.repo.inner.block_store.put(block.clone()).await?;
+
+            if let BlockPut::NewBlock = res {
+                if self.broadcast_on_new_block {
+                    if let Some(mut event) = self.repo.repo_channel() {
+                        _ = event.send(RepoEvent::NewBlock(block.clone())).await;
+                    }
+                }
+                let list = self.repo.inner.subscriptions.lock().remove(&cid);
+                if let Some(mut list) = list {
+                    for ch in list.drain(..) {
+                        let block = block.clone();
+                        let _ = ch.send(Ok(block));
+                    }
+                }
+            }
+
+            Ok(cid)
+        }
+        .instrument(span)
+        .boxed()
+    }
+}
+
 pub struct RepoFetch {
     repo: Repo,
     cid: Cid,
     span: Option<Span>,
     providers: Vec<PeerId>,
     recursive: bool,
+    timeout: Option<Duration>,
     refs: crate::refs::IpldRefs,
 }
 
@@ -1044,6 +1116,7 @@ impl RepoFetch {
             cid,
             recursive: false,
             providers: vec![],
+            timeout: None,
             refs: Default::default(),
             span: None,
         }
@@ -1057,15 +1130,15 @@ impl RepoFetch {
 
     /// Peer that may contain the block
     pub fn provider(mut self, peer_id: PeerId) -> Self {
-        self.providers.push(peer_id);
-        self.refs = self.refs.provider(peer_id);
+        if !self.providers.contains(&peer_id) {
+            self.providers.push(peer_id);
+        }
         self
     }
 
     /// List of peers that may contain the block
     pub fn providers(mut self, providers: &[PeerId]) -> Self {
         self.providers = providers.to_vec();
-        self.refs = self.refs.providers(providers);
         self
     }
 
@@ -1078,6 +1151,7 @@ impl RepoFetch {
     /// Duration to fetch the block from the network before
     /// timing out
     pub fn timeout(mut self, duration: Duration) -> Self {
+        self.timeout.replace(duration);
         self.refs = self.refs.with_timeout(duration);
         self
     }
@@ -1107,10 +1181,13 @@ impl std::future::IntoFuture for RepoFetch {
         let repo = self.repo;
         let span = debug_span!(parent: &span, "fetch", cid = %cid, recursive);
         let providers = self.providers;
+        let timeout = self.timeout;
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo.get_block(&cid, &providers, false).await?;
+            let block = repo
+                .get_block_with_session(None, &cid, &providers, false, timeout)
+                .await?;
 
             if !recursive {
                 return Ok(());
@@ -1120,6 +1197,7 @@ impl std::future::IntoFuture for RepoFetch {
             let mut st = self
                 .refs
                 .with_only_unique()
+                .providers(&providers)
                 .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
                 .map_ok(|crate::refs::Edge { destination, .. }| destination)
                 .into_stream()
@@ -1138,7 +1216,9 @@ pub struct RepoInsertPin {
     repo: Repo,
     cid: Cid,
     span: Option<Span>,
+    providers: Vec<PeerId>,
     recursive: bool,
+    timeout: Option<Duration>,
     local: bool,
     refs: crate::refs::IpldRefs,
 }
@@ -1149,7 +1229,9 @@ impl RepoInsertPin {
             repo,
             cid,
             recursive: false,
+            providers: vec![],
             local: false,
+            timeout: None,
             refs: Default::default(),
             span: None,
         }
@@ -1177,6 +1259,20 @@ impl RepoInsertPin {
         self
     }
 
+    /// Peer that may contain the block to pin
+    pub fn provider(mut self, peer_id: PeerId) -> Self {
+        if !self.providers.contains(&peer_id) {
+            self.providers.push(peer_id);
+        }
+        self
+    }
+
+    /// List of peers that may contain the block to pin
+    pub fn providers(mut self, providers: &[PeerId]) -> Self {
+        self.providers = providers.into();
+        self
+    }
+
     /// Pin to a specific depth of the graph
     pub fn depth(mut self, depth: u64) -> Self {
         self.refs = self.refs.with_max_depth(depth);
@@ -1186,6 +1282,7 @@ impl RepoInsertPin {
     /// Duration to fetch the block from the network before
     /// timing out
     pub fn timeout(mut self, duration: Duration) -> Self {
+        self.timeout.replace(duration);
         self.refs = self.refs.with_timeout(duration);
         self
     }
@@ -1215,10 +1312,14 @@ impl std::future::IntoFuture for RepoInsertPin {
         let recursive = self.recursive;
         let repo = self.repo;
         let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
+        let providers = self.providers;
+        let timeout = self.timeout;
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo.get_block(&cid, &[], local).await?;
+            let block = repo
+                .get_block_with_session(None, &cid, &providers, local, timeout)
+                .await?;
 
             if !recursive {
                 repo.insert_direct_pin(&cid).await?
@@ -1228,6 +1329,7 @@ impl std::future::IntoFuture for RepoInsertPin {
                 let st = self
                     .refs
                     .with_only_unique()
+                    .providers(&providers)
                     .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()

@@ -298,9 +298,21 @@ impl From<Cid> for PathRoot {
     }
 }
 
+impl From<&Cid> for PathRoot {
+    fn from(cid: &Cid) -> Self {
+        PathRoot::Ipld(*cid)
+    }
+}
+
 impl From<PeerId> for PathRoot {
     fn from(peer_id: PeerId) -> Self {
         PathRoot::Ipns(peer_id)
+    }
+}
+
+impl From<&PeerId> for PathRoot {
+    fn from(peer_id: &PeerId) -> Self {
+        PathRoot::Ipns(*peer_id)
     }
 }
 

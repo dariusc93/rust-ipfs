@@ -67,7 +67,7 @@ impl UnixfsLs {
     }
 
     pub fn providers(mut self, list: &[PeerId]) -> Self {
-        self.providers = list.to_owned();
+        self.providers = list.to_vec();
         self
     }
 

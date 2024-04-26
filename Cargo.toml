@@ -7,13 +7,15 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.11.4"
+version = "0.11.8"
 
 [features]
 
 default = []
 
 experimental_stream = ["dep:libp2p-stream"]
+
+webrtc_transport = ["dep:libp2p-webrtc"]
 
 beetle_bitswap = ["dep:beetle-bitswap-next"]
 libp2p_bitswap = ["dep:libp2p-bitswap-next"]
@@ -30,13 +32,13 @@ asynchronous-codec = "0.7.0"
 libp2p = { version = "0.53" }
 libp2p-stream = { version = "0.1.0-alpha" }
 beetle-bitswap-next = { version = "0.5.1", path = "packages/beetle-bitswap-next" }
-libp2p-bitswap-next = { version = "0.26.1", path = "packages/libp2p-bitswap-next" }
+libp2p-bitswap-next = { version = "0.26.2", path = "packages/libp2p-bitswap-next" }
 rust-unixfs = { version = "0.4.1", path = "unixfs" }
 libipld = { version = "0.16", features = ["serde-codec"] }
 clap = { version = "4.3", features = ["derive"] }
-rust-ipns = { version = "0.5", path = "packages/rust-ipns" }
+rust-ipns = { version = "0.5.1", path = "packages/rust-ipns" }
 chrono = { version = "0.4.35" }
-libp2p-relay-manager = { version = "0.2.1", path = "packages/libp2p-relay-manager" }
+libp2p-relay-manager = { version = "0.2.2", path = "packages/libp2p-relay-manager" }
 
 redb = { version = "1.3" }
 futures-timer = "3.0"
@@ -52,18 +54,19 @@ asynchronous-codec.workspace = true
 anyhow = "1.0"
 async-stream = { version = "0.3" }
 async-trait = { version = "0.1" }
+
 base64 = { default-features = false, features = ["alloc"], version = "0.22" }
 beetle-bitswap-next = { workspace = true, optional = true }
-libp2p-bitswap-next = { workspace = true, optional = true }
+
 byteorder = { default-features = false, version = "1" }
 bytes = { workspace = true }
 libipld.workspace = true
-hickory-resolver = "0.24.0"
+
 either = { version = "1" }
 futures = { version = "0.3" }
 
+futures-timeout = "0.1"
 
-redb = { workspace = true, optional = true }
 rust-unixfs = { workspace = true }
 
 rust-ipns = { workspace = true }
@@ -71,6 +74,40 @@ libp2p-relay-manager = { workspace = true }
 
 chrono.workspace = true
 
+libp2p-allow-block-list = "0.3"
+libp2p-stream = { workspace = true, optional = true }
+
+parking_lot = "0.12"
+serde = { default-features = false, features = ["derive"], version = "1.0" }
+serde_json = { default-features = false, features = ["std"], version = "1.0" }
+
+thiserror = { default-features = false, version = "1.0" }
+
+tracing = { default-features = false, features = ["log"], version = "0.1" }
+tracing-futures = { default-features = false, features = [
+    "std-future",
+    "std",
+    "futures-03",
+], version = "0.2" }
+
+void = { default-features = false, version = "1.0" }
+
+wasm-timer = "0.2"
+futures-timer.workspace = true
+
+rand = "0.8"
+
+zeroize = "1"
+
+quick-protobuf.workspace = true
+quick-protobuf-codec.workspace = true
+unsigned-varint.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { features = ["full"], version = "1" }
+tokio-stream = { version = "0.1", features = ["fs"] }
+tokio-util = { version = "0.7", features = ["full"] }
+redb = { workspace = true, optional = true }
 libp2p = { features = [
     "gossipsub",
     "autonat",
@@ -100,42 +137,57 @@ libp2p = { features = [
     "quic",
 ], workspace = true }
 
-libp2p-allow-block-list = "0.3"
-libp2p-stream = { workspace = true, optional = true }
+libp2p-webrtc = { version = "=0.7.1-alpha", features = [
+    "tokio",
+], optional = true }
 
-parking_lot = "0.12"
-serde = { default-features = false, features = ["derive"], version = "1.0" }
-serde_json = { default-features = false, features = ["std"], version = "1.0" }
-
-thiserror = { default-features = false, version = "1.0" }
-tokio = { features = ["full"], version = "1" }
-tokio-stream = { version = "0.1", features = ["fs"] }
-tokio-util = { version = "0.7", features = ["full"] }
-tracing = { default-features = false, features = ["log"], version = "0.1" }
-tracing-futures = { default-features = false, features = [
-    "std-future",
-    "std",
-    "futures-03",
-], version = "0.2" }
-
-async-broadcast = "0.6"
-
-void = { default-features = false, version = "1.0" }
 fs2 = "0.4"
 sled = { version = "0.34", optional = true }
 
 rlimit = "0.10"
+hickory-resolver = "0.24.0"
+beetle-bitswap-next = { workspace = true, optional = true }
+rcgen = "0.13.1"
 
-wasm-timer = "0.2"
-futures-timer.workspace = true
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+send_wrapper = "0.6"
+tokio-stream = { version = "0.1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+tokio = { default-features = false, features = [
+    "sync",
+    "macros",
+], version = "1" }
+wasm-bindgen-futures = { version = "0.4" }
+getrandom = { version = "0.2.14", features = ["js"] }
+libp2p = { features = [
+    "gossipsub",
+    "autonat",
+    "relay",
+    "dcutr",
+    "identify",
+    "kad",
+    "websocket-websys",
+    "webtransport-websys",
+    "macros",
+    "noise",
+    "ping",
+    "yamux",
+    "dns",
+    "ed25519",
+    "secp256k1",
+    "ecdsa",
+    "serde",
+    "request-response",
+    "json",
+    "cbor",
+    "rendezvous",
+    "wasm-bindgen",
+], workspace = true }
 
-rand = "0.8"
+libp2p-webrtc-websys = "0.3.0-alpha"
 
-zeroize = "1"
-
-quick-protobuf.workspace = true
-quick-protobuf-codec.workspace = true
-unsigned-varint.workspace = true
+serde-wasm-bindgen = "0.6"
+idb = "0.6"
 
 [dev-dependencies]
 criterion = { default-features = false, version = "0.5" }
@@ -161,7 +213,7 @@ clap = { workspace = true }
 debug = true
 
 [workspace]
-members = ["packages/*", "unixfs"]
+members = ["packages/*", "unixfs", "examples/*"]
 exclude = ["archived", "deprecated/*"]
 
 resolver = "2"

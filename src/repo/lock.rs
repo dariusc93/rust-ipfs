@@ -2,35 +2,35 @@
 //!
 //! Consists of [`FsDataStore`] and [`FsBlockStore`].
 
-use parking_lot::Mutex;
-use std::fs::File;
-use std::path::PathBuf;
-
 use super::{Lock, LockError};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct FsLock {
-    file: Mutex<Option<File>>,
-    path: PathBuf,
-    state: Mutex<State>,
+    file: parking_lot::Mutex<Option<std::fs::File>>,
+    path: std::path::PathBuf,
+    state: parking_lot::Mutex<State>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 enum State {
     Unlocked,
     Exclusive,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FsLock {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: std::path::PathBuf) -> Self {
         Self {
-            file: Mutex::new(None),
+            file: parking_lot::Mutex::new(None),
             path,
-            state: Mutex::new(State::Unlocked),
+            state: parking_lot::Mutex::new(State::Unlocked),
         }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Lock for FsLock {
     fn try_exclusive(&self) -> Result<(), LockError> {
         use fs2::FileExt;

@@ -32,6 +32,7 @@ use libp2p::kad::{
     Behaviour as Kademlia, BucketInserts as KademliaBucketInserts, Config as KademliaConfig,
     Record, StoreInserts as KademliaStoreInserts,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::tokio::Behaviour as Mdns;
 use libp2p::ping::Behaviour as Ping;
 use libp2p::relay::client::Behaviour as RelayClient;
@@ -52,6 +53,7 @@ where
     C: NetworkBehaviour,
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
+    #[cfg(not(target_arch = "wasm32"))]
     pub mdns: Toggle<Mdns>,
     #[cfg(feature = "libp2p_bitswap")]
     pub bitswap: Toggle<Bitswap<DefaultParams>>,
@@ -64,6 +66,7 @@ where
     pub identify: Toggle<Identify>,
     pub pubsub: Toggle<GossipsubStream>,
     pub autonat: Toggle<autonat::Behaviour>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
     pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
     pub relay: Toggle<Relay>,
@@ -97,12 +100,12 @@ pub enum KadResult {
 pub struct RelayConfig {
     pub max_reservations: usize,
     pub max_reservations_per_peer: usize,
-    pub reservation_duration: std::time::Duration,
+    pub reservation_duration: Duration,
     pub reservation_rate_limiters: Vec<RateLimit>,
 
     pub max_circuits: usize,
     pub max_circuits_per_peer: usize,
-    pub max_circuit_duration: std::time::Duration,
+    pub max_circuit_duration: Duration,
     pub max_circuit_bytes: u64,
     pub circuit_src_rate_limiters: Vec<RateLimit>,
 }
@@ -138,6 +141,23 @@ impl Default for RelayConfig {
                     interval: Duration::from_secs(60),
                 },
             ],
+        }
+    }
+}
+
+impl RelayConfig {
+    /// Configuration to allow a connection to the relay without limits
+    pub fn unbounded() -> Self {
+        Self {
+            max_circuits: usize::MAX,
+            max_circuit_bytes: u64::MAX,
+            max_circuit_duration: Duration::MAX,
+            max_circuits_per_peer: usize::MAX,
+            max_reservations: usize::MAX,
+            reservation_duration: Duration::MAX,
+            max_reservations_per_peer: usize::MAX,
+            reservation_rate_limiters: vec![],
+            circuit_src_rate_limiters: vec![],
         }
     }
 }
@@ -400,6 +420,7 @@ where
 
         info!("net: starting with peer id {}", peer_id);
 
+        #[cfg(not(target_arch = "wasm32"))]
         let mdns = if protocols.mdns {
             Mdns::new(Default::default(), peer_id).ok()
         } else {
@@ -453,7 +474,7 @@ where
                     Default::default(),
                     repo.clone(),
                     Box::new(|fut| {
-                        tokio::spawn(fut);
+                        crate::rt::spawn(fut);
                     }),
                 )
             })
@@ -522,6 +543,7 @@ where
                 .then(|| Relay::new(peer_id, relay_config)),
         );
 
+        #[cfg(not(target_arch = "wasm32"))]
         let upnp = Toggle::from(protocols.upnp.then(libp2p::upnp::tokio::Behaviour::default));
 
         let (transport, relay_client, relay_manager) = match protocols.relay_client {
@@ -556,6 +578,7 @@ where
 
         Ok((
             Behaviour {
+                #[cfg(not(target_arch = "wasm32"))]
                 mdns,
                 kademlia,
                 bitswap,
@@ -570,6 +593,7 @@ where
                 block_list,
                 #[cfg(feature = "experimental_stream")]
                 stream,
+                #[cfg(not(target_arch = "wasm32"))]
                 upnp,
                 peerbook,
                 addressbook,

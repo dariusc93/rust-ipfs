@@ -1,12 +1,9 @@
-use async_broadcast::TrySendError;
 use futures::channel::mpsc::{self as channel};
 use futures::stream::{FusedStream, Stream};
 use libp2p::gossipsub::PublishError;
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use tracing::debug;
 
@@ -26,9 +23,7 @@ use libp2p::swarm::{
 /// to different topics.
 pub struct GossipsubStream {
     // Tracks the topic subscriptions.
-    streams: HashMap<TopicHash, async_broadcast::Sender<GossipsubMessage>>,
-
-    active_streams: HashMap<TopicHash, Arc<AtomicUsize>>,
+    streams: HashMap<TopicHash, futures::channel::mpsc::Sender<GossipsubMessage>>,
 
     // Gossipsub protocol
     gossipsub: Gossipsub,
@@ -58,34 +53,15 @@ impl core::ops::DerefMut for GossipsubStream {
 pub struct SubscriptionStream {
     on_drop: Option<channel::UnboundedSender<TopicHash>>,
     topic: Option<TopicHash>,
-    inner: async_broadcast::Receiver<GossipsubMessage>,
-    counter: Arc<AtomicUsize>,
-}
-
-impl Clone for SubscriptionStream {
-    fn clone(&self) -> Self {
-        self.counter.fetch_add(1, Ordering::SeqCst);
-        Self {
-            on_drop: self.on_drop.clone(),
-            topic: self.topic.clone(),
-            inner: self.inner.clone(),
-            counter: self.counter.clone(),
-        }
-    }
+    inner: futures::channel::mpsc::Receiver<GossipsubMessage>,
 }
 
 impl Drop for SubscriptionStream {
     fn drop(&mut self) {
-        if self.counter.load(Ordering::SeqCst) == 1 {
-            // the on_drop option allows us to disable this unsubscribe on drop once the stream has
-            // ended.
-            if let Some(sender) = self.on_drop.take() {
-                if let Some(topic) = self.topic.take() {
-                    let _ = sender.unbounded_send(topic);
-                }
+        if let Some(sender) = self.on_drop.take() {
+            if let Some(topic) = self.topic.take() {
+                let _ = sender.unbounded_send(topic);
             }
-        } else {
-            self.counter.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -140,7 +116,6 @@ impl From<Gossipsub> for GossipsubStream {
             streams: HashMap::new(),
             gossipsub,
             unsubscriptions: (tx, rx),
-            active_streams: Default::default(),
         }
     }
 }
@@ -150,50 +125,23 @@ impl GossipsubStream {
     /// Returns a receiver for messages sent to the topic or `None` if subscription existed
     /// already.
     pub fn subscribe(&mut self, topic: impl Into<String>) -> anyhow::Result<SubscriptionStream> {
-        use std::collections::hash_map::Entry;
         let topic = Topic::new(topic);
 
-        match self.streams.entry(topic.hash()) {
-            Entry::Vacant(ve) => {
-                match self.gossipsub.subscribe(&topic) {
-                    Ok(true) => {
-                        let counter = Arc::new(AtomicUsize::new(1));
-                        self.active_streams
-                            .insert(topic.hash(), Arc::clone(&counter));
-                        let (tx, rx) = async_broadcast::broadcast(15000);
-                        let key = ve.key().clone();
-                        ve.insert(tx);
-                        Ok(SubscriptionStream {
-                            on_drop: Some(self.unsubscriptions.0.clone()),
-                            topic: Some(key),
-                            inner: rx,
-                            counter,
-                        })
-                    }
-                    Ok(false) => anyhow::bail!("Already subscribed to topic; shouldnt reach this"),
-                    Err(e) => {
-                        debug!("{}", e); //"subscribing to a unsubscribed topic should have succeeded"
-                        Err(anyhow::Error::from(e))
-                    }
-                }
-            }
-            Entry::Occupied(entry) => {
-                let rx = entry.get().clone().new_receiver();
-                let key = entry.key().clone();
-                let counter = self
-                    .active_streams
-                    .get(&key)
-                    .cloned()
-                    .ok_or(anyhow::anyhow!("No active stream"))?;
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok(SubscriptionStream {
-                    on_drop: Some(self.unsubscriptions.0.clone()),
-                    topic: Some(key),
-                    inner: rx,
-                    counter,
-                })
-            }
+        if self.streams.contains_key(&topic.hash()) {
+            anyhow::bail!("Already subscribed to topic")
         }
+
+        if !self.gossipsub.subscribe(&topic)? {
+            anyhow::bail!("Already subscribed to topic")
+        }
+
+        let (tx, rx) = futures::channel::mpsc::channel(15000);
+        self.streams.insert(topic.hash(), tx);
+        Ok(SubscriptionStream {
+            on_drop: Some(self.unsubscriptions.0.clone()),
+            topic: Some(topic.hash()),
+            inner: rx,
+        })
     }
 
     /// Unsubscribes from a topic. Unsubscription is usually done through dropping the
@@ -201,14 +149,19 @@ impl GossipsubStream {
     ///
     /// Returns true if an existing subscription was dropped, false otherwise
     pub fn unsubscribe(&mut self, topic: impl Into<String>) -> anyhow::Result<bool> {
-        let topic = Topic::new(topic.into());
-        if let Some(sender) = self.streams.remove(&topic.hash()) {
-            sender.close();
-            self.active_streams.remove(&topic.hash());
-            Ok(self.gossipsub.unsubscribe(&topic)?)
-        } else {
+        let topic = Topic::new(topic);
+
+        if !self.streams.contains_key(&topic.hash()) {
             anyhow::bail!("Unable to unsubscribe from topic.")
         }
+
+        self.streams
+            .remove(&topic.hash())
+            .expect("subscribed to topic");
+
+        self.gossipsub
+            .unsubscribe(&topic)
+            .map_err(anyhow::Error::from)
     }
 
     /// Publish to subscribed topic
@@ -226,18 +179,12 @@ impl GossipsubStream {
     }
 
     /// Returns the peers known to subscribe to the given topic
-    pub fn subscribed_peers(&self, topic: &str) -> Vec<PeerId> {
+    pub fn subscribed_peers(&self, topic: impl Into<String>) -> Vec<PeerId> {
         let topic = Topic::new(topic);
         self.all_peers()
             .filter(|(_, list)| list.contains(&&topic.hash()))
             .map(|(peer_id, _)| *peer_id)
             .collect()
-    }
-
-    /// Returns the list of currently subscribed topics. This can contain topics for which stream
-    /// has been dropped but no messages have yet been received on the topics after the drop.
-    pub fn subscribed_topics(&self) -> Vec<String> {
-        self.streams.keys().map(|t| t.to_string()).collect()
     }
 }
 
@@ -314,8 +261,8 @@ impl NetworkBehaviour for GossipsubStream {
         loop {
             match self.unsubscriptions.1.poll_next_unpin(ctx) {
                 Poll::Ready(Some(dropped)) => {
-                    if let Some(sender) = self.streams.remove(&dropped) {
-                        sender.close();
+                    if let Some(mut sender) = self.streams.remove(&dropped) {
+                        sender.close_channel();
                         debug!("unsubscribing via drop from {:?}", dropped);
                         assert!(
                             self.gossipsub
@@ -323,7 +270,6 @@ impl NetworkBehaviour for GossipsubStream {
                                 .unwrap_or_default(),
                             "Failed to unsubscribe a dropped subscription"
                         );
-                        self.active_streams.remove(&dropped);
                     }
                 }
                 Poll::Ready(None) => unreachable!("we own the sender"),
@@ -335,8 +281,11 @@ impl NetworkBehaviour for GossipsubStream {
             match futures::ready!(self.gossipsub.poll(ctx)) {
                 ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
                     let topic = message.topic.clone();
-                    if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(TrySendError::Closed(_)) = oe.get().try_broadcast(message) {
+                    if let Entry::Occupied(mut oe) = self.streams.entry(topic) {
+                        if let Err(e) = oe.get_mut().try_send(message) {
+                            if e.is_full() {
+                                continue;
+                            }
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
@@ -346,22 +295,9 @@ impl NetworkBehaviour for GossipsubStream {
                                     .unwrap_or_default(),
                                 "Failed to unsubscribe following SendError"
                             );
-                            self.active_streams.remove(&topic);
                         }
                     }
                     continue;
-                }
-                ToSwarm::GenerateEvent(GossipsubEvent::Subscribed { peer_id, topic }) => {
-                    return Poll::Ready(ToSwarm::GenerateEvent(GossipsubEvent::Subscribed {
-                        peer_id,
-                        topic,
-                    }));
-                }
-                ToSwarm::GenerateEvent(GossipsubEvent::Unsubscribed { peer_id, topic }) => {
-                    return Poll::Ready(ToSwarm::GenerateEvent(GossipsubEvent::Unsubscribed {
-                        peer_id,
-                        topic,
-                    }));
                 }
                 action => {
                     return Poll::Ready(action);

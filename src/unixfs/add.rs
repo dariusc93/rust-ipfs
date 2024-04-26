@@ -1,14 +1,19 @@
-use std::{path::PathBuf, task::Poll};
+use std::{
+    path::{Path, PathBuf},
+    task::Poll,
+};
 
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
 use either::Either;
+#[allow(unused_imports)]
 use futures::{
     future::BoxFuture,
     stream::{BoxStream, FusedStream},
     FutureExt, Stream, StreamExt, TryFutureExt,
 };
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::io::ReaderStream;
 use tracing::{Instrument, Span};
 
@@ -28,6 +33,12 @@ pub enum AddOpt {
 impl From<PathBuf> for AddOpt {
     fn from(path: PathBuf) -> Self {
         AddOpt::File(path)
+    }
+}
+
+impl From<&Path> for AddOpt {
+    fn from(path: &Path) -> Self {
+        AddOpt::File(path.to_path_buf())
     }
 }
 
@@ -120,6 +131,7 @@ impl Stream for UnixfsAdd {
                         let mut written = 0;
 
                         let (name, total_size, mut stream) = match option {
+                            #[cfg(not(target_arch = "wasm32"))]
                             AddOpt::File(path) => match tokio::fs::File::open(path.clone())
                                 .and_then(|file| async move {
                                     let size = file.metadata().await?.len() as usize;
@@ -136,6 +148,11 @@ impl Stream for UnixfsAdd {
                                         return;
                                     }
                                 },
+                            #[cfg(target_arch = "wasm32")]
+                            AddOpt::File(_) => {
+                                yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
+                                return;
+                            },
                             AddOpt::Stream { name, total, stream } => (name, total, stream),
                         };
 
@@ -252,11 +269,9 @@ impl Stream for UnixfsAdd {
 
                         let cid = path.root().cid().copied().expect("Cid is apart of the path");
 
-                        if pin {
-                            if let Ok(false) = repo.is_pinned(&cid).await {
-                                if let Err(e) = repo.pin(&cid).recursive().await {
-                                    error!("Unable to pin {cid}: {e}");
-                                }
+                        if pin && !repo.is_pinned(&cid).await.unwrap_or_default() {
+                            if let Err(e) = repo.pin(&cid).recursive().await {
+                                error!("Unable to pin {cid}: {e}");
                             }
                         }
 

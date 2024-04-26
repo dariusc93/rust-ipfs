@@ -1,5 +1,7 @@
 //! IPNS functionality around [`Ipfs`].
 
+use futures_timeout::TimeoutExt;
+
 use crate::error::Error;
 use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
@@ -89,20 +91,18 @@ impl Ipns {
                 let stream = self.ipfs.dht_get(mb).await?;
 
                 //TODO: Implement configurable timeout
-                let mut records = tokio::time::timeout(
-                    Duration::from_secs(60 * 2),
-                    stream
-                        .filter_map(|record| async move {
-                            let key = &record.key.as_ref()[6..];
-                            let record = rust_ipns::Record::decode(&record.value).ok()?;
-                            let peer_id = PeerId::from_bytes(key).ok()?;
-                            record.verify(peer_id).ok()?;
-                            Some(record)
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .await
-                .unwrap_or_default();
+                let mut records = stream
+                    .filter_map(|record| async move {
+                        let key = &record.key.as_ref()[6..];
+                        let record = rust_ipns::Record::decode(&record.value).ok()?;
+                        let peer_id = PeerId::from_bytes(key).ok()?;
+                        record.verify(peer_id).ok()?;
+                        Some(record)
+                    })
+                    .collect::<Vec<_>>()
+                    .timeout(Duration::from_secs(60 * 2))
+                    .await
+                    .unwrap_or_default();
 
                 if records.is_empty() {
                     anyhow::bail!("No records found")
@@ -164,7 +164,7 @@ impl Ipns {
 
         let datastore = repo.data_store();
 
-        let record_data = datastore.get(mb.as_bytes()).await?;
+        let record_data = datastore.get(mb.as_bytes()).await.unwrap_or_default();
 
         let mut seq = 0;
 

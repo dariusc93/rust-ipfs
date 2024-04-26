@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let repo = Repo::new_memory();
     let dag = IpldDag::from(repo.clone());
 
-    let cid1: libipld::cid::CidGeneric<64> = dag.put_dag(ipld!("block1")).await?;
+    let cid1 = dag.put_dag(ipld!("block1")).await?;
     let cid2 = dag.put_dag(ipld!("block2")).await?;
     let root = ipld!([cid1, cid2]);
     let cid = dag.put_dag(root).await?;
