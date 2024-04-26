@@ -24,7 +24,7 @@ impl IdbBlockStore {
     pub fn new(namespace: Option<String>) -> Self {
         let namespace = match namespace {
             Some(ns) => format!("{NAMESPACE}-{ns}"),
-            None => NAMESPACE.to_string()
+            None => NAMESPACE.to_string(),
         };
 
         let factory = Factory::new().unwrap();
