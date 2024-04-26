@@ -1,5 +1,5 @@
 use futures_timeout::TimeoutExt;
-use libp2p::multiaddr::Protocol;
+use libp2p::{multiaddr::Protocol, Multiaddr};
 use rust_ipfs::Node;
 use std::time::Duration;
 
@@ -67,7 +67,7 @@ async fn connect_two_nodes_with_two_connections_doesnt_panic() {
     let node_b = Node::new("b").await;
 
     node_a
-        .add_listening_address("/ip4/127.0.0.1/tcp/0".parse().unwrap())
+        .add_listening_address(Multiaddr::empty().with(Protocol::Memory(0)))
         .await
         .unwrap();
 
