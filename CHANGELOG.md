@@ -1,3 +1,6 @@
+# 0.11.8
+- chore: Add peers to specific defined sessions instead of sending the entire wantlist. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.11.7
 - fix: Use rt import path when using beetle bitswap feature.
 - feat: Add in-memory transport.
