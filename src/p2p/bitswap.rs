@@ -130,7 +130,7 @@ impl Behaviour {
             return;
         }
 
-        self.send_wants(peers)
+        self.send_wants(peers, cids)
     }
 
     pub fn local_wantlist(&self) -> Vec<Cid> {
@@ -206,7 +206,7 @@ impl Behaviour {
             return;
         }
 
-        self.send_wants(vec![peer_id]);
+        self.send_wants(vec![peer_id], vec![]);
     }
 
     fn on_connection_close(
@@ -270,14 +270,33 @@ impl Behaviour {
         }
     }
 
-    fn send_wants(&mut self, peers: Vec<PeerId>) {
+    fn send_wants(&mut self, peers: Vec<PeerId>, cids: Vec<Cid>) {
         if let Some(waker) = self.waker.take() {
             waker.wake();
         }
 
-        for (_, session) in self.want_session.iter_mut() {
-            for peer_id in &peers {
-                session.send_have_block(*peer_id)
+        match cids.is_empty() {
+            false => {
+                for cid in cids {
+                    let Some(session) = self
+                        .want_session
+                        .iter_mut()
+                        .find(|(session_cid, _)| *session_cid == cid)
+                        .map(|(_, session)| session)
+                    else {
+                        continue;
+                    };
+                    for peer_id in &peers {
+                        session.send_have_block(*peer_id)
+                    }
+                }
+            }
+            true => {
+                for session in self.want_session.values_mut() {
+                    for peer_id in &peers {
+                        session.send_have_block(*peer_id)
+                    }
+                }
             }
         }
     }
