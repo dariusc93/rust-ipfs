@@ -118,9 +118,17 @@ impl Debug for BitswapResponse {
 pub struct BitswapMessage {
     pub requests: Vec<BitswapRequest>,
     pub responses: HashMap<Cid, BitswapResponse>,
+    pub full: bool,
 }
 
 impl BitswapMessage {
+    pub fn new(full: bool) -> Self {
+        Self {
+            full,
+            ..Default::default()
+        }
+    }
+
     pub fn add_request(mut self, request: BitswapRequest) -> Self {
         self.requests.push(request);
         self
@@ -145,7 +153,9 @@ impl BitswapMessage {
 impl BitswapMessage {
     pub fn from_proto(message: bitswap_pb::Message) -> io::Result<BitswapMessage> {
         let mut bitswap_message = Self::default();
+
         if let Some(list) = message.wantlist {
+            bitswap_message.full = list.full;
             for entry in list.entries {
                 let cid = Cid::try_from(entry.block).map_err(io::Error::other)?;
                 bitswap_message.requests.push(BitswapRequest {
@@ -194,9 +204,14 @@ impl BitswapMessage {
         let BitswapMessage {
             requests,
             responses,
+            full,
         } = self;
 
-        let mut wantlist = Wantlist::default();
+        let mut wantlist = Wantlist {
+            full,
+            ..Default::default()
+        };
+
         for BitswapRequest {
             ty,
             cid,

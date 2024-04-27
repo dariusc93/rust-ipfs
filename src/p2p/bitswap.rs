@@ -388,6 +388,7 @@ impl NetworkBehaviour for Behaviour {
         let BitswapMessage {
             requests,
             responses,
+            ..
         } = message;
 
         for BitswapRequest {
