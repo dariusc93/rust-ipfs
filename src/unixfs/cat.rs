@@ -210,7 +210,18 @@ impl Stream for UnixfsCat {
                             }
                         };
 
+                        let mut size = 0;
+
                         if let Some(bytes) = bytes {
+                            size = bytes.len();
+                            if let Some(length) = length { 
+                                if size > length {
+                                    yield Err(TraversalFailed::MaxLengthExceeded {
+                                        size, length
+                                    });
+                                    return;
+                                }
+                            }
                             yield Ok(bytes);
                         }
 
@@ -219,11 +230,9 @@ impl Stream for UnixfsCat {
                             None => return,
                         };
 
-                        let mut size = 0;
-
                         loop {
                             if let Some(length) = length { 
-                                if size >= length {
+                                if size > length {
                                     yield Err(TraversalFailed::MaxLengthExceeded {
                                         size, length
                                     });
