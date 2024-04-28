@@ -2516,7 +2516,12 @@ mod node {
         pub async fn with_options(span: Option<Span>, addr: Option<Vec<Multiaddr>>) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let mut uninit = UninitializedIpfsNoop::new().with_default();
+            let mut uninit = UninitializedIpfsNoop::new()
+                .with_default()
+                .set_transport_configuration(TransportConfig {
+                    enable_memory_transport: true,
+                    ..Default::default()
+                });
 
             if let Some(span) = span {
                 uninit = uninit.set_span(span);
@@ -2524,7 +2529,7 @@ mod node {
 
             let list = match addr {
                 Some(addr) => addr,
-                None => vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()],
+                None => vec![Multiaddr::empty().with(Protocol::Memory(0))],
             };
 
             let ipfs = uninit.start().await.unwrap();

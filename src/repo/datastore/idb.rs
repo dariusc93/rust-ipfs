@@ -27,7 +27,7 @@ impl IdbDataStore {
     pub fn new(namespace: Option<String>) -> Self {
         let namespace = match namespace {
             Some(ns) => format!("{NAMESPACE}-{ns}"),
-            None => NAMESPACE.to_string()
+            None => NAMESPACE.to_string(),
         };
 
         let factory = Factory::new().unwrap();
@@ -244,8 +244,7 @@ impl PinStore for IdbDataStore {
         let (tx, rx) = oneshot::channel();
         wasm_bindgen_futures::spawn_local(async move {
             let res = async {
-                let transaction =
-                    database.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
+                let transaction = database.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
 
                 let store = transaction.object_store("pinstore")?;
 

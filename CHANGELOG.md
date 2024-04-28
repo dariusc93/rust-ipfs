@@ -1,5 +1,7 @@
 # 0.11.8
 - chore: Add peers to specific defined sessions instead of sending the entire wantlist. [PR 189](https://github.com/dariusc93/rust-ipfs/pull/189)
+- feat: Add an optional max length to read from the file via UnixfsCat. [PR 190](https://github.com/dariusc93/rust-ipfs/pull/190)
+- feat: Add `full` to `BitswapMessage` to indicate if message is full. [PR 191](https://github.com/dariusc93/rust-ipfs/pull/191)
 
 # 0.11.7
 - fix: Use rt import path when using beetle bitswap feature.
