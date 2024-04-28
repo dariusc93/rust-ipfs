@@ -24,6 +24,7 @@ use super::TraversalFailed;
 pub struct UnixfsCat {
     core: Option<Either<Ipfs, Repo>>,
     span: Span,
+    length: Option<usize>,
     starting_point: Option<StartingPoint>,
     range: Option<Range<u64>>,
     providers: Vec<PeerId>,
@@ -48,6 +49,7 @@ impl UnixfsCat {
             starting_point: Some(starting_point),
             span: Span::current(),
             range: None,
+            length: None,
             providers: Vec::new(),
             local_only: false,
             timeout: None,
@@ -64,6 +66,16 @@ impl UnixfsCat {
         if !self.providers.contains(&peer_id) {
             self.providers.push(peer_id);
         }
+        self
+    }
+
+    pub fn max_length(mut self, length: usize) -> Self {
+        self.length = Some(length);
+        self
+    }
+
+    pub fn set_max_length(mut self, length: impl Into<Option<usize>>) -> Self {
+        self.length = length.into();
         self
     }
 
@@ -154,6 +166,8 @@ impl Stream for UnixfsCat {
                     let local_only = self.local_only;
                     let timeout = self.timeout;
 
+                    let length = self.length;
+
                     // using async_stream here at least to get on faster; writing custom streams is not too easy
                     // but this might be easy enough to write open.
                     let stream = stream! {
@@ -205,7 +219,17 @@ impl Stream for UnixfsCat {
                             None => return,
                         };
 
+                        let mut size = 0;
+
                         loop {
+                            if let Some(length) = length { 
+                                if size >= length {
+                                    yield Err(TraversalFailed::MaxLengthExceeded {
+                                        size, length
+                                    });
+                                    return;
+                                }
+                            }
                             // TODO: if it was possible, it would make sense to start downloading N of these
                             // we could just create an FuturesUnordered which would drop the value right away. that
                             // would probably always cost many unnecessary clones, but it would be nice to "shut"
@@ -224,6 +248,7 @@ impl Stream for UnixfsCat {
 
                             match visit.continue_walk(block.data(), &mut cache) {
                                 Ok((bytes, next_visit)) => {
+                                    size += bytes.len();
                                     if !bytes.is_empty() {
                                         // TODO: manual implementation could allow returning just the slice
                                         yield Ok(Bytes::copy_from_slice(bytes));
