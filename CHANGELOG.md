@@ -1,3 +1,6 @@
+# 0.11.8
+- feat: Add `full` to `BitswapMessage` to indicate if message is full. [PR 191](https://github.com/dariusc93/rust-ipfs/pull/191)
+
 # 0.11.7
 - fix: Use rt import path when using beetle bitswap feature.
 - feat: Add in-memory transport.
