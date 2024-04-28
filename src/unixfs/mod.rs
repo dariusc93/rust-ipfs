@@ -222,10 +222,7 @@ pub enum TraversalFailed {
     Loading(Cid, #[source] Error),
 
     #[error("data exceeded max length")]
-    MaxLengthExceeded {
-        size: usize,
-        length: usize,
-    },
+    MaxLengthExceeded { size: usize, length: usize },
     #[error("Timeout while resolving {path}")]
     Timeout { path: IpfsPath },
 

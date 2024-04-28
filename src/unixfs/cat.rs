@@ -213,7 +213,7 @@ impl Stream for UnixfsCat {
                         let mut size = 0;
 
                         if let Some(bytes) = bytes {
-                            size = bytes.len();
+                            size += bytes.len();
                             if let Some(length) = length { 
                                 if size > length {
                                     yield Err(TraversalFailed::MaxLengthExceeded {
@@ -231,14 +231,6 @@ impl Stream for UnixfsCat {
                         };
 
                         loop {
-                            if let Some(length) = length { 
-                                if size > length {
-                                    yield Err(TraversalFailed::MaxLengthExceeded {
-                                        size, length
-                                    });
-                                    return;
-                                }
-                            }
                             // TODO: if it was possible, it would make sense to start downloading N of these
                             // we could just create an FuturesUnordered which would drop the value right away. that
                             // would probably always cost many unnecessary clones, but it would be nice to "shut"
@@ -258,8 +250,17 @@ impl Stream for UnixfsCat {
                             match visit.continue_walk(block.data(), &mut cache) {
                                 Ok((bytes, next_visit)) => {
                                     size += bytes.len();
+
+                                    if let Some(length) = length { 
+                                        if size > length {
+                                            yield Err(TraversalFailed::MaxLengthExceeded {
+                                                size, length
+                                            });
+                                            return;
+                                        }
+                                    }
+
                                     if !bytes.is_empty() {
-                                        // TODO: manual implementation could allow returning just the slice
                                         yield Ok(Bytes::copy_from_slice(bytes));
                                     }
 
