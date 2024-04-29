@@ -43,7 +43,7 @@ futures = { version = "0.3" }
 futures-timeout = "0.1"
 futures-timer = "3.0"
 getrandom = { version = "0.2.14" }
-hickory-resolver = "0.24.0"
+hickory-resolver = "0.24.1"
 idb = "0.6"
 libipld = { version = "0.16", features = ["serde-codec"] }
 libp2p = { version = "0.53" }
