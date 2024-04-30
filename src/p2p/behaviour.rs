@@ -250,7 +250,7 @@ impl From<RelayConfig> for libp2p::relay::Config {
 fn max_duration(duration: Duration) -> Duration {
     let start = std::time::Instant::now();
     if start.checked_add(duration).is_none() {
-        return Duration::from_secs(u32::MAX as _)
+        return Duration::from_secs(u32::MAX as _);
     }
     duration
 }
@@ -686,5 +686,22 @@ where
     #[cfg(feature = "beetle_bitswap")]
     pub fn bitswap(&mut self) -> Option<&mut Bitswap<Repo>> {
         self.bitswap.as_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_duration_test() {
+        let base = Duration::from_secs(1);
+        let dur = max_duration(base);
+        assert_eq!(dur, base);
+
+        let base = Duration::MAX;
+        let dur = max_duration(base);
+        assert_ne!(dur, base);
+        assert_eq!(dur, Duration::from_secs(u32::MAX as _))
     }
 }
