@@ -1,5 +1,5 @@
 # 0.11.10
-- fix: prevent overflow for relay duration by capping to u32::MAX. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- fix: prevent overflow for relay duration by capping to u32::MAX. [PR 198](https://github.com/dariusc93/rust-ipfs/pull/198)
 
 # 0.11.9
 - chore: Add peers to specific defined sessions instead of sending the entire wantlist. [PR 189](https://github.com/dariusc93/rust-ipfs/pull/189)
