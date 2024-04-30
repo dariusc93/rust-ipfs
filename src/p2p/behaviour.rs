@@ -207,6 +207,9 @@ impl From<RelayConfig> for libp2p::relay::Config {
             circuit_src_rate_limiters,
         }: RelayConfig,
     ) -> Self {
+        let reservation_duration = max_duration(reservation_duration);
+        let max_circuit_duration = max_duration(max_circuit_duration);
+
         let mut config = libp2p::relay::Config {
             max_reservations,
             max_reservations_per_peer,
@@ -242,6 +245,14 @@ impl From<RelayConfig> for libp2p::relay::Config {
 
         config
     }
+}
+
+fn max_duration(duration: Duration) -> Duration {
+    let start = std::time::Instant::now();
+    if start.checked_add(duration).is_none() {
+        return Duration::from_secs(u32::MAX as _)
+    }
+    duration
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
