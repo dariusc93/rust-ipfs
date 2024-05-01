@@ -154,12 +154,14 @@ impl<P: StoreParams> Bitswap<P> {
     /// Adds an address for a peer.
     pub fn add_address(&mut self, peer_id: &PeerId, addr: Multiaddr) {
         self.query_manager.add_peer(peer_id);
+        #[allow(deprecated)]
         self.inner.add_address(peer_id, addr);
     }
 
     /// Removes an address for a peer.
     pub fn remove_address(&mut self, peer_id: &PeerId, addr: &Multiaddr) {
         self.query_manager.remove_peer(peer_id);
+        #[allow(deprecated)]
         self.inner.remove_address(peer_id, addr);
     }
 
