@@ -48,7 +48,7 @@ idb = "0.6"
 libipld = { version = "0.16", features = ["serde-codec"] }
 libp2p = { version = "0.53" }
 libp2p-allow-block-list = "0.3"
-libp2p-bitswap-next = { version = "0.26.2", path = "packages/libp2p-bitswap-next" }
+libp2p-bitswap-next = { version = "0.26.3", path = "packages/libp2p-bitswap-next" }
 libp2p-relay-manager = { version = "0.2.2", path = "packages/libp2p-relay-manager" }
 libp2p-stream = { version = "0.1.0-alpha" }
 libp2p-webrtc = { version = "=0.7.1-alpha" }

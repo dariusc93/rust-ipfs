@@ -2613,7 +2613,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-bitswap-next"
-version = "0.26.2"
+version = "0.26.3"
 dependencies = [
  "async-std",
  "async-trait",
