@@ -248,7 +248,7 @@ impl From<RelayConfig> for libp2p::relay::Config {
 }
 
 fn max_duration(duration: Duration) -> Duration {
-    let start = std::time::Instant::now();
+    let start = web_time::Instant::now();
     if start.checked_add(duration).is_none() {
         return Duration::from_secs(u32::MAX as _);
     }

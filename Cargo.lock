@@ -4725,6 +4725,7 @@ dependencies = [
  "void",
  "wasm-bindgen-futures",
  "wasm-timer",
+ "web-time",
  "zeroize",
 ]
 
