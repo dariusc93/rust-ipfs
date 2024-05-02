@@ -1,3 +1,6 @@
+# 0.2.3
+- fix: Enable wasm-bindgen feature when targetting wasm target
+
 # 0.2.2
 - chore: Add wasm support
 

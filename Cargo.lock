@@ -3034,7 +3034,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-relay-manager"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "async-std",
@@ -4667,7 +4667,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ipfs"
-version = "0.11.10"
+version = "0.11.12"
 dependencies = [
  "anyhow",
  "async-stream",

@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.11.10"
+version = "0.11.12"
 
 [features]
 
@@ -49,7 +49,7 @@ libipld = { version = "0.16", features = ["serde-codec"] }
 libp2p = { version = "0.53" }
 libp2p-allow-block-list = "0.3"
 libp2p-bitswap-next = { version = "0.26.3", path = "packages/libp2p-bitswap-next" }
-libp2p-relay-manager = { version = "0.2.2", path = "packages/libp2p-relay-manager" }
+libp2p-relay-manager = { version = "0.2.3", path = "packages/libp2p-relay-manager" }
 libp2p-stream = { version = "0.1.0-alpha" }
 libp2p-webrtc = { version = "=0.7.1-alpha" }
 libp2p-webrtc-websys = "0.3.0-alpha"
@@ -97,7 +97,6 @@ bytes = { workspace = true }
 chrono.workspace = true
 either.workspace = true
 futures-timeout.workspace = true
-futures-timer.workspace = true
 futures.workspace = true
 libipld.workspace = true
 libp2p-allow-block-list.workspace = true
@@ -121,6 +120,7 @@ wasm-timer.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures-timer.workspace = true
 beetle-bitswap-next = { workspace = true, optional = true }
 fs2.workspace = true
 hickory-resolver.workspace = true
@@ -135,6 +135,7 @@ tokio-stream = { workspace = true, features = ["fs"] }
 tokio-util = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
 libp2p = { features = [ "gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "noise", "ping", "yamux", "dns", "ed25519", "secp256k1", "ecdsa", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }

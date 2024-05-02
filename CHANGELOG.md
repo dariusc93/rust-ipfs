@@ -1,3 +1,5 @@
+# 0.11.12
+
 # 0.11.10
 - fix: prevent overflow for relay duration by capping to u32::MAX. [PR 198](https://github.com/dariusc93/rust-ipfs/pull/198)
 
