@@ -1,3 +1,6 @@
+# 0.11.13
+- fix: Use web-time `Instant` inplace of `std::time::Instant`.
+
 # 0.11.12
 
 # 0.11.10
