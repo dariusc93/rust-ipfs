@@ -92,7 +92,6 @@ pub enum KadResult {
     Peers(Vec<PeerId>),
     /// The query successfully returns a `GetRecord` result.
     Records(Vec<Record>),
-    ///
     Record(Record),
 }
 

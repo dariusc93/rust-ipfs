@@ -73,6 +73,7 @@ impl PartialEq for Connection {
 
 impl Eq for Connection {}
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingReservation {
     peer_id: PeerId,

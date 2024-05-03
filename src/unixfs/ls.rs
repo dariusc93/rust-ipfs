@@ -175,7 +175,7 @@ impl Stream for UnixfsLs {
                                 },
                                 Ok(ContinuedWalk::RootDirectory( cid, path, _)) => {
                                     let path = path.to_string_lossy().to_string();
-                                    root_directory = path.clone();
+                                    root_directory.clone_from(&path);
                                     yield Entry::RootDirectory { cid: *cid, path };
                                 }
                                 Ok(ContinuedWalk::Directory( cid, path, _)) => {

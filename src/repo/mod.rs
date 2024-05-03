@@ -1156,7 +1156,6 @@ impl RepoFetch {
         self
     }
 
-    ///
     pub fn exit_on_error(mut self) -> Self {
         self.refs = self.refs.with_exit_on_error();
         self
@@ -1287,7 +1286,6 @@ impl RepoInsertPin {
         self
     }
 
-    ///
     pub fn exit_on_error(mut self) -> Self {
         self.refs = self.refs.with_exit_on_error();
         self

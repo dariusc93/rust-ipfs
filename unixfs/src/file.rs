@@ -151,6 +151,7 @@ impl From<FileError> for FileReadFailed {
 /// This at least sounded useful early on as the quick-protobuf produces many Option<Cow> values
 /// which are a bit tricky to handle. We never turn them into Option<Cow::Owned> so we can safely
 /// use these.
+#[allow(dead_code)]
 pub(crate) trait UnwrapBorrowedExt<'a> {
     /// Does not default but requires there to be an borrowed inner value.
     fn unwrap_borrowed(self) -> &'a [u8];
