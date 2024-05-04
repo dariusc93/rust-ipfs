@@ -410,38 +410,41 @@ impl NetworkBehaviour for Behaviour {
             ..
         } = message;
 
-        for BitswapRequest {
-            ty,
-            cid,
-            send_dont_have,
-            cancel,
-            priority: _,
-        } in requests
-        {
-            if !self.have_session.contains_key(&cid) && !cancel {
+        for request in requests {
+            let BitswapRequest {
+                ty,
+                cid,
+                send_dont_have,
+                cancel,
+                priority: _,
+            } = &request;
+
+            if !self.have_session.contains_key(cid) && !cancel {
                 // Lets build out have new sessions
-                let have_session = HaveSession::new(&self.store, cid);
-                self.have_session.insert(cid, have_session);
+                let have_session = HaveSession::new(&self.store, *cid);
+                self.have_session.insert(*cid, have_session);
             }
 
             let Some(session) = self
                 .have_session
                 .iter_mut()
-                .find(|(session_cid, _)| *session_cid == cid)
+                .find(|(session_cid, _)| session_cid == cid)
                 .map(|(_, session)| session)
             else {
-                tracing::warn!(block = %cid, %peer_id, %connection_id, "want session does not exist. Skipping request");
+                if !*cancel {
+                    tracing::warn!(block = %cid, %peer_id, %connection_id, "have session does not exist. Skipping request");
+                }
                 continue;
             };
 
-            if cancel {
+            if *cancel {
                 session.cancel(peer_id);
                 continue;
             }
 
             match ty {
                 RequestType::Have => {
-                    session.want_block(peer_id, send_dont_have);
+                    session.want_block(peer_id, *send_dont_have);
                 }
                 RequestType::Block => {
                     session.need_block(peer_id);
