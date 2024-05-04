@@ -115,7 +115,7 @@ impl WantSession {
         self.sending_wants.retain(|pid| *pid != peer_id);
         self.sent_wants.retain(|pid| *pid != peer_id);
 
-        if !self.is_empty()
+        if self.is_empty()
             && !matches!(
                 self.state,
                 WantSessionState::NextBlock | WantSessionState::NextBlockPending { .. }
