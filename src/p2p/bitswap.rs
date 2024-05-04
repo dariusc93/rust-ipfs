@@ -414,7 +414,7 @@ impl NetworkBehaviour for Behaviour {
             let BitswapRequest {
                 ty,
                 cid,
-                send_dont_have,
+                send_dont_have: _,
                 cancel,
                 priority: _,
             } = &request;
@@ -444,7 +444,7 @@ impl NetworkBehaviour for Behaviour {
 
             match ty {
                 RequestType::Have => {
-                    session.want_block(peer_id, *send_dont_have);
+                    session.want_block(peer_id);
                 }
                 RequestType::Block => {
                     session.need_block(peer_id);

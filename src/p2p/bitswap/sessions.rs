@@ -309,7 +309,6 @@ enum HaveWantState {
 pub struct HaveSession {
     cid: Cid,
     want: HashMap<PeerId, HaveWantState>,
-    send_dont_have: HashSet<PeerId>,
     have: Option<bool>,
     repo: Repo,
     waker: Option<Waker>,
@@ -321,7 +320,6 @@ impl HaveSession {
         let mut session = Self {
             cid,
             want: HashMap::new(),
-            send_dont_have: HashSet::new(),
             have: None,
             repo: repo.clone(),
             waker: None,
@@ -341,7 +339,7 @@ impl HaveSession {
         self.want.contains_key(&peer_id)
     }
 
-    pub fn want_block(&mut self, peer_id: PeerId, send_dont_have: bool) {
+    pub fn want_block(&mut self, peer_id: PeerId) {
         if self.want.contains_key(&peer_id) {
             tracing::warn!(session = %self.cid, %peer_id, "peer requested block");
             return;
@@ -349,9 +347,6 @@ impl HaveSession {
 
         tracing::info!(session = %self.cid, %peer_id, name = "have_session", "peer want block");
 
-        if send_dont_have {
-            self.send_dont_have.insert(peer_id);
-        }
         self.want.insert(peer_id, HaveWantState::Pending);
 
         if let Some(w) = self.waker.take() {
@@ -397,7 +392,6 @@ impl HaveSession {
     pub fn remove_peer(&mut self, peer_id: PeerId) {
         tracing::info!(session = %self.cid, %peer_id, name = "have_session", "removing peer from have_session");
         self.want.remove(&peer_id);
-        self.send_dont_have.remove(&peer_id);
         if let Some(w) = self.waker.take() {
             w.wake();
         }
@@ -426,7 +420,6 @@ impl HaveSession {
 
     pub fn cancel(&mut self, peer_id: PeerId) {
         self.want.remove(&peer_id);
-        self.send_dont_have.remove(&peer_id);
 
         tracing::info!(session = %self.cid, %peer_id, name = "have_session", "cancelling request");
     }
