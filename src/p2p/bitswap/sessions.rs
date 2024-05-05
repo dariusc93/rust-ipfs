@@ -166,7 +166,6 @@ impl WantSession {
         }
     }
 
-    #[allow(dead_code)]
     fn is_empty(&self) -> bool {
         self.sending_wants.is_empty() && self.sent_wants.is_empty() && self.have_block.is_empty()
     }
