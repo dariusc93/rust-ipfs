@@ -177,7 +177,7 @@ impl Unpin for WantSession {}
 impl Stream for WantSession {
     type Item = WantSessionEvent;
 
-    #[tracing::instrument(level = "trace", name = "Session::poll_next", skip(self, cx))]
+    #[tracing::instrument(level = "trace", name = "WantSession::poll_next", skip(self, cx))]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.received {
             return Poll::Ready(None);
