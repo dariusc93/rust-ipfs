@@ -2477,7 +2477,7 @@ use crate::p2p::AddressBookConfig;
 pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
-mod node {
+pub(crate) mod node {
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
@@ -2497,8 +2497,9 @@ mod node {
         ///
         /// This will use the testing defaults for the `IpfsOptions`. If `IpfsOptions` has been
         /// initialised manually, use `Node::with_options` instead.
-        pub async fn new<T: AsRef<str>>(name: T) -> Self {
-            Self::with_options(Some(trace_span!("ipfs", node = name.as_ref())), None).await
+        pub async fn new<T: AsRef<str>>(_: T) -> Self {
+            let kp = Keypair::generate_ed25519();
+            Self::with_options(None, kp).await
         }
 
         /// Connects to a peer at the given address.
@@ -2513,19 +2514,20 @@ mod node {
         }
 
         /// Returns a new `Node` based on `IpfsOptions`.
-        pub async fn with_options(span: Option<Span>, addr: Option<Vec<Multiaddr>>) -> Self {
+        pub async fn with_options(addr: Option<Vec<Multiaddr>>, kp: Keypair) -> Self {
+            let span = trace_span!("ipfs", node = %kp.public().to_peer_id());
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let mut uninit = UninitializedIpfsNoop::new()
-                .with_default()
+            let uninit = UninitializedIpfsNoop::new()
+                .set_keypair(&kp)
+                .with_identify(Default::default())
+                .with_bitswap()
+                // .with_kademlia(Either::Left(Default::default()), Default::default())
                 .set_transport_configuration(TransportConfig {
                     enable_memory_transport: true,
                     ..Default::default()
-                });
-
-            if let Some(span) = span {
-                uninit = uninit.set_span(span);
-            }
+                })
+                .set_span(span);
 
             let list = match addr {
                 Some(addr) => addr,
@@ -2534,7 +2536,7 @@ mod node {
 
             let ipfs = uninit.start().await.unwrap();
 
-            ipfs.dht_mode(DhtMode::Server).await.unwrap();
+            // ipfs.dht_mode(DhtMode::Server).await.unwrap();
 
             let id = ipfs.keypair().public().to_peer_id();
             for addr in list {
