@@ -610,7 +610,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "async-broadcast",
- "async-channel 1.9.0",
+ "async-channel 2.2.1",
  "async-stream",
  "async-trait",
  "asynchronous-codec 0.6.2",
