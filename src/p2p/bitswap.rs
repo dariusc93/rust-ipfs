@@ -535,8 +535,8 @@ impl NetworkBehaviour for Behaviour {
             };
         }
 
-        while let Poll::Ready(Some((cid, event))) = self.want_session.poll_next_unpin(ctx) {
-            match event {
+        match self.want_session.poll_next_unpin(ctx) {
+            Poll::Ready(Some((cid, event))) => match event {
                 WantSessionEvent::SendWant { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
@@ -545,15 +545,12 @@ impl NetworkBehaviour for Behaviour {
                             .add_request(BitswapRequest::have(cid).send_dont_have(true)),
                     });
                 }
-                WantSessionEvent::SendCancels { peers } => {
-                    for peer_id in peers {
-                        self.events.push_back(ToSwarm::NotifyHandler {
-                            peer_id,
-                            handler: NotifyHandler::Any,
-                            event: BitswapMessage::default()
-                                .add_request(BitswapRequest::cancel(cid)),
-                        });
-                    }
+                WantSessionEvent::SendCancel { peer_id } => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::default().add_request(BitswapRequest::cancel(cid)),
+                    });
                 }
                 WantSessionEvent::SendBlock { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
@@ -569,7 +566,8 @@ impl NetworkBehaviour for Behaviour {
                 WantSessionEvent::BlockStored => {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }))
                 }
-            }
+            },
+            Poll::Pending | Poll::Ready(None) => {}
         }
 
         self.waker = Some(ctx.waker().clone());

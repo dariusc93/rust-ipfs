@@ -19,7 +19,7 @@ const CAP_THRESHOLD: usize = 100;
 
 pub enum WantSessionEvent {
     SendWant { peer_id: PeerId },
-    SendCancels { peers: VecDeque<PeerId> },
+    SendCancel { peer_id: PeerId },
     SendBlock { peer_id: PeerId },
     BlockStored,
     NeedBlock,
@@ -57,6 +57,7 @@ pub struct WantSession {
     repo: Repo,
     state: WantSessionState,
     timeout: Option<Duration>,
+    cancel: VecDeque<PeerId>,
 }
 
 impl WantSession {
@@ -74,6 +75,7 @@ impl WantSession {
             waker: None,
             state: WantSessionState::Idle,
             timeout: None,
+            cancel: Default::default(),
         }
     }
 
@@ -178,6 +180,11 @@ impl Stream for WantSession {
 
     #[tracing::instrument(level = "trace", name = "WantSession::poll_next", skip(self, cx))]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // We check any cancels request since
+        if let Some(peer_id) = self.cancel.pop_back() {
+            return Poll::Ready(Some(WantSessionEvent::SendCancel { peer_id }));
+        }
+
         if self.received {
             return Poll::Ready(None);
         }
@@ -229,6 +236,7 @@ impl Stream for WantSession {
                     }
                 }
                 WantSessionState::NextBlockPending { timer } => {
+                    // We will wait until the peer respond and if it does not respond in time to timeout the request and proceed to the next block request
                     ready!(timer.poll_unpin(cx));
                     tracing::warn!(session = %self.cid, name = "want_session", "request timeout attempting to get next block");
                     self.state = WantSessionState::NextBlock;
@@ -260,11 +268,12 @@ impl Stream for WantSession {
                         peers.insert(peer_id);
                     };
 
-                    let peers = VecDeque::from_iter(peers);
-
                     tracing::info!(session = %self.cid, pending_cancellation = peers.len());
 
-                    return Poll::Ready(Some(WantSessionEvent::SendCancels { peers }));
+                    self.cancel.extend(peers);
+                    // Wake up the task so the stream would poll any cancel requests
+                    cx.waker().wake_by_ref();
+                    self.state = WantSessionState::Idle;
                 }
             }
         }
@@ -298,6 +307,7 @@ enum HaveSessionState {
     Complete,
 }
 
+#[derive(Debug)]
 enum HaveWantState {
     Pending,
     Sent,
@@ -479,7 +489,7 @@ impl Stream for HaveSession {
                         {
                             let peer_id = *peer_id;
                             *state = HaveWantState::Sent;
-
+                            tracing::debug!(%peer_id, peer_state = ?state, have_block=have, session = %this.cid, "notifying peer of block status");
                             return match have {
                                 true => Poll::Ready(Some(HaveSessionEvent::Have { peer_id })),
                                 false => Poll::Ready(Some(HaveSessionEvent::DontHave { peer_id })),
@@ -491,6 +501,7 @@ impl Stream for HaveSession {
                 HaveSessionState::ContainBlock { fut } => {
                     let have = ready!(fut.poll_unpin(cx)).unwrap_or_default();
                     this.have = Some(have);
+                    cx.waker().wake_by_ref();
                     this.state = HaveSessionState::Idle;
                 }
                 // Maybe we should have a lock on a single lock to prevent GC from cleaning it up or being removed while waiting for it to be
