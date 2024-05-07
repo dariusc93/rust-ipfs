@@ -53,6 +53,7 @@ pub struct WantSession {
     failed_block: VecDeque<PeerId>,
     sent_have_block: Option<PeerId>,
     disconnected: HashMap<PeerId, bool>,
+    discovery: Option<Delay>,
     requested_block: bool,
     received: bool,
     waker: Option<Waker>,
@@ -72,6 +73,7 @@ impl WantSession {
             sent_have_block: Default::default(),
             failed_block: Default::default(),
             disconnected: Default::default(),
+            discovery: Some(Delay::new(Duration::from_secs(5))),
             received: false,
             requested_block: false,
             repo: repo.clone(),
@@ -110,6 +112,8 @@ impl WantSession {
             self.state = WantSessionState::NextBlock;
         }
 
+        self.discovery.take();
+
         if let Some(w) = self.waker.take() {
             w.wake();
         }
@@ -122,6 +126,7 @@ impl WantSession {
 
         if self.is_empty() {
             self.state = WantSessionState::Idle;
+            self.discovery.replace(Delay::new(Duration::from_secs(5)));
             tracing::warn!(session = %self.cid, %peer_id, name = "want_session", "session is empty. setting state to idle.");
         } else {
             // change state to next block so it will perform another request if possible,
@@ -154,6 +159,7 @@ impl WantSession {
             tracing::info!(%peer_id, cid = %block.cid(), name = "want_session", "storing block");
             let fut = self.repo.put_block(block).into_future();
             self.state = WantSessionState::PutBlock { fut };
+            self.discovery.take();
         }
 
         if let Some(w) = self.waker.take() {
@@ -173,7 +179,10 @@ impl WantSession {
                 self.sent_have_block.take();
                 self.state = WantSessionState::NextBlock;
             }
+        } else {
+            self.discovery.replace(Delay::new(Duration::from_secs(5)));
         }
+
         if let Some(w) = self.waker.take() {
             w.wake();
         }
@@ -225,6 +234,13 @@ impl Stream for WantSession {
                 return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id }));
             } else if self.sending_wants.capacity() > CAP_THRESHOLD {
                 self.sending_wants.shrink_to_fit()
+            }
+        }
+
+        if let Some(timer) = self.discovery.as_mut() {
+            if timer.poll_unpin(cx).is_ready() {
+                timer.reset(Duration::from_secs(60));
+                return Poll::Ready(Some(WantSessionEvent::NeedBlock));
             }
         }
 
