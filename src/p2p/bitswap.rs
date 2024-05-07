@@ -219,6 +219,7 @@ impl Behaviour {
             ..
         }: ConnectionClosed,
     ) {
+        tracing::debug!(%connection_id, %peer_id, "connection closed");
         let address = endpoint.get_remote_address().clone();
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let list = entry.get_mut();
@@ -237,8 +238,10 @@ impl Behaviour {
         }
 
         if remaining_established == 0 {
-            for (_, session) in self.want_session.iter_mut() {
-                session.remove_peer(peer_id);
+            tracing::debug!(%connection_id, %peer_id, "peer disconnected");
+            for (cid, session) in self.want_session.iter_mut() {
+                tracing::debug!(session=%*cid, %peer_id, "marking peer as disconnected");
+                session.peer_disconnected(peer_id);
             }
         }
     }
@@ -246,14 +249,16 @@ impl Behaviour {
     fn on_dial_failure(
         &mut self,
         DialFailure {
-            connection_id: _,
+            connection_id,
             peer_id,
-            error: _,
+            error,
         }: DialFailure,
     ) {
         let Some(peer_id) = peer_id else {
             return;
         };
+
+        tracing::warn!(%peer_id, %connection_id, error = %error, "unable to dial peer");
 
         if self.connections.contains_key(&peer_id) {
             // Since there is still an existing connection for the peer
@@ -410,38 +415,41 @@ impl NetworkBehaviour for Behaviour {
             ..
         } = message;
 
-        for BitswapRequest {
-            ty,
-            cid,
-            send_dont_have,
-            cancel,
-            priority: _,
-        } in requests
-        {
-            if !self.have_session.contains_key(&cid) && !cancel {
+        for request in requests {
+            let BitswapRequest {
+                ty,
+                cid,
+                send_dont_have: _,
+                cancel,
+                priority: _,
+            } = &request;
+
+            if !self.have_session.contains_key(cid) && !cancel {
                 // Lets build out have new sessions
-                let have_session = HaveSession::new(&self.store, cid);
-                self.have_session.insert(cid, have_session);
+                let have_session = HaveSession::new(&self.store, *cid);
+                self.have_session.insert(*cid, have_session);
             }
 
             let Some(session) = self
                 .have_session
                 .iter_mut()
-                .find(|(session_cid, _)| *session_cid == cid)
+                .find(|(session_cid, _)| session_cid == cid)
                 .map(|(_, session)| session)
             else {
-                tracing::warn!(block = %cid, %peer_id, %connection_id, "want session does not exist. Skipping request");
+                if !*cancel {
+                    tracing::warn!(block = %cid, %peer_id, %connection_id, "have session does not exist. Skipping request");
+                }
                 continue;
             };
 
-            if cancel {
+            if *cancel {
                 session.cancel(peer_id);
                 continue;
             }
 
             match ty {
                 RequestType::Have => {
-                    session.want_block(peer_id, send_dont_have);
+                    session.want_block(peer_id);
                 }
                 RequestType::Block => {
                     session.need_block(peer_id);
@@ -507,7 +515,7 @@ impl NetworkBehaviour for Behaviour {
                         handler: NotifyHandler::Any,
                         event: BitswapMessage::default()
                             .add_response(cid, BitswapResponse::Have(true)),
-                    })
+                    });
                 }
                 HaveSessionEvent::DontHave { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
@@ -532,8 +540,8 @@ impl NetworkBehaviour for Behaviour {
             };
         }
 
-        while let Poll::Ready(Some((cid, event))) = self.want_session.poll_next_unpin(ctx) {
-            match event {
+        match self.want_session.poll_next_unpin(ctx) {
+            Poll::Ready(Some((cid, event))) => match event {
                 WantSessionEvent::SendWant { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
@@ -542,17 +550,16 @@ impl NetworkBehaviour for Behaviour {
                             .add_request(BitswapRequest::have(cid).send_dont_have(true)),
                     });
                 }
-                WantSessionEvent::SendCancels { peers } => {
-                    for peer_id in peers {
-                        self.events.push_back(ToSwarm::NotifyHandler {
-                            peer_id,
-                            handler: NotifyHandler::Any,
-                            event: BitswapMessage::default()
-                                .add_request(BitswapRequest::cancel(cid)),
-                        });
-                    }
+                WantSessionEvent::SendCancel { peer_id } => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: BitswapMessage::default().add_request(BitswapRequest::cancel(cid)),
+                    });
                 }
                 WantSessionEvent::SendBlock { peer_id } => {
+                    ctx.waker().wake_by_ref();
+
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
@@ -566,7 +573,12 @@ impl NetworkBehaviour for Behaviour {
                 WantSessionEvent::BlockStored => {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }))
                 }
-            }
+                WantSessionEvent::Dial { peer_id } => {
+                    let opts = DialOpts::peer_id(peer_id).build();
+                    return Poll::Ready(ToSwarm::Dial { opts });
+                }
+            },
+            Poll::Pending | Poll::Ready(None) => {}
         }
 
         self.waker = Some(ctx.waker().clone());
