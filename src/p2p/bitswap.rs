@@ -219,6 +219,7 @@ impl Behaviour {
             ..
         }: ConnectionClosed,
     ) {
+        tracing::debug!(%connection_id, %peer_id, "connection closed");
         let address = endpoint.get_remote_address().clone();
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let list = entry.get_mut();
@@ -237,8 +238,10 @@ impl Behaviour {
         }
 
         if remaining_established == 0 {
-            for (_, session) in self.want_session.iter_mut() {
-                session.remove_peer(peer_id);
+            tracing::debug!(%connection_id, %peer_id, "peer disconnected");
+            for (cid, session) in self.want_session.iter_mut() {
+                tracing::debug!(session=%*cid, %peer_id, "marking peer as disconnected");
+                session.peer_disconnected(peer_id);
             }
         }
     }
@@ -246,14 +249,16 @@ impl Behaviour {
     fn on_dial_failure(
         &mut self,
         DialFailure {
-            connection_id: _,
+            connection_id,
             peer_id,
-            error: _,
+            error,
         }: DialFailure,
     ) {
         let Some(peer_id) = peer_id else {
             return;
         };
+
+        tracing::warn!(%peer_id, %connection_id, error = %error, "unable to dial peer");
 
         if self.connections.contains_key(&peer_id) {
             // Since there is still an existing connection for the peer
@@ -510,7 +515,7 @@ impl NetworkBehaviour for Behaviour {
                         handler: NotifyHandler::Any,
                         event: BitswapMessage::default()
                             .add_response(cid, BitswapResponse::Have(true)),
-                    })
+                    });
                 }
                 HaveSessionEvent::DontHave { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
@@ -553,6 +558,8 @@ impl NetworkBehaviour for Behaviour {
                     });
                 }
                 WantSessionEvent::SendBlock { peer_id } => {
+                    ctx.waker().wake_by_ref();
+
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
@@ -565,6 +572,10 @@ impl NetworkBehaviour for Behaviour {
                 }
                 WantSessionEvent::BlockStored => {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }))
+                }
+                WantSessionEvent::Dial { peer_id } => {
+                    let opts = DialOpts::peer_id(peer_id).build();
+                    return Poll::Ready(ToSwarm::Dial { opts });
                 }
             },
             Poll::Pending | Poll::Ready(None) => {}
