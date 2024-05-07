@@ -9,7 +9,7 @@ use rust_ipfs::UninitializedIpfs;
 #[derive(Debug, Parser)]
 #[clap(name = "relay-client")]
 struct Opt {
-    relay: Multiaddr,
+    relay: Vec<Multiaddr>,
     #[clap(long)]
     connect: Option<Multiaddr>,
 }
@@ -35,15 +35,21 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
 
-    let mut addr = opt.relay.clone();
+    for mut addr in opt.relay.clone() {
+        let peer_id = addr
+            .extract_peer_id()
+            .expect("peerid required on multiaddr");
 
-    let peer_id = addr
-        .extract_peer_id()
-        .expect("peerid required on multiaddr");
+        if let Err(e) = ipfs.add_relay(peer_id, addr.clone()).await {
+            println!("error adding relay {addr}: {e}");
+        }
+    }
 
-    ipfs.add_relay(peer_id, addr).await?;
-
-    ipfs.enable_relay(None).await?;
+    for _ in 0..opt.relay.len() {
+        if let Err(e) = ipfs.enable_relay(None).await {
+            println!("error enabling relay: {e}");
+        }
+    }
 
     if let Some(addr) = opt.connect {
         ipfs.connect(addr).await?;
