@@ -1,3 +1,6 @@
+# 0.2.4
+- fix: Emit event to swarm after exhausting possible relays.
+
 # 0.2.3
 - fix: Enable wasm-bindgen feature when targetting wasm target
 
