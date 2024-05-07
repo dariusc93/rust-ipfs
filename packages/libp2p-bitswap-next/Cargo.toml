@@ -18,7 +18,7 @@ futures = "0.3.29"
 lazy_static = "1.4.0"
 libipld = { version = "0.16.0", default-features = false }
 libp2p = { version = "0.53", features = ["request-response"] }
-prometheus = "0.13.0"
+prometheus = "0.13.4"
 thiserror = "1.0.59"
 tracing = "0.1.40"
 unsigned-varint = { version = "0.8.0", features = ["futures", "asynchronous_codec"] }
