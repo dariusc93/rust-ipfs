@@ -26,6 +26,7 @@ pub struct TransportConfig {
     pub version: UpgradeVersion,
     pub enable_quic: bool,
     pub quic_max_idle_timeout: Duration,
+    pub quic_keep_alive: Option<Duration>,
     pub enable_websocket: bool,
     pub enable_dns: bool,
     pub enable_memory_transport: bool,
@@ -44,8 +45,13 @@ impl Default for TransportConfig {
             support_quic_draft_29: false,
             enable_dns: true,
             enable_webrtc: false,
-            timeout: Duration::from_secs(30),
-            quic_max_idle_timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(10),
+            //Note: This is set low due to quic transport not properly resetting connection state when reconnecting before connection timeout
+            //      While in smaller settings this would be alright, we should be cautious of this setting for nodes with larger connections
+            //      since this may increase cpu and network usage.
+            //      see https://github.com/libp2p/rust-libp2p/issues/5097
+            quic_max_idle_timeout: Duration::from_millis(300),
+            quic_keep_alive: Some(Duration::from_millis(100)),
             dns_resolver: None,
             version: UpgradeVersion::default(),
         }
@@ -112,6 +118,7 @@ pub(crate) fn build_transport(
         enable_memory_transport,
         support_quic_draft_29,
         quic_max_idle_timeout,
+        quic_keep_alive,
         enable_dns,
         enable_websocket,
         enable_secure_websocket,
@@ -214,7 +221,7 @@ pub(crate) fn build_transport(
             let mut quic_config = QuicConfig::new(&keypair);
             quic_config.support_draft_29 = support_quic_draft_29;
             quic_config.max_idle_timeout = quic_max_idle_timeout.as_millis() as _;
-            quic_config.keep_alive_interval = quic_max_idle_timeout / 2;
+            quic_config.keep_alive_interval = quic_keep_alive.unwrap_or(quic_max_idle_timeout / 2);
             let quic_transport = TokioQuicTransport::new(quic_config);
 
             OrTransport::new(quic_transport, transport)
@@ -246,6 +253,7 @@ pub(crate) fn build_transport(
         enable_websocket,
         enable_secure_websocket: _,
         enable_webrtc,
+        ..
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     use libp2p::websocket_websys;
