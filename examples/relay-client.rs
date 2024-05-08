@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use clap::Parser;
 use libp2p::Multiaddr;
 use rust_ipfs::p2p::MultiaddrExt;
@@ -12,6 +14,37 @@ struct Opt {
     relay: Vec<Multiaddr>,
     #[clap(long)]
     connect: Option<Multiaddr>,
+    #[clap(long)]
+    relay_select: Option<RelaySelect>,
+}
+
+#[derive(Default, Debug, Clone)]
+enum RelaySelect {
+    Random,
+    First,
+    Last,
+    #[default]
+    All,
+}
+
+impl FromStr for RelaySelect {
+    type Err = std::io::Error;
+    fn from_str(opt: &str) -> Result<Self, Self::Err> {
+        let opt = match opt.to_lowercase().as_str() {
+            "random" => Self::Random,
+            "first" => Self::First,
+            "last" => Self::Last,
+            "all" => Self::All,
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "selection option invalid",
+                ))
+            }
+        };
+
+        Ok(opt)
+    }
 }
 
 #[tokio::main]
@@ -35,19 +68,33 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
 
+    let mut relays_peer_id = vec![];
+
     for mut addr in opt.relay.clone() {
         let peer_id = addr
             .extract_peer_id()
             .expect("peerid required on multiaddr");
+        relays_peer_id.push(peer_id);
 
         if let Err(e) = ipfs.add_relay(peer_id, addr.clone()).await {
             println!("error adding relay {addr}: {e}");
         }
     }
 
-    for _ in 0..opt.relay.len() {
-        if let Err(e) = ipfs.enable_relay(None).await {
-            println!("error enabling relay: {e}");
+    let selection = opt.relay_select.unwrap_or_default();
+
+    if !relays_peer_id.is_empty() {
+        let list = match selection {
+            RelaySelect::Random => vec![None],
+            RelaySelect::First => vec![relays_peer_id.first().copied()],
+            RelaySelect::Last => vec![relays_peer_id.last().copied()],
+            RelaySelect::All => relays_peer_id.iter().copied().map(Some).collect(),
+        };
+
+        for peer_id in list {
+            if let Err(e) = ipfs.enable_relay(peer_id).await {
+                println!("error enabling relay: {e}");
+            }
         }
     }
 
