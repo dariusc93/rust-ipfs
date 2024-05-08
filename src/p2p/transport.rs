@@ -203,22 +203,16 @@ pub(crate) fn build_transport(
     };
 
     let transport = match relay {
-        Some(relay) => {
-            let transport = OrTransport::new(relay, transport);
-            transport
-                .upgrade(version.into())
-                .authenticate(noise_config)
-                .multiplex(yamux_config)
-                .timeout(timeout)
-                .boxed()
-        }
-        None => transport
-            .upgrade(version.into())
-            .authenticate(noise_config)
-            .multiplex(yamux_config)
-            .timeout(timeout)
-            .boxed(),
+        Some(relay) => Either::Left(OrTransport::new(relay, transport)),
+        None => Either::Right(transport),
     };
+
+    let transport = transport
+        .upgrade(version.into())
+        .authenticate(noise_config)
+        .multiplex(yamux_config)
+        .timeout(timeout)
+        .boxed();
 
     #[cfg(feature = "webrtc_transport")]
     let transport = match enable_webrtc {
@@ -298,22 +292,16 @@ pub(crate) fn build_transport(
     let transport = TransportTimeout::new(transport, timeout);
 
     let transport = match relay {
-        Some(relay) => {
-            let transport = OrTransport::new(relay, transport);
-            transport
-                .upgrade(version.into())
-                .authenticate(noise_config)
-                .multiplex(yamux_config)
-                .timeout(timeout)
-                .boxed()
-        }
-        None => transport
-            .upgrade(version.into())
-            .authenticate(noise_config)
-            .multiplex(yamux_config)
-            .timeout(timeout)
-            .boxed(),
+        Some(relay) => Either::Left(OrTransport::new(relay, transport)),
+        None => Either::Right(transport),
     };
+
+    let transport = transport
+        .upgrade(version.into())
+        .authenticate(noise_config)
+        .multiplex(yamux_config)
+        .timeout(timeout)
+        .boxed();
 
     let transport = match enable_webrtc {
         true => {
