@@ -19,7 +19,7 @@ use std::time::Duration;
 /// Transport type.
 pub(crate) type TTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TransportConfig {
     pub timeout: Duration,
     pub dns_resolver: Option<DnsResolver>,
@@ -30,9 +30,11 @@ pub struct TransportConfig {
     pub enable_websocket: bool,
     pub enable_dns: bool,
     pub enable_memory_transport: bool,
+    pub websocket_pem: Option<(String, String)>,
     pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
     pub enable_webrtc: bool,
+    pub webrtc_pem: Option<String>,
 }
 
 impl Default for TransportConfig {
@@ -40,11 +42,13 @@ impl Default for TransportConfig {
         Self {
             enable_quic: true,
             enable_websocket: false,
+            websocket_pem: None,
             enable_secure_websocket: true,
             enable_memory_transport: false,
             support_quic_draft_29: false,
             enable_dns: true,
             enable_webrtc: false,
+            webrtc_pem: None,
             timeout: Duration::from_secs(10),
             //Note: This is set low due to quic transport not properly resetting connection state when reconnecting before connection timeout
             //      While in smaller settings this would be alright, we should be cautious of this setting for nodes with larger connections
@@ -123,12 +127,15 @@ pub(crate) fn build_transport(
         enable_websocket,
         enable_secure_websocket,
         enable_webrtc,
+        webrtc_pem,
+        websocket_pem,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     use libp2p::dns::tokio::Transport as TokioDnsConfig;
     use libp2p::quic::tokio::Transport as TokioQuicTransport;
     use libp2p::quic::Config as QuicConfig;
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
+    use rcgen::KeyPair;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
 
@@ -151,15 +158,30 @@ pub(crate) fn build_transport(
             let mut ws_transport =
                 libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
             if enable_secure_websocket {
-                let rcgen::CertifiedKey {
-                    cert: self_cert,
-                    key_pair,
-                } = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
-                    .map_err(io::Error::other)?;
+                let (cert, priv_key) = match websocket_pem {
+                    Some((cert, kp)) => {
+                        let kp = KeyPair::from_pem(&kp).map_err(io::Error::other)?;
+                        let priv_key = libp2p::websocket::tls::PrivateKey::new(kp.serialize_der());
+                        let cert = libp2p::websocket::tls::Certificate::new(cert.into_bytes());
+                        (cert, priv_key)
+                    }
+                    None => {
+                        let rcgen::CertifiedKey {
+                            cert: self_cert,
+                            key_pair,
+                        } = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+                            .map_err(io::Error::other)?;
 
-                let priv_key = libp2p::websocket::tls::PrivateKey::new(key_pair.serialize_der());
-                let self_cert = libp2p::websocket::tls::Certificate::new(self_cert.der().to_vec());
-                let tls_config = libp2p::websocket::tls::Config::new(priv_key, [self_cert])
+                        let priv_key =
+                            libp2p::websocket::tls::PrivateKey::new(key_pair.serialize_der());
+                        let self_cert =
+                            libp2p::websocket::tls::Certificate::new(self_cert.der().to_vec());
+
+                        (self_cert, priv_key)
+                    }
+                };
+
+                let tls_config = libp2p::websocket::tls::Config::new(priv_key, [cert])
                     .map_err(io::Error::other)?;
                 ws_transport.set_tls_config(tls_config);
             }
@@ -201,10 +223,16 @@ pub(crate) fn build_transport(
     #[cfg(feature = "webrtc_transport")]
     let transport = match enable_webrtc {
         true => {
-            let cert = libp2p_webrtc::tokio::Certificate::generate(&mut rand::thread_rng())
-                .map_err(std::io::Error::other)?;
+            let cert = match webrtc_pem {
+                Some(pem) => libp2p_webrtc::tokio::Certificate::from_pem(&pem)
+                    .map_err(std::io::Error::other)?,
+                None => libp2p_webrtc::tokio::Certificate::generate(&mut rand::thread_rng())
+                    .map_err(std::io::Error::other)?,
+            };
+
             let kp = keypair.clone();
             let wrtc_tp = libp2p_webrtc::tokio::Transport::new(kp, cert);
+
             wrtc_tp
                 .or_transport(transport)
                 .map(|either_output, _| match either_output {
@@ -243,15 +271,9 @@ pub(crate) fn build_transport(
     relay: Option<ClientTransport>,
     TransportConfig {
         timeout,
-        dns_resolver: _,
         version,
-        enable_quic,
-        enable_dns: _,
-        enable_memory_transport: _,
-        support_quic_draft_29: _,
-        quic_max_idle_timeout: _,
         enable_websocket,
-        enable_secure_websocket: _,
+        enable_secure_websocket,
         enable_webrtc,
         ..
     }: TransportConfig,
@@ -264,11 +286,7 @@ pub(crate) fn build_transport(
 
     let transport = MemoryTransport::default();
 
-    if enable_quic {
-        tracing::warn!("quic is not supported");
-    }
-
-    let transport = match enable_websocket {
+    let transport = match enable_websocket | enable_secure_websocket {
         true => {
             let ws_transport = websocket_websys::Transport::default();
             let transport = ws_transport.or_transport(transport);
