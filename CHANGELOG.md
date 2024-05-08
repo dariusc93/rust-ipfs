@@ -1,5 +1,6 @@
 # 0.11.14
 - fix: Log warning if request isnt cancelled. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- chore: Decrease quic timeout. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 
 # 0.11.13
 - fix: Use web-time `Instant` inplace of `std::time::Instant`.
