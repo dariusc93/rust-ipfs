@@ -195,7 +195,7 @@ where
     let peer_id = keypair.public().to_peer_id();
 
     let swarm_config = options.swarm_configuration.clone();
-    let transport_config = options.transport_configuration;
+    let transport_config = options.transport_configuration.clone();
 
     let idle = options.connection_idle;
 

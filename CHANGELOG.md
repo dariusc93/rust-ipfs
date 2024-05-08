@@ -1,6 +1,7 @@
 # 0.11.14
 - fix: Log warning if request isnt cancelled. [PR 204](https://github.com/dariusc93/rust-ipfs/pull/204)
 - chore: Decrease quic timeout. [PR 206](https://github.com/dariusc93/rust-ipfs/pull/206)
+- feat: Add fields to add external certificate and keypair. [PR 207](https://github.com/dariusc93/rust-ipfs/pull/207)
 
 # 0.11.13
 - fix: Use web-time `Instant` inplace of `std::time::Instant`.
