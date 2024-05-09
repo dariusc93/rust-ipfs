@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 mod misc;
 
 #[allow(unused_imports)]
