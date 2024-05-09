@@ -4751,6 +4751,7 @@ dependencies = [
  "getrandom 0.2.14",
  "hex-literal",
  "hickory-resolver",
+ "hkdf",
  "idb",
  "libipld",
  "libp2p",
@@ -4760,16 +4761,20 @@ dependencies = [
  "libp2p-stream",
  "libp2p-webrtc",
  "libp2p-webrtc-websys",
+ "p256",
  "parking_lot 0.12.2",
+ "pem",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1",
  "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "rcgen 0.13.1",
  "redb",
  "rlimit",
  "rust-ipns",
  "rust-unixfs",
  "rustyline-async",
+ "sec1",
  "send_wrapper 0.6.0",
  "serde",
  "serde-wasm-bindgen",
@@ -4979,9 +4984,9 @@ dependencies = [
 
 [[package]]
 name = "sdp"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af90731e1f1150eb1740e35f9832958832a893965b632adc7ad27086077e24c7"
+checksum = "13254db766b17451aced321e7397ebf0a446ef0c8d2942b6e67a95815421093f"
 dependencies = [
  "rand 0.8.5",
  "substring",
