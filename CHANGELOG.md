@@ -1,3 +1,6 @@
+# 0.11.17
+- fix: Remove aws-lc-rs feature.
+
 # 0.11.16
 - chore: Enable feature in rcgen.
 
