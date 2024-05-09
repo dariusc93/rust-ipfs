@@ -1,3 +1,6 @@
+# 0.11.15
+- feat: Add placeholder function for future wrtc deterministic certs. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.11.14
 - fix: Log warning if request isnt cancelled. [PR 204](https://github.com/dariusc93/rust-ipfs/pull/204)
 - chore: Decrease quic timeout. [PR 206](https://github.com/dariusc93/rust-ipfs/pull/206)
