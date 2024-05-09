@@ -1,6 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod misc;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use misc::generate_cert;
+
 #[allow(unused_imports)]
 use either::Either;
 #[allow(unused_imports)]
@@ -139,6 +142,7 @@ pub(crate) fn build_transport(
     use libp2p::quic::Config as QuicConfig;
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
     use rcgen::KeyPair;
+    use misc::generate_cert;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
 
@@ -169,7 +173,7 @@ pub(crate) fn build_transport(
                         (cert, priv_key)
                     }
                     None => {
-                        let (cert, prv, _) = misc::generate_deterministic_cert(
+                        let (cert, prv, _) = generate_cert(
                             &keypair,
                             b"libp2p-websocket",
                             false,
@@ -226,7 +230,7 @@ pub(crate) fn build_transport(
                     // This flag is internal, but is meant to allow generating an expired pem to satify webrtc
                     let expired = true;
                     let (cert, prv, expired_pem) =
-                        misc::generate_deterministic_cert(&keypair, b"libp2p-webrtc", expired)?;
+                        generate_cert(&keypair, b"libp2p-webrtc", expired)?;
                     // dtls requires pem with a dash in the label?
                     let priv_key = prv.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
                     let cert = cert.pem();

@@ -18,12 +18,16 @@ const ENCODE_CONFIG: pem::EncodeConfig = {
     pem::EncodeConfig::new().set_line_ending(line_ending)
 };
 
-pub fn generate_deterministic_cert(
+/// Generates a TLS certificate that derives from libp2p `Keypair` with a salt.
+/// Note: If `expire` is true, it will produce a expired pem that can be appended for webrtc transport
+///       Additionally, this function does not generate deterministic certs *yet* due to 
+///       `CertificateParams::self_signed` using ring rng. This may change in the future
+pub fn generate_cert(
     keypair: &Keypair,
     salt: &[u8],
     expire: bool,
 ) -> io::Result<(Certificate, KeyPair, Option<String>)> {
-    let internal_keypair = generate_deterministic_keypair(keypair, salt)?;
+    let internal_keypair = derive_keypair(keypair, salt)?;
     let mut param =
         CertificateParams::new(vec!["localhost".into()]).map_err(std::io::Error::other)?;
     param.distinguished_name.push(
@@ -31,6 +35,7 @@ pub fn generate_deterministic_cert(
         keypair.public().to_peer_id().to_string().as_str(),
     );
 
+    // Note: The certificate, while it is signed,
     let cert = param
         .self_signed(&internal_keypair)
         .map_err(std::io::Error::other)?;
@@ -51,7 +56,7 @@ pub fn generate_deterministic_cert(
     Ok((cert, internal_keypair, expired_pem))
 }
 
-fn generate_deterministic_keypair(keypair: &Keypair, salt: &[u8]) -> io::Result<KeyPair> {
+fn derive_keypair(keypair: &Keypair, salt: &[u8]) -> io::Result<KeyPair> {
     //Note: We could use `Keypair::derive_secret`, but this seems more sensible?
     let secret = keypair_secret(keypair).ok_or(io::Error::from(io::ErrorKind::Unsupported))?;
     let hkdf_gen = Hkdf::<Sha256>::from_prk(secret.as_ref()).expect("key length to be valid");
