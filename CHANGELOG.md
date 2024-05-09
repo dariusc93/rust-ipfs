@@ -1,3 +1,6 @@
+# 0.11.16
+- chore: Enable feature in rcgen.
+
 # 0.11.15
 - feat: Add placeholder function for future wrtc deterministic certs. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 

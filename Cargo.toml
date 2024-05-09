@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.11.15"
+version = "0.11.16"
 
 [features]
 
@@ -61,7 +61,7 @@ quick-protobuf = { version = "0.8" }
 quick-protobuf-codec = "0.3"
 rand = "0.8"
 rand_chacha = "0.3.1"
-rcgen = { version = "0.13.1", features = ["pem", "x509-parser"] }
+rcgen = { version = "0.13.1", features = ["pem", "x509-parser", "aws_lc_rs"] }
 redb = { version = "1.3" }
 rlimit = "0.10"
 rust-ipns = { version = "0.5.1", path = "packages/rust-ipns" }
