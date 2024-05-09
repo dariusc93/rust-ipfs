@@ -1,3 +1,9 @@
+#[cfg(not(target_arch = "wasm32"))]
+mod misc;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use misc::generate_cert;
+
 #[allow(unused_imports)]
 use either::Either;
 #[allow(unused_imports)]
@@ -136,6 +142,7 @@ pub(crate) fn build_transport(
     use libp2p::quic::Config as QuicConfig;
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
     use rcgen::KeyPair;
+    use misc::generate_cert;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
 
@@ -166,16 +173,15 @@ pub(crate) fn build_transport(
                         (cert, priv_key)
                     }
                     None => {
-                        let rcgen::CertifiedKey {
-                            cert: self_cert,
-                            key_pair,
-                        } = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
-                            .map_err(io::Error::other)?;
+                        let (cert, prv, _) = generate_cert(
+                            &keypair,
+                            b"libp2p-websocket",
+                            false,
+                        )?;
 
-                        let priv_key =
-                            libp2p::websocket::tls::PrivateKey::new(key_pair.serialize_der());
+                        let priv_key = libp2p::websocket::tls::PrivateKey::new(prv.serialize_der());
                         let self_cert =
-                            libp2p::websocket::tls::Certificate::new(self_cert.der().to_vec());
+                            libp2p::websocket::tls::Certificate::new(cert.der().to_vec());
 
                         (self_cert, priv_key)
                     }
@@ -220,8 +226,25 @@ pub(crate) fn build_transport(
             let cert = match webrtc_pem {
                 Some(pem) => libp2p_webrtc::tokio::Certificate::from_pem(&pem)
                     .map_err(std::io::Error::other)?,
-                None => libp2p_webrtc::tokio::Certificate::generate(&mut rand::thread_rng())
-                    .map_err(std::io::Error::other)?,
+                None => {
+                    // This flag is internal, but is meant to allow generating an expired pem to satify webrtc
+                    let expired = true;
+                    let (cert, prv, expired_pem) =
+                        generate_cert(&keypair, b"libp2p-webrtc", expired)?;
+                    // dtls requires pem with a dash in the label?
+                    let priv_key = prv.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
+                    let cert = cert.pem();
+
+                    let pem = priv_key + "\n\n" + &cert;
+
+                    let pem = match expired_pem {
+                        Some(epem) => epem + "\n\n" + &pem,
+                        None => pem,
+                    };
+
+                    libp2p_webrtc::tokio::Certificate::from_pem(&pem)
+                        .map_err(std::io::Error::other)?
+                }
             };
 
             let kp = keypair.clone();
