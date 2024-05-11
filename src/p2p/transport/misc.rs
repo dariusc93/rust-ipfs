@@ -40,7 +40,7 @@ type Key = zeroize::Zeroizing<String>;
 
 /// Generates a TLS certificate that derives from libp2p `Keypair` with a salt.
 /// Note: If `expire` is true, it will produce a expired pem that can be appended for webrtc transport
-///       Additionally, this function does not generate deterministic certs *yet* due to 
+///       Additionally, this function does not generate deterministic certs *yet* due to
 ///       `CertificateParams::self_signed` using ring rng. This may change in the future
 pub fn generate_cert(
     keypair: &Keypair,
@@ -85,10 +85,11 @@ pub(crate) fn generate_wrtc_cert(
     expire: bool,
 ) -> io::Result<(Cert, Key, Option<String>)> {
     let (secret, public_key) = derive_keypair_secret(keypair, salt)?;
+    let peer_id = keypair.public().to_peer_id();
 
     let certificate = simple_x509::X509::builder()
         .issuer_utf8(Vec::from(ORGANISATION_NAME_OID), "rust-ipfs")
-        .subject_utf8(Vec::from(ORGANISATION_NAME_OID), "rust-ipfs")
+        .subject_utf8(Vec::from(ORGANISATION_NAME_OID), &peer_id.to_string())
         .not_before_gen(UNIX_2000)
         .not_after_gen(UNIX_3000)
         .pub_key_ec(
