@@ -4780,6 +4780,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.10.8",
+ "simple_x509",
  "sled",
  "tempfile",
  "thiserror",
@@ -5194,6 +5195,29 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "simple_asn1"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eb4ea60fb301dc81dfc113df680571045d375ab7345d171c5dc7d7e13107a80"
+dependencies = [
+ "chrono",
+ "num-bigint",
+ "num-traits",
+ "thiserror",
+]
+
+[[package]]
+name = "simple_x509"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "417fc25f99e6af54350cbc26997572b6ee04c4b8deec627ce5f16f76a7ed887b"
+dependencies = [
+ "chrono",
+ "num-traits",
+ "simple_asn1",
 ]
 
 [[package]]

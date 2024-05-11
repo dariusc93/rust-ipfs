@@ -141,8 +141,8 @@ pub(crate) fn build_transport(
     use libp2p::quic::tokio::Transport as TokioQuicTransport;
     use libp2p::quic::Config as QuicConfig;
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
-    use rcgen::KeyPair;
     use misc::generate_cert;
+    use rcgen::KeyPair;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
 
@@ -173,11 +173,7 @@ pub(crate) fn build_transport(
                         (cert, priv_key)
                     }
                     None => {
-                        let (cert, prv, _) = generate_cert(
-                            &keypair,
-                            b"libp2p-websocket",
-                            false,
-                        )?;
+                        let (cert, prv, _) = generate_cert(&keypair, b"libp2p-websocket", false)?;
 
                         let priv_key = libp2p::websocket::tls::PrivateKey::new(prv.serialize_der());
                         let self_cert =
@@ -230,10 +226,9 @@ pub(crate) fn build_transport(
                     // This flag is internal, but is meant to allow generating an expired pem to satify webrtc
                     let expired = true;
                     let (cert, prv, expired_pem) =
-                        generate_cert(&keypair, b"libp2p-webrtc", expired)?;
+                        misc::generate_wrtc_cert(&keypair, b"libp2p-webrtc", expired)?;
                     // dtls requires pem with a dash in the label?
-                    let priv_key = prv.serialize_pem().replace("PRIVATE KEY", "PRIVATE_KEY");
-                    let cert = cert.pem();
+                    let priv_key = prv.replace("PRIVATE KEY", "PRIVATE_KEY");
 
                     let pem = priv_key + "\n\n" + &cert;
 

@@ -1,5 +1,6 @@
 use hkdf::Hkdf;
 use libp2p::identity::{self as identity, Keypair};
+use p256::ecdsa::signature::Signer;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rcgen::{Certificate, CertificateParams, DnType, KeyPair};
@@ -8,7 +9,23 @@ use sha2::Sha256;
 use std::io;
 use web_time::{Duration, SystemTime};
 
+/// The year 2000.
+const UNIX_2000: i64 = 946645200;
+
+/// The year 3000.
 const UNIX_3000: i64 = 32503640400;
+
+/// OID for the organisation name. See <http://oid-info.com/get/2.5.4.10>.
+const ORGANISATION_NAME_OID: [u64; 4] = [2, 5, 4, 10];
+
+/// OID for Elliptic Curve Public Key Cryptography. See <http://oid-info.com/get/1.2.840.10045.2.1>.
+const EC_OID: [u64; 6] = [1, 2, 840, 10045, 2, 1];
+
+/// OID for 256-bit Elliptic Curve Cryptography (ECC) with the P256 curve. See <http://oid-info.com/get/1.2.840.10045.3.1.7>.
+const P256_OID: [u64; 7] = [1, 2, 840, 10045, 3, 1, 7];
+
+/// OID for the ECDSA signature algorithm with using SHA256 as the hash function. See <http://oid-info.com/get/1.2.840.10045.4.3.2>.
+const ECDSA_SHA256_OID: [u64; 7] = [1, 2, 840, 10045, 4, 3, 2];
 
 const ENCODE_CONFIG: pem::EncodeConfig = {
     let line_ending = match cfg!(target_family = "windows") {
@@ -17,6 +34,9 @@ const ENCODE_CONFIG: pem::EncodeConfig = {
     };
     pem::EncodeConfig::new().set_line_ending(line_ending)
 };
+
+type Cert = String;
+type Key = zeroize::Zeroizing<String>;
 
 /// Generates a TLS certificate that derives from libp2p `Keypair` with a salt.
 /// Note: If `expire` is true, it will produce a expired pem that can be appended for webrtc transport
@@ -56,8 +76,78 @@ pub fn generate_cert(
     Ok((cert, internal_keypair, expired_pem))
 }
 
+/// Used to generate webrtc certificates.
+/// Note: Although simple_x509 does not deal with crypto directly (eg signing certificate)
+///       we would still have to be careful of any changes upstream that may cause a change in the certificate
+pub(crate) fn generate_wrtc_cert(
+    keypair: &Keypair,
+    salt: &[u8],
+    expire: bool,
+) -> io::Result<(Cert, Key, Option<String>)> {
+    let (secret, public_key) = derive_keypair_secret(keypair, salt)?;
+
+    let certificate = simple_x509::X509::builder()
+        .issuer_utf8(Vec::from(ORGANISATION_NAME_OID), "rust-ipfs")
+        .subject_utf8(Vec::from(ORGANISATION_NAME_OID), "rust-ipfs")
+        .not_before_gen(UNIX_2000)
+        .not_after_gen(UNIX_3000)
+        .pub_key_ec(
+            Vec::from(EC_OID),
+            public_key.to_encoded_point(false).as_bytes().to_owned(),
+            Vec::from(P256_OID),
+        )
+        .sign_oid(Vec::from(ECDSA_SHA256_OID))
+        .build()
+        .sign(
+            |cert, _| {
+                let signature: p256::ecdsa::DerSignature = secret.sign(cert);
+                Some(signature.as_bytes().to_owned())
+            },
+            &[], // We close over the keypair so no need to pass it.
+        )
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+
+    let der_bytes = certificate.x509_enc().unwrap();
+
+    let cert_pem = pem::encode_config(
+        &pem::Pem::new("CERTIFICATE".to_string(), der_bytes),
+        ENCODE_CONFIG,
+    );
+
+    let private_pem = secret
+        .to_pkcs8_pem(Default::default())
+        .map_err(std::io::Error::other)?;
+
+    let expired_pem = expire.then(|| {
+        let expired = SystemTime::UNIX_EPOCH
+            .checked_add(Duration::from_secs(UNIX_3000 as u64))
+            .expect("year 3000 to be representable by SystemTime")
+            .to_der()
+            .unwrap();
+
+        pem::encode_config(
+            &pem::Pem::new("EXPIRES".to_string(), expired),
+            ENCODE_CONFIG,
+        )
+    });
+
+    Ok((cert_pem, private_pem, expired_pem))
+}
+
 fn derive_keypair(keypair: &Keypair, salt: &[u8]) -> io::Result<KeyPair> {
-    //Note: We could use `Keypair::derive_secret`, but this seems more sensible?
+    let (secret, _) = derive_keypair_secret(keypair, salt)?;
+
+    let pem = secret
+        .to_pkcs8_pem(Default::default())
+        .map_err(std::io::Error::other)?;
+
+    KeyPair::from_pem(&pem).map_err(std::io::Error::other)
+}
+
+fn derive_keypair_secret(
+    keypair: &Keypair,
+    salt: &[u8],
+) -> io::Result<(p256::ecdsa::SigningKey, p256::ecdsa::VerifyingKey)> {
     let secret = keypair_secret(keypair).ok_or(io::Error::from(io::ErrorKind::Unsupported))?;
     let hkdf_gen = Hkdf::<Sha256>::from_prk(secret.as_ref()).expect("key length to be valid");
 
@@ -69,12 +159,9 @@ fn derive_keypair(keypair: &Keypair, salt: &[u8]) -> io::Result<KeyPair> {
     let mut rng = ChaCha20Rng::from_seed(seed);
 
     let secret = p256::ecdsa::SigningKey::random(&mut rng);
+    let public = p256::ecdsa::VerifyingKey::from(&secret);
 
-    let pem = secret
-        .to_pkcs8_pem(Default::default())
-        .map_err(std::io::Error::other)?;
-
-    KeyPair::from_pem(&pem).map_err(std::io::Error::other)
+    Ok((secret, public))
 }
 
 fn keypair_secret(keypair: &Keypair) -> Option<[u8; 32]> {
