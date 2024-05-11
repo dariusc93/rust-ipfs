@@ -1,3 +1,6 @@
+# next
+- feat: Use tls along side noise. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.11.17
 - fix: Remove aws-lc-rs feature.
 
