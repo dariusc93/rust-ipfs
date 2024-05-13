@@ -76,7 +76,7 @@ pub fn generate_cert(
 /// Used to generate webrtc certificates.
 /// Note: Although simple_x509 does not deal with crypto directly (eg signing certificate)
 ///       we would still have to be careful of any changes upstream that may cause a change in the certificate
-
+#[allow(dead_code)]
 pub(crate) fn generate_wrtc_cert(keypair: &Keypair) -> io::Result<String> {
     let (secret, public_key) = derive_keypair_secret(keypair, b"libp2p-webrtc")?;
     let peer_id = keypair.public().to_peer_id();
