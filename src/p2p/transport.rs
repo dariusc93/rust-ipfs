@@ -149,6 +149,7 @@ pub(crate) fn build_transport(
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
     let tls_config = tls::Config::new(&keypair).map_err(io::Error::other)?;
 
+    //TODO: Make configurable
     let config: SelectSecurityUpgrade<noise::Config, tls::Config> =
         SelectSecurityUpgrade::new(noise_config, tls_config);
 
