@@ -1,3 +1,6 @@
+# 0.11.18
+- chore: Use simple_x509 for certificate generation. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.11.17
 - fix: Remove aws-lc-rs feature.
 
