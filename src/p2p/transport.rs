@@ -137,6 +137,7 @@ pub(crate) fn build_transport(
         websocket_pem,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
+    use crate::p2p::transport::dual_transport::SelectSecurityUpgrade;
     use libp2p::dns::tokio::Transport as TokioDnsConfig;
     use libp2p::quic::tokio::Transport as TokioQuicTransport;
     use libp2p::quic::Config as QuicConfig;
@@ -144,7 +145,6 @@ pub(crate) fn build_transport(
     use libp2p::tls;
     use misc::generate_cert;
     use rcgen::KeyPair;
-    use crate::p2p::transport::dual_transport::SelectSecurityUpgrade;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
     let tls_config = tls::Config::new(&keypair).map_err(io::Error::other)?;

@@ -227,8 +227,7 @@ AiAH43Q833G8p1eXxqJr2xRrA1B5vCZ1qgl/44Z++NDMqQ==
     fn generate_ed25519() -> Keypair {
         let mut bytes = [0u8; 32];
         bytes[0] = 1;
-    
+
         Keypair::ed25519_from_bytes(bytes).expect("only errors on wrong length")
     }
-    
 }
