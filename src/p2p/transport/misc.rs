@@ -35,9 +35,6 @@ const ENCODE_CONFIG: pem::EncodeConfig = {
     pem::EncodeConfig::new().set_line_ending(line_ending)
 };
 
-type Cert = String;
-type Key = zeroize::Zeroizing<String>;
-
 /// Generates a TLS certificate that derives from libp2p `Keypair` with a salt.
 /// Note: If `expire` is true, it will produce a expired pem that can be appended for webrtc transport
 ///       Additionally, this function does not generate deterministic certs *yet* due to
@@ -79,12 +76,9 @@ pub fn generate_cert(
 /// Used to generate webrtc certificates.
 /// Note: Although simple_x509 does not deal with crypto directly (eg signing certificate)
 ///       we would still have to be careful of any changes upstream that may cause a change in the certificate
-pub(crate) fn generate_wrtc_cert(
-    keypair: &Keypair,
-    salt: &[u8],
-    expire: bool,
-) -> io::Result<(Cert, Key, Option<String>)> {
-    let (secret, public_key) = derive_keypair_secret(keypair, salt)?;
+
+pub(crate) fn generate_wrtc_cert(keypair: &Keypair) -> io::Result<String> {
+    let (secret, public_key) = derive_keypair_secret(keypair, b"libp2p-webrtc")?;
     let peer_id = keypair.public().to_peer_id();
 
     let certificate = simple_x509::X509::builder()
@@ -117,9 +111,10 @@ pub(crate) fn generate_wrtc_cert(
 
     let private_pem = secret
         .to_pkcs8_pem(Default::default())
-        .map_err(std::io::Error::other)?;
+        .map_err(std::io::Error::other)?
+        .replace("PRIVATE KEY", "PRIVATE_KEY");
 
-    let expired_pem = expire.then(|| {
+    let expired_pem = {
         let expired = SystemTime::UNIX_EPOCH
             .checked_add(Duration::from_secs(UNIX_3000 as u64))
             .expect("year 3000 to be representable by SystemTime")
@@ -130,9 +125,11 @@ pub(crate) fn generate_wrtc_cert(
             &pem::Pem::new("EXPIRES".to_string(), expired),
             ENCODE_CONFIG,
         )
-    });
+    };
 
-    Ok((cert_pem, private_pem, expired_pem))
+    let pem = expired_pem + "\n\n" + &private_pem + "\n\n" + &cert_pem;
+
+    Ok(pem)
 }
 
 fn derive_keypair(keypair: &Keypair, salt: &[u8]) -> io::Result<KeyPair> {
@@ -189,4 +186,49 @@ fn keypair_secret(keypair: &Keypair) -> Option<[u8; 32]> {
             )
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+    use libp2p::identity::Keypair;
+
+    use crate::p2p::transport::misc::generate_wrtc_cert;
+
+    const PEM: &str = r#"-----BEGIN EXPIRES-----
+GA8yOTk5MTIzMTEzMDAwMFo=
+-----END EXPIRES-----
+
+
+-----BEGIN PRIVATE_KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgXARqgq74dVCrVR6G
+VT/iHnwBmx9s217QqvegG1xKNpqhRANCAAQvm08WYqoMCCEF36I5OAhA/XS7SqhR
+7n2CahGwC/fEqtvRrwAfZGejF21lzOW/m+A3EbDIzjy+xpUY+zaCE57V
+-----END PRIVATE_KEY-----
+
+
+-----BEGIN CERTIFICATE-----
+MIIBPjCB5QIBADAKBggqhkjOPQQDAjAUMRIwEAYDVQQKDAlydXN0LWlwZnMwIhgP
+MTk5OTEyMzExMzAwMDBaGA8yOTk5MTIzMTEzMDAwMFowPzE9MDsGA1UECgw0MTJE
+M0tvb1dQamNlUXJTd2RXWFB5TExlQUJSWG11cXQ2OVJnM3NCWWJVMU5mdDlIeVE2
+WDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABC+bTxZiqgwIIQXfojk4CED9dLtK
+qFHufYJqEbAL98Sq29GvAB9kZ6MXbWXM5b+b4DcRsMjOPL7GlRj7NoITntUwCgYI
+KoZIzj0EAwIDSAAwRQIhAP+F5COvtCQbZiyBQpAoiIoQP12KwIsNe1zhumki4bkU
+AiAH43Q833G8p1eXxqJr2xRrA1B5vCZ1qgl/44Z++NDMqQ==
+-----END CERTIFICATE-----
+"#;
+
+    #[test]
+    fn generate_cert() {
+        let keypair = generate_ed25519();
+        let pem = generate_wrtc_cert(&keypair).expect("not to fail");
+        assert_eq!(pem, PEM)
+    }
+
+    fn generate_ed25519() -> Keypair {
+        let mut bytes = [0u8; 32];
+        bytes[0] = 1;
+    
+        Keypair::ed25519_from_bytes(bytes).expect("only errors on wrong length")
+    }
+    
 }

@@ -225,17 +225,7 @@ pub(crate) fn build_transport(
                 None => {
                     // This flag is internal, but is meant to allow generating an expired pem to satify webrtc
                     let expired = true;
-                    let (cert, prv, expired_pem) =
-                        misc::generate_wrtc_cert(&keypair, b"libp2p-webrtc", expired)?;
-                    // dtls requires pem with a dash in the label?
-                    let priv_key = prv.replace("PRIVATE KEY", "PRIVATE_KEY");
-
-                    let pem = priv_key + "\n\n" + &cert;
-
-                    let pem = match expired_pem {
-                        Some(epem) => epem + "\n\n" + &pem,
-                        None => pem,
-                    };
+                    let pem = misc::generate_wrtc_cert(&keypair)?;
 
                     libp2p_webrtc::tokio::Certificate::from_pem(&pem)
                         .map_err(std::io::Error::other)?
