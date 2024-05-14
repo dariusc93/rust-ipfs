@@ -36,6 +36,7 @@ pub struct TransportConfig {
     pub enable_websocket: bool,
     pub enable_dns: bool,
     pub enable_memory_transport: bool,
+    pub enable_webtransport: bool,
     pub websocket_pem: Option<(String, String)>,
     pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
@@ -53,6 +54,7 @@ impl Default for TransportConfig {
             enable_memory_transport: false,
             support_quic_draft_29: false,
             enable_dns: true,
+            enable_webtransport: false,
             enable_webrtc: false,
             webrtc_pem: None,
             timeout: Duration::from_secs(10),
@@ -135,6 +137,7 @@ pub(crate) fn build_transport(
         enable_webrtc,
         webrtc_pem,
         websocket_pem,
+        enable_webtransport: _,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     use crate::p2p::transport::dual_transport::SelectSecurityUpgrade;
@@ -284,10 +287,12 @@ pub(crate) fn build_transport(
         enable_websocket,
         enable_secure_websocket,
         enable_webrtc,
+        enable_webtransport,
         ..
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     use libp2p::websocket_websys;
+    use libp2p::webtransport_websys;
     use libp2p_webrtc_websys as webrtc_websys;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
@@ -317,6 +322,21 @@ pub(crate) fn build_transport(
         .multiplex(yamux_config)
         .timeout(timeout)
         .boxed();
+
+    let transport = match enable_webtransport {
+        true => {
+            let config = webtransport_websys::Config::new(&keypair);
+            let wtransport = webtransport_websys::Transport::new(config);
+            wtransport
+                .or_transport(transport)
+                .map(|either_output, _| match either_output {
+                    FutureEither::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                    FutureEither::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                })
+                .boxed()
+        }
+        false => transport.boxed(),
+    };
 
     let transport = match enable_webrtc {
         true => {

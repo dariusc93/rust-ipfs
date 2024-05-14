@@ -1,6 +1,7 @@
 # 0.11.18
 - chore: Use simple_x509 for certificate generation. [PR 219](https://github.com/dariusc93/rust-ipfs/pull/219)
 - feat: Use tls along side noise. [PR 212](https://github.com/dariusc93/rust-ipfs/pull/212
+- feat: Add webtransport support for wasm target. [PR 220](https://github.com/dariusc93/rust-ipfs/pull/220)
 
 # 0.11.17
 - fix: Remove aws-lc-rs feature.
