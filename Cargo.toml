@@ -139,7 +139,7 @@ futures-timer.workspace = true
 beetle-bitswap-next = { workspace = true, optional = true }
 fs2.workspace = true
 hickory-resolver.workspace = true
-libp2p = { features = [ "gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "ping", "yamux", "dns", "mdns", "ed25519", "secp256k1", "ecdsa", "rsa", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", ], workspace = true }
+libp2p = { features = [ "gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "ed25519", "secp256k1", "ecdsa", "rsa", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", ], workspace = true }
 libp2p-webrtc = { workspace = true, features = ["tokio",], optional = true }
 rcgen.workspace = true
 redb = { workspace = true, optional = true }
