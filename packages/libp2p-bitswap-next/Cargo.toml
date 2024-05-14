@@ -28,7 +28,7 @@ asynchronous-codec = { version = "0.7", optional = true }
 bytes = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2.14", features = ["js"] }
+getrandom = { version = "0.2.15", features = ["js"] }
 
 [dev-dependencies]
 async-std = { version = "1.12.0", features = ["attributes"] }

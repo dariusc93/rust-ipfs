@@ -42,7 +42,7 @@ fs2 = "0.4"
 futures = { version = "0.3" }
 futures-timeout = "0.1"
 futures-timer = "3.0"
-getrandom = { version = "0.2.14" }
+getrandom = { version = "0.2.15" }
 hickory-resolver = "0.24.1"
 hkdf = "0.12.4"
 idb = "0.6"
