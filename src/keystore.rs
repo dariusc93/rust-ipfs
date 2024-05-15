@@ -124,7 +124,6 @@ impl Keystore {
             KeyType::Ed25519 => Keypair::generate_ed25519(),
             KeyType::Ecdsa => Keypair::generate_ecdsa(),
             KeyType::Secp256k1 => Keypair::generate_secp256k1(),
-            _ => anyhow::bail!("unimplemented"),
         };
         let public_key = keypair.public();
 
