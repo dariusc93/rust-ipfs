@@ -14,7 +14,6 @@ pub enum KeyType {
     Ed25519,
     Ecdsa,
     Secp256k1,
-    Rsa,
 }
 
 #[derive(Clone)]
