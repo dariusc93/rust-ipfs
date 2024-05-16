@@ -1,5 +1,5 @@
 # next
-- chore: Cleanup Keystore implementation. [PR 222](https://github.com/dariusc93/rust-ipfs/pull/222)
+- chore: Cleanup Keystore logic and implementation. [PR 222](https://github.com/dariusc93/rust-ipfs/pull/222)
 
 # 0.11.18
 - chore: Use simple_x509 for certificate generation. [PR 219](https://github.com/dariusc93/rust-ipfs/pull/219)
