@@ -1,6 +1,6 @@
 [package]
 name = "libp2p-relay-manager"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 description = "(WIP) Implementation of a relay-manager"
@@ -26,7 +26,7 @@ rand = "0.8"
 futures-timer = { version = "3.0" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2.15", features = ["js"] }
+getrandom = { workspace = true, features = ["js"] }
 futures-timer = { version = "3.0", features = ["wasm-bindgen"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
