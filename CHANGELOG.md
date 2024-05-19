@@ -1,6 +1,9 @@
 # next
 - chore: Cleanup Keystore logic and implementation. [PR 222](https://github.com/dariusc93/rust-ipfs/pull/222)
 
+# 0.11.19
+- chore: Pin getrandom to 0.2.14 due to libc 0.2.154 being yanked. 
+
 # 0.11.18
 - chore: Use simple_x509 for certificate generation. [PR 219](https://github.com/dariusc93/rust-ipfs/pull/219)
 - feat: Use tls along side noise. [PR 212](https://github.com/dariusc93/rust-ipfs/pull/212

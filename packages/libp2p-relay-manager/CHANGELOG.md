@@ -1,3 +1,5 @@
+# 0.2.5
+
 # 0.2.4
 - fix: Emit event to swarm after exhausting possible relays.
 
