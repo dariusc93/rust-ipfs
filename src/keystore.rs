@@ -14,9 +14,9 @@ pub enum KeyType {
     Ed25519,
     Ecdsa,
     Secp256k1,
-    Rsa,
 }
 
+#[derive(Clone)]
 pub struct Key {
     key: Vec<u8>,
 }
@@ -42,6 +42,12 @@ impl AsRef<[u8]> for Key {
 impl From<Vec<u8>> for Key {
     fn from(key: Vec<u8>) -> Self {
         Self { key }
+    }
+}
+
+impl From<&[u8]> for Key {
+    fn from(key: &[u8]) -> Self {
+        key.to_vec().into()
     }
 }
 
@@ -80,10 +86,7 @@ impl Keystore {
 
         let peer_id_str = peer_id.as_str();
 
-        let name = match name {
-            Some(name) => name,
-            None => peer_id_str,
-        };
+        let name = name.unwrap_or_else(|| peer_id_str);
 
         let bytes = Key::from(keypair.to_protobuf_encoding()?);
 
@@ -119,7 +122,8 @@ impl Keystore {
     ) -> Result<PublicKey, Error> {
         let keypair = match key_type {
             KeyType::Ed25519 => Keypair::generate_ed25519(),
-            _ => anyhow::bail!("unimplemented"),
+            KeyType::Ecdsa => Keypair::generate_ecdsa(),
+            KeyType::Secp256k1 => Keypair::generate_secp256k1(),
         };
         let public_key = keypair.public();
 
@@ -127,12 +131,10 @@ impl Keystore {
 
         let peer_id_str = peer_id.as_str();
 
+        // We could probably wrap this in `Zeroizing` instead until `KeyStore` is refactored to accept `Key`
         let bytes = Key::from(keypair.to_protobuf_encoding()?);
 
-        let name = match name {
-            Some(name) => name,
-            None => peer_id_str,
-        };
+        let name = name.unwrap_or_else(|| peer_id_str);
 
         self.storage.set(name, bytes.as_ref()).await?;
 
@@ -173,7 +175,7 @@ pub trait KeyStorage: Sync + Send + 'static {
 
 #[derive(Default)]
 pub struct MemoryKeyStorage {
-    inner: Mutex<BTreeMap<String, Vec<u8>>>,
+    inner: Mutex<BTreeMap<String, Key>>,
 }
 
 #[async_trait::async_trait]
@@ -182,14 +184,11 @@ impl KeyStorage for MemoryKeyStorage {
         let mut inner = self.inner.lock().await;
         match inner.entry(name.into()) {
             Entry::Occupied(mut entry) => {
-                if !entry.get().is_empty() {
-                    anyhow::bail!("Key exist");
-                }
-
-                *entry.get_mut() = key.to_vec();
+                let key_entry = entry.get_mut();
+                *key_entry = key.into();
             }
             Entry::Vacant(entry) => {
-                entry.insert(key.to_vec());
+                entry.insert(key.into());
             }
         };
 
@@ -200,7 +199,6 @@ impl KeyStorage for MemoryKeyStorage {
         inner
             .get(name)
             .cloned()
-            .map(Key::from)
             .ok_or(anyhow::anyhow!("Key doesnt exist"))
     }
     async fn remove(&self, name: &str) -> Result<(), Error> {
@@ -233,7 +231,7 @@ impl KeyStorage for MemoryKeyStorage {
         let inner = self.inner.lock().await.clone();
         let stream = async_stream::stream! {
             for (_, key) in inner {
-                yield Key::from(key);
+                yield key;
             }
         };
 
