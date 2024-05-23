@@ -3,6 +3,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use crate::AddPeerOpt;
 use libp2p::{
     core::{ConnectedPoint, Endpoint},
     multiaddr::Protocol,
@@ -34,12 +35,25 @@ impl Behaviour {
             ..Default::default()
         }
     }
-    pub fn add_address(&mut self, peer_id: PeerId, mut addr: Multiaddr) -> bool {
-        if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-            addr.pop();
+    pub fn add_address<I: Into<AddPeerOpt>>(&mut self, opt: I) -> bool {
+        let opt = opt.into();
+
+        let peer_id = opt.peer_id();
+        let addresses = opt.addresses();
+
+        debug_assert!(!addresses.is_empty());
+
+        let addrs = self.peer_addresses.entry(*peer_id).or_default();
+
+        for addr in addresses {
+            addrs.insert(addr.clone());
         }
 
-        self.peer_addresses.entry(peer_id).or_default().insert(addr)
+        if let Some(opts) = opt.to_dial_opts() {
+            self.events.push_back(ToSwarm::Dial { opts });
+        }
+
+        true
     }
 
     pub fn remove_address(&mut self, peer_id: &PeerId, addr: &Multiaddr) -> bool {
@@ -221,12 +235,16 @@ mod test {
         Multiaddr, PeerId, Swarm, SwarmBuilder,
     };
 
+    use crate::AddPeerOpt;
+
     #[tokio::test]
     async fn dial_with_peer_id() -> anyhow::Result<()> {
         let (_, _, mut swarm1) = build_swarm(false).await;
         let (peer2, addr2, mut swarm2) = build_swarm(false).await;
 
-        swarm1.behaviour_mut().add_address(peer2, addr2);
+        let opts = AddPeerOpt::with_peer_id(peer2).add_address(addr2);
+
+        swarm1.behaviour_mut().add_address(opts);
 
         swarm1.dial(peer2)?;
 
@@ -248,8 +266,8 @@ mod test {
     async fn remove_peer_address() -> anyhow::Result<()> {
         let (_, _, mut swarm1) = build_swarm(false).await;
         let (peer2, addr2, mut swarm2) = build_swarm(false).await;
-
-        swarm1.behaviour_mut().add_address(peer2, addr2);
+        let opts = AddPeerOpt::with_peer_id(peer2).add_address(addr2);
+        swarm1.behaviour_mut().add_address(opts);
 
         swarm1.dial(peer2)?;
 

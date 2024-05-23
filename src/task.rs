@@ -42,6 +42,7 @@ use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
 use crate::{
     p2p::TSwarm,
     repo::{Repo, RepoEvent},
+    AddPeerOpt,
 };
 
 pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
@@ -394,7 +395,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
                 MdnsEvent::Discovered(list) => {
                     for (peer, addr) in list {
-                        self.swarm.behaviour_mut().add_peer(peer, addr);
+                        self.swarm.behaviour_mut().add_peer((peer, addr));
                     }
                 }
                 MdnsEvent::Expired(list) => {
@@ -951,11 +952,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let namespace = registration.namespace.clone();
                     let peer_id = registration.record.peer_id();
                     let addrs = registration.record.addresses();
-                    for addr in addrs {
-                        if addrbook.add_address(peer_id, addr.clone()) {
-                            info!("Discovered {peer_id} with address {addr} in {namespace}");
-                        }
-                    }
+
+                    // info!("Discovered {peer_id} with address {addr} in {namespace}");
+
+                    let opts = AddPeerOpt::with_peer_id(peer_id).set_addresses(addrs.to_vec());
+
+                    addrbook.add_address(opts);
+
                     ns_book
                         .entry(namespace.clone())
                         .or_default()
@@ -1260,12 +1263,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 };
                 let _ = ret.send(future);
             }
-            IpfsEvent::AddPeer(peer_id, addr, ret) => {
-                let result = match self.swarm.behaviour_mut().add_peer(peer_id, addr.clone()) {
+            IpfsEvent::AddPeer(opt, ret) => {
+                let result = match self.swarm.behaviour_mut().add_peer(opt) {
                     true => Ok(()),
-                    false => Err(anyhow::anyhow!(
-                        "Unable to add {addr}. It either contains a `PeerId` or already exist."
-                    )),
+                    false => Err(anyhow::anyhow!("unable to add peer")),
                 };
 
                 let _ = ret.send(result);
@@ -1533,7 +1534,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                 if self.bootstraps.insert(addr.clone()) {
                     if let Some(peer_id) = addr.extract_peer_id() {
-                        self.swarm.behaviour_mut().add_peer(peer_id, addr);
+                        self.swarm.behaviour_mut().add_peer((peer_id, addr));
                         // the return value of add_address doesn't implement Debug
                         trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                     }
@@ -1605,7 +1606,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             continue;
                         };
 
-                        if self.swarm.behaviour_mut().add_peer(peer_id, addr.clone()) {
+                        if self.swarm.behaviour_mut().add_peer((peer_id, addr.clone())) {
                             trace!(peer_id=%peer_id, "tried to restore a bootstrapper");
                             // report with the peerid
                             rets.push(original);
