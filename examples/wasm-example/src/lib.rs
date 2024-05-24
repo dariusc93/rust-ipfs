@@ -1,6 +1,6 @@
 use libipld::ipld;
+use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
 use rust_ipfs::{Multiaddr, Protocol};
-use rust_ipfs::{StorageType, UninitializedIpfsNoop as UninitializedIpfs};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
 
@@ -13,18 +13,13 @@ pub async fn run() -> Result<(), JsError> {
     let node_a = UninitializedIpfs::new()
         .with_default()
         .add_listening_addr(Multiaddr::empty().with(Protocol::Memory(0)))
-        .set_storage_type(StorageType::IndexedDb {
-            namespace: Some("node_a".into()),
-        })
         .start()
         .await
         .unwrap();
+
     let node_b = UninitializedIpfs::new()
         .with_default()
         .add_listening_addr(Multiaddr::empty().with(Protocol::Memory(0)))
-        .set_storage_type(StorageType::IndexedDb {
-            namespace: Some("node_b".into()),
-        })
         .start()
         .await
         .unwrap();
