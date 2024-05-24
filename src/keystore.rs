@@ -86,7 +86,7 @@ impl Keystore {
 
         let peer_id_str = peer_id.as_str();
 
-        let name = name.unwrap_or_else(|| peer_id_str);
+        let name = name.unwrap_or(peer_id_str);
 
         let bytes = Key::from(keypair.to_protobuf_encoding()?);
 
@@ -134,7 +134,7 @@ impl Keystore {
         // We could probably wrap this in `Zeroizing` instead until `KeyStore` is refactored to accept `Key`
         let bytes = Key::from(keypair.to_protobuf_encoding()?);
 
-        let name = name.unwrap_or_else(|| peer_id_str);
+        let name = name.unwrap_or(peer_id_str);
 
         self.storage.set(name, bytes.as_ref()).await?;
 
