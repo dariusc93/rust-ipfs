@@ -45,7 +45,6 @@ struct Opts {
 }
 
 #[async_std::main]
-#[allow(deprecated)]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 

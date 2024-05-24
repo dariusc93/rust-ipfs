@@ -128,10 +128,6 @@ use libp2p::{
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
-#[allow(dead_code)]
-#[deprecated(note = "Use `StoreageType` instead")]
-type StoragePath = StorageType;
-
 #[derive(Default, Debug)]
 pub enum StorageType {
     #[cfg(not(target_arch = "wasm32"))]
@@ -174,7 +170,7 @@ impl PartialEq for StorageType {
 impl Eq for StorageType {}
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
-pub struct IpfsOptions {
+pub(crate) struct IpfsOptions {
     /// The path of the ipfs repo (blockstore and datastore).
     ///
     /// This is always required but can be any path with in-memory backends. The filesystem backend
@@ -530,29 +526,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             gc_config: None,
             gc_repo_duration: None,
         }
-    }
-
-    /// New uninitualized instance without any listener addresses
-    #[deprecated(
-        note = "UninitializedIpfs::empty will be removed in the future. Use UninitializedIpfs::new()"
-    )]
-    pub fn empty() -> Self {
-        Self::new()
-    }
-
-    /// Configures a new UninitializedIpfs with from the given options and optionally a span.
-    /// If the span is not given, it is defaulted to `tracing::trace_span!("ipfs")`.
-    ///
-    /// The span is attached to all operations called on the later created `Ipfs` along with all
-    /// operations done in the background task as well as tasks spawned by the underlying
-    /// `libp2p::Swarm`.
-    #[deprecated(
-        note = "UninitializedIpfs::with_opt will be removed in the future. Use UninitializedIpfs::new()"
-    )]
-    pub fn with_opt(options: IpfsOptions) -> Self {
-        let mut opt = Self::new();
-        opt.options = options;
-        opt
     }
 
     /// Set default listening unspecified ipv4 and ipv6 addresseses for tcp and udp/quic

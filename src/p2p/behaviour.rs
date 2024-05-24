@@ -418,7 +418,7 @@ where
     C: NetworkBehaviour,
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
-    pub async fn new(
+    pub(crate) async fn new(
         keypair: &Keypair,
         options: &IpfsOptions,
         repo: &Repo,
