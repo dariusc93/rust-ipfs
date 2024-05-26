@@ -369,7 +369,7 @@ enum HaveSessionState {
 
 #[derive(Debug)]
 enum HaveWantState {
-    Pending,
+    Pending { send_dont_have: bool },
     Sent,
     Block,
     BlockSent,
@@ -378,6 +378,7 @@ enum HaveWantState {
 pub struct HaveSession {
     cid: Cid,
     want: HashMap<PeerId, HaveWantState>,
+    send_dont_have: HashSet<PeerId>,
     have: Option<bool>,
     repo: Repo,
     waker: Option<Waker>,
@@ -392,6 +393,7 @@ impl HaveSession {
             have: None,
             repo: repo.clone(),
             waker: None,
+            send_dont_have: Default::default(),
             state: HaveSessionState::Idle,
         };
         let repo = session.repo.clone();
@@ -408,7 +410,7 @@ impl HaveSession {
         self.want.contains_key(&peer_id)
     }
 
-    pub fn want_block(&mut self, peer_id: PeerId) {
+    pub fn want_block(&mut self, peer_id: PeerId, send_dont_have: bool) {
         if self.want.contains_key(&peer_id) {
             tracing::warn!(session = %self.cid, %peer_id, "peer requested block");
             return;
@@ -416,7 +418,8 @@ impl HaveSession {
 
         tracing::info!(session = %self.cid, %peer_id, name = "have_session", "peer want block");
 
-        self.want.insert(peer_id, HaveWantState::Pending);
+        self.want
+            .insert(peer_id, HaveWantState::Pending { send_dont_have });
 
         if let Some(w) = self.waker.take() {
             w.wake();
@@ -461,6 +464,7 @@ impl HaveSession {
     pub fn remove_peer(&mut self, peer_id: PeerId) {
         tracing::info!(session = %self.cid, %peer_id, name = "have_session", "removing peer from have_session");
         self.want.remove(&peer_id);
+        self.send_dont_have.remove(&peer_id);
         if let Some(w) = self.waker.take() {
             w.wake();
         }
@@ -475,7 +479,9 @@ impl HaveSession {
         tracing::info!(session = %self.cid, name = "have_session", "resetting session");
 
         for (peer_id, state) in self.want.iter_mut() {
-            *state = HaveWantState::Pending;
+            *state = HaveWantState::Pending {
+                send_dont_have: self.send_dont_have.contains(peer_id),
+            };
             tracing::debug!(session = %self.cid, name = "have_session", %peer_id, "resetting peer state");
         }
         let repo = self.repo.clone();
@@ -490,7 +496,7 @@ impl HaveSession {
 
     pub fn cancel(&mut self, peer_id: PeerId) {
         self.want.remove(&peer_id);
-
+        self.send_dont_have.remove(&peer_id);
         tracing::info!(session = %self.cid, %peer_id, name = "have_session", "cancelling request");
     }
 }
@@ -532,6 +538,7 @@ impl Stream for HaveSession {
                 // Since we have no more peers who want the block, we will finalize the session
                 this.state = HaveSessionState::Complete;
                 this.want.clear();
+                this.send_dont_have.clear();
                 return Poll::Ready(Some(HaveSessionEvent::Cancelled));
             }
 
@@ -546,14 +553,30 @@ impl Stream for HaveSession {
                         if let Some((peer_id, state)) = this
                             .want
                             .iter_mut()
-                            .find(|(_, state)| matches!(state, HaveWantState::Pending))
+                            .find(|(_, state)| matches!(state, HaveWantState::Pending { .. }))
                         {
                             let peer_id = *peer_id;
                             *state = HaveWantState::Sent;
                             tracing::debug!(%peer_id, peer_state = ?state, have_block=have, session = %this.cid, "notifying peer of block status");
                             return match have {
                                 true => Poll::Ready(Some(HaveSessionEvent::Have { peer_id })),
-                                false => Poll::Ready(Some(HaveSessionEvent::DontHave { peer_id })),
+                                false => {
+                                    match matches!(
+                                        state,
+                                        HaveWantState::Pending {
+                                            send_dont_have: true
+                                        }
+                                    ) {
+                                        true => Poll::Ready(Some(HaveSessionEvent::DontHave {
+                                            peer_id,
+                                        })),
+                                        false => {
+                                            // Since the peer does not want us to send a response if we dont have the block, we will drop them from the session
+                                            this.want.remove(&peer_id);
+                                            continue;
+                                        }
+                                    }
+                                }
                             };
                         }
                     }
