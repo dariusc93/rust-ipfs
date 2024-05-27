@@ -3158,9 +3158,9 @@ dependencies = [
 
 [[package]]
 name = "libp2p-stream"
-version = "0.1.0-alpha"
+version = "0.1.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e1f34086b787422d4cf148bc0f0c72557a1cb97811dd001f363af7b1f82057e"
+checksum = "2e80e4cc955913d1a3e292688aada12fc86edefec9ada087cf91825cd6368887"
 dependencies = [
  "futures",
  "libp2p-core",
