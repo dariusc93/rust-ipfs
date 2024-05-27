@@ -580,6 +580,7 @@ impl Stream for HaveSession {
                             };
                         }
                     }
+                    this.waker.replace(cx.waker().clone());
                     return Poll::Pending;
                 }
                 HaveSessionState::ContainBlock { fut } => {
