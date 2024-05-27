@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use crate::utils::stream_map::StreamMap;
 use futures::StreamExt;
 use libipld::Cid;
 use libp2p::{
@@ -23,7 +24,6 @@ use libp2p::{
     },
     Multiaddr, PeerId,
 };
-use tokio_stream::StreamMap;
 
 mod bitswap_pb {
     pub use super::pb::bitswap_pb::Message;
@@ -172,7 +172,7 @@ impl Behaviour {
         let blocks = cid.into_iter().collect::<Vec<_>>();
 
         for (cid, session) in self.have_session.iter_mut() {
-            if !blocks.contains(cid) {
+            if !blocks.contains(&cid) {
                 continue;
             }
 
@@ -240,7 +240,7 @@ impl Behaviour {
         if remaining_established == 0 {
             tracing::debug!(%connection_id, %peer_id, "peer disconnected");
             for (cid, session) in self.want_session.iter_mut() {
-                tracing::debug!(session=%*cid, %peer_id, "marking peer as disconnected");
+                tracing::debug!(session=%cid, %peer_id, "marking peer as disconnected");
                 session.peer_disconnected(peer_id);
             }
         }
@@ -283,12 +283,7 @@ impl Behaviour {
         match cids.is_empty() {
             false => {
                 for cid in cids {
-                    let Some(session) = self
-                        .want_session
-                        .iter_mut()
-                        .find(|(session_cid, _)| *session_cid == cid)
-                        .map(|(_, session)| session)
-                    else {
+                    let Some(session) = self.want_session.get_mut(&cid) else {
                         continue;
                     };
                     for peer_id in &peers {
@@ -430,12 +425,7 @@ impl NetworkBehaviour for Behaviour {
                 self.have_session.insert(*cid, have_session);
             }
 
-            let Some(session) = self
-                .have_session
-                .iter_mut()
-                .find(|(session_cid, _)| session_cid == cid)
-                .map(|(_, session)| session)
-            else {
+            let Some(session) = self.have_session.get_mut(cid) else {
                 if !*cancel {
                     tracing::warn!(block = %cid, %peer_id, %connection_id, "have session does not exist. Skipping request");
                 }
@@ -458,12 +448,7 @@ impl NetworkBehaviour for Behaviour {
         }
 
         for (cid, response) in responses {
-            let Some(session) = self
-                .want_session
-                .iter_mut()
-                .find(|(session_cid, _)| *session_cid == cid)
-                .map(|(_, session)| session)
-            else {
+            let Some(session) = self.want_session.get_mut(&cid) else {
                 tracing::warn!(block = %cid, %peer_id, %connection_id, "want session does not exist. Skipping response");
                 continue;
             };

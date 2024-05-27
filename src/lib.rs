@@ -34,6 +34,7 @@ pub mod repo;
 pub(crate) mod rt;
 mod task;
 pub mod unixfs;
+pub(crate) mod utils;
 
 #[macro_use]
 extern crate tracing;
