@@ -371,6 +371,7 @@ enum HaveSessionState {
 
 #[derive(Debug)]
 enum HaveWantState {
+    #[allow(dead_code)]
     Pending { send_dont_have: bool },
     Sent,
     Block,
@@ -562,23 +563,7 @@ impl Stream for HaveSession {
                             tracing::debug!(%peer_id, peer_state = ?state, have_block=have, session = %this.cid, "notifying peer of block status");
                             return match have {
                                 true => Poll::Ready(Some(HaveSessionEvent::Have { peer_id })),
-                                false => {
-                                    match matches!(
-                                        state,
-                                        HaveWantState::Pending {
-                                            send_dont_have: true
-                                        }
-                                    ) {
-                                        true => Poll::Ready(Some(HaveSessionEvent::DontHave {
-                                            peer_id,
-                                        })),
-                                        false => {
-                                            // Since the peer does not want us to send a response if we dont have the block, we will drop them from the session
-                                            this.want.remove(&peer_id);
-                                            continue;
-                                        }
-                                    }
-                                }
+                                false => Poll::Ready(Some(HaveSessionEvent::DontHave { peer_id })),
                             };
                         }
                     }
