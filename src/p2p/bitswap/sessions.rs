@@ -17,6 +17,7 @@ use crate::{repo::Repo, Block};
 
 const CAP_THRESHOLD: usize = 100;
 
+#[derive(Debug)]
 pub enum WantSessionEvent {
     Dial { peer_id: PeerId },
     SendWant { peer_id: PeerId },
@@ -346,6 +347,7 @@ impl FusedStream for WantSession {
     }
 }
 
+#[derive(Debug)]
 pub enum HaveSessionEvent {
     Have { peer_id: PeerId },
     DontHave { peer_id: PeerId },
