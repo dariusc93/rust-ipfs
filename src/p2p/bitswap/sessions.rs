@@ -372,7 +372,9 @@ enum HaveSessionState {
 #[derive(Debug)]
 enum HaveWantState {
     #[allow(dead_code)]
-    Pending { send_dont_have: bool },
+    Pending {
+        send_dont_have: bool,
+    },
     Sent,
     Block,
     BlockSent,
