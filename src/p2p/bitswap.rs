@@ -694,7 +694,7 @@ mod test {
         swarm3.behaviour_mut().get(&cid, &[]);
 
         loop {
-            tokio::select! {
+            futures::select! {
                 _ = swarm1.next() => {}
                 e = swarm2.select_next_some() => {
                     if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
@@ -734,7 +734,7 @@ mod test {
         swarm1.behaviour_mut().cancel(cid);
 
         loop {
-            tokio::select! {
+            futures::select! {
                 e = swarm1.select_next_some() => {
                     if let SwarmEvent::Behaviour(super::Event::CancelBlock { cid: inner_cid }) = e {
                         assert_eq!(inner_cid, cid);
@@ -803,7 +803,7 @@ mod test {
         swarm2.behaviour_mut().get(&cid, &[peer1]);
 
         loop {
-            tokio::select! {
+            futures::select! {
                 _ = swarm1.next() => {}
                 e = swarm2.select_next_some() => {
                     if let SwarmEvent::Behaviour(super::Event::NeedBlock { cid: inner_cid }) = e {
