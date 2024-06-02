@@ -60,7 +60,7 @@ pub enum Event {
 
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
-    connections: HashMap<PeerId, HashSet<(ConnectionId, Multiaddr)>>,
+    connections: HashMap<PeerId, HashSet<ConnectionId>>,
     blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
     store: Repo,
     want_session: StreamMap<Cid, WantSession>,
@@ -191,16 +191,15 @@ impl Behaviour {
         ConnectionEstablished {
             connection_id,
             peer_id,
-            endpoint,
             other_established,
             ..
         }: ConnectionEstablished,
     ) {
-        let address = endpoint.get_remote_address().clone();
+        tracing::info!(%peer_id, %connection_id, "connection established");
         self.connections
             .entry(peer_id)
             .or_default()
-            .insert((connection_id, address));
+            .insert(connection_id);
 
         if other_established > 0 {
             return;
@@ -214,16 +213,14 @@ impl Behaviour {
         ConnectionClosed {
             connection_id,
             peer_id,
-            endpoint,
             remaining_established,
             ..
         }: ConnectionClosed,
     ) {
         tracing::debug!(%connection_id, %peer_id, "connection closed");
-        let address = endpoint.get_remote_address().clone();
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let list = entry.get_mut();
-            list.remove(&(connection_id, address));
+            list.remove(&connection_id);
             if list.is_empty() {
                 entry.remove();
             }
