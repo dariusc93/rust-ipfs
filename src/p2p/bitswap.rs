@@ -594,8 +594,9 @@ mod test {
         Cid, IpldCodec,
     };
     use libp2p::{
+        core::{transport::MemoryTransport, upgrade::Version},
         swarm::{dial_opts::DialOpts, SwarmEvent},
-        Multiaddr, PeerId, Swarm, SwarmBuilder,
+        Multiaddr, PeerId, Swarm, SwarmBuilder, Transport,
     };
 
     use crate::{repo::Repo, Block};
@@ -850,24 +851,27 @@ mod test {
 
         let mut swarm = SwarmBuilder::with_new_identity()
             .with_tokio()
-            .with_tcp(
-                libp2p::tcp::Config::default(),
-                libp2p::noise::Config::new,
-                libp2p::yamux::Config::default,
-            )
+            .with_other_transport(|kp| {
+                MemoryTransport::default()
+                    .upgrade(Version::V1)
+                    .authenticate(libp2p::noise::Config::new(kp).expect("valid config"))
+                    .multiplex(libp2p::yamux::Config::default())
+                    .timeout(Duration::from_secs(20))
+                    .boxed()
+            })
             .expect("")
             .with_behaviour(|_| super::Behaviour::new(&repo))
             .expect("")
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
 
-        Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
+        Swarm::listen_on(&mut swarm, "/memory/0".parse().unwrap()).unwrap();
 
         if let Some(SwarmEvent::NewListenAddr { address, .. }) = swarm.next().await {
             let peer_id = swarm.local_peer_id();
             return (*peer_id, address, swarm, repo);
         }
 
-        panic!("no new addrs")
+        unreachable!()
     }
 }
