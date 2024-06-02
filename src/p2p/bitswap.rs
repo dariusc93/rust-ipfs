@@ -609,7 +609,7 @@ mod test {
 
     #[tokio::test]
     async fn exchange_blocks() -> anyhow::Result<()> {
-        let (_, _, mut swarm1, repo) = build_swarm().await;
+        let (peer1, _, mut swarm1, repo) = build_swarm().await;
         let (peer2, addr2, mut swarm2, repo2) = build_swarm().await;
 
         let block = create_block();
@@ -636,7 +636,7 @@ mod test {
             }
         }
 
-        swarm2.behaviour_mut().get(&cid, &[peer2]);
+        swarm2.behaviour_mut().get(&cid, &[peer1]);
 
         loop {
             tokio::select! {
