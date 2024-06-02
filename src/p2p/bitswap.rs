@@ -637,6 +637,62 @@ mod test {
             }
         }
 
+        swarm2.behaviour_mut().get(&cid, &[]);
+
+        loop {
+            tokio::select! {
+                _ = swarm1.next() => {}
+                e = swarm2.select_next_some() => {
+                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                        assert_eq!(inner_cid, cid);
+                    }
+                },
+                Ok(true) = repo2.contains(&cid) => {
+                    break;
+                }
+            }
+        }
+
+        let b = repo2
+            .get_block_now(&cid)
+            .await
+            .unwrap()
+            .expect("block exist");
+
+        assert_eq!(b, block);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn exchange_blocks_with_explicit_peer() -> anyhow::Result<()> {
+        let (peer1, _, mut swarm1, repo) = build_swarm().await;
+        let (peer2, addr2, mut swarm2, repo2) = build_swarm().await;
+
+        let block = create_block();
+
+        let cid = *block.cid();
+
+        repo.put_block(block.clone()).await?;
+
+        let opt = DialOpts::peer_id(peer2)
+            .addresses(vec![addr2.clone()])
+            .build();
+
+        swarm1.dial(opt)?;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+
         swarm2.behaviour_mut().get(&cid, &[peer1]);
 
         loop {
