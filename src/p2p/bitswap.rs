@@ -18,8 +18,7 @@ use libp2p::{
     swarm::{
         behaviour::ConnectionEstablished, dial_opts::DialOpts, ConnectionClosed, ConnectionDenied,
         ConnectionId, DialFailure, FromSwarm, NetworkBehaviour, NotifyHandler, OneShotHandler,
-        OneShotHandlerConfig, SubstreamProtocol, THandler, THandlerInEvent, THandlerOutEvent,
-        ToSwarm,
+        THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -334,13 +333,7 @@ impl NetworkBehaviour for Behaviour {
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::new(
-            SubstreamProtocol::new(Default::default(), ()),
-            OneShotHandlerConfig {
-                max_dial_negotiated: 100,
-                ..Default::default()
-            },
-        ))
+        Ok(OneShotHandler::default())
     }
 
     fn handle_established_outbound_connection(
@@ -350,13 +343,7 @@ impl NetworkBehaviour for Behaviour {
         _: &Multiaddr,
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::new(
-            SubstreamProtocol::new(Default::default(), ()),
-            OneShotHandlerConfig {
-                max_dial_negotiated: 100,
-                ..Default::default()
-            },
-        ))
+        Ok(OneShotHandler::default())
     }
 
     fn on_connection_handler_event(
