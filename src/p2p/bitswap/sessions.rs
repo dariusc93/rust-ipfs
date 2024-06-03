@@ -143,7 +143,12 @@ impl WantSession {
 
         if self.is_empty() {
             self.state = WantSessionState::Idle;
-            self.discovery = WantDiscovery::Start;
+            if !matches!(
+                self.discovery,
+                WantDiscovery::Running { .. } | WantDiscovery::Start
+            ) {
+                self.discovery = WantDiscovery::Start;
+            }
             tracing::warn!(session = %self.cid, %peer_id, name = "want_session", "session is empty. setting state to idle.");
         } else {
             // change state to next block so it will perform another request if possible,
@@ -206,7 +211,10 @@ impl WantSession {
                     previous_peer_id: Some(peer_id),
                 };
             }
-        } else {
+        } else if !matches!(
+            self.discovery,
+            WantDiscovery::Running { .. } | WantDiscovery::Start
+        ) {
             self.discovery = WantDiscovery::Start;
         }
 
@@ -278,19 +286,19 @@ impl Stream for WantSession {
         loop {
             match &mut this.state {
                 WantSessionState::Idle => {
-                    self.waker = Some(cx.waker().clone());
-                    if let Some(peer_id) = self.cancel.pop_back() {
+                    this.waker = Some(cx.waker().clone());
+                    if let Some(peer_id) = this.cancel.pop_back() {
                         // Kick start the cancel requests.
                         return Poll::Ready(Some(WantSessionEvent::SendCancel { peer_id }));
                     }
 
-                    match &mut self.discovery {
+                    match &mut this.discovery {
                         WantDiscovery::Disable => {}
                         WantDiscovery::Start => {
-                            self.discovery = WantDiscovery::Running {
+                            this.discovery = WantDiscovery::Running {
                                 timer: Delay::new(Duration::from_secs(60)),
                             };
-                            cx.waker().wake_by_ref();
+
                             return Poll::Ready(Some(WantSessionEvent::NeedBlock));
                         }
                         WantDiscovery::Running { timer } => {
