@@ -51,7 +51,7 @@ libp2p = { version = "0.53" }
 libp2p-allow-block-list = "0.3"
 libp2p-bitswap-next = { version = "0.26.3", path = "packages/libp2p-bitswap-next" }
 libp2p-relay-manager = { version = "0.2.4", path = "packages/libp2p-relay-manager" }
-libp2p-stream = { version = "0.1.0-alpha" }
+libp2p-stream = { version = "0.1.0-alpha.1" }
 libp2p-webrtc = { version = "=0.7.1-alpha", features = ["pem"] }
 libp2p-webrtc-websys = "0.3.0-alpha"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"] }
