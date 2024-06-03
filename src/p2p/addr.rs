@@ -35,6 +35,8 @@ impl MultiaddrExt for Multiaddr {
     }
 
     fn extract_peer_id(&mut self) -> Option<PeerId> {
+        self.peer_id()?;
+
         match self.pop() {
             Some(Protocol::P2p(peer)) => Some(peer),
             _ => None,

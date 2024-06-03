@@ -1,5 +1,6 @@
 # next
 - chore: Cleanup Keystore logic and implementation. [PR 222](https://github.com/dariusc93/rust-ipfs/pull/222)
+- feat: Add {Into}AddPeerOpt. [PR 226](https://github.com/dariusc93/rust-ipfs/pull/226)
 
 # 0.11.19
 - chore: Pin getrandom to 0.2.14 due to libc 0.2.154 being yanked. 

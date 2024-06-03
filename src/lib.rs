@@ -59,8 +59,8 @@ use keystore::Keystore;
 use p2p::BitswapConfig;
 
 use p2p::{
-    IdentifyConfiguration, KadConfig, KadStoreConfig, PeerInfo, PubsubConfig, RelayConfig,
-    SwarmConfig, TransportConfig,
+    IdentifyConfiguration, KadConfig, KadStoreConfig, MultiaddrExt, PeerInfo, PubsubConfig,
+    RelayConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
     BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
@@ -78,8 +78,7 @@ use std::{
     fmt,
     ops::{Deref, DerefMut},
     path::Path,
-    sync::atomic::AtomicU64,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     time::Duration,
 };
 
@@ -117,6 +116,7 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
+use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
     kad::{store::MemoryStoreConfig, Mode, Record},
@@ -381,7 +381,7 @@ enum IpfsEvent {
     AddListeningAddress(Multiaddr, Channel<Multiaddr>),
     RemoveListeningAddress(Multiaddr, Channel<()>),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
-    AddPeer(PeerId, Multiaddr, Channel<()>),
+    AddPeer(AddPeerOpt, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
     GetClosestPeers(PeerId, Channel<ReceiverChannel<KadResult>>),
     FindPeerIdentity(PeerId, Channel<ReceiverChannel<libp2p::identify::Info>>),
@@ -2291,16 +2291,17 @@ impl Ipfs {
     }
 
     /// Add address of a peer to the address book
-    pub async fn add_peer(&self, peer_id: PeerId, mut addr: Multiaddr) -> Result<(), Error> {
-        if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-            addr.pop();
+    pub async fn add_peer(&self, opt: impl IntoAddPeerOpt) -> Result<(), Error> {
+        let opt: AddPeerOpt = opt.into_opt()?;
+        if opt.addresses().is_empty() {
+            anyhow::bail!("no address supplied");
         }
 
         let (tx, rx) = oneshot::channel();
 
         self.to_task
             .clone()
-            .send(IpfsEvent::AddPeer(peer_id, addr, tx))
+            .send(IpfsEvent::AddPeer(opt, tx))
             .await?;
 
         rx.await??;
@@ -2407,6 +2408,120 @@ impl TryFrom<StreamProtocolRef> for StreamProtocol {
     }
 }
 
+#[derive(Debug)]
+pub struct AddPeerOpt {
+    peer_id: PeerId,
+    addresses: Vec<Multiaddr>,
+    condition: Option<PeerCondition>,
+    dial: bool,
+}
+
+impl AddPeerOpt {
+    pub fn with_peer_id(peer_id: PeerId) -> Self {
+        Self {
+            peer_id,
+            addresses: vec![],
+            condition: None,
+            dial: false,
+        }
+    }
+
+    pub fn add_address(mut self, mut addr: Multiaddr) -> Self {
+        if addr.is_empty() {
+            return self;
+        }
+
+        match addr.iter().last() {
+            // if the address contains a peerid, we should confirm it matches the initial peer
+            Some(Protocol::P2p(peer_id)) if peer_id == self.peer_id => {
+                addr.pop();
+            }
+            Some(Protocol::P2p(_)) => return self,
+            _ => {}
+        }
+
+        if !self.addresses.contains(&addr) {
+            self.addresses.push(addr);
+        }
+
+        self
+    }
+
+    pub fn set_addresses(mut self, addrs: Vec<Multiaddr>) -> Self {
+        for addr in addrs {
+            self = self.add_address(addr);
+        }
+
+        self
+    }
+
+    pub fn set_peer_condition(mut self, condition: PeerCondition) -> Self {
+        self.condition = Some(condition);
+        self
+    }
+
+    pub fn set_dial(mut self, dial: bool) -> Self {
+        self.dial = dial;
+        self
+    }
+}
+
+impl AddPeerOpt {
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
+    }
+
+    pub fn addresses(&self) -> &[Multiaddr] {
+        &self.addresses
+    }
+
+    pub fn to_dial_opts(&self) -> Option<DialOpts> {
+        if !self.dial {
+            return None;
+        }
+
+        // We dial without addresses attached because it will they will be fetched within the address book
+        // which will allow us not only to use those addresses but any addresses from other behaviours
+        let opts = DialOpts::peer_id(self.peer_id)
+            .condition(self.condition.unwrap_or_default())
+            .build();
+
+        Some(opts)
+    }
+}
+
+pub trait IntoAddPeerOpt {
+    fn into_opt(self) -> Result<AddPeerOpt, anyhow::Error>;
+}
+
+impl IntoAddPeerOpt for AddPeerOpt {
+    fn into_opt(self) -> Result<AddPeerOpt, anyhow::Error> {
+        Ok(self)
+    }
+}
+
+impl IntoAddPeerOpt for (PeerId, Multiaddr) {
+    fn into_opt(self) -> Result<AddPeerOpt, anyhow::Error> {
+        Ok(AddPeerOpt::with_peer_id(self.0).add_address(self.1))
+    }
+}
+
+impl IntoAddPeerOpt for (PeerId, Vec<Multiaddr>) {
+    fn into_opt(self) -> Result<AddPeerOpt, anyhow::Error> {
+        Ok(AddPeerOpt::with_peer_id(self.0).set_addresses(self.1))
+    }
+}
+
+impl IntoAddPeerOpt for Multiaddr {
+    fn into_opt(mut self) -> Result<AddPeerOpt, anyhow::Error> {
+        let peer_id = self
+            .extract_peer_id()
+            .ok_or(anyhow::anyhow!("address does not contain peer id"))
+            .map_err(std::io::Error::other)?;
+        Ok(AddPeerOpt::with_peer_id(peer_id).add_address(self))
+    }
+}
+
 #[inline]
 pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
     anyhow::ensure!(!key.is_empty(), "Key cannot be empty");
@@ -2492,6 +2607,12 @@ mod node {
         pub addrs: Vec<Multiaddr>,
     }
 
+    impl IntoAddPeerOpt for &Node {
+        fn into_opt(self) -> Result<AddPeerOpt, anyhow::Error> {
+            Ok(AddPeerOpt::with_peer_id(self.id).set_addresses(self.addrs.clone()))
+        }
+    }
+
     impl Node {
         /// Initialises a new `Node` with an in-memory store backed configuration.
         ///
@@ -2574,7 +2695,7 @@ mod node {
 
         pub async fn add_node(&self, node: &Self) -> Result<(), Error> {
             for addr in &node.addrs {
-                self.add_peer(node.id, addr.to_owned()).await?;
+                self.add_peer((node.id, addr.to_owned())).await?;
             }
 
             Ok(())
