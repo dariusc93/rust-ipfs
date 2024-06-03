@@ -12,7 +12,7 @@ use either::Either;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
-use crate::IpfsOptions;
+use crate::{IntoAddPeerOpt, IpfsOptions};
 
 use crate::p2p::MultiaddrExt;
 use crate::repo::Repo;
@@ -616,25 +616,28 @@ where
         ))
     }
 
-    pub fn add_peer(&mut self, peer: PeerId, addr: Multiaddr) -> bool {
-        if self.addressbook.contains(&peer, &addr) {
-            return false;
-        }
-
-        if !self.addressbook.contains(&peer, &addr) {
-            self.addressbook.add_address(peer, addr.clone());
-        }
-
+    pub fn add_peer<I: IntoAddPeerOpt>(&mut self, opt: I) -> bool {
+        let opt = opt.into_opt().expect("valid entries");
         if let Some(kad) = self.kademlia.as_mut() {
-            kad.add_address(&peer, addr.clone());
+            let peer_id = opt.peer_id();
+            let addrs = opt.addresses().to_vec();
+            for addr in addrs {
+                kad.add_address(peer_id, addr);
+            }
         }
 
         #[cfg(feature = "libp2p_bitswap")]
         {
             if let Some(bs) = self.bitswap.as_mut() {
-                bs.add_address(&peer, addr);
+                let peer_id = opt.peer_id();
+                let addrs = opt.addresses().to_vec();
+                for addr in addrs {
+                    bs.add_address(peer_id, addr);
+                }
             }
         }
+
+        self.addressbook.add_address(opt);
 
         true
     }

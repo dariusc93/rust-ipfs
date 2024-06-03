@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     let addrs = node_a.listening_addresses().await?;
 
     for addr in addrs {
-        node_b.add_peer(peer_id, addr).await?;
+        node_b.add_peer((peer_id, addr)).await?;
     }
 
     node_b.connect(peer_id).await?;

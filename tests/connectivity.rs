@@ -34,10 +34,7 @@ async fn connect_two_nodes_by_peer_id() {
     let node_a = Node::new("a").await;
     let node_b = Node::new("b").await;
 
-    node_a
-        .add_peer(node_b.id, node_b.addrs[0].clone())
-        .await
-        .unwrap();
+    node_a.add_peer(&node_b).await.unwrap();
 
     node_a.connect(node_b.id).await.unwrap()
 }
