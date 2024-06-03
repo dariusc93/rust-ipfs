@@ -595,7 +595,7 @@ mod test {
     };
     use libp2p::{
         core::{transport::MemoryTransport, upgrade::Version},
-        swarm::{dial_opts::DialOpts, SwarmEvent},
+        swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmEvent},
         Multiaddr, PeerId, Swarm, SwarmBuilder, Transport,
     };
 
@@ -637,13 +637,13 @@ mod test {
             }
         }
 
-        swarm2.behaviour_mut().get(&cid, &[]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[]);
 
         loop {
             tokio::select! {
                 _ = swarm1.next() => {}
                 e = swarm2.select_next_some() => {
-                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::BlockRetrieved { cid: inner_cid })) = e {
                         assert_eq!(inner_cid, cid);
                     }
                 },
@@ -693,13 +693,13 @@ mod test {
             }
         }
 
-        swarm2.behaviour_mut().get(&cid, &[peer1]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1]);
 
         loop {
             tokio::select! {
                 _ = swarm1.next() => {}
                 e = swarm2.select_next_some() => {
-                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::BlockRetrieved { cid: inner_cid })) = e {
                         assert_eq!(inner_cid, cid);
                     }
                 },
@@ -772,20 +772,20 @@ mod test {
                 break;
             }
         }
-        swarm2.behaviour_mut().get(&cid, &[peer1]);
-        swarm3.behaviour_mut().get(&cid, &[]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1]);
+        swarm3.behaviour_mut().bitswap.get(&cid, &[]);
 
         loop {
             tokio::select! {
                 _ = swarm1.next() => {}
                 e = swarm2.select_next_some() => {
-                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::BlockRetrieved { cid: inner_cid })) = e {
                         assert_eq!(inner_cid, cid);
-                        swarm2.behaviour_mut().notify_new_blocks(std::iter::once(cid));
+                        swarm2.behaviour_mut().bitswap.notify_new_blocks(std::iter::once(cid));
                     }
                 },
                 e = swarm3.select_next_some() => {
-                    if let SwarmEvent::Behaviour(super::Event::BlockRetrieved { cid: inner_cid }) = e {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::BlockRetrieved { cid: inner_cid })) = e {
                         assert_eq!(inner_cid, cid);
                         break;
                     }
@@ -812,13 +812,13 @@ mod test {
 
         let cid = *block.cid();
 
-        swarm1.behaviour_mut().get(&cid, &[]);
-        swarm1.behaviour_mut().cancel(cid);
+        swarm1.behaviour_mut().bitswap.get(&cid, &[]);
+        swarm1.behaviour_mut().bitswap.cancel(cid);
 
         loop {
             tokio::select! {
                 e = swarm1.select_next_some() => {
-                    if let SwarmEvent::Behaviour(super::Event::CancelBlock { cid: inner_cid }) = e {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::CancelBlock { cid: inner_cid })) = e {
                         assert_eq!(inner_cid, cid);
                         break;
                     }
@@ -837,9 +837,9 @@ mod test {
 
         let cid = *block.cid();
 
-        swarm1.behaviour_mut().get(&cid, &[]);
+        swarm1.behaviour_mut().bitswap.get(&cid, &[]);
 
-        let list = swarm1.behaviour().local_wantlist();
+        let list = swarm1.behaviour().bitswap.local_wantlist();
 
         assert_eq!(list[0], cid);
 
@@ -882,13 +882,13 @@ mod test {
                 break;
             }
         }
-        swarm2.behaviour_mut().get(&cid, &[peer1]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1]);
 
         loop {
             tokio::select! {
                 _ = swarm1.next() => {}
                 e = swarm2.select_next_some() => {
-                    if let SwarmEvent::Behaviour(super::Event::NeedBlock { cid: inner_cid }) = e {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::NeedBlock { cid: inner_cid })) = e {
                         assert_eq!(inner_cid, cid);
                         break;
                     }
@@ -896,13 +896,13 @@ mod test {
             }
         }
 
-        let list = swarm1.behaviour().peer_wantlist(peer2);
+        let list = swarm1.behaviour().bitswap.peer_wantlist(peer2);
         assert_eq!(list[0], cid);
 
         Ok(())
     }
 
-    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<super::Behaviour>, Repo) {
+    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<Behaviour>, Repo) {
         let repo = Repo::new_memory();
 
         let mut swarm = SwarmBuilder::with_new_identity()
@@ -916,7 +916,14 @@ mod test {
                     .boxed()
             })
             .expect("")
-            .with_behaviour(|_| super::Behaviour::new(&repo))
+            .with_behaviour(|_| Behaviour {
+                bitswap: super::Behaviour::new(&repo),
+                address_book: crate::p2p::addressbook::Behaviour::with_config(
+                    crate::p2p::addressbook::Config {
+                        store_on_connection: true,
+                    },
+                ),
+            })
             .expect("")
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
             .build();
@@ -929,5 +936,11 @@ mod test {
         }
 
         unreachable!()
+    }
+
+    #[derive(NetworkBehaviour)]
+    struct Behaviour {
+        bitswap: super::Behaviour,
+        address_book: crate::p2p::addressbook::Behaviour,
     }
 }
