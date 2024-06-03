@@ -4758,6 +4758,7 @@ dependencies = [
  "hickory-resolver",
  "hkdf",
  "idb",
+ "indexmap 2.2.6",
  "libipld",
  "libp2p",
  "libp2p-allow-block-list",

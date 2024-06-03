@@ -46,6 +46,7 @@ getrandom = { version = "=0.2.14" }
 hickory-resolver = "0.24.1"
 hkdf = "0.12.4"
 idb = "0.6"
+indexmap = "2.2.0"
 libipld = { version = "0.16", features = ["serde-codec"] }
 libp2p = { version = "0.53" }
 libp2p-allow-block-list = "0.3"
@@ -107,6 +108,7 @@ either.workspace = true
 futures-timeout.workspace = true
 futures.workspace = true
 hkdf.workspace = true
+indexmap.workspace = true
 libipld.workspace = true
 libp2p-allow-block-list.workspace = true
 libp2p-bitswap-next = { workspace = true, optional = true }
