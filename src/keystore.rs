@@ -268,11 +268,11 @@ mod test {
     }
 
     #[tokio::test]
-    async fn keystore_key_exist() -> anyhow::Result<()> {
+    async fn keystore_replace_existing() -> anyhow::Result<()> {
         let keystore = Keystore::in_memory();
-        keystore.generate_ed25519(Some("primary")).await?;
-        let result = keystore.generate_ed25519(Some("primary")).await;
-        assert!(result.is_err());
+        let public_key_1 = keystore.generate_ed25519(Some("primary")).await?;
+        let public_key_2 = keystore.generate_ed25519(Some("primary")).await?;
+        assert_ne!(public_key_1, public_key_2);
         Ok(())
     }
 
