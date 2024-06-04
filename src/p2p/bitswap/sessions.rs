@@ -286,7 +286,6 @@ impl Stream for WantSession {
         loop {
             match &mut this.state {
                 WantSessionState::Idle => {
-                    this.waker = Some(cx.waker().clone());
                     if let Some(peer_id) = this.cancel.pop_back() {
                         // Kick start the cancel requests.
                         return Poll::Ready(Some(WantSessionEvent::SendCancel { peer_id }));
@@ -308,6 +307,8 @@ impl Stream for WantSession {
                             }
                         }
                     }
+
+                    this.waker = Some(cx.waker().clone());
 
                     return Poll::Pending;
                 }
@@ -379,8 +380,6 @@ impl Stream for WantSession {
                         Ok(cid) => {
                             tracing::info!(session = %self.cid, block = %cid, name = "want_session", "block stored in block store");
                             self.state = WantSessionState::Complete;
-
-                            cx.waker().wake_by_ref();
                             return Poll::Ready(Some(WantSessionEvent::BlockStored));
                         }
                         Err(e) => {
@@ -401,7 +400,6 @@ impl Stream for WantSession {
 
                     this.cancel.extend(peers);
                     // Wake up the task so the stream would poll any cancel requests
-                    cx.waker().wake_by_ref();
                     this.state = WantSessionState::Idle;
                 }
             }
@@ -643,7 +641,6 @@ impl Stream for HaveSession {
                 HaveSessionState::ContainBlock { fut } => {
                     let have = ready!(fut.poll_unpin(cx)).unwrap_or_default();
                     this.have = Some(have);
-                    cx.waker().wake_by_ref();
                     this.state = HaveSessionState::Idle;
                 }
                 // Maybe we should have a lock on a single lock to prevent GC from cleaning it up or being removed while waiting for it to be
