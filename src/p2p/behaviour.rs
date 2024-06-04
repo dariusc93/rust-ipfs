@@ -1,11 +1,7 @@
 use super::gossipsub::GossipsubStream;
 use super::{addressbook, protocol};
-#[cfg(feature = "beetle_bitswap")]
-use bytes::Bytes;
 
 use libp2p_allow_block_list::BlockedPeers;
-#[cfg(feature = "libp2p_bitswap")]
-use libp2p_bitswap_next::Bitswap;
 
 use super::peerbook::{self};
 use either::Either;
@@ -16,11 +12,6 @@ use crate::{IntoAddPeerOpt, IpfsOptions};
 
 use crate::p2p::MultiaddrExt;
 use crate::repo::Repo;
-#[cfg(feature = "beetle_bitswap")]
-use beetle_bitswap_next::{Bitswap, ProtocolId};
-
-#[cfg(feature = "libp2p_bitswap")]
-use libipld::DefaultParams;
 
 use libipld::Cid;
 use libp2p::core::Multiaddr;
@@ -55,11 +46,6 @@ where
 {
     #[cfg(not(target_arch = "wasm32"))]
     pub mdns: Toggle<Mdns>,
-    #[cfg(feature = "libp2p_bitswap")]
-    pub bitswap: Toggle<Bitswap<DefaultParams>>,
-    #[cfg(feature = "beetle_bitswap")]
-    pub bitswap: Toggle<Bitswap<Repo>>,
-    #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
     pub bitswap: Toggle<super::bitswap::Behaviour>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
     pub ping: Toggle<Ping>,
@@ -352,67 +338,6 @@ impl Default for KadConfig {
     }
 }
 
-#[cfg(feature = "beetle_bitswap")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BitswapConfig {
-    protocol: Vec<BitswapProtocol>,
-    max_buf_size: Option<usize>,
-    server: bool,
-}
-
-#[cfg(feature = "beetle_bitswap")]
-impl Default for BitswapConfig {
-    fn default() -> Self {
-        Self {
-            protocol: vec![
-                BitswapProtocol::ProtocolLegacy,
-                BitswapProtocol::Protocol100,
-                BitswapProtocol::Protocol110,
-                BitswapProtocol::Protocol120,
-            ],
-            max_buf_size: None,
-            server: true,
-        }
-    }
-}
-
-#[cfg(feature = "beetle_bitswap")]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
-pub enum BitswapProtocol {
-    ProtocolLegacy,
-    Protocol100,
-    Protocol110,
-    #[default]
-    Protocol120,
-}
-
-#[cfg(feature = "beetle_bitswap")]
-impl From<BitswapProtocol> for ProtocolId {
-    fn from(value: BitswapProtocol) -> Self {
-        match value {
-            BitswapProtocol::ProtocolLegacy => ProtocolId::Legacy,
-            BitswapProtocol::Protocol100 => ProtocolId::Bitswap100,
-            BitswapProtocol::Protocol110 => ProtocolId::Bitswap110,
-            BitswapProtocol::Protocol120 => ProtocolId::Bitswap120,
-        }
-    }
-}
-
-#[cfg(feature = "beetle_bitswap")]
-impl From<BitswapConfig> for beetle_bitswap_next::Config {
-    fn from(value: BitswapConfig) -> Self {
-        beetle_bitswap_next::Config {
-            client: Default::default(),
-            server: value.server.then(Default::default),
-            protocol: beetle_bitswap_next::ProtocolConfig {
-                protocol_ids: value.protocol.iter().map(|proto| (*proto).into()).collect(),
-                max_transmit_size: value.max_buf_size.unwrap_or(1024 * 1024 * 2),
-            },
-            ..Default::default()
-        }
-    }
-}
-
 impl<C> Behaviour<C>
 where
     C: NetworkBehaviour,
@@ -469,28 +394,6 @@ where
             .then(|| autonat::Behaviour::new(peer_id, Default::default()))
             .into();
 
-        #[cfg(feature = "beetle_bitswap")]
-        let bitswap = match protocols.bitswap {
-            true => Some(Bitswap::new(peer_id, repo.clone(), Default::default()).await),
-            false => None,
-        }
-        .into();
-
-        #[cfg(feature = "libp2p_bitswap")]
-        let bitswap = protocols
-            .bitswap
-            .then(|| {
-                Bitswap::new(
-                    Default::default(),
-                    repo.clone(),
-                    Box::new(|fut| {
-                        crate::rt::spawn(fut);
-                    }),
-                )
-            })
-            .into();
-
-        #[cfg(not(any(feature = "libp2p_bitswap", feature = "beetle_bitswap")))]
         let bitswap = protocols
             .bitswap
             .then(|| super::bitswap::Behaviour::new(repo))
@@ -626,17 +529,6 @@ where
             }
         }
 
-        #[cfg(feature = "libp2p_bitswap")]
-        {
-            if let Some(bs) = self.bitswap.as_mut() {
-                let peer_id = opt.peer_id();
-                let addrs = opt.addresses().to_vec();
-                for addr in addrs {
-                    bs.add_address(peer_id, addr);
-                }
-            }
-        }
-
         self.addressbook.add_address(opt);
 
         true
@@ -662,32 +554,8 @@ where
         self.protocol.iter().collect::<Vec<_>>()
     }
 
-    #[cfg(feature = "beetle_bitswap")]
-    pub fn notify_new_blocks(&self, blocks: Vec<crate::Block>) {
-        if let Some(bitswap) = self.bitswap.as_ref() {
-            let client = bitswap.client().clone();
-            tokio::task::spawn(async move {
-                let blocks = blocks
-                    .iter()
-                    .map(|block| beetle_bitswap_next::Block {
-                        cid: *block.cid(),
-                        data: Bytes::copy_from_slice(block.data()),
-                    })
-                    .collect::<Vec<_>>();
-                if let Err(err) = client.notify_new_blocks(&blocks).await {
-                    warn!("failed to notify bitswap about blocks: {:?}", err);
-                }
-            });
-        }
-    }
-
     pub fn pubsub(&mut self) -> Option<&mut GossipsubStream> {
         self.pubsub.as_mut()
-    }
-
-    #[cfg(feature = "beetle_bitswap")]
-    pub fn bitswap(&mut self) -> Option<&mut Bitswap<Repo>> {
-        self.bitswap.as_mut()
     }
 }
 
