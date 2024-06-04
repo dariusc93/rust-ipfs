@@ -483,7 +483,7 @@ impl HaveSession {
 
     pub fn want_block(&mut self, peer_id: PeerId, send_dont_have: bool) {
         if self.want.contains_key(&peer_id) {
-            tracing::warn!(session = %self.cid, %peer_id, "peer requested block");
+            tracing::warn!(session = %self.cid, %peer_id, "peer already requested block. Ignoring additional request");
             return;
         }
 
