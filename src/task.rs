@@ -453,41 +453,23 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                             Bootstrap(Err(BootstrapError::Timeout { .. })) => {
                                 warn!("kad: timed out while trying to bootstrap");
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Err(anyhow::anyhow!(
-                                            "kad: timed out while trying to bootstrap"
-                                        )));
-                                    }
+                                if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                        "kad: timed out while trying to bootstrap"
+                                    )));
                                 }
                             }
                             GetClosestPeers(Ok(GetClosestPeersOk { key, peers })) => {
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Ok(KadResult::Peers(peers.clone())));
-                                    }
-                                    if let Ok(peer_id) = PeerId::from_bytes(&key) {
-                                        if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
-                                            if !peers.contains(&peer_id) {
-                                                for ret in rets {
-                                                    let _ = ret.send(Err(anyhow::anyhow!(
-                                                        "Could not locate peer"
-                                                    )));
-                                                }
+                                if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                    let _ = ret.send(Ok(KadResult::Peers(peers.clone())));
+                                }
+                                if let Ok(peer_id) = PeerId::from_bytes(&key) {
+                                    if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                                        if !peers.contains(&peer_id) {
+                                            for ret in rets {
+                                                let _ = ret.send(Err(anyhow::anyhow!(
+                                                    "Could not locate peer"
+                                                )));
                                             }
                                         }
                                     }
@@ -500,26 +482,17 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 // don't mention the key here, as this is just the id of our node
                                 warn!("kad: timed out while trying to find all closest peers");
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Err(anyhow::anyhow!(
-                                            "timed out while trying to find all closest peers"
-                                        )));
-                                    }
-                                    if let Ok(peer_id) = PeerId::from_bytes(&key) {
-                                        if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
-                                            for ret in rets {
-                                                let _ = ret.send(Err(anyhow::anyhow!(
-                                                    "timed out while trying to find all closest peers"
-                                                )));
-                                            }
+                                if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                        "timed out while trying to find all closest peers"
+                                    )));
+                                }
+                                if let Ok(peer_id) = PeerId::from_bytes(&key) {
+                                    if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
+                                        for ret in rets {
+                                            let _ = ret.send(Err(anyhow::anyhow!(
+                                                "timed out while trying to find all closest peers"
+                                            )));
                                         }
                                     }
                                 }
@@ -566,17 +539,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 let key = multibase::encode(Base::Base32Lower, key);
                                 warn!("kad: timed out while trying to get providers for {}", key);
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Err(anyhow::anyhow!("timed out while trying to get providers for the given key")));
-                                    }
+                                if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                        "timed out while trying to get providers for the given key"
+                                    )));
                                 }
                             }
                             StartProviding(Ok(AddProviderOk { key })) => {
@@ -587,19 +553,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 let key = multibase::encode(Base::Base32Lower, key);
                                 warn!("kad: timed out while trying to provide {}", key);
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Err(anyhow::anyhow!(
-                                            "kad: timed out while trying to provide the record"
-                                        )));
-                                    }
+                                if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                        "kad: timed out while trying to provide the record"
+                                    )));
                                 }
                             }
                             RepublishProvider(Ok(AddProviderOk { key })) => {
@@ -631,17 +588,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 let key = multibase::encode(Base::Base32Lower, key);
                                 warn!("kad: couldn't find record {}", key);
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(tx) = self.record_stream.remove(&id) {
-                                        tx.close_channel();
-                                    }
+                                if let Some(tx) = self.record_stream.remove(&id) {
+                                    tx.close_channel();
                                 }
                             }
                             GetRecord(Err(GetRecordError::QuorumFailed {
@@ -655,34 +603,16 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                     quorum, key
                                 );
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(tx) = self.record_stream.remove(&id) {
-                                        tx.close_channel();
-                                    }
+                                if let Some(tx) = self.record_stream.remove(&id) {
+                                    tx.close_channel();
                                 }
                             }
                             GetRecord(Err(GetRecordError::Timeout { key })) => {
                                 let key = multibase::encode(Base::Base32Lower, key);
                                 warn!("kad: timed out while trying to get key {}", key);
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(tx) = self.record_stream.remove(&id) {
-                                        tx.close_channel();
-                                    }
+                                if let Some(tx) = self.record_stream.remove(&id) {
+                                    tx.close_channel();
                                 }
                             }
                             PutRecord(Ok(PutRecordOk { key }))
@@ -706,19 +636,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                     quorum, key
                                 );
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Err(anyhow::anyhow!(
-                                            "kad: quorum failed when trying to put the record"
-                                        )));
-                                    }
+                                if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                        "kad: quorum failed when trying to put the record"
+                                    )));
                                 }
                             }
                             PutRecord(Err(PutRecordError::Timeout {
@@ -729,20 +650,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 let key = multibase::encode(Base::Base32Lower, key);
                                 warn!("kad: timed out while trying to put record {}", key);
 
-                                if self
-                                    .swarm
-                                    .behaviour()
-                                    .kademlia
-                                    .as_ref()
-                                    .and_then(|kad| kad.query(&id))
-                                    .is_none()
-                                {
-                                    if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Err(anyhow::anyhow!(
-                                            "kad: timed out while trying to put record {}",
-                                            key
-                                        )));
-                                    }
+                                if let Some(ret) = self.kad_subscriptions.remove(&id) {
+                                    let _ = ret.send(Err(anyhow::anyhow!(
+                                        "kad: timed out while trying to put record {}",
+                                        key
+                                    )));
                                 }
                             }
                             RepublishRecord(Err(PutRecordError::Timeout {
