@@ -380,6 +380,8 @@ enum IpfsEvent {
     PubsubSubscribed(Channel<Vec<String>>),
     AddListeningAddress(Multiaddr, Channel<Multiaddr>),
     RemoveListeningAddress(Multiaddr, Channel<()>),
+    AddExternalAddress(Multiaddr, Channel<()>),
+    RemoveExternalAddress(Multiaddr, Channel<()>),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(AddPeerOpt, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
@@ -1778,6 +1780,39 @@ impl Ipfs {
             self.to_task
                 .clone()
                 .send(IpfsEvent::RemoveListeningAddress(addr, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Add a given multiaddr as a external address to indenticate how our node can be reached.
+    /// Note: We will not perform checks
+    pub async fn add_external_address(&self, addr: Multiaddr) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::AddExternalAddress(addr, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Removes a previously added external address.
+    pub async fn remove_external_address(&self, addr: Multiaddr) -> Result<(), Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RemoveExternalAddress(addr, tx))
                 .await?;
 
             rx.await?
