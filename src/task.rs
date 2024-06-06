@@ -1241,6 +1241,14 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
             }
+            IpfsEvent::AddExternalAddress(addr, ret) => {
+                self.swarm.add_external_address(addr);
+                _ = ret.send(Ok(()))
+            }
+            IpfsEvent::RemoveExternalAddress(addr, ret) => {
+                self.swarm.remove_external_address(&addr);
+                _ = ret.send(Ok(()))
+            }
             IpfsEvent::Bootstrap(ret) => {
                 let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() else {
                     let _ = ret.send(Err(anyhow!("kad protocol is disabled")));

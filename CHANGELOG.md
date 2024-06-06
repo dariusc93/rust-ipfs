@@ -1,3 +1,6 @@
+# 0.11.20
+- feat: Add Ipfs::{add,remove}_external_address.
+
 # 0.11.19
 - chore: Pin getrandom to 0.2.14 due to libc 0.2.154 being yanked. 
 
