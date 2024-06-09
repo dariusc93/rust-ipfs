@@ -140,21 +140,21 @@ pub(crate) fn build_transport(
         enable_webtransport: _,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
-    use crate::p2p::transport::dual_transport::SelectSecurityUpgrade;
+    // use crate::p2p::transport::dual_transport::SelectSecurityUpgrade;
     use libp2p::dns::tokio::Transport as TokioDnsConfig;
     use libp2p::quic::tokio::Transport as TokioQuicTransport;
     use libp2p::quic::Config as QuicConfig;
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
-    use libp2p::tls;
+    // use libp2p::tls;
     use misc::generate_cert;
     use rcgen::KeyPair;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
-    let tls_config = tls::Config::new(&keypair).map_err(io::Error::other)?;
+    // let tls_config = tls::Config::new(&keypair).map_err(io::Error::other)?;
 
-    //TODO: Make configurable
-    let config: SelectSecurityUpgrade<noise::Config, tls::Config> =
-        SelectSecurityUpgrade::new(noise_config, tls_config);
+    // //TODO: Make configurable
+    // let config: SelectSecurityUpgrade<noise::Config, tls::Config> =
+    //     SelectSecurityUpgrade::new(noise_config, tls_config);
 
     let yamux_config = YamuxConfig::default();
 
@@ -221,7 +221,7 @@ pub(crate) fn build_transport(
 
     let transport = transport
         .upgrade(version.into())
-        .authenticate(config)
+        .authenticate(noise_config)
         .multiplex(yamux_config)
         .timeout(timeout)
         .boxed();
@@ -357,101 +357,101 @@ pub(crate) fn build_transport(
 }
 
 // borrow from libp2p SwarmBuilder
-#[cfg(not(target_arch = "wasm32"))]
-mod dual_transport {
-    use either::Either;
-    use futures::{
-        future::{self, MapOk},
-        TryFutureExt,
-    };
-    use libp2p::{
-        core::{
-            either::EitherFuture,
-            upgrade::{InboundConnectionUpgrade, OutboundConnectionUpgrade},
-            UpgradeInfo,
-        },
-        PeerId,
-    };
-    use std::iter::{Chain, Map};
+// #[cfg(not(target_arch = "wasm32"))]
+// mod dual_transport {
+//     use either::Either;
+//     use futures::{
+//         future::{self, MapOk},
+//         TryFutureExt,
+//     };
+//     use libp2p::{
+//         core::{
+//             either::EitherFuture,
+//             upgrade::{InboundConnectionUpgrade, OutboundConnectionUpgrade},
+//             UpgradeInfo,
+//         },
+//         PeerId,
+//     };
+//     use std::iter::{Chain, Map};
 
-    #[derive(Debug, Clone)]
-    pub struct SelectSecurityUpgrade<A, B>(A, B);
+//     #[derive(Debug, Clone)]
+//     pub struct SelectSecurityUpgrade<A, B>(A, B);
 
-    impl<A, B> SelectSecurityUpgrade<A, B> {
-        /// Combines two upgrades into an `SelectUpgrade`.
-        ///
-        /// The protocols supported by the first element have a higher priority.
-        pub fn new(a: A, b: B) -> Self {
-            SelectSecurityUpgrade(a, b)
-        }
-    }
+//     impl<A, B> SelectSecurityUpgrade<A, B> {
+//         /// Combines two upgrades into an `SelectUpgrade`.
+//         ///
+//         /// The protocols supported by the first element have a higher priority.
+//         pub fn new(a: A, b: B) -> Self {
+//             SelectSecurityUpgrade(a, b)
+//         }
+//     }
 
-    impl<A, B> UpgradeInfo for SelectSecurityUpgrade<A, B>
-    where
-        A: UpgradeInfo,
-        B: UpgradeInfo,
-    {
-        type Info = Either<A::Info, B::Info>;
-        type InfoIter = Chain<
-            Map<<A::InfoIter as IntoIterator>::IntoIter, fn(A::Info) -> Self::Info>,
-            Map<<B::InfoIter as IntoIterator>::IntoIter, fn(B::Info) -> Self::Info>,
-        >;
+//     impl<A, B> UpgradeInfo for SelectSecurityUpgrade<A, B>
+//     where
+//         A: UpgradeInfo,
+//         B: UpgradeInfo,
+//     {
+//         type Info = Either<A::Info, B::Info>;
+//         type InfoIter = Chain<
+//             Map<<A::InfoIter as IntoIterator>::IntoIter, fn(A::Info) -> Self::Info>,
+//             Map<<B::InfoIter as IntoIterator>::IntoIter, fn(B::Info) -> Self::Info>,
+//         >;
 
-        fn protocol_info(&self) -> Self::InfoIter {
-            let a = self
-                .0
-                .protocol_info()
-                .into_iter()
-                .map(Either::Left as fn(A::Info) -> _);
-            let b = self
-                .1
-                .protocol_info()
-                .into_iter()
-                .map(Either::Right as fn(B::Info) -> _);
+//         fn protocol_info(&self) -> Self::InfoIter {
+//             let a = self
+//                 .0
+//                 .protocol_info()
+//                 .into_iter()
+//                 .map(Either::Left as fn(A::Info) -> _);
+//             let b = self
+//                 .1
+//                 .protocol_info()
+//                 .into_iter()
+//                 .map(Either::Right as fn(B::Info) -> _);
 
-            a.chain(b)
-        }
-    }
+//             a.chain(b)
+//         }
+//     }
 
-    impl<C, A, B, TA, TB, EA, EB> InboundConnectionUpgrade<C> for SelectSecurityUpgrade<A, B>
-    where
-        A: InboundConnectionUpgrade<C, Output = (PeerId, TA), Error = EA>,
-        B: InboundConnectionUpgrade<C, Output = (PeerId, TB), Error = EB>,
-    {
-        type Output = (PeerId, future::Either<TA, TB>);
-        type Error = Either<EA, EB>;
-        type Future = MapOk<
-            EitherFuture<A::Future, B::Future>,
-            fn(future::Either<(PeerId, TA), (PeerId, TB)>) -> (PeerId, future::Either<TA, TB>),
-        >;
+//     impl<C, A, B, TA, TB, EA, EB> InboundConnectionUpgrade<C> for SelectSecurityUpgrade<A, B>
+//     where
+//         A: InboundConnectionUpgrade<C, Output = (PeerId, TA), Error = EA>,
+//         B: InboundConnectionUpgrade<C, Output = (PeerId, TB), Error = EB>,
+//     {
+//         type Output = (PeerId, future::Either<TA, TB>);
+//         type Error = Either<EA, EB>;
+//         type Future = MapOk<
+//             EitherFuture<A::Future, B::Future>,
+//             fn(future::Either<(PeerId, TA), (PeerId, TB)>) -> (PeerId, future::Either<TA, TB>),
+//         >;
 
-        fn upgrade_inbound(self, sock: C, info: Self::Info) -> Self::Future {
-            match info {
-                Either::Left(info) => EitherFuture::First(self.0.upgrade_inbound(sock, info)),
-                Either::Right(info) => EitherFuture::Second(self.1.upgrade_inbound(sock, info)),
-            }
-            .map_ok(future::Either::factor_first)
-        }
-    }
+//         fn upgrade_inbound(self, sock: C, info: Self::Info) -> Self::Future {
+//             match info {
+//                 Either::Left(info) => EitherFuture::First(self.0.upgrade_inbound(sock, info)),
+//                 Either::Right(info) => EitherFuture::Second(self.1.upgrade_inbound(sock, info)),
+//             }
+//             .map_ok(future::Either::factor_first)
+//         }
+//     }
 
-    impl<C, A, B, TA, TB, EA, EB> OutboundConnectionUpgrade<C> for SelectSecurityUpgrade<A, B>
-    where
-        A: OutboundConnectionUpgrade<C, Output = (PeerId, TA), Error = EA>,
-        B: OutboundConnectionUpgrade<C, Output = (PeerId, TB), Error = EB>,
-    {
-        type Output = (PeerId, future::Either<TA, TB>);
-        type Error = Either<EA, EB>;
-        type Future = MapOk<
-            EitherFuture<A::Future, B::Future>,
-            fn(future::Either<(PeerId, TA), (PeerId, TB)>) -> (PeerId, future::Either<TA, TB>),
-        >;
+//     impl<C, A, B, TA, TB, EA, EB> OutboundConnectionUpgrade<C> for SelectSecurityUpgrade<A, B>
+//     where
+//         A: OutboundConnectionUpgrade<C, Output = (PeerId, TA), Error = EA>,
+//         B: OutboundConnectionUpgrade<C, Output = (PeerId, TB), Error = EB>,
+//     {
+//         type Output = (PeerId, future::Either<TA, TB>);
+//         type Error = Either<EA, EB>;
+//         type Future = MapOk<
+//             EitherFuture<A::Future, B::Future>,
+//             fn(future::Either<(PeerId, TA), (PeerId, TB)>) -> (PeerId, future::Either<TA, TB>),
+//         >;
 
-        fn upgrade_outbound(self, sock: C, info: Self::Info) -> Self::Future {
-            match info {
-                Either::Left(info) => EitherFuture::First(self.0.upgrade_outbound(sock, info)),
-                Either::Right(info) => EitherFuture::Second(self.1.upgrade_outbound(sock, info)),
-            }
-            .map_ok(future::Either::factor_first)
-        }
-    }
-}
+//         fn upgrade_outbound(self, sock: C, info: Self::Info) -> Self::Future {
+//             match info {
+//                 Either::Left(info) => EitherFuture::First(self.0.upgrade_outbound(sock, info)),
+//                 Either::Right(info) => EitherFuture::Second(self.1.upgrade_outbound(sock, info)),
+//             }
+//             .map_ok(future::Either::factor_first)
+//         }
+//     }
+// }
