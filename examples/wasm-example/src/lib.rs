@@ -33,7 +33,7 @@ pub async fn run() -> Result<(), JsError> {
     let addrs = node_a.listening_addresses().await.unwrap();
 
     for addr in addrs {
-        node_b.add_peer(peer_id, addr).await.unwrap();
+        node_b.add_peer((peer_id, addr)).await.unwrap();
     }
 
     node_b.connect(peer_id).await.unwrap();
