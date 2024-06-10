@@ -36,7 +36,7 @@ beetle-bitswap-next = { version = "0.5.1", path = "packages/beetle-bitswap-next"
 byteorder = { version = "1" }
 bytes = "1"
 chrono = { version = "0.4.35" }
-clap = { version = "4.3", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 either = { version = "1" }
 fs2 = "0.4"
 futures = { version = "0.3" }
