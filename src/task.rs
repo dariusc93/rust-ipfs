@@ -891,8 +891,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 }
             }
 
-            SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
-                IdentifyEvent::Received { peer_id, info } => {
+            SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => {
+                debug!("identify: {:?}", event);
+                if let IdentifyEvent::Received { peer_id, info } = event {
                     let IdentifyInfo {
                         listen_addrs,
                         protocols,
@@ -926,8 +927,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                     self.swarm.behaviour_mut().peerbook.inject_peer_info(info);
                 }
-                event => debug!("identify: {:?}", event),
-            },
+            }
             SwarmEvent::Behaviour(BehaviourEvent::Autonat(autonat::Event::StatusChanged {
                 old,
                 new,
