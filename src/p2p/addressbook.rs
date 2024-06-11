@@ -312,7 +312,7 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use futures::StreamExt;
+    use futures::{FutureExt, StreamExt};
     use libp2p::{
         swarm::{dial_opts::DialOpts, SwarmEvent},
         Multiaddr, PeerId, Swarm, SwarmBuilder,
@@ -388,6 +388,71 @@ mod test {
     }
 
     #[tokio::test]
+    async fn dial_and_keepalive() -> anyhow::Result<()> {
+        let (peer1, addr1, mut swarm1) = build_swarm(false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
+        let opts_1 = AddPeerOpt::with_peer_id(peer2)
+            .add_address(addr2)
+            .keepalive();
+        swarm1.behaviour_mut().add_address(opts_1);
+
+        let opts_2 = AddPeerOpt::with_peer_id(peer1)
+            .add_address(addr1)
+            .keepalive();
+        swarm2.behaviour_mut().add_address(opts_2);
+
+        swarm1.dial(peer2)?;
+
+        let mut peer_a_connected = false;
+        let mut peer_b_connected = false;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        peer_b_connected = true;
+                    }
+                }
+                event = swarm2.select_next_some() => {
+                     if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer1);
+                        peer_a_connected = true;
+                    }
+                }
+            }
+
+            if peer_a_connected && peer_b_connected {
+                break;
+            }
+        }
+
+        let mut timer = futures_timer::Delay::new(Duration::from_secs(4)).fuse();
+
+        loop {
+            futures::select! {
+                _ = &mut timer => {
+                    break;
+                }
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionClosed { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        unreachable!("connection shouldnt have closed")
+                    }
+                }
+                event = swarm2.select_next_some() => {
+                    if let SwarmEvent::ConnectionClosed { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer1);
+                        unreachable!("connection shouldnt have closed")
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn store_address() -> anyhow::Result<()> {
         let (_, _, mut swarm1) = build_swarm(true).await;
         let (peer2, addr2, mut swarm2) = build_swarm(true).await;
@@ -439,7 +504,7 @@ mod test {
                 })
             })
             .expect("")
-            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(3)))
             .build();
 
         Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
