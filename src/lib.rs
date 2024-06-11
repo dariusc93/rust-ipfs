@@ -2553,13 +2553,15 @@ impl IntoAddPeerOpt for AddPeerOpt {
 
 impl IntoAddPeerOpt for (PeerId, Multiaddr) {
     fn into_opt(self) -> Result<AddPeerOpt, anyhow::Error> {
-        Ok(AddPeerOpt::with_peer_id(self.0).add_address(self.1))
+        let (peer_id, addr) = self;
+        Ok(AddPeerOpt::with_peer_id(peer_id).add_address(addr))
     }
 }
 
 impl IntoAddPeerOpt for (PeerId, Vec<Multiaddr>) {
     fn into_opt(self) -> Result<AddPeerOpt, anyhow::Error> {
-        Ok(AddPeerOpt::with_peer_id(self.0).set_addresses(self.1))
+        let (peer_id, addrs) = self;
+        Ok(AddPeerOpt::with_peer_id(peer_id).set_addresses(addrs))
     }
 }
 
