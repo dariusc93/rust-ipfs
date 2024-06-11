@@ -4,6 +4,7 @@
 - feat: Add {Into}AddPeerOpt. [PR 226](https://github.com/dariusc93/rust-ipfs/pull/226)
 - refactor: Simplify bitswap WantSession. [PR 234](https://github.com/dariusc93/rust-ipfs/pull/234)
 - chore: Use default handler in bitswap behaviour. [PR 235](https://github.com/dariusc93/rust-ipfs/pull/235)
+- feat: Add AddPeerOpt::{set_keepalive, keepalive, can_keep_alive). [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.

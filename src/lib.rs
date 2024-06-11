@@ -2449,6 +2449,7 @@ pub struct AddPeerOpt {
     addresses: Vec<Multiaddr>,
     condition: Option<PeerCondition>,
     dial: bool,
+    keepalive: bool,
 }
 
 impl AddPeerOpt {
@@ -2458,6 +2459,7 @@ impl AddPeerOpt {
             addresses: vec![],
             condition: None,
             dial: false,
+            keepalive: false,
         }
     }
 
@@ -2499,6 +2501,16 @@ impl AddPeerOpt {
         self.dial = dial;
         self
     }
+
+    pub fn keepalive(mut self) -> Self {
+        self.keepalive = true;
+        self
+    }
+
+    pub fn set_keepalive(mut self, keepalive: bool) -> Self {
+        self.keepalive = keepalive;
+        self
+    }
 }
 
 impl AddPeerOpt {
@@ -2508,6 +2520,10 @@ impl AddPeerOpt {
 
     pub fn addresses(&self) -> &[Multiaddr] {
         &self.addresses
+    }
+
+    pub fn can_keep_alive(&self) -> bool {
+        self.keepalive
     }
 
     pub fn to_dial_opts(&self) -> Option<DialOpts> {
