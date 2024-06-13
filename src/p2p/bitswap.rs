@@ -908,6 +908,7 @@ mod test {
                 address_book: crate::p2p::addressbook::Behaviour::with_config(
                     crate::p2p::addressbook::Config {
                         store_on_connection: true,
+                        ..Default::default()
                     },
                 ),
             })

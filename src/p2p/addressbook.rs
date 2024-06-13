@@ -1,16 +1,18 @@
+mod handler;
+
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
 
 use crate::AddPeerOpt;
+use libp2p::swarm::ConnectionClosed;
 use libp2p::{
     core::{ConnectedPoint, Endpoint},
     multiaddr::Protocol,
     swarm::{
-        self, behaviour::ConnectionEstablished, dummy::ConnectionHandler as DummyConnectionHandler,
-        AddressChange, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
-        THandlerInEvent, ToSwarm,
+        self, behaviour::ConnectionEstablished, AddressChange, ConnectionDenied, ConnectionId,
+        FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
     },
     Multiaddr, PeerId,
 };
@@ -19,12 +21,16 @@ use libp2p::{
 pub struct Config {
     /// Store peer address on an established connection
     pub store_on_connection: bool,
+    /// Keep connection alive automatically if peer is added through `Behaviour::add_address`
+    pub keep_connection_alive: bool,
 }
 
 #[derive(Default, Debug)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
+    connections: HashMap<PeerId, HashSet<ConnectionId>>,
     peer_addresses: HashMap<PeerId, HashSet<Multiaddr>>,
+    peer_keepalive: HashSet<PeerId>,
     config: Config,
 }
 
@@ -41,16 +47,22 @@ impl Behaviour {
         let peer_id = opt.peer_id();
         let addresses = opt.addresses();
 
-        debug_assert!(!addresses.is_empty());
+        if !addresses.is_empty() {
+            let addrs = self.peer_addresses.entry(*peer_id).or_default();
 
-        let addrs = self.peer_addresses.entry(*peer_id).or_default();
+            for addr in addresses {
+                addrs.insert(addr.clone());
+            }
 
-        for addr in addresses {
-            addrs.insert(addr.clone());
+            if let Some(opts) = opt.to_dial_opts() {
+                self.events.push_back(ToSwarm::Dial { opts });
+            }
         }
 
-        if let Some(opts) = opt.to_dial_opts() {
-            self.events.push_back(ToSwarm::Dial { opts });
+        if (opt.can_keep_alive() || self.config.keep_connection_alive)
+            && self.peer_addresses.contains_key(peer_id)
+        {
+            self.keep_peer_alive(peer_id);
         }
 
         true
@@ -66,13 +78,18 @@ impl Behaviour {
 
             if entry.is_empty() {
                 e.remove();
+                self.dont_keep_peer_alive(peer_id);
             }
         }
         true
     }
 
     pub fn remove_peer(&mut self, peer_id: &PeerId) -> bool {
-        self.peer_addresses.remove(peer_id).is_some()
+        let removed = self.peer_addresses.remove(peer_id).is_some();
+        if removed {
+            self.dont_keep_peer_alive(peer_id);
+        }
+        removed
     }
 
     pub fn contains(&self, peer_id: &PeerId, addr: &Multiaddr) -> bool {
@@ -92,10 +109,93 @@ impl Behaviour {
     pub fn iter(&self) -> impl Iterator<Item = (&PeerId, &HashSet<Multiaddr>)> {
         self.peer_addresses.iter()
     }
+
+    fn keep_peer_alive(&mut self, peer_id: &PeerId) {
+        self.peer_keepalive.insert(*peer_id);
+        if let Some(conns) = self.connections.get(peer_id) {
+            self.events.extend(
+                conns
+                    .iter()
+                    .copied()
+                    .map(|connection_id| ToSwarm::NotifyHandler {
+                        peer_id: *peer_id,
+                        handler: swarm::NotifyHandler::One(connection_id),
+                        event: handler::In::Protect,
+                    }),
+            )
+        }
+    }
+
+    fn dont_keep_peer_alive(&mut self, peer_id: &PeerId) {
+        self.peer_keepalive.remove(peer_id);
+        if let Some(conns) = self.connections.get(peer_id) {
+            self.events.extend(
+                conns
+                    .iter()
+                    .copied()
+                    .map(|connection_id| ToSwarm::NotifyHandler {
+                        peer_id: *peer_id,
+                        handler: swarm::NotifyHandler::One(connection_id),
+                        event: handler::In::Unprotect,
+                    }),
+            )
+        }
+    }
+
+    fn on_connection_established(
+        &mut self,
+        ConnectionEstablished {
+            peer_id,
+            connection_id,
+            endpoint,
+            ..
+        }: ConnectionEstablished,
+    ) {
+        self.connections
+            .entry(peer_id)
+            .or_default()
+            .insert(connection_id);
+
+        if !self.config.store_on_connection {
+            return;
+        }
+
+        let mut addr = match endpoint {
+            ConnectedPoint::Dialer { address, .. } => address.clone(),
+            ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
+                local_addr.clone()
+            }
+            ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
+        };
+
+        if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+            addr.pop();
+        }
+
+        self.peer_addresses.entry(peer_id).or_default().insert(addr);
+    }
+
+    fn on_connection_closed(
+        &mut self,
+        ConnectionClosed {
+            peer_id,
+            connection_id,
+            remaining_established,
+            ..
+        }: ConnectionClosed,
+    ) {
+        if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
+            let list = entry.get_mut();
+            list.remove(&connection_id);
+            if list.is_empty() && remaining_established == 0 {
+                entry.remove();
+            }
+        }
+    }
 }
 
 impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = DummyConnectionHandler;
+    type ConnectionHandler = handler::Handler;
     type ToSwarm = void::Void;
 
     fn handle_pending_outbound_connection(
@@ -112,7 +212,8 @@ impl NetworkBehaviour for Behaviour {
         let list = self
             .peer_addresses
             .get(&peer_id)
-            .map(|list| Vec::from_iter(list.clone()))
+            .cloned()
+            .map(Vec::from_iter)
             .unwrap_or_default();
 
         Ok(list)
@@ -121,21 +222,23 @@ impl NetworkBehaviour for Behaviour {
     fn handle_established_inbound_connection(
         &mut self,
         _: ConnectionId,
-        _: PeerId,
+        peer_id: PeerId,
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(DummyConnectionHandler)
+        let keepalive = self.peer_keepalive.contains(&peer_id);
+        Ok(handler::Handler::new(keepalive))
     }
 
     fn handle_established_outbound_connection(
         &mut self,
         _: ConnectionId,
-        _: PeerId,
+        peer_id: PeerId,
         _: &Multiaddr,
         _: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(DummyConnectionHandler)
+        let keepalive = self.peer_keepalive.contains(&peer_id);
+        Ok(handler::Handler::new(keepalive))
     }
 
     fn on_connection_handler_event(
@@ -181,28 +284,8 @@ impl NetworkBehaviour for Behaviour {
                     entry.remove(&old);
                 }
             }
-            FromSwarm::ConnectionEstablished(ConnectionEstablished {
-                peer_id, endpoint, ..
-            }) => {
-                if !self.config.store_on_connection {
-                    return;
-                }
-
-                let mut addr = match endpoint {
-                    ConnectedPoint::Dialer { address, .. } => address.clone(),
-                    ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
-                        local_addr.clone()
-                    }
-                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
-                };
-
-                if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
-                    addr.pop();
-                }
-
-                self.peer_addresses.entry(peer_id).or_default().insert(addr);
-            }
-            FromSwarm::ConnectionClosed(_) => {}
+            FromSwarm::ConnectionEstablished(ev) => self.on_connection_established(ev),
+            FromSwarm::ConnectionClosed(ev) => self.on_connection_closed(ev),
             FromSwarm::DialFailure(_) => {}
             FromSwarm::ListenFailure(_) => {}
             FromSwarm::NewListener(_) => {}
@@ -229,7 +312,7 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use futures::StreamExt;
+    use futures::{FutureExt, StreamExt};
     use libp2p::{
         swarm::{dial_opts::DialOpts, SwarmEvent},
         Multiaddr, PeerId, Swarm, SwarmBuilder,
@@ -305,6 +388,71 @@ mod test {
     }
 
     #[tokio::test]
+    async fn dial_and_keepalive() -> anyhow::Result<()> {
+        let (peer1, addr1, mut swarm1) = build_swarm(false).await;
+        let (peer2, addr2, mut swarm2) = build_swarm(false).await;
+        let opts_1 = AddPeerOpt::with_peer_id(peer2)
+            .add_address(addr2)
+            .keepalive();
+        swarm1.behaviour_mut().add_address(opts_1);
+
+        let opts_2 = AddPeerOpt::with_peer_id(peer1)
+            .add_address(addr1)
+            .keepalive();
+        swarm2.behaviour_mut().add_address(opts_2);
+
+        swarm1.dial(peer2)?;
+
+        let mut peer_a_connected = false;
+        let mut peer_b_connected = false;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        peer_b_connected = true;
+                    }
+                }
+                event = swarm2.select_next_some() => {
+                     if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer1);
+                        peer_a_connected = true;
+                    }
+                }
+            }
+
+            if peer_a_connected && peer_b_connected {
+                break;
+            }
+        }
+
+        let mut timer = futures_timer::Delay::new(Duration::from_secs(4)).fuse();
+
+        loop {
+            futures::select! {
+                _ = &mut timer => {
+                    break;
+                }
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionClosed { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        unreachable!("connection shouldnt have closed")
+                    }
+                }
+                event = swarm2.select_next_some() => {
+                    if let SwarmEvent::ConnectionClosed { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer1);
+                        unreachable!("connection shouldnt have closed")
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn store_address() -> anyhow::Result<()> {
         let (_, _, mut swarm1) = build_swarm(true).await;
         let (peer2, addr2, mut swarm2) = build_swarm(true).await;
@@ -352,10 +500,11 @@ mod test {
             .with_behaviour(|_| {
                 super::Behaviour::with_config(super::Config {
                     store_on_connection,
+                    ..Default::default()
                 })
             })
             .expect("")
-            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(3)))
             .build();
 
         Swarm::listen_on(&mut swarm, "/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
