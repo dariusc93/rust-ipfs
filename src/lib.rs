@@ -2449,6 +2449,7 @@ pub struct AddPeerOpt {
     addresses: Vec<Multiaddr>,
     condition: Option<PeerCondition>,
     dial: bool,
+    reconnect: bool,
     keepalive: bool,
 }
 
@@ -2460,9 +2461,11 @@ impl AddPeerOpt {
             condition: None,
             dial: false,
             keepalive: false,
+            reconnect: false,
         }
     }
 
+    /// Add an address. If the address ends with an [PeerId], it must match the id that was supplied in [AddPeerOpt::with_peer_id], otherwise it will be ignored.
     pub fn add_address(mut self, mut addr: Multiaddr) -> Self {
         if addr.is_empty() {
             return self;
@@ -2484,6 +2487,7 @@ impl AddPeerOpt {
         self
     }
 
+    /// Supply a list of addresses.
     pub fn set_addresses(mut self, addrs: Vec<Multiaddr>) -> Self {
         for addr in addrs {
             self = self.add_address(addr);
@@ -2492,16 +2496,35 @@ impl AddPeerOpt {
         self
     }
 
+    /// Signal to reconnect to peer when peer disconnects
+    ///
+    /// Note: While we will attempt to reconnect after a disconnection,
+    ///       We may eventually only allow a reconnection based on specific events
+    ///       I.e. connection idle timeout, etc
+    pub fn reconnect(mut self) -> Self {
+        self.reconnect = true;
+        self
+    }
+
+    /// Set a condition if dialing the peer. See [PeerCondition] for more information.
     pub fn set_peer_condition(mut self, condition: PeerCondition) -> Self {
         self.condition = Some(condition);
         self
     }
 
+    /// Lazily dial the peer.
+    ///
+    /// Note that if the peer is already connected or if a dialing request is already in progress, this request
+    /// will be ignored unless [`AddPeerOpt::set_peer_condition`] is used to override the default condition.
     pub fn set_dial(mut self, dial: bool) -> Self {
         self.dial = dial;
         self
     }
 
+    /// Keep connection alive.
+    ///
+    /// > **Note:**
+    /// > This only keeps the connection alive on this node. This does not stop the peer from closing the connection through their own means such*
     pub fn keepalive(mut self) -> Self {
         self.keepalive = true;
         self
@@ -2526,7 +2549,12 @@ impl AddPeerOpt {
         self.keepalive
     }
 
-    pub fn to_dial_opts(&self) -> Option<DialOpts> {
+    pub fn can_reconnect(&self) -> bool {
+        self.reconnect
+    }
+
+    /// Returns [DialOpts] if `AddPeerOpt::dial` is true.
+    pub(crate) fn to_dial_opts(&self) -> Option<DialOpts> {
         if !self.dial {
             return None;
         }

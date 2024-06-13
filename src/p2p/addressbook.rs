@@ -1,10 +1,13 @@
 mod handler;
+mod peering;
 
+use futures::stream::SelectAll;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
 
+use crate::p2p::addressbook::peering::Peering;
 use crate::AddPeerOpt;
 use libp2p::swarm::ConnectionClosed;
 use libp2p::{
@@ -25,12 +28,13 @@ pub struct Config {
     pub keep_connection_alive: bool,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<ConnectionId>>,
     peer_addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     peer_keepalive: HashSet<PeerId>,
+    peering: SelectAll<Peering>,
     config: Config,
 }
 
@@ -63,6 +67,20 @@ impl Behaviour {
             && self.peer_addresses.contains_key(peer_id)
         {
             self.keep_peer_alive(peer_id);
+        }
+
+        if opt.can_reconnect() {
+            if !self
+                .peering
+                .iter()
+                .any(|peering| peering.peer_id() == peer_id)
+            {
+                let mut peering = Peering::new(*peer_id, None);
+                if self.connections.contains_key(peer_id) {
+                    peering.connected();
+                }
+                self.peering.push(peering);
+            }
         }
 
         true
