@@ -69,18 +69,15 @@ impl Behaviour {
             self.keep_peer_alive(peer_id);
         }
 
-        if opt.can_reconnect() {
-            if !self
+        if opt.can_reconnect() && !self
                 .peering
                 .iter()
-                .any(|peering| peering.peer_id() == peer_id)
-            {
-                let mut peering = Peering::new(*peer_id, None);
-                if self.connections.contains_key(peer_id) {
-                    peering.connected();
-                }
-                self.peering.push(peering);
+                .any(|peering| peering.peer_id() == peer_id) {
+            let mut peering = Peering::new(*peer_id, None);
+            if self.connections.contains_key(peer_id) {
+                peering.connected();
             }
+            self.peering.push(peering);
         }
 
         true
@@ -106,6 +103,7 @@ impl Behaviour {
         let removed = self.peer_addresses.remove(peer_id).is_some();
         if removed {
             self.dont_keep_peer_alive(peer_id);
+            
         }
         removed
     }
@@ -206,6 +204,9 @@ impl Behaviour {
             let list = entry.get_mut();
             list.remove(&connection_id);
             if list.is_empty() && remaining_established == 0 {
+                if let Some(peering) = self.peering.iter_mut().find(|peering| peering.peer_id() == &peer_id) {
+                    peering.disconnected();
+                }
                 entry.remove();
             }
         }

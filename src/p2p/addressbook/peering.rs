@@ -16,6 +16,7 @@ pub struct Peering {
     delay: Option<Delay>,
     next_backoff: Duration,
     connected: bool,
+    disable: bool,
 }
 
 impl Peering {
@@ -26,6 +27,7 @@ impl Peering {
             delay: Some(Delay::new(duration)),
             next_backoff: duration,
             connected: false,
+            disable: false,
         }
     }
 
@@ -42,6 +44,14 @@ impl Peering {
         let backoff = self.next_backoff();
         self.connected = false;
         self.delay.replace(Delay::new(backoff));
+    }
+
+    pub fn enable(&mut self) {
+        self.disable = false;
+    }
+
+    pub fn disable(&mut self) {
+        self.disable = true;
     }
 
     pub fn connection_failed(&mut self) {
@@ -69,6 +79,9 @@ impl Peering {
 impl Stream for Peering {
     type Item = PeerId;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.disable {
+            return Poll::Ready(None);
+        }
         let Some(timer) = self.delay.as_mut() else {
             return Poll::Pending;
         };
