@@ -376,16 +376,17 @@ impl Stream for WantSession {
                     };
                 }
                 WantSessionState::PutBlock { from_peer_id, fut } => {
+                    let peer_id = *from_peer_id;
                     match ready!(fut.poll_unpin(cx)) {
                         Ok(cid) => {
-                            tracing::info!(session = %self.cid, block = %cid, name = "want_session", "block stored in block store");
+                            tracing::info!(session = %self.cid, %peer_id, block = %cid, name = "want_session", "block stored in block store");
                             self.state = WantSessionState::Complete;
                             return Poll::Ready(Some(WantSessionEvent::BlockStored));
                         }
                         Err(e) => {
-                            tracing::error!(session = %cid, error = %e, name = "want_session", "error storing block in store");
+                            tracing::error!(session = %cid, %peer_id, error = %e, name = "want_session", "error storing block in store");
                             this.state = WantSessionState::NextBlock {
-                                previous_peer_id: Some(*from_peer_id),
+                                previous_peer_id: Some(peer_id),
                             };
                         }
                     }
