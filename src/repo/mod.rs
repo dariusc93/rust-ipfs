@@ -341,66 +341,6 @@ pub(crate) struct RepoInner {
     pub(crate) gclock: tokio::sync::RwLock<()>,
 }
 
-#[cfg(feature = "beetle_bitswap")]
-#[async_trait]
-impl beetle_bitswap_next::Store for Repo {
-    async fn get_size(&self, cid: &Cid) -> anyhow::Result<usize> {
-        self.get_block_now(cid)
-            .await?
-            .ok_or(anyhow::anyhow!("Block doesnt exist"))
-            .map(|block| block.data().len())
-    }
-    async fn get(&self, cid: &Cid) -> anyhow::Result<beetle_bitswap_next::Block> {
-        let block = self
-            .get_block_now(cid)
-            .await?
-            .ok_or(anyhow::anyhow!("Block doesnt exist"))?;
-        Ok(beetle_bitswap_next::Block {
-            cid: *block.cid(),
-            data: bytes::Bytes::copy_from_slice(block.data()),
-        })
-    }
-    async fn has(&self, cid: &Cid) -> anyhow::Result<bool> {
-        self.contains(cid).await
-    }
-}
-
-#[cfg(feature = "libp2p_bitswap")]
-#[async_trait]
-impl libp2p_bitswap_next::BitswapStore for Repo {
-    type Params = libipld::DefaultParams;
-
-    async fn contains(&mut self, cid: &Cid) -> anyhow::Result<bool> {
-        self.inner.block_store.contains(cid).await
-    }
-
-    async fn get(&mut self, cid: &Cid) -> anyhow::Result<Option<Vec<u8>>> {
-        self.inner
-            .block_store
-            .get(cid)
-            .await
-            .map(|block| block.map(|block| block.data().to_vec()))
-    }
-
-    async fn insert(&mut self, block: &libipld::Block<Self::Params>) -> anyhow::Result<()> {
-        self.put_block(block.clone()).await.map(|_| ())
-    }
-
-    async fn missing_blocks(&mut self, cid: &Cid) -> anyhow::Result<Vec<Cid>> {
-        let mut stack = vec![*cid];
-        let mut missing = vec![];
-        while let Some(cid) = stack.pop() {
-            if let Some(data) = self.get(&cid).await? {
-                let block = Block::new_unchecked(cid, data);
-                block.references(&mut stack)?;
-            } else {
-                missing.push(cid);
-            }
-        }
-        Ok(missing)
-    }
-}
-
 /// Events used to communicate to the swarm on repo changes.
 #[derive(Debug)]
 pub enum RepoEvent {

@@ -10,16 +10,11 @@ description = "IPFS node implementation"
 version = "0.11.20"
 
 [features]
-
 default = []
 
 experimental_stream = ["dep:libp2p-stream"]
 
 webrtc_transport = ["dep:libp2p-webrtc"]
-
-beetle_bitswap = ["dep:beetle-bitswap-next"]
-libp2p_bitswap = ["dep:libp2p-bitswap-next"]
-libp2p_bitswap_compat = ["libp2p_bitswap", "libp2p-bitswap-next?/compat"]
 
 sled_data_store = ["dep:sled"]
 redb_data_store = ["dep:redb"]
@@ -32,7 +27,6 @@ async-stream = { version = "0.3" }
 async-trait = { version = "0.1" }
 asynchronous-codec = "0.7.0"
 base64 = { default-features = false, features = ["alloc"], version = "0.22" }
-beetle-bitswap-next = { version = "0.5.1", path = "packages/beetle-bitswap-next" }
 byteorder = { version = "1" }
 bytes = "1"
 chrono = { version = "0.4.35" }
@@ -50,7 +44,6 @@ indexmap = "2.2.0"
 libipld = { version = "0.16", features = ["serde-codec"] }
 libp2p = { version = "0.53" }
 libp2p-allow-block-list = "0.3"
-libp2p-bitswap-next = { version = "0.26.3", path = "packages/libp2p-bitswap-next" }
 libp2p-relay-manager = { version = "0.2.4", path = "packages/libp2p-relay-manager" }
 libp2p-stream = { version = "0.1.0-alpha.1" }
 libp2p-webrtc = { version = "=0.7.1-alpha", features = ["pem"] }
@@ -100,7 +93,6 @@ async-stream.workspace = true
 async-trait.workspace = true
 asynchronous-codec.workspace = true
 base64 = { workspace = true }
-beetle-bitswap-next = { workspace = true, optional = true }
 byteorder = { workspace = true }
 bytes = { workspace = true }
 chrono.workspace = true
@@ -111,7 +103,6 @@ hkdf.workspace = true
 indexmap.workspace = true
 libipld.workspace = true
 libp2p-allow-block-list.workspace = true
-libp2p-bitswap-next = { workspace = true, optional = true }
 libp2p-relay-manager = { workspace = true }
 libp2p-stream = { workspace = true, optional = true }
 p256.workspace = true
@@ -138,7 +129,6 @@ zeroize.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures-timer.workspace = true
-beetle-bitswap-next = { workspace = true, optional = true }
 fs2.workspace = true
 hickory-resolver.workspace = true
 libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "ed25519", "secp256k1", "ecdsa", "rsa", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", ], workspace = true }
