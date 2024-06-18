@@ -1630,9 +1630,9 @@ impl Ipfs {
     #[cfg(feature = "experimental_stream")]
     pub async fn new_stream(
         &self,
-        protocol: impl Into<StreamProtocolRef>,
+        protocol: impl IntoStreamProtocol,
     ) -> Result<libp2p_stream::IncomingStreams, Error> {
-        let protocol: StreamProtocol = protocol.into().try_into()?;
+        let protocol: StreamProtocol = protocol.into_protocol()?;
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -1651,9 +1651,9 @@ impl Ipfs {
     pub async fn open_stream(
         &self,
         peer_id: PeerId,
-        protocol: impl Into<StreamProtocolRef>,
+        protocol: impl IntoStreamProtocol,
     ) -> Result<libp2p::Stream, Error> {
-        let protocol: StreamProtocol = protocol.into().try_into()?;
+        let protocol: StreamProtocol = protocol.into_protocol()?;
         async move {
             let mut control = self.stream_control().await?;
             let stream = control
@@ -2357,41 +2357,25 @@ impl Ipfs {
     }
 }
 
-pub enum StreamProtocolRef {
-    Static(&'static str),
-    Owned(String),
-    Direct(StreamProtocol),
+pub trait IntoStreamProtocol {
+    fn into_protocol(self) -> std::io::Result<StreamProtocol>;
 }
 
-impl From<&'static str> for StreamProtocolRef {
-    fn from(protocol: &'static str) -> Self {
-        StreamProtocolRef::Static(protocol)
+impl IntoStreamProtocol for StreamProtocol {
+    fn into_protocol(self) -> std::io::Result<StreamProtocol> {
+        Ok(self)
     }
 }
 
-impl From<String> for StreamProtocolRef {
-    fn from(protocol: String) -> Self {
-        StreamProtocolRef::Owned(protocol)
+impl IntoStreamProtocol for String {
+    fn into_protocol(self) -> std::io::Result<StreamProtocol> {
+        StreamProtocol::try_from_owned(self).map_err(std::io::Error::other)
     }
 }
 
-impl From<StreamProtocol> for StreamProtocolRef {
-    fn from(protocol: StreamProtocol) -> Self {
-        StreamProtocolRef::Direct(protocol)
-    }
-}
-
-impl TryFrom<StreamProtocolRef> for StreamProtocol {
-    type Error = std::io::Error;
-    fn try_from(protocl_ref: StreamProtocolRef) -> Result<Self, Self::Error> {
-        let protocol = match protocl_ref {
-            StreamProtocolRef::Direct(protocol) => protocol,
-            StreamProtocolRef::Owned(protocol) => StreamProtocol::try_from_owned(protocol)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
-            StreamProtocolRef::Static(protocol) => StreamProtocol::new(protocol),
-        };
-
-        Ok(protocol)
+impl IntoStreamProtocol for &'static str {
+    fn into_protocol(self) -> std::io::Result<StreamProtocol> {
+        Ok(StreamProtocol::new(self))
     }
 }
 
