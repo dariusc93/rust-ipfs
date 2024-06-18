@@ -5,6 +5,7 @@
 - refactor: Simplify bitswap WantSession. [PR 234](https://github.com/dariusc93/rust-ipfs/pull/234)
 - chore: Use default handler in bitswap behaviour. [PR 235](https://github.com/dariusc93/rust-ipfs/pull/235)
 - feat: Add AddPeerOpt::{set_keepalive, keepalive, can_keep_alive). [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- feat: Add IntoStreamProtocol, replacing StreamProtocolRef. [PR 244](https://github.com/dariusc93/rust-ipfs/pull/244)
 
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.
@@ -14,7 +15,7 @@
 
 # 0.11.18
 - chore: Use simple_x509 for certificate generation. [PR 219](https://github.com/dariusc93/rust-ipfs/pull/219)
-- feat: Use tls along side noise. [PR 212](https://github.com/dariusc93/rust-ipfs/pull/212
+- feat: Use tls along side noise. [PR 212](https://github.com/dariusc93/rust-ipfs/pull/212)
 - feat: Add webtransport support for wasm target. [PR 220](https://github.com/dariusc93/rust-ipfs/pull/220)
 
 # 0.11.17
