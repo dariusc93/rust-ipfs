@@ -6,7 +6,7 @@
 - chore: Use default handler in bitswap behaviour. [PR 235](https://github.com/dariusc93/rust-ipfs/pull/235)
 - feat: Add AddPeerOpt::{set_keepalive, keepalive, can_keep_alive). [PR 240](https://github.com/dariusc93/rust-ipfs/pull/240)
 - feat: Add IntoStreamProtocol, replacing StreamProtocolRef. [PR 244](https://github.com/dariusc93/rust-ipfs/pull/244)
-- feat: Add `set_connection_limits` and change behaviour order. [PR 246](https://github.com/dariusc93/rust-ipfs/pull/246)
+- feat: Add `UninitializedIpfs::set_connection_limits` and change behaviour order. [PR 246](https://github.com/dariusc93/rust-ipfs/pull/246)
 
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.
