@@ -10,10 +10,22 @@ async fn main() -> anyhow::Result<()> {
     use rand::RngCore;
     use rust_ipfs::{p2p::MultiaddrExt, Ipfs, Keypair, UninitializedIpfsNoop as UninitializedIpfs};
 
+    fn generate_ed25519(secret_key_seed: u8) -> Keypair {
+        let mut bytes = [0u8; 32];
+        bytes[0] = secret_key_seed;
+        Keypair::ed25519_from_bytes(bytes).expect("Keypair is valid")
+    }
+
     #[derive(Debug, Parser)]
     #[clap(name = "stream")]
     struct Opt {
         address: Option<Multiaddr>,
+        #[clap(long)]
+        seed: u8,
+        #[clap(long)]
+        listen_addr: Vec<Multiaddr>,
+        #[clap(long)]
+        max_size: usize,
     }
 
     const ECHO_PROTOCOL: StreamProtocol = StreamProtocol::new("/ipfs/echo/0.0.0");
@@ -21,13 +33,13 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     tracing_subscriber::fmt::init();
 
-    let keypair = Keypair::generate_ed25519();
+    let keypair = generate_ed25519(opt.seed);
 
     println!("peer id: {}", keypair.public().to_peer_id());
     // Initialize the repo and start a daemon
     let ipfs = UninitializedIpfs::new()
         .set_keypair(&keypair)
-        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .set_listening_addrs(opt.listen_addr)
         .with_streams()
         .start()
         .await?;
@@ -37,10 +49,10 @@ async fn main() -> anyhow::Result<()> {
     println!("{:?}", ipfs.listening_addresses().await?);
 
     let mut incoming_streams = ipfs.new_stream(ECHO_PROTOCOL).await?;
-
+    let max_bytes: usize = opt.max_size;
     tokio::spawn(async move {
         while let Some((peer, stream)) = incoming_streams.next().await {
-            match echo(stream).await {
+            match echo(stream, max_bytes).await {
                 Ok(n) => {
                     tracing::info!(%peer, "Echoed {n} bytes!");
                 }
@@ -52,6 +64,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+
+
     if let Some(address) = opt.address {
         let Some(peer_id) = address.peer_id() else {
             anyhow::bail!("Provided address does not end in `/p2p`");
@@ -59,10 +73,10 @@ async fn main() -> anyhow::Result<()> {
 
         ipfs.connect(address).await?;
         let ipfs = ipfs.clone();
-        tokio::spawn(connection_handler(peer_id, ipfs));
+        tokio::spawn(connection_handler(peer_id, ipfs, max_bytes));
     }
 
-    async fn connection_handler(peer: PeerId, ipfs: Ipfs) {
+    async fn connection_handler(peer: PeerId, ipfs: Ipfs, max_bytes: usize) {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
             let stream = match ipfs.open_stream(peer, ECHO_PROTOCOL).await {
@@ -73,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
 
-            if let Err(e) = send(stream).await {
+            if let Err(e) = send(stream, max_bytes).await {
                 tracing::warn!(%peer, "Echo protocol failed: {e}");
                 continue;
             }
@@ -82,10 +96,15 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    async fn echo(mut stream: rust_ipfs::libp2p::Stream) -> std::io::Result<usize> {
+    async fn echo(
+        mut stream: rust_ipfs::libp2p::Stream,
+        max_bytes: usize,
+    ) -> std::io::Result<usize> {
         let mut total = 0;
 
-        let mut buf = [0u8; 100];
+        let mut buf = vec![0u8; max_bytes];
+
+        // let (mut reader, mut writer) = stream.split();
 
         loop {
             let read = stream.read(&mut buf).await?;
@@ -98,8 +117,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    async fn send(mut stream: rust_ipfs::libp2p::Stream) -> std::io::Result<()> {
-        let num_bytes = rand::random::<usize>() % 1000;
+    async fn send(mut stream: rust_ipfs::libp2p::Stream, max_bytes: usize) -> std::io::Result<()> {
+        // let (mut reader, mut writer) = stream.split();
+        let num_bytes = max_bytes;
 
         let mut bytes = vec![0; num_bytes];
         rand::thread_rng().fill_bytes(&mut bytes);

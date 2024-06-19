@@ -10,7 +10,7 @@ description = "IPFS node implementation"
 version = "0.11.20"
 
 [features]
-default = []
+default = ["experimental_stream"]
 
 experimental_stream = ["dep:libp2p-stream"]
 
