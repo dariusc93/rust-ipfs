@@ -44,28 +44,39 @@ where
     C: NetworkBehaviour,
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
-    #[cfg(not(target_arch = "wasm32"))]
-    pub mdns: Toggle<Mdns>,
-    pub bitswap: Toggle<super::bitswap::Behaviour>,
-    pub kademlia: Toggle<Kademlia<MemoryStore>>,
-    pub ping: Toggle<Ping>,
-    pub identify: Toggle<Identify>,
-    pub pubsub: Toggle<GossipsubStream>,
-    pub autonat: Toggle<autonat::Behaviour>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
+    // connection management
+    pub connection_limits: Toggle<libp2p_connection_limits::Behaviour>,
     pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
+    pub addressbook: addressbook::Behaviour,
+
+    // networking
     pub relay: Toggle<Relay>,
     pub relay_client: Toggle<RelayClient>,
     pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
+    pub dcutr: Toggle<Dcutr>,
+
+    // discovery
     pub rendezvous_client: Toggle<libp2p::rendezvous::client::Behaviour>,
     pub rendezvous_server: Toggle<libp2p::rendezvous::server::Behaviour>,
-    #[cfg(feature = "experimental_stream")]
-    pub stream: Toggle<libp2p_stream::Behaviour>,
-    pub dcutr: Toggle<Dcutr>,
-    pub addressbook: addressbook::Behaviour,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub mdns: Toggle<Mdns>,
+    pub kademlia: Toggle<Kademlia<MemoryStore>>,
+
+    pub identify: Toggle<Identify>,
     pub peerbook: peerbook::Behaviour,
     pub protocol: protocol::Behaviour,
+
+    // messaging
+    pub pubsub: Toggle<GossipsubStream>,
+    pub bitswap: Toggle<super::bitswap::Behaviour>,
+    pub ping: Toggle<Ping>,
+    #[cfg(feature = "experimental_stream")]
+    pub stream: Toggle<libp2p_stream::Behaviour>,
+
+    pub autonat: Toggle<autonat::Behaviour>,
+
     pub custom: Toggle<C>,
 }
 
@@ -489,8 +500,16 @@ where
         #[cfg(feature = "experimental_stream")]
         let stream = protocols.streams.then(libp2p_stream::Behaviour::new).into();
 
+        let connection_limits = Toggle::from(
+            options
+                .connection_limits
+                .clone()
+                .map(libp2p_connection_limits::Behaviour::new),
+        );
+
         Ok((
             Behaviour {
+                connection_limits,
                 #[cfg(not(target_arch = "wasm32"))]
                 mdns,
                 kademlia,

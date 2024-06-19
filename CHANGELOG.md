@@ -4,8 +4,9 @@
 - feat: Add {Into}AddPeerOpt. [PR 226](https://github.com/dariusc93/rust-ipfs/pull/226)
 - refactor: Simplify bitswap WantSession. [PR 234](https://github.com/dariusc93/rust-ipfs/pull/234)
 - chore: Use default handler in bitswap behaviour. [PR 235](https://github.com/dariusc93/rust-ipfs/pull/235)
-- feat: Add AddPeerOpt::{set_keepalive, keepalive, can_keep_alive). [PR 240](https://github.com/dariusc93/rust-ipfs/pull/20)
+- feat: Add AddPeerOpt::{set_keepalive, keepalive, can_keep_alive). [PR 240](https://github.com/dariusc93/rust-ipfs/pull/240)
 - feat: Add IntoStreamProtocol, replacing StreamProtocolRef. [PR 244](https://github.com/dariusc93/rust-ipfs/pull/244)
+- feat: Add `set_connection_limits` and change behaviour order. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
 
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.
