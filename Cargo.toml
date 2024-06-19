@@ -44,6 +44,7 @@ indexmap = "2.2.0"
 libipld = { version = "0.16", features = ["serde-codec"] }
 libp2p = { version = "0.53" }
 libp2p-allow-block-list = "0.3"
+libp2p-connection-limits = "0.3"
 libp2p-relay-manager = { version = "0.2.4", path = "packages/libp2p-relay-manager" }
 libp2p-stream = { version = "0.1.0-alpha.1" }
 libp2p-webrtc = { version = "=0.7.1-alpha", features = ["pem"] }
@@ -103,6 +104,7 @@ hkdf.workspace = true
 indexmap.workspace = true
 libipld.workspace = true
 libp2p-allow-block-list.workspace = true
+libp2p-connection-limits.workspace = true
 libp2p-relay-manager = { workspace = true }
 libp2p-stream = { workspace = true, optional = true }
 p256.workspace = true

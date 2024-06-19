@@ -4745,6 +4745,7 @@ dependencies = [
  "libipld",
  "libp2p",
  "libp2p-allow-block-list",
+ "libp2p-connection-limits",
  "libp2p-relay-manager",
  "libp2p-stream",
  "libp2p-webrtc",

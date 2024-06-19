@@ -123,6 +123,8 @@ use libp2p::{
     StreamProtocol,
 };
 
+pub use libp2p_connection_limits::ConnectionLimits;
+
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[allow(dead_code)]
@@ -232,6 +234,8 @@ pub struct IpfsOptions {
     /// default is useful when running multiple nodes.
     pub span: Option<Span>,
 
+    pub connection_limits: Option<ConnectionLimits>,
+
     pub(crate) protocols: Libp2pProtocol,
 }
 
@@ -292,6 +296,7 @@ impl Default for IpfsOptions {
             swarm_configuration: SwarmConfig::default(),
             span: None,
             protocols: Default::default(),
+            connection_limits: None,
         }
     }
 }
@@ -567,6 +572,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         if !self.options.listening_addrs.contains(&addr) {
             self.options.listening_addrs.push(addr)
         }
+        self
+    }
+
+    /// Set a connection limit
+    pub fn set_connection_limits(mut self, connection_limits: ConnectionLimits) -> Self {
+        self.options.connection_limits.replace(connection_limits);
         self
     }
 
