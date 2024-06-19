@@ -45,8 +45,9 @@ where
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
     // connection management
-    pub connection_limits: Toggle<libp2p_connection_limits::Behaviour>,
+    //TODO: Maybe have a optiont to enable a whitelist?
     pub block_list: libp2p_allow_block_list::Behaviour<BlockedPeers>,
+    pub connection_limits: Toggle<libp2p_connection_limits::Behaviour>,
     pub addressbook: addressbook::Behaviour,
 
     // networking
@@ -64,11 +65,8 @@ where
     pub mdns: Toggle<Mdns>,
     pub kademlia: Toggle<Kademlia<MemoryStore>>,
 
-    pub identify: Toggle<Identify>,
-    pub peerbook: peerbook::Behaviour,
-    pub protocol: protocol::Behaviour,
-
     // messaging
+    pub identify: Toggle<Identify>,
     pub pubsub: Toggle<GossipsubStream>,
     pub bitswap: Toggle<super::bitswap::Behaviour>,
     pub ping: Toggle<Ping>,
@@ -77,7 +75,12 @@ where
 
     pub autonat: Toggle<autonat::Behaviour>,
 
+    // custom behaviours
     pub custom: Toggle<C>,
+
+    // misc
+    pub peerbook: peerbook::Behaviour,
+    pub protocol: protocol::Behaviour,
 }
 
 /// Represents the result of a Kademlia query.
