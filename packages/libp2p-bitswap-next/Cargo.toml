@@ -15,7 +15,7 @@ compat = ["quick-protobuf", "quick-protobuf-codec", "asynchronous-codec"]
 async-trait = "0.1.80"
 fnv = "1.0.7"
 futures = "0.3.29"
-lazy_static = "1.4.0"
+lazy_static = "1.5.0"
 libipld = { version = "0.16.0", default-features = false }
 libp2p = { version = "0.53", features = ["request-response"] }
 prometheus = "0.13.4"
