@@ -178,7 +178,7 @@ impl Default for SwarmConfig {
 #[allow(deprecated)]
 //TODO: use libp2p::SwarmBuilder
 /// Creates a new IPFS swarm.
-pub async fn create_swarm<C>(
+pub fn create_swarm<C>(
     keypair: &Keypair,
     options: &IpfsOptions,
     repo: &Repo,
@@ -197,8 +197,7 @@ where
 
     let idle = options.connection_idle;
 
-    let (behaviour, relay_transport) =
-        behaviour::Behaviour::new(&keypair, options, repo, custom).await?;
+    let (behaviour, relay_transport) = behaviour::Behaviour::new(&keypair, options, repo, custom)?;
 
     // Set up an encrypted TCP transport over the Yamux. If relay transport is supplied, that will be apart
     let transport = match custom_transport {

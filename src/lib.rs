@@ -973,9 +973,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             &ipfs.repo,
             exec_span,
             (custom_behaviour, custom_transport),
-        )
-        .instrument(tracing::trace_span!(parent: &init_span, "swarm"))
-        .await?;
+        )?;
 
         let IpfsOptions {
             listening_addrs, ..
