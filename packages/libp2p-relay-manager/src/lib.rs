@@ -3,13 +3,10 @@ mod handler;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     error::Error,
-    hash::Hash,
     task::{Context, Poll},
     time::Duration,
 };
 
-use futures::StreamExt;
-use futures_timer::Delay;
 use libp2p::{
     core::Endpoint,
     multiaddr::Protocol,
@@ -41,8 +38,6 @@ pub enum Event {
     FindRelays {
         /// Namespace of where to locate possible relay candidates
         namespace: Option<String>,
-        /// Channel to send peer ids of the candidates
-        channel: futures::channel::mpsc::Sender<HashSet<PeerId>>,
     },
 }
 
@@ -73,43 +68,15 @@ impl PartialEq for Connection {
 
 impl Eq for Connection {}
 
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct PendingReservation {
-    peer_id: PeerId,
-    connection_id: ConnectionId,
-    listener_id: ListenerId,
-}
-
-impl Hash for PendingReservation {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.listener_id.hash(state)
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-enum ReconnectState {
-    Idle {
-        backoff: bool,
-        delay: Delay,
-    },
-    Pending {
-        connection_id: ConnectionId,
-        backoff: bool,
-    },
-}
-
 #[derive(Default, Debug)]
 #[allow(dead_code)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
+
+    static_relays: HashMap<PeerId, HashSet<Multiaddr>>,
+
     relays: HashMap<PeerId, Vec<Multiaddr>>,
     connections: HashMap<PeerId, Vec<Connection>>,
-
-    reconnect: HashMap<PeerId, ReconnectState>,
-
-    discovery_channel: HashMap<u64, futures::channel::mpsc::Receiver<HashSet<PeerId>>>,
 
     pending_connection: HashSet<ConnectionId>,
     pending_selection: HashSet<PeerId>,
@@ -137,12 +104,74 @@ impl Behaviour {
             config,
             events: VecDeque::default(),
             relays: HashMap::default(),
+            static_relays: Default::default(),
             connections: HashMap::default(),
-            reconnect: HashMap::default(),
-            discovery_channel: HashMap::default(),
             pending_connection: HashSet::default(),
             pending_selection: HashSet::default(),
         }
+    }
+
+    pub fn add_static_relay(
+        &mut self,
+        peer_id: PeerId,
+        mut addr: Multiaddr,
+    ) -> std::io::Result<()> {
+        if addr.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "address provided was empty",
+            ));
+        }
+        if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+            addr.pop();
+        }
+
+        if matches!(addr.iter().last(), Some(Protocol::P2pCircuit)) {
+            addr.pop();
+        }
+
+        let list = self.static_relays.entry(peer_id).or_default();
+
+        if list.contains(&addr) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "address provided already exist",
+            ));
+        }
+
+        list.insert(addr);
+
+        Ok(())
+    }
+
+    pub fn remove_static_relay(
+        &mut self,
+        peer_id: PeerId,
+        addr: Option<Multiaddr>,
+    ) -> std::io::Result<()> {
+        if !self.static_relays.contains_key(&peer_id) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no static relay exist for the specificied peer",
+            ));
+        }
+
+        match addr {
+            Some(addr) => {
+                if let Entry::Occupied(mut entry) = self.static_relays.entry(peer_id) {
+                    let list = entry.get_mut();
+                    list.remove(&addr);
+                    if list.is_empty() {
+                        entry.remove();
+                    }
+                }
+            }
+            None => {
+                self.static_relays.remove(&peer_id);
+            }
+        };
+
+        Ok(())
     }
 
     pub fn add_address(&mut self, peer_id: PeerId, addr: Multiaddr) {
@@ -195,8 +224,21 @@ impl Behaviour {
         }
     }
 
-    pub fn list_relays(&self) -> impl Iterator<Item = (&PeerId, &Vec<Multiaddr>)> {
-        self.relays.iter()
+    pub fn list_relays(&self) -> Vec<Multiaddr> {
+        self.static_relays
+            .iter()
+            .map(|(peer_id, addrs)| {
+                let peer_id = *peer_id;
+                addrs
+                    .iter()
+                    .map(|addr| match addr.clone().with_p2p(peer_id) {
+                        Ok(addr) => addr,
+                        Err(addr) => addr,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect()
     }
 
     pub fn list_active_relays(&self) -> Vec<(PeerId, Vec<Multiaddr>)> {
@@ -653,19 +695,6 @@ impl Behaviour {
             libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
         };
 
-        match self.relays.entry(peer_id) {
-            Entry::Occupied(entry) => {
-                let mut addr = addr.clone();
-                addr.pop();
-
-                if !entry.get().contains(&addr) {
-                    return;
-                }
-            }
-            Entry::Vacant(_) if self.config.auto_connect => {}
-            _ => return,
-        };
-
         let connection = Connection {
             peer_id,
             id: connection_id,
@@ -856,23 +885,11 @@ impl NetworkBehaviour for Behaviour {
 
     fn poll(
         &mut self,
-        cx: &mut Context<'_>,
+        _cx: &mut Context<'_>,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
-
-        self.discovery_channel
-            .retain(|_, rx| match rx.poll_next_unpin(cx) {
-                Poll::Ready(Some(list)) => {
-                    for peer_id in list {
-                        self.relays.entry(peer_id).or_default();
-                    }
-                    false
-                }
-                Poll::Ready(None) => false,
-                Poll::Pending => true,
-            });
 
         Poll::Pending
     }
