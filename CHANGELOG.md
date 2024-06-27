@@ -8,7 +8,8 @@
 - feat: Add IntoStreamProtocol, replacing StreamProtocolRef. [PR 244](https://github.com/dariusc93/rust-ipfs/pull/244)
 - feat: Add `UninitializedIpfs::set_connection_limits` and change behaviour order. [PR 246](https://github.com/dariusc93/rust-ipfs/pull/246)
 - refactor: Remove redundant async signature. [PR 247](https://github.com/dariusc93/rust-ipfs/pull/247)
-- refactor: Add `Serialize` for {Ipfs, IpldDag)::put_dag. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- refactor: Add `Serialize` for {Ipfs, IpldDag)::put_dag. [PR 249](https://github.com/dariusc93/rust-ipfs/pull/249)
+
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.
 
