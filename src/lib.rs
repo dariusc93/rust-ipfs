@@ -124,6 +124,7 @@ use libp2p::{
 };
 
 pub use libp2p_connection_limits::ConnectionLimits;
+use serde::Serialize;
 
 pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -1242,7 +1243,7 @@ impl Ipfs {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub fn put_dag(&self, ipld: Ipld) -> DagPut {
+    pub fn put_dag<S: Serialize>(&self, ipld: S) -> DagPut {
         self.dag().put_dag(ipld).span(self.span.clone())
     }
 
