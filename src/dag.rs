@@ -22,6 +22,7 @@ use rust_unixfs::{
     resolve, MaybeResolved,
 };
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::iter::Peekable;
@@ -201,8 +202,8 @@ impl IpldDag {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub fn put_dag(&self, ipld: Ipld) -> DagPut {
-        self.put().ipld(ipld)
+    pub fn put_dag<S: Serialize>(&self, ipld: S) -> DagPut {
+        self.put().serialize(ipld)
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
@@ -598,9 +599,8 @@ impl DagPut {
     }
 
     /// Set a ipld object
-    pub fn ipld(mut self, data: Ipld) -> Self {
-        self.data = Box::new(move || Ok(data));
-        self
+    pub fn ipld(self, data: Ipld) -> Self {
+        self.serialize(data)
     }
 
     /// Set a serde-compatible object
