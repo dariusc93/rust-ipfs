@@ -122,7 +122,7 @@ impl Stream for UnixfsLs {
                     let stream = async_stream::stream! {
 
                         let resolved = match dag
-                            .resolve_with_session(None, path, true, &providers, local_only, timeout)
+                            ._resolve(path, true, &providers, local_only, timeout)
                             .await {
                                 Ok((resolved, _)) => resolved,
                                 Err(e) => {
@@ -147,7 +147,7 @@ impl Stream for UnixfsLs {
                         let mut root_directory = String::new();
                         while walker.should_continue() {
                             let (next, _) = walker.pending_links();
-                            let block = match repo.get_block_with_session(None, next, &providers, local_only, timeout).await {
+                            let block = match repo._get_block(next, &providers, local_only, timeout).await {
                                 Ok(block) => block,
                                 Err(error) => {
                                     yield Entry::Error { error };

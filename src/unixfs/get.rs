@@ -130,7 +130,7 @@ impl Stream for UnixfsGet {
                             };
 
                         let block  = match dag
-                            .resolve_with_session(None, path.clone(), true, &providers, local_only, timeout)
+                            ._resolve(path.clone(), true, &providers, local_only, timeout)
                             .await
                             .map_err(TraversalFailed::Resolving)
                             .and_then(|(resolved, _)| resolved.into_unixfs_block().map_err(TraversalFailed::Path)) {
@@ -148,7 +148,7 @@ impl Stream for UnixfsGet {
 
                         while walker.should_continue() {
                             let (next, _) = walker.pending_links();
-                            let block = match repo.get_block_with_session(None, next, &providers, local_only, timeout).await {
+                            let block = match repo._get_block(next, &providers, local_only, timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
                                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };

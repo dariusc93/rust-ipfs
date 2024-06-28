@@ -227,9 +227,8 @@ impl IpldDag {
         DagGet::new(self.clone())
     }
 
-    pub(crate) async fn get_with_session(
+    pub(crate) async fn _get(
         &self,
-        session: Option<u64>,
         path: IpfsPath,
         providers: &[PeerId],
         local_only: bool,
@@ -256,9 +255,7 @@ impl IpldDag {
         let mut iter = resolved_path.iter().peekable();
 
         let (node, _) = match self
-            .resolve0(
-                session, cid, &mut iter, true, providers, local_only, timeout,
-            )
+            .resolve0(cid, &mut iter, true, providers, local_only, timeout)
             .await
         {
             Ok(t) => t,
@@ -289,13 +286,12 @@ impl IpldDag {
         providers: &[PeerId],
         local_only: bool,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
-        self.resolve_with_session(None, path, follow_links, providers, local_only, None)
+        self._resolve(path, follow_links, providers, local_only, None)
             .await
     }
 
-    pub(crate) async fn resolve_with_session(
+    pub(crate) async fn _resolve(
         &self,
-        session: Option<u64>,
         path: IpfsPath,
         follow_links: bool,
         providers: &[PeerId],
@@ -323,15 +319,7 @@ impl IpldDag {
         let (node, matched_segments) = {
             let mut iter = resolved_path.iter().peekable();
             match self
-                .resolve0(
-                    session,
-                    cid,
-                    &mut iter,
-                    follow_links,
-                    providers,
-                    local_only,
-                    timeout,
-                )
+                .resolve0(cid, &mut iter, follow_links, providers, local_only, timeout)
                 .await
             {
                 Ok(t) => t,
@@ -354,7 +342,6 @@ impl IpldDag {
     #[allow(clippy::too_many_arguments)]
     async fn resolve0<'a>(
         &self,
-        session: Option<u64>,
         cid: &Cid,
         segments: &mut Peekable<impl Iterator<Item = &'a str>>,
         follow_links: bool,
@@ -372,7 +359,7 @@ impl IpldDag {
         loop {
             let block = match self
                 .repo
-                .get_block_with_session(session, &current, providers, local_only, timeout)
+                ._get_block(&current, providers, local_only, timeout)
                 .await
             {
                 Ok(block) => block,
@@ -526,7 +513,7 @@ impl std::future::IntoFuture for DagGet {
         async move {
             let path = self.path.ok_or(ResolveError::PathNotProvided)?;
             self.dag_ipld
-                .get_with_session(None, path, &self.providers, self.local, self.timeout)
+                ._get(path, &self.providers, self.local, self.timeout)
                 .await
         }
         .instrument(span)

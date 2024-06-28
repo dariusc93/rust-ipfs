@@ -224,7 +224,7 @@ where
             let borrowed = repo.borrow();
 
             let block = if download_blocks {
-                match borrowed.get_block_with_session(None, &cid, &providers, !download_blocks, timeout).await {
+                match borrowed._get_block(&cid, &providers, !download_blocks, timeout).await {
                     Ok(block) => block,
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);

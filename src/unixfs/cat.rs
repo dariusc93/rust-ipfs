@@ -165,7 +165,7 @@ impl Stream for UnixfsCat {
                         // metadata. To get to it the user needs to create a Visitor over the first block.
                         let block = match starting_point {
                             StartingPoint::Left(path) => match dag
-                                .resolve_with_session(None, path.clone(), true, &providers, local_only, timeout)
+                                ._resolve(path.clone(), true, &providers, local_only, timeout)
                                 .await
                                 .map_err(TraversalFailed::Resolving)
                                 .and_then(|(resolved, _)| {
@@ -228,7 +228,7 @@ impl Stream for UnixfsCat {
                             let (next, _) = visit.pending_links();
 
                             let borrow = &repo;
-                            let block = match borrow.get_block_with_session(None, next, &providers, local_only, timeout).await {
+                            let block = match borrow._get_block(next, &providers, local_only, timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
                                     yield Err(TraversalFailed::Loading(*next, e));
