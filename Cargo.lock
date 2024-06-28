@@ -4807,7 +4807,7 @@ dependencies = [
 name = "rust-unixfs"
 version = "0.4.1"
 dependencies = [
- "criterion 0.4.0",
+ "criterion 0.5.1",
  "either",
  "filetime",
  "hex-literal",
