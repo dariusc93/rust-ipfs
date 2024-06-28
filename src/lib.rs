@@ -75,7 +75,7 @@ use std::{
     fmt,
     ops::{Deref, DerefMut},
     path::Path,
-    sync::{atomic::AtomicU64, Arc},
+    sync::Arc,
     time::Duration,
 };
 
@@ -125,8 +125,6 @@ use libp2p::{
 
 pub use libp2p_connection_limits::ConnectionLimits;
 use serde::Serialize;
-
-pub(crate) static BITSWAP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[allow(dead_code)]
 #[deprecated(note = "Use `StoreageType` instead")]

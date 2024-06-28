@@ -443,7 +443,6 @@ impl IpldDag {
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagGet {
     dag_ipld: IpldDag,
-    session: Option<u64>,
     path: Option<IpfsPath>,
     providers: Vec<PeerId>,
     local: bool,
@@ -455,20 +454,12 @@ impl DagGet {
     pub fn new(dag: IpldDag) -> Self {
         Self {
             dag_ipld: dag,
-            session: None,
             path: None,
             providers: vec![],
             local: false,
             timeout: None,
             span: None,
         }
-    }
-
-    /// Bitswap session
-    #[allow(dead_code)]
-    pub(crate) fn session(mut self, session: u64) -> Self {
-        self.session = Some(session);
-        self
     }
 
     /// Path to object
@@ -535,13 +526,7 @@ impl std::future::IntoFuture for DagGet {
         async move {
             let path = self.path.ok_or(ResolveError::PathNotProvided)?;
             self.dag_ipld
-                .get_with_session(
-                    self.session,
-                    path,
-                    &self.providers,
-                    self.local,
-                    self.timeout,
-                )
+                .get_with_session(None, path, &self.providers, self.local, self.timeout)
                 .await
         }
         .instrument(span)

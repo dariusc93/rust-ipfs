@@ -9,7 +9,7 @@ use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
 use std::task::Poll;
-use std::{borrow::Borrow, time::Duration};
+use std::time::Duration;
 use tracing::{Instrument, Span};
 
 use super::TraversalFailed;
@@ -139,20 +139,9 @@ impl Stream for UnixfsCat {
                         return Poll::Ready(None);
                     };
 
-                    let (repo, dag, session) = match core {
-                        Either::Left(ipfs) => (
-                            ipfs.repo().clone(),
-                            ipfs.dag(),
-                            Some(
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                            ),
-                        ),
-                        Either::Right(repo) => {
-                            let session = repo.is_online().then(|| {
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                            });
-                            (repo.clone(), IpldDag::from(repo.clone()), session)
-                        }
+                    let (repo, dag) = match core {
+                        Either::Left(ipfs) => (ipfs.repo().clone(), ipfs.dag()),
+                        Either::Right(repo) => (repo.clone(), IpldDag::from(repo.clone())),
                     };
 
                     let mut visit = IdleFileVisit::default();
@@ -176,7 +165,7 @@ impl Stream for UnixfsCat {
                         // metadata. To get to it the user needs to create a Visitor over the first block.
                         let block = match starting_point {
                             StartingPoint::Left(path) => match dag
-                                .resolve_with_session(session, path.clone(), true, &providers, local_only, timeout)
+                                .resolve_with_session(None, path.clone(), true, &providers, local_only, timeout)
                                 .await
                                 .map_err(TraversalFailed::Resolving)
                                 .and_then(|(resolved, _)| {
@@ -238,8 +227,8 @@ impl Stream for UnixfsCat {
                             // going. Not that we have any "operation" concept of the Want yet.
                             let (next, _) = visit.pending_links();
 
-                            let borrow = repo.borrow();
-                            let block = match borrow.get_block_with_session(session, next, &providers, local_only, timeout).await {
+                            let borrow = &repo;
+                            let block = match borrow.get_block_with_session(None, next, &providers, local_only, timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
                                     yield Err(TraversalFailed::Loading(*next, e));

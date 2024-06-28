@@ -100,21 +100,9 @@ impl Stream for UnixfsGet {
         loop {
             match &mut self.stream {
                 StatusStreamState::None => {
-                    let (repo, dag, session) = match self.core.take().expect("ipfs or repo is used")
-                    {
-                        Either::Left(ipfs) => (
-                            ipfs.repo().clone(),
-                            ipfs.dag(),
-                            Some(
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                            ),
-                        ),
-                        Either::Right(repo) => {
-                            let session = repo.is_online().then(|| {
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                            });
-                            (repo.clone(), IpldDag::from(repo.clone()), session)
-                        }
+                    let (repo, dag) = match self.core.take().expect("ipfs or repo is used") {
+                        Either::Left(ipfs) => (ipfs.repo().clone(), ipfs.dag()),
+                        Either::Right(repo) => (repo.clone(), IpldDag::from(repo.clone())),
                     };
 
                     let path = self.path.take().expect("starting point exist");
@@ -142,7 +130,7 @@ impl Stream for UnixfsGet {
                             };
 
                         let block  = match dag
-                            .resolve_with_session(session, path.clone(), true, &providers, local_only, timeout)
+                            .resolve_with_session(None, path.clone(), true, &providers, local_only, timeout)
                             .await
                             .map_err(TraversalFailed::Resolving)
                             .and_then(|(resolved, _)| resolved.into_unixfs_block().map_err(TraversalFailed::Path)) {
@@ -160,7 +148,7 @@ impl Stream for UnixfsGet {
 
                         while walker.should_continue() {
                             let (next, _) = walker.pending_links();
-                            let block = match repo.get_block_with_session(session, next, &providers, local_only, timeout).await {
+                            let block = match repo.get_block_with_session(None, next, &providers, local_only, timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
                                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };

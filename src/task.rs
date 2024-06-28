@@ -60,15 +60,12 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
     pub(crate) listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
-    pub(crate) bitswap_provider_stream:
-        HashMap<QueryId, futures::channel::mpsc::Sender<Result<HashSet<PeerId>, String>>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
-    pub(crate) bitswap_sessions: HashMap<i64, libipld::Cid>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub(crate) timer: TaskTimer,
     pub(crate) local_external_addr: bool,
@@ -96,10 +93,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             from_facade,
             swarm,
             provider_stream: HashMap::new(),
-            bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
-            bitswap_sessions: Default::default(),
             pubsub_event_stream: Default::default(),
             kad_subscriptions: Default::default(),
             repo: repo.clone(),
@@ -434,9 +429,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 if step.last {
                                     if let Some(tx) = self.provider_stream.remove(&id) {
                                         tx.close_channel();
-                                    }
-                                    if let Some(tx) = self.bitswap_provider_stream.remove(&id) {
-                                        drop(tx);
                                     }
                                 }
                             }
