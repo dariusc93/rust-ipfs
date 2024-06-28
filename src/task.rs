@@ -12,13 +12,12 @@ use futures::{
 use crate::TSwarmEvent;
 use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 
-use wasm_timer::Interval;
-
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     time::Duration,
 };
 
+use futures_timer::Delay;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -116,12 +115,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 }
 
 pub(crate) struct TaskTimer {
-    pub(crate) event_cleanup: Interval,
+    pub(crate) event_cleanup: Delay,
 }
 
 impl Default for TaskTimer {
     fn default() -> Self {
-        let event_cleanup = Interval::new(Duration::from_secs(60));
+        let event_cleanup = Delay::new(Duration::from_secs(60));
 
         Self { event_cleanup }
     }
@@ -153,8 +152,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
             }
         }
 
-        if self.timer.event_cleanup.poll_next_unpin(cx).is_ready() {
+        if self.timer.event_cleanup.poll_unpin(cx).is_ready() {
             self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+            self.timer.event_cleanup.reset(Duration::from_secs(60));
         }
 
         Poll::Pending
@@ -163,7 +163,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self) {
-        let mut session_cleanup = futures_timer::Delay::new(Duration::from_secs(5 * 60));
         let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
 
         loop {
@@ -184,9 +183,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 _ = &mut event_cleanup => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
                     event_cleanup.reset(Duration::from_secs(60));
-                }
-                _ = &mut session_cleanup => {
-                    session_cleanup.reset(Duration::from_secs(5 * 60));
                 }
             }
         }

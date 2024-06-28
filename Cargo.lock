@@ -4782,7 +4782,6 @@ dependencies = [
  "unsigned-varint 0.7.2",
  "void",
  "wasm-bindgen-futures",
- "wasm-timer",
  "web-time",
  "zeroize",
 ]
