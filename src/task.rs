@@ -421,25 +421,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 key: _,
                                 providers,
                             })) => {
-                                if !providers.is_empty() {
-                                    #[cfg(feature = "beetle_bitswap")]
-                                    {
-                                        if let Entry::Occupied(entry) =
-                                            self.bitswap_provider_stream.entry(id)
-                                        {
-                                            let providers = providers.clone();
-                                            let mut tx = entry.get().clone();
-                                            crate::rt::spawn(async move {
-                                                let _ = tx.send(Ok(providers)).await;
-                                            });
-                                        }
-                                    }
-                                }
                                 if let Entry::Occupied(entry) = self.provider_stream.entry(id) {
-                                    if !providers.is_empty() {
-                                        for provider in providers {
-                                            let _ = entry.get().unbounded_send(provider);
-                                        }
+                                    let tx = entry.get();
+                                    for provider in providers {
+                                        let _ = tx.unbounded_send(provider);
                                     }
                                 }
                             }
