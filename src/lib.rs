@@ -389,8 +389,8 @@ enum IpfsEvent {
         bool,
         Channel<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
     ),
-    GetProviders(Cid, Channel<Option<BoxStream<'static, PeerId>>>),
-    Provide(Cid, Channel<ReceiverChannel<KadResult>>),
+    GetProviders(Key, Channel<Option<BoxStream<'static, PeerId>>>),
+    Provide(Key, Channel<ReceiverChannel<KadResult>>),
     DhtMode(DhtMode, Channel<()>),
     DhtGet(Key, Channel<BoxStream<'static, Record>>),
     DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
@@ -1824,12 +1824,21 @@ impl Ipfs {
     ///
     /// Returns a list of peers found providing the Cid.
     pub async fn get_providers(&self, cid: Cid) -> Result<BoxStream<'static, PeerId>, Error> {
+        let key = cid.hash().to_bytes();
+        self.dht_get_providers(key).await
+    }
+
+    /// Performs a DHT lookup for providers of a value to the given key.
+    pub async fn dht_get_providers(
+        &self,
+        key: impl Into<Key>,
+    ) -> Result<BoxStream<'static, PeerId>, Error> {
+        let key = key.into();
         async move {
             let (tx, rx) = oneshot_channel();
-
             self.to_task
                 .clone()
-                .send(IpfsEvent::GetProviders(cid, tx))
+                .send(IpfsEvent::GetProviders(key, tx))
                 .await?;
 
             rx.await??.ok_or_else(|| anyhow!("Provider already exist"))
@@ -1851,12 +1860,21 @@ impl Ipfs {
             ));
         }
 
+        self.dht_provide(cid.hash().to_bytes()).await
+    }
+
+    /// Establishes the node as a provider of a given Key: it publishes a provider
+    /// record with the given key and the node's PeerId to the peers closest to the key. The
+    /// publication of provider records is periodically repeated as per the interval specified in
+    /// `libp2p`'s  `KademliaConfig`.
+    pub async fn dht_provide(&self, key: impl Into<Key>) -> Result<(), Error> {
+        let key = key.into();
         let kad_result = async move {
             let (tx, rx) = oneshot_channel();
 
             self.to_task
                 .clone()
-                .send(IpfsEvent::Provide(cid, tx))
+                .send(IpfsEvent::Provide(key, tx))
                 .await?;
 
             rx.await?

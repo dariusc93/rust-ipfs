@@ -33,10 +33,7 @@ use crate::{
 pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 
 use libipld::multibase::{self, Base};
-pub use libp2p::{
-    self, core::transport::ListenerId, kad::RecordKey as Key, swarm::NetworkBehaviour, Multiaddr,
-    PeerId,
-};
+pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
 
 use libp2p::{
     autonat,
@@ -424,25 +421,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 key: _,
                                 providers,
                             })) => {
-                                if !providers.is_empty() {
-                                    #[cfg(feature = "beetle_bitswap")]
-                                    {
-                                        if let Entry::Occupied(entry) =
-                                            self.bitswap_provider_stream.entry(id)
-                                        {
-                                            let providers = providers.clone();
-                                            let mut tx = entry.get().clone();
-                                            crate::rt::spawn(async move {
-                                                let _ = tx.send(Ok(providers)).await;
-                                            });
-                                        }
-                                    }
-                                }
                                 if let Entry::Occupied(entry) = self.provider_stream.entry(id) {
-                                    if !providers.is_empty() {
-                                        for provider in providers {
-                                            let _ = entry.get().unbounded_send(provider);
-                                        }
+                                    let tx = entry.get();
+                                    for provider in providers {
+                                        let _ = tx.unbounded_send(provider);
                                     }
                                 }
                             }
@@ -1247,13 +1229,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 };
                 let _ = ret.send(Ok(addrs));
             }
-            IpfsEvent::GetProviders(cid, ret) => {
+            IpfsEvent::GetProviders(key, ret) => {
                 let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() else {
                     let _ = ret.send(Err(anyhow!("kad protocol is disabled")));
                     return;
                 };
 
-                let key = Key::from(cid.hash().to_bytes());
                 let id = kad.get_providers(key);
 
                 let (tx, mut rx) = futures::channel::mpsc::unbounded();
@@ -1269,13 +1250,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                 let _ = ret.send(Ok(Some(stream.boxed())));
             }
-            IpfsEvent::Provide(cid, ret) => {
+            IpfsEvent::Provide(key, ret) => {
                 let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() else {
                     let _ = ret.send(Err(anyhow!("kad protocol is disabled")));
                     return;
                 };
-
-                let key = Key::from(cid.hash().to_bytes());
 
                 let future = match kad.start_providing(key) {
                     Ok(id) => {
