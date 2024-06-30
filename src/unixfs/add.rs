@@ -1,7 +1,7 @@
-use std::{
-    path::{Path, PathBuf},
-    task::Poll,
-};
+use std::task::Poll;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
 
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
@@ -22,6 +22,7 @@ use crate::{Ipfs, IpfsPath};
 use super::{StatusStreamState, UnixfsStatus};
 
 pub enum AddOpt {
+    #[cfg(not(target_arch = "wasm32"))]
     File(PathBuf),
     Stream {
         name: Option<String>,
@@ -30,12 +31,14 @@ pub enum AddOpt {
     },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<PathBuf> for AddOpt {
     fn from(path: PathBuf) -> Self {
         AddOpt::File(path)
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&Path> for AddOpt {
     fn from(path: &Path) -> Self {
         AddOpt::File(path.to_path_buf())
@@ -148,11 +151,6 @@ impl Stream for UnixfsAdd {
                                         return;
                                     }
                                 },
-                            #[cfg(target_arch = "wasm32")]
-                            AddOpt::File(_) => {
-                                yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
-                                return;
-                            },
                             AddOpt::Stream { name, total, stream } => (name, total, stream),
                         };
 

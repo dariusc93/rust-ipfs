@@ -114,7 +114,6 @@ impl Stream for UnixfsGet {
                     #[cfg(not(target_arch = "wasm32"))]
                     let stream = async_stream::stream! {
 
-
                         let mut cache = None;
                         let mut total_size = None;
                         let mut written = 0;
@@ -209,7 +208,6 @@ impl Stream for UnixfsGet {
                     let stream = async_stream::stream! {
                         _ = repo;
                         _ = dag;
-                        _ = session;
                         _ = path;
                         _ = providers;
                         _ = local_only;

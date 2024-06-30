@@ -3,6 +3,7 @@
 //! Adding files and directory structures is supported but not exposed via an API. See examples and
 //! `ipfs-http`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use anyhow::Error;
@@ -34,29 +35,34 @@ pub struct IpfsUnixfs {
 }
 
 pub enum AddOpt {
+    #[cfg(not(target_arch = "wasm32"))]
     Path(PathBuf),
     Stream(BoxStream<'static, std::io::Result<Bytes>>),
     StreamWithName(String, BoxStream<'static, std::io::Result<Bytes>>),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&str> for AddOpt {
     fn from(value: &str) -> Self {
         AddOpt::Path(PathBuf::from(value))
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<String> for AddOpt {
     fn from(value: String) -> Self {
         AddOpt::Path(PathBuf::from(value))
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&std::path::Path> for AddOpt {
     fn from(path: &std::path::Path) -> Self {
         AddOpt::Path(path.to_path_buf())
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<PathBuf> for AddOpt {
     fn from(path: PathBuf) -> Self {
         AddOpt::Path(path)
@@ -146,6 +152,7 @@ impl IpfsUnixfs {
     pub fn add<I: Into<AddOpt>>(&self, item: I) -> UnixfsAdd {
         let item = item.into();
         match item {
+            #[cfg(not(target_arch = "wasm32"))]
             AddOpt::Path(path) => UnixfsAdd::with_ipfs(&self.ipfs, path),
             AddOpt::Stream(stream) => UnixfsAdd::with_ipfs(
                 &self.ipfs,
