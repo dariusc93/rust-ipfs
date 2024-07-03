@@ -180,11 +180,7 @@ impl Stream for UnixfsCat {
                         // Start the visit from the root block. We need to move the both components as Options into the
                         // stream as we can't yet return them from this Future context.
                         let (visit, bytes) = visit.start(block.data()).map(|(bytes, _, _, visit)| {
-                            let bytes = if !bytes.is_empty() {
-                                Some(Bytes::copy_from_slice(bytes))
-                            } else {
-                                None
-                            };
+                            let bytes = (!bytes.is_empty()).then(|| Bytes::copy_from_slice(bytes));
                             (visit, bytes)
                         }).map_err(|e| {
                             TraversalFailed::Walking(*block.cid(), e)
