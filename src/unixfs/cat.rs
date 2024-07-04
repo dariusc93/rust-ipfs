@@ -20,7 +20,7 @@ use super::TraversalFailed;
 /// be helpful in some contexts, like the http.
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
-#[must_use = "do nothing unless you `.await` or poll the stream"]
+#[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsCat {
     core: Option<Either<Ipfs, Repo>>,
     span: Span,

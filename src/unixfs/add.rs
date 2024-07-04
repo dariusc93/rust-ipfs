@@ -45,7 +45,7 @@ impl From<&Path> for AddOpt {
     }
 }
 
-#[must_use = "do nothing unless you `.await` or poll the stream"]
+#[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsAdd {
     core: Option<Either<Ipfs, Repo>>,
     opt: Option<AddOpt>,
