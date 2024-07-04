@@ -83,7 +83,6 @@ tokio-util = { default-features = false, version = "0.7" }
 unsigned-varint = { version = "0.7.1", features = ["asynchronous_codec"] }
 void = { default-features = false, version = "1" }
 wasm-bindgen-futures = { version = "0.4" }
-wasm-timer = "0.2"
 web-time = "1.1.0"
 zeroize = "1"
 
@@ -125,7 +124,6 @@ tracing = { default-features = false, features = ["log"], workspace = true }
 tracing-futures = { workspace = true }
 unsigned-varint.workspace = true
 void = { default-features = false, workspace = true }
-wasm-timer.workspace = true
 web-time.workspace = true
 zeroize.workspace = true
 

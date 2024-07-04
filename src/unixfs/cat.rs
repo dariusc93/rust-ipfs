@@ -1,5 +1,5 @@
 use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
-use async_stream::stream;
+use async_stream::try_stream;
 use bytes::Bytes;
 use either::Either;
 use futures::future::BoxFuture;
@@ -9,7 +9,7 @@ use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
 use std::task::Poll;
-use std::{borrow::Borrow, time::Duration};
+use std::time::Duration;
 use tracing::{Instrument, Span};
 
 use super::TraversalFailed;
@@ -20,7 +20,7 @@ use super::TraversalFailed;
 /// be helpful in some contexts, like the http.
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
-#[must_use = "do nothing unless you `.await` or poll the stream"]
+#[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsCat {
     core: Option<Either<Ipfs, Repo>>,
     span: Span,
@@ -139,20 +139,9 @@ impl Stream for UnixfsCat {
                         return Poll::Ready(None);
                     };
 
-                    let (repo, dag, session) = match core {
-                        Either::Left(ipfs) => (
-                            ipfs.repo().clone(),
-                            ipfs.dag(),
-                            Some(
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                            ),
-                        ),
-                        Either::Right(repo) => {
-                            let session = repo.is_online().then(|| {
-                                crate::BITSWAP_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                            });
-                            (repo.clone(), IpldDag::from(repo.clone()), session)
-                        }
+                    let (repo, dag) = match core {
+                        Either::Left(ipfs) => (ipfs.repo().clone(), ipfs.dag()),
+                        Either::Right(repo) => (repo.clone(), IpldDag::from(repo.clone())),
                     };
 
                     let mut visit = IdleFileVisit::default();
@@ -170,59 +159,46 @@ impl Stream for UnixfsCat {
 
                     // using async_stream here at least to get on faster; writing custom streams is not too easy
                     // but this might be easy enough to write open.
-                    let stream = stream! {
+                    let stream = try_stream! {
 
                         // Get the root block to start the traversal. The stream does not expose any of the file
                         // metadata. To get to it the user needs to create a Visitor over the first block.
                         let block = match starting_point {
-                            StartingPoint::Left(path) => match dag
-                                .resolve_with_session(session, path.clone(), true, &providers, local_only, timeout)
+                            StartingPoint::Left(path) => dag
+                                ._resolve(path.clone(), true, &providers, local_only, timeout)
                                 .await
                                 .map_err(TraversalFailed::Resolving)
                                 .and_then(|(resolved, _)| {
                                     resolved.into_unixfs_block().map_err(TraversalFailed::Path)
-                                }) {
-                                    Ok(block) => block,
-                                    Err(e) => {
-                                        yield Err(e);
-                                        return;
-                                    }
-                                },
+                                })?,
                             StartingPoint::Right(block) => block,
                         };
 
                         let mut cache = None;
-                        // Start the visit from the root block. We need to move the both components as Options into the
-                        // stream as we can't yet return them from this Future context.
-                        let (visit, bytes) = match visit.start(block.data()) {
-                            Ok((bytes, _, _, visit)) => {
-                                let bytes = if !bytes.is_empty() {
-                                    Some(Bytes::copy_from_slice(bytes))
-                                } else {
-                                    None
-                                };
-
-                                (visit, bytes)
-                            }
-                            Err(e) => {
-                                yield Err(TraversalFailed::Walking(*block.cid(), e));
-                                return;
-                            }
-                        };
-
                         let mut size = 0;
 
-                        if let Some(bytes) = bytes {
-                            size += bytes.len();
-                            if let Some(length) = length {
-                                if size > length {
-                                    yield Err(TraversalFailed::MaxLengthExceeded {
-                                        size, length
-                                    });
-                                    return;
+                        // Start the visit from the root block. We need to move the both components as Options into the
+                        // stream as we can't yet return them from this Future context.
+                        let (visit, bytes) = visit.start(block.data()).map(|(bytes, _, _, visit)| {
+                            let bytes = (!bytes.is_empty()).then(|| Bytes::copy_from_slice(bytes));
+                            (visit, bytes)
+                        }).map_err(|e| {
+                            TraversalFailed::Walking(*block.cid(), e)
+                        }).and_then(|(visit, bytes)| {
+                            if let Some(bytes) = &bytes {
+                                size += bytes.len();
+                                if let Some(length) = length {
+                                    if size > length {
+                                        return Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
+                                    }
                                 }
                             }
-                            yield Ok(bytes);
+                            Ok::<_, TraversalFailed>((visit, bytes))
+                        })?;
+
+
+                        if let Some(bytes) = bytes {
+                            yield bytes;
                         }
 
                         let mut visit = match visit {
@@ -238,42 +214,30 @@ impl Stream for UnixfsCat {
                             // going. Not that we have any "operation" concept of the Want yet.
                             let (next, _) = visit.pending_links();
 
-                            let borrow = repo.borrow();
-                            let block = match borrow.get_block_with_session(session, next, &providers, local_only, timeout).await {
-                                Ok(block) => block,
-                                Err(e) => {
-                                    yield Err(TraversalFailed::Loading(*next, e));
-                                    return;
-                                },
-                            };
+                            let borrow = &repo;
+                            let block = borrow._get_block(next, &providers, local_only, timeout).await.map_err(|e| TraversalFailed::Loading(*next, e))?;
 
-                            match visit.continue_walk(block.data(), &mut cache) {
-                                Ok((bytes, next_visit)) => {
-                                    size += bytes.len();
+                            let (bytes, next_visit) = visit.continue_walk(block.data(), &mut cache).map_err(|e| TraversalFailed::Walking(*block.cid(), e))?;
 
-                                    if let Some(length) = length {
-                                        if size > length {
-                                            yield Err(TraversalFailed::MaxLengthExceeded {
-                                                size, length
-                                            });
-                                            return;
-                                        }
-                                    }
+                            size += bytes.len();
 
-                                    if !bytes.is_empty() {
-                                        yield Ok(Bytes::copy_from_slice(bytes));
-                                    }
-
-                                    match next_visit {
-                                        Some(v) => visit = v,
-                                        None => return,
-                                    }
-                                }
-                                Err(e) => {
-                                    yield Err(TraversalFailed::Walking(*block.cid(), e));
+                            if let Some(length) = length {
+                                if size > length {
+                                    let fn_err = || Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
+                                    fn_err()?;
                                     return;
                                 }
                             }
+
+                            if !bytes.is_empty() {
+                                yield Bytes::copy_from_slice(bytes);
+                            }
+
+                            match next_visit {
+                                Some(v) => visit = v,
+                                None => return,
+                            }
+
                         }
                     }.boxed();
 

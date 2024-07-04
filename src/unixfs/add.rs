@@ -1,7 +1,7 @@
-use std::{
-    path::{Path, PathBuf},
-    task::Poll,
-};
+use std::task::Poll;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
 
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
@@ -19,30 +19,33 @@ use tracing::{Instrument, Span};
 
 use crate::{Ipfs, IpfsPath};
 
-use super::{StatusStreamState, UnixfsStatus};
+use super::UnixfsStatus;
 
 pub enum AddOpt {
+    #[cfg(not(target_arch = "wasm32"))]
     File(PathBuf),
     Stream {
         name: Option<String>,
         total: Option<usize>,
-        stream: BoxStream<'static, std::result::Result<Bytes, std::io::Error>>,
+        stream: BoxStream<'static, Result<Bytes, std::io::Error>>,
     },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<PathBuf> for AddOpt {
     fn from(path: PathBuf) -> Self {
         AddOpt::File(path)
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&Path> for AddOpt {
     fn from(path: &Path) -> Self {
         AddOpt::File(path.to_path_buf())
     }
 }
 
-#[must_use = "do nothing unless you `.await` or poll the stream"]
+#[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsAdd {
     core: Option<Either<Ipfs, Repo>>,
     opt: Option<AddOpt>,
@@ -51,7 +54,7 @@ pub struct UnixfsAdd {
     pin: bool,
     provide: bool,
     wrap: bool,
-    stream: StatusStreamState,
+    stream: Option<BoxStream<'static, UnixfsStatus>>,
 }
 
 impl UnixfsAdd {
@@ -73,7 +76,7 @@ impl UnixfsAdd {
             pin: true,
             provide: false,
             wrap: false,
-            stream: StatusStreamState::None,
+            stream: None,
         }
     }
 
@@ -111,7 +114,7 @@ impl Stream for UnixfsAdd {
     ) -> std::task::Poll<Option<Self::Item>> {
         loop {
             match &mut self.stream {
-                StatusStreamState::None => {
+                None => {
                     let (ipfs, repo) = match self.core.take().expect("ipfs or repo is used") {
                         Either::Left(ipfs) => {
                             let repo = ipfs.repo().clone();
@@ -148,11 +151,6 @@ impl Stream for UnixfsAdd {
                                         return;
                                     }
                                 },
-                            #[cfg(target_arch = "wasm32")]
-                            AddOpt::File(_) => {
-                                yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
-                                return;
-                            },
                             AddOpt::Stream { name, total, stream } => (name, total, stream),
                         };
 
@@ -287,29 +285,24 @@ impl Stream for UnixfsAdd {
                         yield UnixfsStatus::CompletedStatus { path, written, total_size }
                     };
 
-                    self.stream = StatusStreamState::Pending {
-                        stream: stream.boxed(),
-                    };
+                    self.stream = Some(stream.boxed());
                 }
-                StatusStreamState::Pending { stream } => {
-                    match futures::ready!(stream.poll_next_unpin(cx)) {
-                        Some(item) => {
-                            if matches!(
-                                item,
-                                UnixfsStatus::FailedStatus { .. }
-                                    | UnixfsStatus::CompletedStatus { .. }
-                            ) {
-                                self.stream = StatusStreamState::Done;
-                            }
-                            return Poll::Ready(Some(item));
+                Some(stream) => match futures::ready!(stream.poll_next_unpin(cx)) {
+                    Some(item) => {
+                        if matches!(
+                            item,
+                            UnixfsStatus::FailedStatus { .. }
+                                | UnixfsStatus::CompletedStatus { .. }
+                        ) {
+                            self.stream.take();
                         }
-                        None => {
-                            self.stream = StatusStreamState::Done;
-                            return Poll::Ready(None);
-                        }
+                        return Poll::Ready(Some(item));
                     }
-                }
-                StatusStreamState::Done => return Poll::Ready(None),
+                    None => {
+                        self.stream.take();
+                        return Poll::Ready(None);
+                    }
+                },
             }
         }
     }
@@ -341,6 +334,6 @@ impl std::future::IntoFuture for UnixfsAdd {
 
 impl FusedStream for UnixfsAdd {
     fn is_terminated(&self) -> bool {
-        matches!(self.stream, StatusStreamState::Done) && self.core.is_none()
+        self.stream.is_none() && self.core.is_none()
     }
 }

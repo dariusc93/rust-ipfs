@@ -345,7 +345,7 @@ pub(crate) struct RepoInner {
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Option<u64>, Vec<Cid>, Vec<PeerId>),
+    WantBlock(Vec<Cid>, Vec<PeerId>),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
@@ -616,8 +616,7 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
     ) -> Result<Block, Error> {
-        self.get_block_with_session(None, cid, peers, local_only, None)
-            .await
+        self._get_block(cid, peers, local_only, None).await
     }
 
     /// Retrives a set of blocks from the block store, or starts fetching them from the network and awaits
@@ -629,8 +628,7 @@ impl Repo {
         peers: &[PeerId],
         local_only: bool,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
-        self.get_blocks_with_session(None, cids, peers, local_only, None)
-            .await
+        self._get_blocks(cids, peers, local_only, None).await
     }
 
     /// Get the size of listed blocks
@@ -645,9 +643,8 @@ impl Repo {
         self.inner.block_store.total_size().await
     }
 
-    pub(crate) async fn get_blocks_with_session(
+    pub(crate) async fn _get_blocks(
         &self,
-        session: impl Into<Option<u64>>,
         cids: &[Cid],
         peers: &[PeerId],
         local_only: bool,
@@ -713,29 +710,22 @@ impl Repo {
         }
 
         events
-            .send(RepoEvent::WantBlock(
-                session.into(),
-                missing,
-                peers.to_vec(),
-            ))
+            .send(RepoEvent::WantBlock(missing, peers.to_vec()))
             .await
             .ok();
 
         Ok(blocks.boxed())
     }
 
-    pub(crate) async fn get_block_with_session(
+    pub(crate) async fn _get_block(
         &self,
-        session: impl Into<Option<u64>>,
         cid: &Cid,
         peers: &[PeerId],
         local_only: bool,
         timeout: impl Into<Option<Duration>>,
     ) -> Result<Block, Error> {
         let cids = vec![*cid];
-        let mut blocks = self
-            .get_blocks_with_session(session, &cids, peers, local_only, timeout)
-            .await?;
+        let mut blocks = self._get_blocks(&cids, peers, local_only, timeout).await?;
 
         blocks
             .next()
@@ -1124,9 +1114,7 @@ impl std::future::IntoFuture for RepoFetch {
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo
-                .get_block_with_session(None, &cid, &providers, false, timeout)
-                .await?;
+            let block = repo._get_block(&cid, &providers, false, timeout).await?;
 
             if !recursive {
                 return Ok(());
@@ -1255,9 +1243,7 @@ impl std::future::IntoFuture for RepoInsertPin {
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo
-                .get_block_with_session(None, &cid, &providers, local, timeout)
-                .await?;
+            let block = repo._get_block(&cid, &providers, local, timeout).await?;
 
             if !recursive {
                 repo.insert_direct_pin(&cid).await?

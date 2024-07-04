@@ -13,7 +13,7 @@ default = ["filetime"]
 
 [dependencies]
 libipld = "0.16"
-either = { default-features = false, version = "1.8" }
+either = { default-features = false, version = "1.13" }
 filetime = { optional = true, version = "0.2" }
 quick-protobuf = { default-features = false, features = [
     "std",
@@ -25,7 +25,7 @@ hex-literal = { default-features = false, version = "0.4" }
 libc = { default-features = false, version = "0.2" }
 multibase = { default-features = false, version = "0.9" }
 tar = { default-features = false, version = "0.4" }
-criterion = { default-features = false, version = "0.4" }
+criterion = { default-features = false, version = "0.5" }
 
 [[bench]]
 name = "ingest-tar"

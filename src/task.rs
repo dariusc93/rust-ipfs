@@ -12,13 +12,12 @@ use futures::{
 use crate::TSwarmEvent;
 use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 
-use wasm_timer::Interval;
-
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     time::Duration,
 };
 
+use futures_timer::Delay;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -33,10 +32,7 @@ use crate::{
 pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 
 use libipld::multibase::{self, Base};
-pub use libp2p::{
-    self, core::transport::ListenerId, kad::RecordKey as Key, swarm::NetworkBehaviour, Multiaddr,
-    PeerId,
-};
+pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
 
 use libp2p::{
     autonat,
@@ -63,15 +59,12 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
     pub(crate) listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
-    pub(crate) bitswap_provider_stream:
-        HashMap<QueryId, futures::channel::mpsc::Sender<Result<HashSet<PeerId>, String>>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
     pub(crate) repo: Repo,
     pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub(crate) bootstraps: HashSet<Multiaddr>,
     pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
-    pub(crate) bitswap_sessions: HashMap<i64, libipld::Cid>,
     pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub(crate) timer: TaskTimer,
     pub(crate) local_external_addr: bool,
@@ -99,10 +92,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             from_facade,
             swarm,
             provider_stream: HashMap::new(),
-            bitswap_provider_stream: Default::default(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
-            bitswap_sessions: Default::default(),
             pubsub_event_stream: Default::default(),
             kad_subscriptions: Default::default(),
             repo: repo.clone(),
@@ -124,12 +115,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 }
 
 pub(crate) struct TaskTimer {
-    pub(crate) event_cleanup: Interval,
+    pub(crate) event_cleanup: Delay,
 }
 
 impl Default for TaskTimer {
     fn default() -> Self {
-        let event_cleanup = Interval::new(Duration::from_secs(60));
+        let event_cleanup = Delay::new(Duration::from_secs(60));
 
         Self { event_cleanup }
     }
@@ -161,8 +152,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
             }
         }
 
-        if self.timer.event_cleanup.poll_next_unpin(cx).is_ready() {
+        if self.timer.event_cleanup.poll_unpin(cx).is_ready() {
             self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+            self.timer.event_cleanup.reset(Duration::from_secs(60));
         }
 
         Poll::Pending
@@ -171,7 +163,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     pub(crate) async fn run(&mut self) {
-        let mut session_cleanup = futures_timer::Delay::new(Duration::from_secs(5 * 60));
         let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
 
         loop {
@@ -192,9 +183,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 _ = &mut event_cleanup => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
                     event_cleanup.reset(Duration::from_secs(60));
-                }
-                _ = &mut session_cleanup => {
-                    session_cleanup.reset(Duration::from_secs(5 * 60));
                 }
             }
         }
@@ -424,25 +412,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 key: _,
                                 providers,
                             })) => {
-                                if !providers.is_empty() {
-                                    #[cfg(feature = "beetle_bitswap")]
-                                    {
-                                        if let Entry::Occupied(entry) =
-                                            self.bitswap_provider_stream.entry(id)
-                                        {
-                                            let providers = providers.clone();
-                                            let mut tx = entry.get().clone();
-                                            crate::rt::spawn(async move {
-                                                let _ = tx.send(Ok(providers)).await;
-                                            });
-                                        }
-                                    }
-                                }
                                 if let Entry::Occupied(entry) = self.provider_stream.entry(id) {
-                                    if !providers.is_empty() {
-                                        for provider in providers {
-                                            let _ = entry.get().unbounded_send(provider);
-                                        }
+                                    let tx = entry.get();
+                                    for provider in providers {
+                                        let _ = tx.unbounded_send(provider);
                                     }
                                 }
                             }
@@ -452,9 +425,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                 if step.last {
                                     if let Some(tx) = self.provider_stream.remove(&id) {
                                         tx.close_channel();
-                                    }
-                                    if let Some(tx) = self.bitswap_provider_stream.remove(&id) {
-                                        drop(tx);
                                     }
                                 }
                             }
@@ -1247,13 +1217,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 };
                 let _ = ret.send(Ok(addrs));
             }
-            IpfsEvent::GetProviders(cid, ret) => {
+            IpfsEvent::GetProviders(key, ret) => {
                 let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() else {
                     let _ = ret.send(Err(anyhow!("kad protocol is disabled")));
                     return;
                 };
 
-                let key = Key::from(cid.hash().to_bytes());
                 let id = kad.get_providers(key);
 
                 let (tx, mut rx) = futures::channel::mpsc::unbounded();
@@ -1269,13 +1238,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                 let _ = ret.send(Ok(Some(stream.boxed())));
             }
-            IpfsEvent::Provide(cid, ret) => {
+            IpfsEvent::Provide(key, ret) => {
                 let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() else {
                     let _ = ret.send(Err(anyhow!("kad protocol is disabled")));
                     return;
                 };
-
-                let key = Key::from(cid.hash().to_bytes());
 
                 let future = match kad.start_providing(key) {
                     Ok(id) => {
@@ -1574,7 +1541,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(_, cids, peers) => {
+            RepoEvent::WantBlock(cids, peers) => {
                 let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
                     return;
                 };
