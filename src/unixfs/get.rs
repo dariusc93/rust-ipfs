@@ -5,6 +5,7 @@ use std::{
 };
 
 use either::Either;
+use futures::stream::BoxStream;
 use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
 use libp2p::PeerId;
 #[allow(unused_imports)]
@@ -16,7 +17,7 @@ use tracing::{Instrument, Span};
 use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 #[allow(unused_imports)]
-use super::{StatusStreamState, TraversalFailed, UnixfsStatus};
+use super::{TraversalFailed, UnixfsStatus};
 
 #[must_use = "do nothing unless you `.await` or poll the stream"]
 pub struct UnixfsGet {
@@ -27,7 +28,7 @@ pub struct UnixfsGet {
     providers: Vec<PeerId>,
     local_only: bool,
     timeout: Option<Duration>,
-    stream: StatusStreamState,
+    stream: Option<BoxStream<'static, UnixfsStatus>>,
 }
 
 impl UnixfsGet {
@@ -54,7 +55,7 @@ impl UnixfsGet {
             providers: Vec::new(),
             local_only: false,
             timeout: None,
-            stream: StatusStreamState::None,
+            stream: None,
         }
     }
 
@@ -99,7 +100,7 @@ impl Stream for UnixfsGet {
     ) -> std::task::Poll<Option<Self::Item>> {
         loop {
             match &mut self.stream {
-                StatusStreamState::None => {
+                None => {
                     let (repo, dag) = match self.core.take().expect("ipfs or repo is used") {
                         Either::Left(ipfs) => (ipfs.repo().clone(), ipfs.dag()),
                         Either::Right(repo) => (repo.clone(), IpldDag::from(repo.clone())),
@@ -216,29 +217,24 @@ impl Stream for UnixfsGet {
                         yield UnixfsStatus::FailedStatus { written: 0, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
                     };
 
-                    self.stream = StatusStreamState::Pending {
-                        stream: stream.boxed(),
-                    };
+                    self.stream = Some(stream.boxed());
                 }
-                StatusStreamState::Pending { stream } => {
-                    match futures::ready!(stream.poll_next_unpin(cx)) {
-                        Some(item) => {
-                            if matches!(
-                                item,
-                                UnixfsStatus::FailedStatus { .. }
-                                    | UnixfsStatus::CompletedStatus { .. }
-                            ) {
-                                self.stream = StatusStreamState::Done;
-                            }
-                            return Poll::Ready(Some(item));
+                Some(stream) => match futures::ready!(stream.poll_next_unpin(cx)) {
+                    Some(item) => {
+                        if matches!(
+                            item,
+                            UnixfsStatus::FailedStatus { .. }
+                                | UnixfsStatus::CompletedStatus { .. }
+                        ) {
+                            self.stream.take();
                         }
-                        None => {
-                            self.stream = StatusStreamState::Done;
-                            return Poll::Ready(None);
-                        }
+                        return Poll::Ready(Some(item));
                     }
-                }
-                StatusStreamState::Done => return Poll::Ready(None),
+                    None => {
+                        self.stream.take();
+                        return Poll::Ready(None);
+                    }
+                },
             }
         }
     }
@@ -272,6 +268,6 @@ impl std::future::IntoFuture for UnixfsGet {
 
 impl FusedStream for UnixfsGet {
     fn is_terminated(&self) -> bool {
-        matches!(self.stream, StatusStreamState::Done) && self.core.is_none()
+        self.stream.is_none() && self.core.is_none()
     }
 }

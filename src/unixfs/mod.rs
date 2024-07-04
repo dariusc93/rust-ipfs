@@ -204,14 +204,6 @@ pub enum UnixfsStatus {
     },
 }
 
-pub(crate) enum StatusStreamState {
-    None,
-    Pending {
-        stream: BoxStream<'static, UnixfsStatus>,
-    },
-    Done,
-}
-
 /// Types of failures which can occur while walking the UnixFS graph.
 #[derive(Debug, thiserror::Error)]
 pub enum TraversalFailed {
