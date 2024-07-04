@@ -11,9 +11,9 @@ env:
 
 jobs:
   check-native:
+    name: Check (native)
     runs-on: ubuntu-latest
     steps:    
-    - name: Check (native)
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@master
       with:
@@ -21,9 +21,9 @@ jobs:
     - run: cargo check
 
   check-wasm:
+    name: Check (wasm)
     runs-on: ubuntu-latest
     steps:    
-    - name: Check (native)
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@master
       with:
