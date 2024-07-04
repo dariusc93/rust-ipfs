@@ -13,7 +13,7 @@ default = ["filetime"]
 
 [dependencies]
 libipld = "0.16"
-either = { default-features = false, version = "1.8" }
+either = { default-features = false, version = "1.13" }
 filetime = { optional = true, version = "0.2" }
 quick-protobuf = { default-features = false, features = [
     "std",

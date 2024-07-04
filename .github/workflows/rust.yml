@@ -1,0 +1,32 @@
+name: Checks
+
+on:
+  push:
+    branches: [ "libp2p-next" ]
+  pull_request:
+    branches: [ "libp2p-next" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-native:
+    runs-on: ubuntu-latest
+    steps:    
+    - name: Check (native)
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: stable
+    - run: cargo check
+
+  check-wasm:
+    runs-on: ubuntu-latest
+    steps:    
+    - name: Check (native)
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: stable
+        target: wasm32-unknown-unknown
+    - run: cargo check --target wasm32-unknown-unknown
