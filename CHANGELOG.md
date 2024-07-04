@@ -10,6 +10,7 @@
 - refactor: Remove redundant async signature. [PR 247](https://github.com/dariusc93/rust-ipfs/pull/247)
 - refactor: Add `Serialize` for {Ipfs, IpldDag)::put_dag. [PR 249](https://github.com/dariusc93/rust-ipfs/pull/249)
 - feat: Add `Ipfs::{dhy_get_providers,dht_provide)`, supporting `RecordKey` directly. [PR 250](https://github.com/dariusc93/rust-ipfs/pull/250)
+- refactor: Remove sessions and redundant code. [PR 255](https://github.com/dariusc93/rust-ipfs/pull/255)
 
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.
