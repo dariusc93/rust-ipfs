@@ -180,6 +180,6 @@ debug = true
 
 [workspace]
 members = ["packages/*", "unixfs", "examples/*"]
-exclude = ["archived", "deprecated/*"]
+exclude = ["archived", "deprecated/*", "packages/libp2p-bitswap-next", "packages/beetle-bitswap-next"]
 
 resolver = "2"
