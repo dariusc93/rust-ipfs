@@ -103,9 +103,6 @@ impl AsRef<[u8]> for Block {
     }
 }
 
-/// Backwards compatible
-pub type IpldCodec = BlockCodec;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockCodec {
     /// Raw codec.

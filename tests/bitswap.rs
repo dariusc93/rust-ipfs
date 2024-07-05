@@ -2,7 +2,7 @@ use ipld_core::cid::Cid;
 
 mod common;
 use common::{spawn_nodes, Topology};
-use rust_ipfs::block::IpldCodec;
+use rust_ipfs::block::BlockCodec;
 use rust_ipfs::Block;
 
 // this test is designed to trigger unfavorable conditions for the bitswap
@@ -21,7 +21,7 @@ async fn bitswap_stress_test() {
     tracing_subscriber::fmt::init();
 
     let data = b"hello block\n".to_vec();
-    let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+    let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
 
     let nodes = spawn_nodes::<5>(Topology::Mesh).await;
 

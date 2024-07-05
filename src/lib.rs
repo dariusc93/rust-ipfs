@@ -2739,7 +2739,7 @@ mod node {
 mod tests {
     use super::*;
 
-    use crate::block::IpldCodec;
+    use crate::block::BlockCodec;
     use ipld_core::ipld;
     use multihash_codetable::Code;
     use multihash_derive::MultihashDigest;
@@ -2749,7 +2749,7 @@ mod tests {
         let ipfs = Node::new("test_node").await;
 
         let data = b"hello block\n".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
         let cid: Cid = ipfs.put_block(block.clone()).await.unwrap();

@@ -313,7 +313,7 @@ fn write_through_tempfile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::IpldCodec;
+    use crate::block::BlockCodec;
     use crate::Block;
     use hex_literal::hex;
     use ipld_core::cid::Cid;
@@ -330,7 +330,7 @@ mod tests {
         let store = FsBlockStore::new(tmp.clone());
 
         let data = b"1".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
         store.init().await.unwrap();
@@ -367,7 +367,7 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
 
         let data = b"1".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
         let block_store = FsBlockStore::new(tmp.clone());
@@ -397,7 +397,7 @@ mod tests {
 
         for data in &[b"1", b"2", b"3"] {
             let data_slice = data.to_vec();
-            let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data_slice));
+            let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data_slice));
             let block = Block::new(cid, data_slice).unwrap();
             block_store.put(block.clone()).await.unwrap();
         }

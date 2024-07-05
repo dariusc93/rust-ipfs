@@ -575,7 +575,7 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use crate::block::IpldCodec;
+    use crate::block::BlockCodec;
     use futures::StreamExt;
     use ipld_core::cid::Cid;
     use libp2p::{
@@ -589,7 +589,7 @@ mod test {
 
     fn create_block() -> Block {
         let data = b"hello block\n".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
 
         Block::new_unchecked(cid, data)
     }
