@@ -139,7 +139,7 @@ impl WantSession {
 
     pub fn dont_have_block(&mut self, peer_id: PeerId) {
         tracing::trace!(session = %self.cid, %peer_id, name = "want_session", "dont have block");
-        self.wants.swap_remove(&peer_id);
+        self.wants.shift_remove(&peer_id);
 
         if self.is_empty() {
             self.state = WantSessionState::Idle;
@@ -171,7 +171,7 @@ impl WantSession {
             let state = entry.get_mut();
             if let PeerWantState::Disconnect { backoff } = state {
                 if *backoff {
-                    entry.swap_remove();
+                    entry.shift_remove();
                 }
                 return false;
             } else {
@@ -203,7 +203,7 @@ impl WantSession {
     pub fn remove_peer(&mut self, peer_id: PeerId) {
         if !self.is_empty() {
             // tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "removing peer from want_session");
-            self.wants.swap_remove(&peer_id);
+            self.wants.shift_remove(&peer_id);
 
             if matches!(self.state, WantSessionState::NextBlockPending { peer_id: p, .. } if p == peer_id)
             {
