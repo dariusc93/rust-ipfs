@@ -1,13 +1,12 @@
 use futures_timeout::TimeoutExt;
-use libipld::{
-    multihash::{Code, MultihashDigest},
-    Cid, IpldCodec,
-};
+use ipld_core::cid::Cid;
+use multihash_codetable::{Code, MultihashDigest};
 use rust_ipfs::Block;
 use std::time::Duration;
 
 mod common;
 use common::{spawn_nodes, Topology};
+use rust_ipfs::block::IpldCodec;
 
 fn create_block() -> Block {
     let data = b"hello block\n".to_vec();

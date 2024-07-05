@@ -1,16 +1,15 @@
 use futures::{pin_mut, StreamExt};
 use futures_timeout::TimeoutExt;
-use libipld::{
-    multihash::{Code, MultihashDigest},
-    Cid, IpldCodec,
-};
+use ipld_core::cid::Cid;
 use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
+use multihash_codetable::{Code, MultihashDigest};
 use rust_ipfs::{p2p::MultiaddrExt, Block, Node};
 
 use std::time::Duration;
 
 mod common;
 use common::{interop::ForeignNode, spawn_nodes, Topology};
+use rust_ipfs::block::IpldCodec;
 
 fn strip_peer_id(mut addr: Multiaddr) -> Multiaddr {
     addr.extract_peer_id().expect("Peer id exist");
