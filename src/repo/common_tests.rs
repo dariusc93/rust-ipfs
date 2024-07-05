@@ -50,7 +50,7 @@ macro_rules! pinstore_interface_tests {
         mod $module_name {
 
             use futures::{StreamExt, TryStreamExt};
-            use libipld::Cid;
+            use ipld_core::cid::Cid;
             use std::collections::HashMap;
             use std::convert::TryFrom;
             use $crate::repo::common_tests::DSTestContext;

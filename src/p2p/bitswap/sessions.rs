@@ -10,7 +10,7 @@ use bytes::Bytes;
 use futures::{future::BoxFuture, ready, stream::FusedStream, FutureExt, Stream};
 use futures_timer::Delay;
 use indexmap::IndexMap;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use libp2p::PeerId;
 use std::fmt::Debug;
 

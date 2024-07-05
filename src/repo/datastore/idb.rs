@@ -10,7 +10,7 @@ use futures::{channel::oneshot, stream::BoxStream, SinkExt, StreamExt, TryStream
 use idb::{
     Database, DatabaseEvent, Factory, ObjectStore, ObjectStoreParams, Transaction, TransactionMode,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use send_wrapper::SendWrapper;
 use wasm_bindgen_futures::wasm_bindgen::JsValue;
 

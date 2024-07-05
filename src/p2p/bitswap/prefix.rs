@@ -1,8 +1,5 @@
-use libipld::{
-    cid::{self, Version},
-    multihash::{Code, MultihashDigest},
-    Cid,
-};
+use ipld_core::cid::{self, Cid, Version};
+use multihash_codetable::{Code, MultihashDigest};
 use unsigned_varint::{decode as varint_decode, encode as varint_encode};
 
 /// Prefix represents all metadata of a CID, without the actual content.
@@ -54,7 +51,9 @@ impl Prefix {
     }
 
     pub fn to_cid(&self, data: &[u8]) -> Result<Cid, cid::Error> {
-        let mh = Code::try_from(self.mh_type)?.digest(data);
+        let mh = Code::try_from(self.mh_type)
+            .map_err(std::io::Error::other)?
+            .digest(data);
         Cid::new(self.version, self.codec, mh)
     }
 }

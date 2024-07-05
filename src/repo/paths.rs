@@ -1,5 +1,5 @@
 use core::convert::TryFrom;
-use libipld::{cid, multibase, Cid};
+use ipld_core::cid::{self, Cid};
 use std::path::PathBuf;
 
 pub fn block_path(mut base: PathBuf, cid: &Cid) -> PathBuf {

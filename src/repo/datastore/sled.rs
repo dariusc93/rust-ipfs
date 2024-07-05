@@ -3,7 +3,7 @@ use crate::repo::{DataStore, PinModeRequirement};
 use crate::repo::{PinKind, PinMode, PinStore, References};
 use async_trait::async_trait;
 use futures::stream::{StreamExt, TryStreamExt};
-use libipld::cid::Cid;
+use ipld_core::cid::Cid;
 use sled::{
     self,
     transaction::{

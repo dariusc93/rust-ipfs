@@ -13,7 +13,7 @@ use crate::{IntoAddPeerOpt, IpfsOptions};
 use crate::p2p::MultiaddrExt;
 use crate::repo::Repo;
 
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use libp2p::core::Multiaddr;
 use libp2p::dcutr::Behaviour as Dcutr;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig};

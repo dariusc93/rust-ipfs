@@ -48,19 +48,19 @@ impl Ipns {
                 use std::time::Duration;
 
                 use futures::StreamExt;
-                use libipld::Cid;
+                use ipld_core::cid::Cid;
                 use libp2p::PeerId;
+                use multihash::Multihash;
 
                 let mut path_iter = path.iter();
 
-                let hash: libipld::multihash::Multihash =
-                    libipld::multihash::Multihash::from_bytes(&peer.to_bytes())?;
+                let hash = Multihash::from_bytes(&peer.to_bytes())?;
 
                 let cid = Cid::new_v1(0x72, hash);
 
                 let mb = format!(
                     "/ipns/{}",
-                    cid.to_string_of_base(libipld::multibase::Base::Base36Lower)?
+                    cid.to_string_of_base(multibase::Base::Base36Lower)?
                 );
 
                 //TODO: Determine if we want to encode the cid of the multihash in base32 or if we can just use the peer id instead
@@ -139,8 +139,9 @@ impl Ipns {
         path: &IpfsPath,
         option: Option<IpnsOption>,
     ) -> Result<IpfsPath, Error> {
-        use libipld::Cid;
+        use ipld_core::cid::Cid;
         use libp2p::kad::Quorum;
+        use multihash::Multihash;
         use std::str::FromStr;
 
         let keypair = match key {
@@ -150,14 +151,13 @@ impl Ipns {
 
         let peer_id = keypair.public().to_peer_id();
 
-        let hash: libipld::multihash::Multihash =
-            libipld::multihash::Multihash::from_bytes(&peer_id.to_bytes())?;
+        let hash = Multihash::from_bytes(&peer_id.to_bytes())?;
 
         let cid = Cid::new_v1(0x72, hash);
 
         let mb = format!(
             "/ipns/{}",
-            cid.to_string_of_base(libipld::multibase::Base::Base36Lower)?
+            cid.to_string_of_base(multibase::Base::Base36Lower)?
         );
 
         let repo = self.ipfs.repo();
