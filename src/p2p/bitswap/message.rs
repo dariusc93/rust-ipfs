@@ -1,7 +1,7 @@
 use super::{bitswap_pb, pb::bitswap_pb::mod_Message::mod_Wantlist::WantType, prefix::Prefix};
 use bitswap_pb::message::{BlockPresenceType, Wantlist};
 use bytes::Bytes;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, io};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

@@ -47,11 +47,11 @@ pub struct InvalidCidInLink {
     /// for other kinds.
     pub name: Cow<'static, str>,
     /// Error from the attempted conversion
-    pub source: libipld::cid::Error,
+    pub source: ipld_core::cid::Error,
 }
 
-impl<'a> From<(usize, pb::PBLink<'a>, libipld::cid::Error)> for InvalidCidInLink {
-    fn from((nth, link, source): (usize, pb::PBLink<'a>, libipld::cid::Error)) -> Self {
+impl<'a> From<(usize, pb::PBLink<'a>, ipld_core::cid::Error)> for InvalidCidInLink {
+    fn from((nth, link, source): (usize, pb::PBLink<'a>, ipld_core::cid::Error)) -> Self {
         let hash = match link.Hash {
             Some(Cow::Borrowed(x)) if !x.is_empty() => Cow::Owned(x.to_vec()),
             Some(Cow::Borrowed(_)) | None => Cow::Borrowed(&[][..]),

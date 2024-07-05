@@ -1,4 +1,4 @@
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_unixfs::dir::{resolve, LookupError, ResolveError};
 use std::convert::TryFrom;
 use std::fmt;
@@ -64,7 +64,7 @@ fn main() {
 
 #[derive(Debug)]
 pub enum PathError {
-    InvalidCid(libipld::cid::Error),
+    InvalidCid(ipld_core::cid::Error),
     InvalidPath,
 }
 

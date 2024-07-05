@@ -1,21 +1,19 @@
 //! `ipfs.dag` interface implementation around [`Ipfs`].
 
+use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
 use crate::repo::Repo;
 use crate::{Block, Ipfs};
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use libipld::serde::{from_ipld, to_ipld};
-use libipld::{
-    cid::{
-        multihash::{Code, MultihashDigest},
-        Cid, Version,
-    },
-    codec::Codec,
-    Ipld, IpldCodec,
-};
+use ipld_core::cid::{Cid, Version};
+use ipld_core::codec::Codec;
+use ipld_core::ipld::Ipld;
+use ipld_core::serde::{from_ipld, to_ipld};
 use libp2p::PeerId;
+use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::{
     dagpb::{wrap_node_data, NodeData},
     dir::{Cache, ShardedLookup},
@@ -549,7 +547,7 @@ where
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagPut {
     dag_ipld: IpldDag,
-    codec: IpldCodec,
+    codec: BlockCodec,
     data: Box<dyn FnOnce() -> anyhow::Result<Ipld> + Send + 'static>,
     hash: Code,
     pinned: Option<bool>,
@@ -561,7 +559,7 @@ impl DagPut {
     pub fn new(dag: IpldDag) -> Self {
         Self {
             dag_ipld: dag,
-            codec: IpldCodec::DagCbor,
+            codec: BlockCodec::DagCbor,
             data: Box::new(|| anyhow::bail!("data not available")),
             hash: Code::Sha2_256,
             pinned: None,
@@ -601,7 +599,7 @@ impl DagPut {
     }
 
     /// Set codec for ipld
-    pub fn codec(mut self, codec: IpldCodec) -> Self {
+    pub fn codec(mut self, codec: BlockCodec) -> Self {
         self.codec = codec;
         self
     }
@@ -628,11 +626,20 @@ impl std::future::IntoFuture for DagPut {
             let _g = self.dag_ipld.repo.gc_guard().await;
 
             let data = (self.data)()?;
+            let bytes = match self.codec {
+                BlockCodec::Raw => from_ipld(data)?,
+                BlockCodec::DagCbor => {
+                    serde_ipld_dagcbor::codec::DagCborCodec::encode_to_vec(&data)?
+                }
+                BlockCodec::DagJson => {
+                    serde_ipld_dagjson::codec::DagJsonCodec::encode_to_vec(&data)?
+                }
+                BlockCodec::DagPb => ipld_dagpb::from_ipld(&data)?,
+            };
 
-            let bytes = self.codec.encode(&data)?;
             let code = self.hash;
             let hash = code.digest(&bytes);
-            let version = if self.codec == IpldCodec::DagPb {
+            let version = if self.codec == BlockCodec::DagPb {
                 Version::V0
             } else {
                 Version::V1
@@ -673,7 +680,7 @@ pub enum ResolvedNode {
     /// Path ended in `Data` at a dag-pb node. This is usually not interesting and should be
     /// treated as a "Not found" error since dag-pb node did not have a *link* called `Data`. The variant
     /// exists as there are interface-ipfs-http tests which require this behaviour.
-    DagPbData(Cid, NodeData<Box<[u8]>>),
+    DagPbData(Cid, NodeData<Bytes>),
     /// Path ended on a !dag-pb document which was projected.
     Projection(Cid, Ipld),
     /// Local resolving ended with a link
@@ -694,9 +701,9 @@ impl ResolvedNode {
     /// Unwraps the dagpb block variant and turns others into UnexpectedResolved.
     /// This is useful wherever unixfs operations are continued after resolving an IpfsPath.
     pub fn into_unixfs_block(self) -> Result<Block, UnexpectedResolved> {
-        if self.source().codec() != <IpldCodec as Into<u64>>::into(IpldCodec::DagPb) {
+        if self.source().codec() != <BlockCodec as Into<u64>>::into(BlockCodec::DagPb) {
             Err(UnexpectedResolved::UnexpectedCodec(
-                IpldCodec::DagPb.into(),
+                BlockCodec::DagPb.into(),
                 self,
             ))
         } else {
@@ -715,7 +722,7 @@ impl TryFrom<ResolvedNode> for Ipld {
 
         match r {
             Block(block) => Ok(block
-                .decode::<IpldCodec, Ipld>()
+                .to_ipld()
                 .map_err(move |e| ResolveError::UnsupportedDocument(*block.cid(), e.into()))?),
             DagPbData(_, node_data) => Ok(Ipld::Bytes(node_data.node_data().to_vec())),
             Projection(_, ipld) => Ok(ipld),
@@ -762,7 +769,7 @@ fn resolve_local<'a>(
         return Ok((LocallyResolved::Complete(ResolvedNode::Block(block)), 0));
     }
 
-    if block.cid().codec() == <IpldCodec as Into<u64>>::into(IpldCodec::DagPb) {
+    if block.cid().codec() == <BlockCodec as Into<u64>>::into(BlockCodec::DagPb) {
         // special-case the dagpb since we need to do the HAMT lookup and going through the
         // BTreeMaps of ipld for this is quite tiresome. if you are looking for that code for
         // simple directories, you can find one in the history of ipfs-http.
@@ -780,7 +787,7 @@ fn resolve_local<'a>(
             cache,
         )?)
     } else {
-        let ipld = match block.decode::<IpldCodec, Ipld>() {
+        let ipld = match block.to_ipld() {
             Ok(ipld) => ipld,
             Err(e) => {
                 return Err(RawResolveLocalError::UnsupportedDocument(
@@ -798,7 +805,7 @@ fn resolve_local<'a>(
 /// `ResolvedNode::DagPbData`.
 fn resolve_local_dagpb<'a>(
     cid: Cid,
-    data: Box<[u8]>,
+    data: Bytes,
     segment: &'a str,
     is_last: bool,
     cache: &mut Option<Cache>,
@@ -927,7 +934,8 @@ fn resolve_local_ipld<'a>(
 mod tests {
     use super::*;
     use crate::Node;
-    use libipld::{cbor::DagCborCodec, ipld};
+    use ipld_core::ipld;
+    use serde_ipld_dagcbor::codec::DagCborCodec;
 
     #[tokio::test]
     async fn test_resolve_root_cid() {
@@ -1291,7 +1299,7 @@ mod tests {
 
         while let Some(node) = iter.next_borrowed() {
             let node = node.unwrap();
-            let block = Block::new(node.cid.to_owned(), node.block.into()).unwrap();
+            let block = Block::new(node.cid.to_owned(), node.block.to_vec()).unwrap();
 
             ipfs.put_block(block).await.unwrap();
 
@@ -1326,7 +1334,7 @@ mod tests {
             "foo": Ipld::Null,
         });
 
-        let bytes = DagCborCodec.encode(&map).unwrap();
+        let bytes = DagCborCodec::encode_to_vec(&map).unwrap();
 
         assert_eq!(
             bytes.as_slice(),

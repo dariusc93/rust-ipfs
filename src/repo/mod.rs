@@ -10,8 +10,7 @@ use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use futures_timeout::TimeoutExt;
-use libipld::cid::Cid;
-use libipld::{Ipld, IpldCodec};
+use ipld_core::cid::Cid;
 use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
@@ -485,9 +484,11 @@ impl Repo {
                             continue;
                         }
                         PinMode::Recursive => {
-                            let block = match self.get_block_now(&cid).await.map(|block| {
-                                block.and_then(|block| block.decode::<IpldCodec, Ipld>().ok())
-                            }) {
+                            let block = match self
+                                .get_block_now(&cid)
+                                .await
+                                .map(|block| block.and_then(|block| block.to_ipld().ok()))
+                            {
                                 Ok(Some(block)) => block,
                                 Ok(None) => continue,
                                 Err(e) => {
@@ -1119,7 +1120,7 @@ impl std::future::IntoFuture for RepoFetch {
             if !recursive {
                 return Ok(());
             }
-            let ipld = block.decode::<IpldCodec, Ipld>()?;
+            let ipld = block.to_ipld()?;
 
             let mut st = self
                 .refs
@@ -1248,7 +1249,7 @@ impl std::future::IntoFuture for RepoInsertPin {
             if !recursive {
                 repo.insert_direct_pin(&cid).await?
             } else {
-                let ipld = block.decode::<IpldCodec, Ipld>()?;
+                let ipld = block.to_ipld()?;
 
                 let st = self
                     .refs
@@ -1326,7 +1327,7 @@ impl std::future::IntoFuture for RepoRemovePin {
                     }
                 };
 
-                let ipld = block.decode::<IpldCodec, Ipld>()?;
+                let ipld = block.to_ipld()?;
                 let st = self
                     .refs
                     .with_only_unique()

@@ -31,8 +31,8 @@ use crate::{
 
 pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 
-use libipld::multibase::{self, Base};
 pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
+use multibase::Base;
 
 use libp2p::{
     autonat,

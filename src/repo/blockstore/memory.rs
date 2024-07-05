@@ -5,7 +5,7 @@ use crate::Block;
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use tokio::sync::RwLock;
 
 use std::collections::HashMap;
@@ -131,11 +131,9 @@ impl BlockStore for MemBlockStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block::IpldCodec;
     use crate::Block;
-    use libipld::{
-        multihash::{Code, MultihashDigest},
-        IpldCodec,
-    };
+    use multihash_codetable::{Code, MultihashDigest};
 
     #[tokio::test]
     async fn test_mem_blockstore() {

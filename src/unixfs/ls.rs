@@ -6,7 +6,7 @@ use futures::{
     stream::{BoxStream, FusedStream},
     FutureExt, Stream, StreamExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tracing::{Instrument, Span};

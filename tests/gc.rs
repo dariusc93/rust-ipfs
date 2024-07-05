@@ -1,7 +1,6 @@
-use libipld::{
-    multihash::{Code, MultihashDigest},
-    Cid, IpldCodec,
-};
+use ipld_core::cid::Cid;
+use multihash_codetable::{Code, MultihashDigest};
+use rust_ipfs::block::IpldCodec;
 use rust_ipfs::{Block, Node};
 
 fn create_block() -> Block {

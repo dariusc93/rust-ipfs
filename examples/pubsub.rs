@@ -1,6 +1,6 @@
 use clap::Parser;
 use futures::{pin_mut, FutureExt};
-use libipld::ipld;
+use ipld_core::ipld;
 use libp2p::futures::StreamExt;
 use libp2p::Multiaddr;
 use rust_ipfs::p2p::MultiaddrExt;

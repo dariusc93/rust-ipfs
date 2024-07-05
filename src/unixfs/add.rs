@@ -176,7 +176,7 @@ impl Stream for UnixfsAdd {
                                     let block = match Block::new(cid, block) {
                                         Ok(block) => block,
                                         Err(e) => {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
                                             return;
                                         }
                                     };
@@ -202,7 +202,7 @@ impl Stream for UnixfsAdd {
                             let block = match Block::new(cid, block) {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
                                     return;
                                 }
                             };
@@ -241,12 +241,14 @@ impl Stream for UnixfsAdd {
                                         let mut cids = Vec::new();
 
                                         while let Some(node) = iter.next_borrowed() {
+                                            //TODO: Determine best course to prevent additional allocation
                                             let node = node?;
-                                            let block = Block::new(node.cid.to_owned(), node.block.into())?;
+                                            let cid = node.cid.to_owned();
+                                            let block = Block::new(cid, node.block.to_vec())?;
 
                                             repo.put_block(block).await?;
 
-                                            cids.push(*node.cid);
+                                            cids.push(cid);
                                         }
                                         let cid = cids.last().ok_or(anyhow::anyhow!("no cid available"))?;
                                         let path = IpfsPath::from(*cid).sub_path(&name)?;

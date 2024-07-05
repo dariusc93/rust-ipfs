@@ -17,4 +17,4 @@ wasm-bindgen-futures = "0.4.42"
 web-sys = { version = "0.3", features = ['Document', 'Element', 'HtmlElement', 'Node', 'Response', 'Window'] }
 js-sys = "0.3.69"
 console_error_panic_hook = "0.1.7"
-libipld.workspace = true
+ipld-core.workspace = true

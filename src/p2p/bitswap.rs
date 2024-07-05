@@ -12,7 +12,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use libp2p::{
     core::Endpoint,
     swarm::{
@@ -575,16 +575,15 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
+    use crate::block::IpldCodec;
     use futures::StreamExt;
-    use libipld::{
-        multihash::{Code, MultihashDigest},
-        Cid, IpldCodec,
-    };
+    use ipld_core::cid::Cid;
     use libp2p::{
         core::{transport::MemoryTransport, upgrade::Version},
         swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmEvent},
         Multiaddr, PeerId, Swarm, SwarmBuilder, Transport,
     };
+    use multihash_codetable::{Code, MultihashDigest};
 
     use crate::{repo::Repo, Block};
 

@@ -1,7 +1,9 @@
-use libipld::{Block, Cid, IpldCodec};
+use ipld_core::cid::Cid;
 
 mod common;
 use common::{spawn_nodes, Topology};
+use rust_ipfs::block::IpldCodec;
+use rust_ipfs::Block;
 
 // this test is designed to trigger unfavorable conditions for the bitswap
 // protocol by putting blocks in every second node and attempting to get
@@ -11,7 +13,7 @@ use common::{spawn_nodes, Topology};
 #[ignore]
 #[tokio::test]
 async fn bitswap_stress_test() {
-    use libipld::multihash::{Code, MultihashDigest};
+    use multihash_codetable::{Code, MultihashDigest};
     fn filter(i: usize) -> bool {
         i % 2 == 0
     }

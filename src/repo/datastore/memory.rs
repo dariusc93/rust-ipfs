@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore};
 use async_trait::async_trait;
 use futures::StreamExt;
-use libipld::{cid, Cid};
+use ipld_core::cid::{self, Cid};
 use std::path::PathBuf;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 

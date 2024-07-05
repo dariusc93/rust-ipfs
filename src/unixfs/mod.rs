@@ -12,7 +12,7 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt,
 };
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use ll::file::FileReadFailed;
 pub use rust_unixfs as ll;
 

@@ -1,4 +1,4 @@
-use libipld::ipld;
+use ipld_core::ipld;
 use rust_ipfs::IpfsPath;
 
 use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
