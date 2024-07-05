@@ -2738,7 +2738,8 @@ mod node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dag::IpldCodec;
+
+    use crate::block::IpldCodec;
     use ipld_core::ipld;
     use multihash_codetable::Code;
     use multihash_derive::MultihashDigest;

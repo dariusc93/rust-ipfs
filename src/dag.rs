@@ -1,5 +1,6 @@
 //! `ipfs.dag` interface implementation around [`Ipfs`].
 
+use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
 use crate::repo::Repo;
@@ -543,51 +544,10 @@ where
     }
 }
 
-/// Backwards compatibily
-pub type IpldCodec = DagCodec;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DagCodec {
-    /// Raw codec.
-    Raw,
-    /// Cbor codec.
-    DagCbor,
-    /// Json codec.
-    DagJson,
-    /// Protobuf codec.
-    DagPb,
-}
-
-impl From<DagCodec> for u64 {
-    fn from(mc: DagCodec) -> Self {
-        match mc {
-            DagCodec::Raw => 0x55,
-            DagCodec::DagCbor => 0x71,
-            DagCodec::DagJson => 0x0129,
-            DagCodec::DagPb => 0x70,
-        }
-    }
-}
-
-impl TryFrom<u64> for DagCodec {
-    type Error = std::io::Error;
-
-    fn try_from(codec: u64) -> Result<Self, Self::Error> {
-        let codec = match codec {
-            0x55 => Self::Raw,
-            0x71 => Self::DagCbor,
-            0x0129 => Self::DagJson,
-            0x70 => Self::DagPb,
-            _ => return Err(std::io::ErrorKind::Unsupported.into()),
-        };
-        Ok(codec)
-    }
-}
-
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct DagPut {
     dag_ipld: IpldDag,
-    codec: DagCodec,
+    codec: BlockCodec,
     data: Box<dyn FnOnce() -> anyhow::Result<Ipld> + Send + 'static>,
     hash: Code,
     pinned: Option<bool>,
@@ -599,7 +559,7 @@ impl DagPut {
     pub fn new(dag: IpldDag) -> Self {
         Self {
             dag_ipld: dag,
-            codec: DagCodec::DagCbor,
+            codec: BlockCodec::DagCbor,
             data: Box::new(|| anyhow::bail!("data not available")),
             hash: Code::Sha2_256,
             pinned: None,
@@ -639,7 +599,7 @@ impl DagPut {
     }
 
     /// Set codec for ipld
-    pub fn codec(mut self, codec: DagCodec) -> Self {
+    pub fn codec(mut self, codec: BlockCodec) -> Self {
         self.codec = codec;
         self
     }
@@ -667,15 +627,19 @@ impl std::future::IntoFuture for DagPut {
 
             let data = (self.data)()?;
             let bytes = match self.codec {
-                DagCodec::Raw => from_ipld(data)?,
-                DagCodec::DagCbor => serde_ipld_dagcbor::codec::DagCborCodec::encode_to_vec(&data)?,
-                DagCodec::DagJson => serde_ipld_dagjson::codec::DagJsonCodec::encode_to_vec(&data)?,
-                DagCodec::DagPb => ipld_dagpb::from_ipld(&data)?,
+                BlockCodec::Raw => from_ipld(data)?,
+                BlockCodec::DagCbor => {
+                    serde_ipld_dagcbor::codec::DagCborCodec::encode_to_vec(&data)?
+                }
+                BlockCodec::DagJson => {
+                    serde_ipld_dagjson::codec::DagJsonCodec::encode_to_vec(&data)?
+                }
+                BlockCodec::DagPb => ipld_dagpb::from_ipld(&data)?,
             };
 
             let code = self.hash;
             let hash = code.digest(&bytes);
-            let version = if self.codec == DagCodec::DagPb {
+            let version = if self.codec == BlockCodec::DagPb {
                 Version::V0
             } else {
                 Version::V1
@@ -737,9 +701,9 @@ impl ResolvedNode {
     /// Unwraps the dagpb block variant and turns others into UnexpectedResolved.
     /// This is useful wherever unixfs operations are continued after resolving an IpfsPath.
     pub fn into_unixfs_block(self) -> Result<Block, UnexpectedResolved> {
-        if self.source().codec() != <IpldCodec as Into<u64>>::into(IpldCodec::DagPb) {
+        if self.source().codec() != <BlockCodec as Into<u64>>::into(BlockCodec::DagPb) {
             Err(UnexpectedResolved::UnexpectedCodec(
-                IpldCodec::DagPb.into(),
+                BlockCodec::DagPb.into(),
                 self,
             ))
         } else {
@@ -805,7 +769,7 @@ fn resolve_local<'a>(
         return Ok((LocallyResolved::Complete(ResolvedNode::Block(block)), 0));
     }
 
-    if block.cid().codec() == <IpldCodec as Into<u64>>::into(IpldCodec::DagPb) {
+    if block.cid().codec() == <BlockCodec as Into<u64>>::into(BlockCodec::DagPb) {
         // special-case the dagpb since we need to do the HAMT lookup and going through the
         // BTreeMaps of ipld for this is quite tiresome. if you are looking for that code for
         // simple directories, you can find one in the history of ipfs-http.
