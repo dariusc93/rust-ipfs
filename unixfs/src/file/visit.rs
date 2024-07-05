@@ -1,6 +1,6 @@
 use core::convert::TryFrom;
 use core::ops::Range;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 
 use crate::file::reader::{FileContent, FileReader, Traversal};
 use crate::file::{FileReadFailed, Metadata};

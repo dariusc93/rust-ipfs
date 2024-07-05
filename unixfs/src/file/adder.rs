@@ -1,5 +1,5 @@
-use libipld::multihash::{self, Multihash};
-use libipld::Cid;
+use ipld_core::cid::Cid;
+use multihash::{self, Multihash};
 
 use crate::pb::{FlatUnixFs, PBLink, UnixFs, UnixFsType};
 use alloc::borrow::Cow;
@@ -313,7 +313,11 @@ fn render_and_hash(flat: &FlatUnixFs<'_>) -> (Cid, Vec<u8>) {
     let mut writer = Writer::new(&mut out);
     flat.write_message(&mut writer)
         .expect("unsure how this could fail");
-    let mh = Multihash::wrap(multihash::Code::Sha2_256.into(), &Sha256::digest(&out)).unwrap();
+    let mh = Multihash::wrap(
+        multihash_codetable::Code::Sha2_256.into(),
+        &Sha256::digest(&out),
+    )
+    .unwrap();
     let cid = Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0");
     (cid, out)
 }
@@ -645,7 +649,7 @@ mod tests {
     use crate::test_support::FakeBlockstore;
     use core::convert::TryFrom;
     use hex_literal::hex;
-    use libipld::Cid;
+    use ipld_core::cid::Cid;
 
     #[test]
     fn test_size_chunker() {

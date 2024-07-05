@@ -1,4 +1,4 @@
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_unixfs::file::adder::FileAdder;
 use std::fmt;
 use std::io::{BufRead, BufReader};
@@ -130,7 +130,8 @@ struct Stats {
 impl fmt::Display for Stats {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let hash = self.last.as_ref().unwrap().hash();
-        let cidv1 = Cid::new_v1(libipld::IpldCodec::DagPb.into(), hash.to_owned());
+        let code = 0x70; // TODO:
+        let cidv1 = Cid::new_v1(code, hash.to_owned());
         write!(
             fmt,
             "{} blocks, {} block bytes, {} or {}",

@@ -1,7 +1,7 @@
 use core::convert::TryFrom;
 use hex_literal::hex;
-use libipld::multihash::Multihash;
-use libipld::{multihash, Cid};
+use ipld_core::cid::Cid;
+use multihash::Multihash;
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -30,7 +30,7 @@ impl FakeBlockstore {
         sha.update(block);
         let result = sha.finalize();
 
-        let mh = Multihash::wrap(multihash::Code::Sha2_256.into(), &result[..]).unwrap();
+        let mh = Multihash::wrap(multihash_codetable::Code::Sha2_256.into(), &result[..]).unwrap();
         let cid = Cid::new_v0(mh).unwrap();
 
         assert!(

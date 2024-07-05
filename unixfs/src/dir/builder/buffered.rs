@@ -1,7 +1,7 @@
 use super::{DirBuilder, Entry, Leaf, PostOrderIterator, TreeBuildingFailed, TreeOptions};
 use crate::Metadata;
 use alloc::collections::btree_map::Entry::*;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 
 /// UnixFs directory tree builder which buffers entries until `build()` is called.
 #[derive(Debug)]
@@ -189,8 +189,9 @@ mod tests {
         super::OwnedTreeNode, BufferingTreeBuilder, Metadata, TreeBuildingFailed, TreeOptions,
     };
     use core::convert::TryFrom;
-    use libipld::multihash::{Code, MultihashDigest};
-    use libipld::Cid;
+    use ipld_core::cid::Cid;
+    use multihash_codetable::Code;
+    use multihash_derive::MultihashDigest;
 
     #[test]
     fn some_directories() {

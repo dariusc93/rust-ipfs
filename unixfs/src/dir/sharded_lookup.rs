@@ -5,7 +5,7 @@ use alloc::borrow::Cow;
 use alloc::collections::VecDeque;
 use core::convert::TryFrom;
 use core::fmt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 
 /// A cache of data structures used while traversing. Reduces allocations when walking over multiple
 /// path segments.

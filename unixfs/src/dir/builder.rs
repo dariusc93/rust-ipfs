@@ -1,5 +1,5 @@
 use core::fmt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 
 mod dir_builder;
 use dir_builder::DirBuilder;

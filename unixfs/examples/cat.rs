@@ -1,4 +1,4 @@
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_unixfs::file::{visit::IdleFileVisit, FileReadFailed};
 use std::convert::TryFrom;
 use std::fmt;
