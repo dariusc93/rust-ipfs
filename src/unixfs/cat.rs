@@ -124,7 +124,10 @@ impl Stream for UnixfsCat {
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    ) -> Poll<Option<Self::Item>> {
+        if self.core.is_none() && self.stream.is_none() {
+            return Poll::Ready(None);
+        }
         loop {
             match &mut self.stream {
                 Some(stream) => match futures::ready!(stream.poll_next_unpin(cx)) {
