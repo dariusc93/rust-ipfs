@@ -44,7 +44,7 @@ struct Opts {
     connect: Option<Multiaddr>,
 }
 
-#[async_std::main]
+#[tokio::main]
 #[allow(deprecated)]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -61,15 +61,14 @@ async fn main() -> anyhow::Result<()> {
     println!("Local Node: {local_peer_id}");
 
     let mut swarm = SwarmBuilder::with_existing_identity(local_keypair)
-        .with_async_std()
+        .with_tokio()
         .with_tcp(
             libp2p::tcp::Config::default(),
             libp2p::noise::Config::new,
             libp2p::yamux::Config::default,
         )?
         .with_quic()
-        .with_dns()
-        .await?
+        .with_dns()?
         .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
         .with_behaviour(|kp, relay_client| Behaviour {
             ping: Ping::new(Default::default()),
