@@ -46,7 +46,7 @@ pub enum WantSessionState {
 
 impl Debug for WantSessionState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SessionState")
+        write!(f, "WantSessionState")
     }
 }
 
