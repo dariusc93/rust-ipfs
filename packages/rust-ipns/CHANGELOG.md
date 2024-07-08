@@ -1,3 +1,6 @@
+# 0.6.0
+- chore: Promote `multiaddr` and `cid` to workspace dependency.
+
 # 0.5.2
 
 # 0.5.1

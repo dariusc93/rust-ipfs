@@ -871,26 +871,13 @@ dependencies = [
 
 [[package]]
 name = "cid"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd94671561e36e4e7de75f753f577edafb0e7c05d6e4547229fdf7938fbcd2c3"
-dependencies = [
- "core2",
- "multibase",
- "multihash 0.18.1",
- "serde",
- "unsigned-varint 0.7.2",
-]
-
-[[package]]
-name = "cid"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3147d8272e8fa0ccd29ce51194dd98f79ddfb8191ba9e3409884e751798acf3a"
 dependencies = [
  "core2",
  "multibase",
- "multihash 0.19.1",
+ "multihash",
  "serde",
  "serde_bytes",
  "unsigned-varint 0.8.0",
@@ -2258,7 +2245,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ede82a79e134f179f4b29b5fdb1eb92bd1b38c4dfea394c539051150a21b9b"
 dependencies = [
- "cid 0.11.1",
+ "cid",
  "serde",
  "serde_bytes",
 ]
@@ -2458,7 +2445,7 @@ dependencies = [
  "futures-timer",
  "libp2p-identity",
  "multiaddr",
- "multihash 0.19.1",
+ "multihash",
  "multistream-select",
  "once_cell",
  "parking_lot 0.12.3",
@@ -2603,7 +2590,7 @@ dependencies = [
  "ed25519-dalek",
  "hkdf",
  "libsecp256k1",
- "multihash 0.19.1",
+ "multihash",
  "p256",
  "quick-protobuf",
  "rand 0.8.5",
@@ -2719,7 +2706,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-identity",
  "multiaddr",
- "multihash 0.19.1",
+ "multihash",
  "once_cell",
  "quick-protobuf",
  "rand 0.8.5",
@@ -3048,7 +3035,7 @@ dependencies = [
  "libp2p-identity",
  "libp2p-noise",
  "libp2p-webrtc-utils",
- "multihash 0.19.1",
+ "multihash",
  "rand 0.8.5",
  "rcgen 0.11.3",
  "serde",
@@ -3156,7 +3143,7 @@ dependencies = [
  "libp2p-identity",
  "libp2p-noise",
  "multiaddr",
- "multihash 0.19.1",
+ "multihash",
  "send_wrapper 0.6.0",
  "thiserror",
  "tracing",
@@ -3380,7 +3367,7 @@ dependencies = [
  "data-encoding",
  "libp2p-identity",
  "multibase",
- "multihash 0.19.1",
+ "multihash",
  "percent-encoding",
  "serde",
  "static_assertions",
@@ -3397,23 +3384,6 @@ dependencies = [
  "base-x",
  "data-encoding",
  "data-encoding-macro",
-]
-
-[[package]]
-name = "multihash"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfd8a792c1694c6da4f68db0a9d707c72bd260994da179e6030a5dcee00bb815"
-dependencies = [
- "blake2b_simd",
- "blake2s_simd",
- "blake3",
- "core2",
- "digest 0.10.7",
- "multihash-derive 0.8.1",
- "sha2 0.10.8",
- "sha3",
- "unsigned-varint 0.7.2",
 ]
 
 [[package]]
@@ -3438,7 +3408,7 @@ dependencies = [
  "blake3",
  "core2",
  "digest 0.10.7",
- "multihash-derive 0.9.0",
+ "multihash-derive",
  "ripemd",
  "sha1",
  "sha2 0.10.8",
@@ -3448,26 +3418,12 @@ dependencies = [
 
 [[package]]
 name = "multihash-derive"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d6d4752e6230d8ef7adf7bd5d8c4b1f6561c1014c5ba9a37445ccefe18aa1db"
-dependencies = [
- "proc-macro-crate 1.1.3",
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
- "synstructure 0.12.6",
-]
-
-[[package]]
-name = "multihash-derive"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "890e72cb7396cb99ed98c1246a97b243cc16394470d94e0bc8b0c2c11d84290e"
 dependencies = [
  "core2",
- "multihash 0.19.1",
+ "multihash",
  "multihash-derive-impl",
 ]
 
@@ -3477,7 +3433,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3958713ce794e12f7c6326fac9aa274c68d74c4881dd37b3e2662b8a2046bb19"
 dependencies = [
- "proc-macro-crate 2.0.2",
+ "proc-macro-crate",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -3955,16 +3911,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
 dependencies = [
  "elliptic-curve",
-]
-
-[[package]]
-name = "proc-macro-crate"
-version = "1.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e17d47ce914bf4de440332250b0edd23ce48c005f59fab39d3335866b114f11a"
-dependencies = [
- "thiserror",
- "toml",
 ]
 
 [[package]]
@@ -4487,9 +4433,9 @@ dependencies = [
  "libp2p-webrtc",
  "libp2p-webrtc-websys",
  "multibase",
- "multihash 0.19.1",
+ "multihash",
  "multihash-codetable",
- "multihash-derive 0.9.0",
+ "multihash-derive",
  "p256",
  "parking_lot 0.12.3",
  "pem",
@@ -4530,16 +4476,16 @@ dependencies = [
 
 [[package]]
 name = "rust-ipns"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "cbor4ii 0.3.2",
  "chrono",
- "cid 0.10.1",
+ "cid",
  "clap",
  "derive_more",
  "getrandom 0.2.14",
  "libp2p-identity",
- "multihash 0.18.1",
+ "multihash",
  "quick-protobuf",
  "serde",
  "sha2 0.10.8",
@@ -4557,9 +4503,9 @@ dependencies = [
  "ipld-dagpb",
  "libc",
  "multibase",
- "multihash 0.19.1",
+ "multihash",
  "multihash-codetable",
- "multihash-derive 0.9.0",
+ "multihash-derive",
  "quick-protobuf",
  "sha2 0.10.8",
  "tar",
@@ -5438,15 +5384,6 @@ dependencies = [
  "pin-project-lite",
  "slab",
  "tokio",
-]
-
-[[package]]
-name = "toml"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
-dependencies = [
- "serde",
 ]
 
 [[package]]
