@@ -4539,7 +4539,7 @@ dependencies = [
  "derive_more",
  "getrandom 0.2.14",
  "libp2p-identity",
- "multihash 0.18.1",
+ "multihash 0.19.1",
  "quick-protobuf",
  "serde",
  "sha2 0.10.8",
