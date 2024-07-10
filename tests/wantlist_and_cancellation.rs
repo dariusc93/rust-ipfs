@@ -1,6 +1,6 @@
 use futures::future::{pending, select, Either, FutureExt};
 use futures::future::{AbortHandle, Abortable};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use rust_ipfs::Node;
 use tokio::{
     task,

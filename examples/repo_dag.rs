@@ -1,4 +1,4 @@
-use libipld::ipld;
+use ipld_core::ipld;
 use rust_ipfs::dag::IpldDag;
 use rust_ipfs::repo::Repo;
 use rust_ipfs::IpfsPath;

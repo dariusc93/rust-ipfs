@@ -2,7 +2,7 @@
 
 use super::NamedLeaf;
 use crate::pb::UnixFs;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use quick_protobuf::{MessageWrite, Writer, WriterBackend};
 
 /// Newtype which uses the &[Option<(NamedLeaf)>] as Vec<PBLink>.
@@ -71,7 +71,7 @@ struct WriteableCid<'a>(&'a Cid);
 
 impl<'a> MessageWrite for WriteableCid<'a> {
     fn get_size(&self) -> usize {
-        use libipld::cid::Version::*;
+        use ipld_core::cid::Version::*;
         use quick_protobuf::sizeofs::*;
 
         let hash_len = self.0.hash().to_bytes().len();
@@ -87,7 +87,7 @@ impl<'a> MessageWrite for WriteableCid<'a> {
     }
 
     fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> quick_protobuf::Result<()> {
-        use libipld::cid::Version::*;
+        use ipld_core::cid::Version::*;
 
         match self.0.version() {
             V0 => { /* cidv0 has only the _multi_hash */ }

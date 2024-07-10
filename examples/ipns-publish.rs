@@ -1,5 +1,6 @@
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use ipld_core::ipld;
     use rust_ipfs::Ipfs;
     use rust_ipfs::IpfsPath;
     use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
@@ -19,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
 
     ipfs.bootstrap().await?;
 
-    let block_a = libipld::ipld!({
+    let block_a = ipld!({
         "name": "alice",
         "age": 99,
     });

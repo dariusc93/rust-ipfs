@@ -22,6 +22,7 @@
 // the docs better.
 //#![allow(private_intra_doc_links)]
 
+pub mod block;
 pub mod config;
 pub mod dag;
 pub mod error;
@@ -35,6 +36,7 @@ pub(crate) mod rt;
 mod task;
 pub mod unixfs;
 
+pub use block::Block;
 #[macro_use]
 extern crate tracing;
 
@@ -70,6 +72,8 @@ use tracing_futures::Instrument;
 use unixfs::UnixfsGet;
 use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsLs};
 
+use ipld_core::cid::Cid;
+use ipld_core::ipld::Ipld;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
@@ -95,10 +99,6 @@ pub use self::{
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
-
-pub type Block = libipld::Block<libipld::DefaultParams>;
-
-use libipld::{Cid, Ipld};
 
 pub use libp2p::{
     self,
@@ -2191,7 +2191,7 @@ impl Ipfs {
         iplds: Iter,
         max_depth: Option<u64>,
         unique: bool,
-    ) -> impl Stream<Item = Result<refs::Edge, libipld::error::Error>> + Send + 'a
+    ) -> impl Stream<Item = Result<refs::Edge, anyhow::Error>> + Send + 'a
     where
         Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
     {
@@ -2560,8 +2560,6 @@ pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
 
 #[inline]
 pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
-    use libipld::multibase;
-
     let default_ipns_prefix = b"/ipns/";
 
     let mut key = key.as_ref().trim().to_string();
@@ -2740,18 +2738,18 @@ mod node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libipld::{
-        ipld,
-        multihash::{Code, MultihashDigest},
-        IpldCodec,
-    };
+
+    use crate::block::BlockCodec;
+    use ipld_core::ipld;
+    use multihash_codetable::Code;
+    use multihash_derive::MultihashDigest;
 
     #[tokio::test]
     async fn test_put_and_get_block() {
         let ipfs = Node::new("test_node").await;
 
         let data = b"hello block\n".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
         let cid: Cid = ipfs.put_block(block.clone()).await.unwrap();

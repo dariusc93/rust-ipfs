@@ -5,7 +5,7 @@ use crate::Block;
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use std::io::{self, ErrorKind, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -313,12 +313,11 @@ fn write_through_tempfile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block::BlockCodec;
     use crate::Block;
     use hex_literal::hex;
-    use libipld::{
-        multihash::{Code, MultihashDigest},
-        Cid, IpldCodec,
-    };
+    use ipld_core::cid::Cid;
+    use multihash_codetable::{Code, MultihashDigest};
     use std::convert::TryFrom;
     use std::env::temp_dir;
     use std::sync::Arc;
@@ -331,7 +330,7 @@ mod tests {
         let store = FsBlockStore::new(tmp.clone());
 
         let data = b"1".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
         store.init().await.unwrap();
@@ -368,7 +367,7 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
 
         let data = b"1".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
         let block_store = FsBlockStore::new(tmp.clone());
@@ -398,7 +397,7 @@ mod tests {
 
         for data in &[b"1", b"2", b"3"] {
             let data_slice = data.to_vec();
-            let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data_slice));
+            let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data_slice));
             let block = Block::new(cid, data_slice).unwrap();
             block_store.put(block.clone()).await.unwrap();
         }
@@ -425,7 +424,7 @@ mod tests {
         let cid = Cid::try_from("QmRgutAxd8t7oGkSm4wmeuByG6M51wcTso6cubDdQtuEfL").unwrap();
         let data = hex!("0a0d08021207666f6f6261720a1807");
 
-        let block = Block::new(cid, data.into()).unwrap();
+        let block = Block::new(cid, data.to_vec()).unwrap();
 
         let count = 10;
 
@@ -487,7 +486,7 @@ mod tests {
         let cid = Cid::try_from("QmRgutAxd8t7oGkSm4wmeuByG6M51wcTso6cubDdQtuEfL").unwrap();
         let data = hex!("0a0d08021207666f6f6261720a1807");
 
-        let block = Block::new(cid, data.into()).unwrap();
+        let block = Block::new(cid, data.to_vec()).unwrap();
 
         assert_eq!(single.list().await.collect::<Vec<_>>().await.len(), 0);
 

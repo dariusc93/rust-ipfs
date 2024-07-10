@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use core::convert::TryFrom;
 use futures::stream::{BoxStream, TryStreamExt};
 use futures::StreamExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

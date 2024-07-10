@@ -5,7 +5,7 @@ use crate::Block;
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
-use libipld::Cid;
+use ipld_core::cid::Cid;
 use tokio::sync::RwLock;
 
 use std::collections::HashMap;
@@ -131,18 +131,16 @@ impl BlockStore for MemBlockStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block::BlockCodec;
     use crate::Block;
-    use libipld::{
-        multihash::{Code, MultihashDigest},
-        IpldCodec,
-    };
+    use multihash_codetable::{Code, MultihashDigest};
 
     #[tokio::test]
     async fn test_mem_blockstore() {
         let tmp = std::env::temp_dir();
         let store = MemBlockStore::new(tmp);
         let data = b"1".to_vec();
-        let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
         store.init().await.unwrap();
@@ -180,7 +178,7 @@ mod tests {
 
         for data in &[b"1", b"2", b"3"] {
             let data_slice = data.to_vec();
-            let cid = Cid::new_v1(IpldCodec::Raw.into(), Code::Sha2_256.digest(&data_slice));
+            let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data_slice));
             let block = Block::new(cid, data_slice).unwrap();
             mem_store.put(block.clone()).await.unwrap();
             assert!(mem_store.contains(block.cid()).await.unwrap());
