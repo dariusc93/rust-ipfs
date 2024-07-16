@@ -461,7 +461,7 @@ impl NetworkBehaviour for Behaviour {
                     }
                 },
                 BitswapResponse::Block(bytes) => {
-                    let Ok(block) = Block::new(cid, bytes.to_vec()) else {
+                    let Ok(block) = Block::new(cid, bytes) else {
                         // The block is invalid so we will notify the session that we still dont have the block
                         // from said peer
                         // TODO: In the future, mark the peer as a bad sender

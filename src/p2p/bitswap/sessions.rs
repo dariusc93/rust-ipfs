@@ -648,8 +648,8 @@ impl Stream for HaveSession {
                 // exchanged. This could probably be done through a temporary pin
                 HaveSessionState::GetBlock { fut } => {
                     let result = ready!(fut.poll_unpin(cx));
-                    let block = match result.as_ref() {
-                        Ok(Some(block)) => block.data(),
+                    let (cid, bytes) = match result {
+                        Ok(Some(block)) => block.into_inner(),
                         Ok(None) => {
                             tracing::warn!(session = %this.cid, "block does not exist");
                             this.state = HaveSessionState::Idle;
@@ -664,8 +664,8 @@ impl Stream for HaveSession {
                         }
                     };
 
-                    // Note: `Bytes` is used to make it cheaper to handle the block data
-                    let bytes = Bytes::copy_from_slice(block);
+                    debug_assert_eq!(cid, this.cid);
+
                     // In case we are sent a block request
                     this.have = Some(true);
 
