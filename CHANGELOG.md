@@ -12,6 +12,7 @@
 - feat: Add `Ipfs::{dht_get_providers,dht_provide)`, supporting `RecordKey` directly. [PR 250](https://github.com/dariusc93/rust-ipfs/pull/250)
 - refactor: Remove sessions and redundant code. [PR 255](https://github.com/dariusc93/rust-ipfs/pull/255)
 - refactor: Move from libipld to ipld-core. [PR 257](https://github.com/dariusc93/rust-ipfs/pull/257)
+- chore: Use `Bytes` when creating or using `Block` within bitswap. [PR 264](https://github.com/dariusc93/rust-ipfs/pull/264)
 
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.

@@ -284,7 +284,7 @@ impl Stream for WantSession {
         let this = &mut *self;
 
         loop {
-            match &mut this.state {
+            match this.state {
                 WantSessionState::Idle => {
                     if let Some(peer_id) = this.cancel.pop_back() {
                         // Kick start the cancel requests.
@@ -312,7 +312,9 @@ impl Stream for WantSession {
 
                     return Poll::Pending;
                 }
-                WantSessionState::NextBlock { previous_peer_id } => {
+                WantSessionState::NextBlock {
+                    ref mut previous_peer_id,
+                } => {
                     if let Some(peer_id) = previous_peer_id.take() {
                         tracing::debug!(session = %cid, %peer_id, name = "want_session", "failed block");
                         // If we hit this state after sending a have_block request to said peer, this means
@@ -372,11 +374,14 @@ impl Stream for WantSession {
                     ready!(timer.poll_unpin(cx));
                     tracing::warn!(session = %cid, name = "want_session", %peer_id, "request timeout attempting to get next block");
                     this.state = WantSessionState::NextBlock {
-                        previous_peer_id: Some(*peer_id),
+                        previous_peer_id: Some(peer_id),
                     };
                 }
-                WantSessionState::PutBlock { from_peer_id, fut } => {
-                    let peer_id = *from_peer_id;
+                WantSessionState::PutBlock {
+                    from_peer_id,
+                    ref mut fut,
+                } => {
+                    let peer_id = from_peer_id;
                     match ready!(fut.poll_unpin(cx)) {
                         Ok(cid) => {
                             tracing::info!(session = %self.cid, %peer_id, block = %cid, name = "want_session", "block stored in block store");
@@ -619,7 +624,7 @@ impl Stream for HaveSession {
         }
 
         loop {
-            match &mut this.state {
+            match this.state {
                 HaveSessionState::Idle => {
                     if let Some(have) = this.have {
                         if let Some((peer_id, state)) = this
@@ -639,17 +644,17 @@ impl Stream for HaveSession {
                     this.waker.replace(cx.waker().clone());
                     return Poll::Pending;
                 }
-                HaveSessionState::ContainBlock { fut } => {
+                HaveSessionState::ContainBlock { ref mut fut } => {
                     let have = ready!(fut.poll_unpin(cx)).unwrap_or_default();
                     this.have = Some(have);
                     this.state = HaveSessionState::Idle;
                 }
                 // Maybe we should have a lock on a single lock to prevent GC from cleaning it up or being removed while waiting for it to be
                 // exchanged. This could probably be done through a temporary pin
-                HaveSessionState::GetBlock { fut } => {
+                HaveSessionState::GetBlock { ref mut fut } => {
                     let result = ready!(fut.poll_unpin(cx));
-                    let block = match result.as_ref() {
-                        Ok(Some(block)) => block.data(),
+                    let (cid, bytes) = match result {
+                        Ok(Some(block)) => block.into_inner(),
                         Ok(None) => {
                             tracing::warn!(session = %this.cid, "block does not exist");
                             this.state = HaveSessionState::Idle;
@@ -664,14 +669,14 @@ impl Stream for HaveSession {
                         }
                     };
 
-                    // Note: `Bytes` is used to make it cheaper to handle the block data
-                    let bytes = Bytes::copy_from_slice(block);
+                    debug_assert_eq!(cid, this.cid);
+
                     // In case we are sent a block request
                     this.have = Some(true);
 
                     this.state = HaveSessionState::Block { bytes };
                 }
-                HaveSessionState::Block { bytes } => {
+                HaveSessionState::Block { ref bytes } => {
                     // This will kick start the providing process to the peer
                     match this
                         .want
