@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
         "age": 99,
     });
 
-    let cid = ipfs.put_dag(block_a.clone()).await?;
+    let cid = ipfs.put_dag(block_a).await?;
 
     let ipfs_path = IpfsPath::from(cid);
 
