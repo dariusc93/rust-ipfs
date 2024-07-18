@@ -80,11 +80,11 @@ impl Behaviour {
         }
     }
 
-    pub fn get(&mut self, cid: &Cid, providers: &[PeerId]) {
-        self.gets(vec![*cid], providers)
+    pub fn get(&mut self, cid: &Cid, providers: &[PeerId], timeout: Option<Duration>) {
+        self.gets(vec![*cid], providers, timeout)
     }
 
-    pub fn gets(&mut self, cids: Vec<Cid>, providers: &[PeerId]) {
+    pub fn gets(&mut self, cids: Vec<Cid>, providers: &[PeerId], timeout: Option<Duration>) {
         let peers = match providers.is_empty() {
             true => {
                 //If no providers are provided, we can send requests connected peers
@@ -116,7 +116,7 @@ impl Behaviour {
             if self.want_session.contains_key(cid) {
                 continue;
             }
-            let session = WantSession::new(&self.store, *cid);
+            let session = WantSession::new(&self.store, *cid, timeout);
             self.want_session.insert(*cid, session);
         }
 
@@ -623,7 +623,7 @@ mod test {
             }
         }
 
-        swarm2.behaviour_mut().bitswap.get(&cid, &[]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[], None);
 
         loop {
             tokio::select! {
@@ -679,7 +679,7 @@ mod test {
             }
         }
 
-        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1], None);
 
         loop {
             tokio::select! {
@@ -758,8 +758,8 @@ mod test {
                 break;
             }
         }
-        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1]);
-        swarm3.behaviour_mut().bitswap.get(&cid, &[]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1], None);
+        swarm3.behaviour_mut().bitswap.get(&cid, &[], None);
 
         loop {
             tokio::select! {
@@ -798,7 +798,7 @@ mod test {
 
         let cid = *block.cid();
 
-        swarm1.behaviour_mut().bitswap.get(&cid, &[]);
+        swarm1.behaviour_mut().bitswap.get(&cid, &[], None);
         swarm1.behaviour_mut().bitswap.cancel(cid);
 
         loop {
@@ -823,7 +823,7 @@ mod test {
 
         let cid = *block.cid();
 
-        swarm1.behaviour_mut().bitswap.get(&cid, &[]);
+        swarm1.behaviour_mut().bitswap.get(&cid, &[], None);
 
         let list = swarm1.behaviour().bitswap.local_wantlist();
 
@@ -868,7 +868,7 @@ mod test {
                 break;
             }
         }
-        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1]);
+        swarm2.behaviour_mut().bitswap.get(&cid, &[peer1], None);
 
         loop {
             tokio::select! {

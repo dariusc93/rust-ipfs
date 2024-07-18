@@ -344,7 +344,7 @@ pub(crate) struct RepoInner {
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Vec<Cid>, Vec<PeerId>),
+    WantBlock(Vec<Cid>, Vec<PeerId>, Option<Duration>),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
@@ -652,6 +652,7 @@ impl Repo {
         timeout: impl Into<Option<Duration>>,
     ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
         let timeout = timeout.into();
+
         let _guard = self.inner.gclock.read().await;
         let mut blocks = FuturesOrdered::new();
         let mut missing = cids.to_vec();
@@ -711,7 +712,7 @@ impl Repo {
         }
 
         events
-            .send(RepoEvent::WantBlock(missing, peers.to_vec()))
+            .send(RepoEvent::WantBlock(missing, peers.to_vec(), timeout))
             .await
             .ok();
 

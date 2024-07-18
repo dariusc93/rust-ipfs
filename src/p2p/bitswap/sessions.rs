@@ -81,7 +81,7 @@ pub struct WantSession {
 }
 
 impl WantSession {
-    pub fn new(repo: &Repo, cid: Cid) -> Self {
+    pub fn new(repo: &Repo, cid: Cid, timeout: Option<Duration>) -> Self {
         Self {
             cid,
             wants: Default::default(),
@@ -90,7 +90,7 @@ impl WantSession {
             repo: repo.clone(),
             waker: None,
             state: WantSessionState::Idle,
-            timeout: None,
+            timeout,
             cancel: Default::default(),
         }
     }

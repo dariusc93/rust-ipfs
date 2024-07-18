@@ -1541,11 +1541,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(cids, peers) => {
+            RepoEvent::WantBlock(cids, peers, timeout) => {
                 let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
                     return;
                 };
-                bs.gets(cids, &peers);
+                bs.gets(cids, &peers, timeout);
             }
             RepoEvent::UnwantBlock(cid) => {
                 let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
