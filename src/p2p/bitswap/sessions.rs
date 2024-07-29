@@ -323,6 +323,7 @@ impl Stream for WantSession {
                 if timer.poll_unpin(cx).is_ready() {
                     // Since the session timed out, we will precede to cancel it
                     this.state = WantSessionState::Cancel;
+                    this.timer.take();
                 }
             }
 
