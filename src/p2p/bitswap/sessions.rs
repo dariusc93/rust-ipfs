@@ -94,7 +94,7 @@ pub struct WantSession {
     state: WantSessionState,
     timeout: Option<Duration>,
     timer: Option<Delay>,
-    terminated: bool,
+    terminated: Option<bool>,
 }
 
 impl WantSession {
@@ -109,7 +109,7 @@ impl WantSession {
             state: WantSessionState::Idle,
             timeout,
             timer: timeout.map(Delay::new),
-            terminated: false,
+            terminated: None,
         }
     }
 
@@ -281,9 +281,14 @@ impl Stream for WantSession {
             return Poll::Ready(None);
         }
 
-        if self.terminated {
-            // Note: At this point, the stream would be removed from the map so there would not be any point in returning `Poll::Ready(None)`
-            return Poll::Ready(Some(WantSessionEvent::Cancelled));
+        if let Some(terminated) = self.terminated.as_mut() {
+            match terminated {
+                true => return Poll::Ready(None),
+                false => {
+                    *terminated = true;
+                    return Poll::Ready(Some(WantSessionEvent::Cancelled));
+                }
+            }
         }
 
         if let Some((peer_id, state)) = self
@@ -453,7 +458,7 @@ impl Stream for WantSession {
                     }
                     // Wake up the task so the stream would poll any cancel requests
                     this.state = WantSessionState::Idle;
-                    this.terminated = true;
+                    this.terminated = Some(false);
                     cx.waker().wake_by_ref();
                 }
                 WantSessionState::Complete => {
