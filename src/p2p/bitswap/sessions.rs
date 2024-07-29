@@ -454,6 +454,7 @@ impl Stream for WantSession {
                     // Wake up the task so the stream would poll any cancel requests
                     this.state = WantSessionState::Idle;
                     this.terminated = true;
+                    cx.waker().wake_by_ref();
                 }
                 WantSessionState::Complete => {
                     tracing::info!(session = %cid, "obtaining block completed.");
