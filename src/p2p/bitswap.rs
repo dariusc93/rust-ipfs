@@ -561,6 +561,10 @@ impl NetworkBehaviour for Behaviour {
                     let opts = DialOpts::peer_id(peer_id).build();
                     return Poll::Ready(ToSwarm::Dial { opts });
                 }
+                WantSessionEvent::Cancelled => {
+                    self.want_session.remove(&cid);
+                    return Poll::Ready(ToSwarm::GenerateEvent(Event::CancelBlock { cid }));
+                }
             },
             Poll::Pending | Poll::Ready(None) => {}
         }
@@ -646,6 +650,55 @@ mod test {
             .expect("block exist");
 
         assert_eq!(b, block);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bitswap_timeout() -> anyhow::Result<()> {
+        let (_, _, mut swarm1, _) = build_swarm().await;
+        let (peer2, addr2, mut swarm2, _) = build_swarm().await;
+
+        let block = create_block();
+
+        let cid = *block.cid();
+
+        // repo.put_block(block.clone()).await?;
+
+        let opt = DialOpts::peer_id(peer2)
+            .addresses(vec![addr2.clone()])
+            .build();
+
+        swarm1.dial(opt)?;
+
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        assert_eq!(peer_id, peer2);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+
+        swarm2
+            .behaviour_mut()
+            .bitswap
+            .get(&cid, &[], Some(Duration::from_millis(250)));
+
+        loop {
+            tokio::select! {
+                _ = swarm1.next() => {}
+                e = swarm2.select_next_some() => {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::CancelBlock { cid: inner_cid })) = e {
+                        assert_eq!(inner_cid, cid);
+                        break;
+                    }
+                },
+            }
+        }
 
         Ok(())
     }
