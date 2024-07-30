@@ -25,11 +25,11 @@ async fn bitswap_stress_test() {
 
     let nodes = spawn_nodes::<5>(Topology::Mesh).await;
 
+    let block = Block::new(cid, data.clone()).unwrap();
+
     for (i, node) in nodes.iter().enumerate() {
         if filter(i) {
-            node.put_block(Block::new(cid, data.clone()).unwrap())
-                .await
-                .unwrap();
+            node.put_block(&block).await.unwrap();
         }
     }
 

@@ -603,7 +603,7 @@ mod test {
 
         let cid = *block.cid();
 
-        repo.put_block(block.clone()).await?;
+        repo.put_block(&block).await?;
 
         let opt = DialOpts::peer_id(peer2)
             .addresses(vec![addr2.clone()])
@@ -659,7 +659,7 @@ mod test {
 
         let cid = *block.cid();
 
-        repo.put_block(block.clone()).await?;
+        repo.put_block(&block).await?;
 
         let opt = DialOpts::peer_id(peer2)
             .addresses(vec![addr2.clone()])
@@ -716,7 +716,7 @@ mod test {
 
         let cid = *block.cid();
 
-        repo.put_block(block.clone()).await?;
+        repo.put_block(&block).await?;
 
         let opt = DialOpts::peer_id(peer2)
             .addresses(vec![addr2.clone()])
