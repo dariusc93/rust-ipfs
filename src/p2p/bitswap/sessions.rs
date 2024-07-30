@@ -306,11 +306,14 @@ impl Stream for WantSession {
             return Poll::Ready(Some(WantSessionEvent::Dial { peer_id: *peer_id }));
         }
 
-        if !matches!(self.state, WantSessionState::Complete) {
+        if !matches!(
+            self.state,
+            WantSessionState::Complete | WantSessionState::Cancel
+        ) {
             if let Some((peer_id, state)) = self
                 .wants
                 .iter_mut()
-                .find(|(_, state)| matches!(state, PeerWantState::Pending))
+                .find(|(_, state)| **state == PeerWantState::Pending)
             {
                 *state = PeerWantState::Sent;
                 tracing::debug!(session = %cid, %peer_id, name = "want_session", "sent want block");
@@ -334,6 +337,8 @@ impl Stream for WantSession {
 
             match this.state {
                 WantSessionState::Idle => {
+                    this.waker = Some(cx.waker().clone());
+
                     if let Some(peer_id) = this
                         .wants
                         .iter()
@@ -361,8 +366,6 @@ impl Stream for WantSession {
                             }
                         }
                     }
-
-                    this.waker = Some(cx.waker().clone());
 
                     return Poll::Pending;
                 }

@@ -633,8 +633,15 @@ mod test {
             tokio::select! {
                 _ = swarm1.next() => {}
                 e = swarm2.select_next_some() => {
-                    if let SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::BlockRetrieved { cid: inner_cid })) = e {
-                        assert_eq!(inner_cid, cid);
+                    match e {
+                        SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::BlockRetrieved { cid: inner_cid })) => {
+                            assert_eq!(inner_cid, cid);
+                        }
+                        SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::CancelBlock { cid: inner_cid })) => {
+                            assert_eq!(inner_cid, cid);
+                            unreachable!("exchange should not timeout");
+                        }
+                        _ => {}
                     }
                 },
                 Ok(true) = repo2.contains(&cid) => {
