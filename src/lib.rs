@@ -2752,7 +2752,7 @@ mod tests {
         let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
         let block = Block::new(cid, data).unwrap();
 
-        let cid: Cid = ipfs.put_block(block.clone()).await.unwrap();
+        let cid: Cid = ipfs.put_block(&block).await.unwrap();
         let new_block = ipfs.get_block(&cid).await.unwrap();
         assert_eq!(block, new_block);
     }

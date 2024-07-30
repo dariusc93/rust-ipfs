@@ -1250,7 +1250,7 @@ mod tests {
         let (cid, data) = blocks.next().unwrap();
         assert_eq!(blocks.next(), None);
 
-        ipfs.put_block(Block::new(cid, data).unwrap())
+        ipfs.put_block(&Block::new(cid, data).unwrap())
             .await
             .unwrap();
 
@@ -1283,7 +1283,7 @@ mod tests {
 
         let total_size = data.len();
 
-        ipfs.put_block(Block::new(cid, data).unwrap())
+        ipfs.put_block(&Block::new(cid, data).unwrap())
             .await
             .unwrap();
 
@@ -1301,7 +1301,7 @@ mod tests {
             let node = node.unwrap();
             let block = Block::new(node.cid.to_owned(), node.block.to_vec()).unwrap();
 
-            ipfs.put_block(block).await.unwrap();
+            ipfs.put_block(&block).await.unwrap();
 
             cids.push(node.cid.to_owned());
         }
