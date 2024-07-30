@@ -79,7 +79,7 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
     /// Get a total size of the block store
     async fn total_size(&self) -> Result<usize, Error>;
     /// Inserts a block in the blockstore.
-    async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error>;
+    async fn put(&self, block: &Block) -> Result<(Cid, BlockPut), Error>;
     /// Removes a block from the blockstore.
     async fn remove(&self, cid: &Cid) -> Result<(), Error>;
     /// Remove multiple blocks from the blockstore
@@ -448,7 +448,7 @@ impl Repo {
                 let mut stream = self.list_blocks().await;
                 while let Some(cid) = stream.next().await {
                     match self.get_block_now(&cid).await {
-                        Ok(Some(block)) => match repo.inner.block_store.put(block).await {
+                        Ok(Some(block)) => match repo.inner.block_store.put(&block).await {
                             Ok(_) => {}
                             Err(e) => error!("Error migrating {cid}: {e}"),
                         },
@@ -604,7 +604,7 @@ impl Repo {
     }
 
     /// Puts a block into the block store.
-    pub fn put_block(&self, block: Block) -> RepoPutBlock {
+    pub fn put_block<'a>(&self, block: &'a Block) -> RepoPutBlock<'a> {
         RepoPutBlock::new(self, block).broadcast_on_new_block(true)
     }
 
@@ -969,15 +969,15 @@ impl Repo {
     }
 }
 
-pub struct RepoPutBlock {
+pub struct RepoPutBlock<'a> {
     repo: Repo,
-    block: Block,
+    block: &'a Block,
     span: Option<Span>,
     broadcast_on_new_block: bool,
 }
 
-impl RepoPutBlock {
-    fn new(repo: &Repo, block: Block) -> Self {
+impl<'a> RepoPutBlock<'a> {
+    fn new(repo: &Repo, block: &'a Block) -> Self {
         Self {
             repo: repo.clone(),
             block,
@@ -997,16 +997,16 @@ impl RepoPutBlock {
     }
 }
 
-impl IntoFuture for RepoPutBlock {
+impl<'a> IntoFuture for RepoPutBlock<'a> {
     type IntoFuture = BoxFuture<'static, Self::Output>;
     type Output = Result<Cid, Error>;
     fn into_future(self) -> Self::IntoFuture {
-        let block = self.block;
+        let block = self.block.clone();
         let span = self.span.unwrap_or(Span::current());
         let span = debug_span!(parent: &span, "put_block", cid = %block.cid());
         async move {
             let _guard = self.repo.inner.gclock.read().await;
-            let (cid, res) = self.repo.inner.block_store.put(block.clone()).await?;
+            let (cid, res) = self.repo.inner.block_store.put(&block).await?;
 
             if let BlockPut::NewBlock = res {
                 if self.broadcast_on_new_block {

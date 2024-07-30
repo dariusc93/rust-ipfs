@@ -187,7 +187,7 @@ impl WantSession {
             tracing::warn!(session = %self.cid, %peer_id, cid = %block.cid(), name = "want_session", "state already putting block into store");
         } else {
             tracing::info!(%peer_id, cid = %block.cid(), name = "want_session", "storing block");
-            let fut = self.repo.put_block(block).into_future();
+            let fut = self.repo.put_block(&block).into_future();
             self.state = WantSessionState::PutBlock {
                 from_peer_id: peer_id,
                 fut,

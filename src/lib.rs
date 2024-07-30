@@ -1128,7 +1128,7 @@ impl Ipfs {
     }
 
     /// Puts a block into the ipfs repo.
-    pub async fn put_block(&self, block: Block) -> Result<Cid, Error> {
+    pub async fn put_block(&self, block: &Block) -> Result<Cid, Error> {
         self.repo.put_block(block).span(self.span.clone()).await
     }
 

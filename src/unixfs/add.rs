@@ -183,7 +183,7 @@ impl Stream for UnixfsAdd {
                                             return;
                                         }
                                     };
-                                    let _cid = match repo.put_block(block).await {
+                                    let _cid = match repo.put_block(&block).await {
                                         Ok(cid) => cid,
                                         Err(e) => {
                                             yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
@@ -209,7 +209,7 @@ impl Stream for UnixfsAdd {
                                     return;
                                 }
                             };
-                            let _cid = match repo.put_block(block).await {
+                            let _cid = match repo.put_block(&block).await {
                                 Ok(cid) => cid,
                                 Err(e) => {
                                     yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
@@ -249,7 +249,7 @@ impl Stream for UnixfsAdd {
                                             let cid = node.cid.to_owned();
                                             let block = Block::new(cid, node.block.to_vec())?;
 
-                                            repo.put_block(block).await?;
+                                            repo.put_block(&block).await?;
 
                                             cids.push(cid);
                                         }

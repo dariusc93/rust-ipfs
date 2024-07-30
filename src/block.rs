@@ -34,6 +34,10 @@ impl Block {
         &self.data
     }
 
+    pub fn inner_data(&self) -> &Bytes {
+        &self.data
+    }
+
     pub fn into_inner(self) -> (Cid, Bytes) {
         (self.cid, self.data)
     }

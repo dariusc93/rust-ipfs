@@ -646,7 +646,7 @@ impl std::future::IntoFuture for DagPut {
             };
             let cid = Cid::new(version, self.codec.into(), hash)?;
             let block = Block::new(cid, bytes)?;
-            let cid = self.dag_ipld.repo.put_block(block).await?;
+            let cid = self.dag_ipld.repo.put_block(&block).await?;
 
             if let Some(opt) = self.pinned {
                 if !self.dag_ipld.repo.is_pinned(&cid).await? {
