@@ -1,15 +1,13 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
 use crate::{Block, StorageType};
-use anyhow::anyhow;
 use async_trait::async_trait;
 use core::fmt::Debug;
 use futures::channel::mpsc::{channel, Receiver, Sender};
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use futures_timeout::TimeoutExt;
 use ipld_core::cid::Cid;
 use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
@@ -22,7 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{error, fmt, io};
-use tokio::sync::RwLockReadGuard;
+use tokio::sync::{Notify, RwLockReadGuard};
 use tracing::{log, Span};
 use tracing_futures::Instrument;
 
@@ -344,7 +342,12 @@ pub(crate) struct RepoInner {
 #[derive(Debug)]
 pub enum RepoEvent {
     /// Signals a desired block.
-    WantBlock(Vec<Cid>, Vec<PeerId>, Option<Duration>),
+    WantBlock(
+        Vec<Cid>,
+        Vec<PeerId>,
+        Option<Duration>,
+        Option<HashMap<Cid, Vec<Arc<Notify>>>>,
+    ),
     /// Signals a desired block is no longer wanted.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
@@ -683,6 +686,10 @@ impl Repo {
             .repo_channel()
             .ok_or(anyhow::anyhow!("Channel is not available"))?;
 
+        let mut notified: HashMap<Cid, Vec<_>> = HashMap::new();
+
+        let timeout = timeout.or(Some(Duration::from_secs(60)));
+
         for cid in &missing {
             let cid = *cid;
             let (tx, rx) = futures::channel::oneshot::channel();
@@ -693,26 +700,47 @@ impl Repo {
                 .or_default()
                 .push(tx);
 
-            let timeout = timeout.unwrap_or(Duration::from_secs(60));
             let mut events = events.clone();
+            let signal = Arc::new(Notify::new());
+            let s2 = signal.clone();
             let task = async move {
-                let block = rx
-                    .timeout(timeout)
-                    .await
-                    .map_err(|_| anyhow::anyhow!("Timeout while resolving {cid}"))??
-                    .map_err(|e| anyhow!("{e}"))?;
-                Ok::<_, anyhow::Error>(block)
+                let block_fut = rx;
+                let notified_fut = signal.notified();
+                futures::pin_mut!(notified_fut);
+
+                match futures::future::select(block_fut, notified_fut).await {
+                    Either::Left((Ok(Ok(block)), _)) => return Ok::<_, Error>(block),
+                    Either::Left((Ok(Err(e)), _)) => {
+                        return Err::<_, Error>(anyhow::anyhow!("{e}"))
+                    }
+                    Either::Left((Err(e), _)) => return Err::<_, Error>(e.into()),
+                    Either::Right(((), _)) => {
+                        return Err::<_, Error>(anyhow::anyhow!(
+                            "request for {cid} has been cancelled"
+                        ))
+                    }
+                }
             }
             .map_err(move |e| {
+                // Although we request would eventually be cancelled if timeout or cancelled, we can still signal to swarm
+                // about the block being unwanted for future changes.
                 _ = events.try_send(RepoEvent::UnwantBlock(cid));
                 e
             })
             .boxed();
+
+            notified.entry(cid).or_default().push(s2);
+
             blocks.push_back(task);
         }
 
         events
-            .send(RepoEvent::WantBlock(missing, peers.to_vec(), timeout))
+            .send(RepoEvent::WantBlock(
+                missing,
+                peers.to_vec(),
+                timeout,
+                Some(notified),
+            ))
             .await
             .ok();
 

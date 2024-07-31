@@ -17,11 +17,12 @@ use std::{
     time::Duration,
 };
 
-use futures_timer::Delay;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
+use futures_timer::Delay;
+use ipld_core::cid::Cid;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use crate::{
     p2p::TSwarm,
@@ -48,6 +49,7 @@ use libp2p::{
 
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::Event as MdnsEvent;
+use tokio::sync::Notify;
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
@@ -57,6 +59,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub(crate) swarm: TSwarm<C>,
     pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
     pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
+    pub(crate) bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
     pub(crate) listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
@@ -96,6 +99,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             dht_peer_lookup: Default::default(),
             pubsub_event_stream: Default::default(),
             kad_subscriptions: Default::default(),
+            bitswap_cancellable: Default::default(),
             repo: repo.clone(),
             bootstraps: Default::default(),
             swarm_event: Default::default(),
@@ -879,7 +883,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                 }
                 crate::p2p::bitswap::Event::CancelBlock { cid } => {
-                    info!(%cid, "block request cancelled")
+                    info!(%cid, "block request cancelled");
+                    if let Some(list) = self.bitswap_cancellable.remove(&cid) {
+                        for signal in list {
+                            signal.notify_waiters();
+                        }
+                    }
                 }
                 crate::p2p::bitswap::Event::BlockRetrieved { cid } => {
                     info!(%cid, "block retrieved")
@@ -1541,10 +1550,20 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
     fn handle_repo_event(&mut self, event: RepoEvent) {
         match event {
-            RepoEvent::WantBlock(cids, peers, timeout) => {
+            RepoEvent::WantBlock(cids, peers, timeout, signals) => {
                 let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
                     return;
                 };
+                if let Some(signals) = signals {
+                    for (cid, signals) in signals {
+                        if signals.is_empty() {
+                            continue;
+                        }
+
+                        let entries = self.bitswap_cancellable.entry(cid).or_default();
+                        entries.extend(signals);
+                    }
+                }
                 bs.gets(cids, &peers, timeout);
             }
             RepoEvent::UnwantBlock(cid) => {
@@ -1552,6 +1571,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     return;
                 };
                 bs.cancel(cid);
+                if let Some(list) = self.bitswap_cancellable.remove(&cid) {
+                    for signal in list {
+                        signal.notify_waiters();
+                    }
+                }
             }
             RepoEvent::NewBlock(block) => {
                 let Some(bs) = self.swarm.behaviour_mut().bitswap.as_mut() else {
