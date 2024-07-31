@@ -68,7 +68,7 @@ impl BlockStore for FsBlockStore {
 
     //TODO: Allow multiple puts without holding a lock. We could probably hold a read lock instead
     //      and revert back to using a broadcast
-    async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+    async fn put(&self, block: &Block) -> Result<(Cid, BlockPut), Error> {
         let inner = &mut *self.inner.write().await;
         inner.put(block).await
     }
@@ -138,7 +138,8 @@ impl FsBlockStoreInner {
         .await?
     }
 
-    async fn put(&mut self, block: Block) -> Result<(Cid, BlockPut), Error> {
+    async fn put(&mut self, block: &Block) -> Result<(Cid, BlockPut), Error> {
+        let block = block.clone();
         let target_path = block_path(self.path.clone(), block.cid());
         let cid = *block.cid();
 
@@ -344,7 +345,7 @@ mod tests {
             panic!("block should not be found")
         }
 
-        let put = store.put(block.clone()).await.unwrap();
+        let put = store.put(&block).await.unwrap();
         assert_eq!(put.0, cid.to_owned());
         let contains = store.contains(&cid);
         assert!(contains.await.unwrap());
@@ -375,7 +376,7 @@ mod tests {
         block_store.open().await.unwrap();
 
         assert!(!block_store.contains(block.cid()).await.unwrap());
-        block_store.put(block.clone()).await.unwrap();
+        block_store.put(&block).await.unwrap();
 
         let block_store = FsBlockStore::new(tmp.clone());
         block_store.open().await.unwrap();
@@ -399,7 +400,7 @@ mod tests {
             let data_slice = data.to_vec();
             let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data_slice));
             let block = Block::new(cid, data_slice).unwrap();
-            block_store.put(block.clone()).await.unwrap();
+            block_store.put(&block).await.unwrap();
         }
 
         let cids = block_store.list().await.collect::<Vec<_>>().await;
@@ -449,7 +450,7 @@ mod tests {
                     let block = block.clone();
                     async move {
                         barrier.wait().await;
-                        bs.put(block).await
+                        bs.put(&block).await
                     }
                 })
             })
@@ -490,7 +491,7 @@ mod tests {
 
         assert_eq!(single.list().await.collect::<Vec<_>>().await.len(), 0);
 
-        single.put(block).await.unwrap();
+        single.put(&block).await.unwrap();
 
         // compare the multihash since we store the block named as cidv1
         assert_eq!(

@@ -541,7 +541,7 @@ mod tests {
             let cid = Cid::try_from(*cid_str).unwrap();
             let block = Block::new(cid, data.to_vec()).unwrap();
             block.to_ipld().unwrap();
-            ipfs.put_block(block).await.unwrap();
+            ipfs.put_block(&block).await.unwrap();
         }
 
         ipfs

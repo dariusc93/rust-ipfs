@@ -212,7 +212,8 @@ impl BlockStore for IdbBlockStore {
         rx.await?
     }
 
-    async fn put(&self, block: Block) -> Result<(Cid, BlockPut), Error> {
+    async fn put(&self, block: &Block) -> Result<(Cid, BlockPut), Error> {
+        let block = block.clone();
         if self.contains(block.cid()).await? {
             return Ok((*block.cid(), BlockPut::Existed));
         }

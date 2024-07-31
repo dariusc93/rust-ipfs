@@ -646,7 +646,7 @@ impl std::future::IntoFuture for DagPut {
             };
             let cid = Cid::new(version, self.codec.into(), hash)?;
             let block = Block::new(cid, bytes)?;
-            let cid = self.dag_ipld.repo.put_block(block).await?;
+            let cid = self.dag_ipld.repo.put_block(&block).await?;
 
             if let Some(opt) = self.pinned {
                 if !self.dag_ipld.repo.is_pinned(&cid).await? {
@@ -1250,7 +1250,7 @@ mod tests {
         let (cid, data) = blocks.next().unwrap();
         assert_eq!(blocks.next(), None);
 
-        ipfs.put_block(Block::new(cid, data).unwrap())
+        ipfs.put_block(&Block::new(cid, data).unwrap())
             .await
             .unwrap();
 
@@ -1283,7 +1283,7 @@ mod tests {
 
         let total_size = data.len();
 
-        ipfs.put_block(Block::new(cid, data).unwrap())
+        ipfs.put_block(&Block::new(cid, data).unwrap())
             .await
             .unwrap();
 
@@ -1301,7 +1301,7 @@ mod tests {
             let node = node.unwrap();
             let block = Block::new(node.cid.to_owned(), node.block.to_vec()).unwrap();
 
-            ipfs.put_block(block).await.unwrap();
+            ipfs.put_block(&block).await.unwrap();
 
             cids.push(node.cid.to_owned());
         }

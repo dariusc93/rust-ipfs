@@ -21,7 +21,7 @@ async fn two_node_put_get() {
     let nodes = spawn_nodes::<2>(Topology::Line).await;
     let block = create_block();
 
-    nodes[0].put_block(block.clone()).await.unwrap();
+    nodes[0].put_block(&block).await.unwrap();
     let found_block = nodes[1]
         .get_block(block.cid())
         .timeout(Duration::from_secs(10))
@@ -40,10 +40,10 @@ async fn long_get_block() {
     let block = create_block();
 
     // the first node should get the block from the last one...
-    nodes[N - 1].put_block(block.clone()).await.unwrap();
+    nodes[N - 1].put_block(&block).await.unwrap();
     nodes[0].get_block(block.cid()).await.unwrap();
 
     // ...and the last one from the first one
-    nodes[0].put_block(block.clone()).await.unwrap();
+    nodes[0].put_block(&block).await.unwrap();
     nodes[N - 1].get_block(block.cid()).await.unwrap();
 }

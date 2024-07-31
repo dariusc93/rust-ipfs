@@ -167,7 +167,7 @@ async fn dht_providing() {
     let data = b"hello block\n".to_vec();
     let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
     nodes[last_index]
-        .put_block(Block::new(cid, data).unwrap())
+        .put_block(&Block::new(cid, data).unwrap())
         .await
         .unwrap();
 

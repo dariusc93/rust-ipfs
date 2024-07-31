@@ -14,7 +14,7 @@ fn create_block() -> Block {
 async fn cleanup_unpinned_blocks() -> anyhow::Result<()> {
     let node = Node::new("gc_test_node").await;
     let block = create_block();
-    let cid = node.put_block(block).await?;
+    let cid = node.put_block(&block).await?;
 
     let removed = node.gc().await?;
 
@@ -27,7 +27,7 @@ async fn cleanup_unpinned_blocks() -> anyhow::Result<()> {
 async fn gc_cleanup_attempt_of_pinned_blocks() -> anyhow::Result<()> {
     let node = Node::new("gc_test_node").await;
     let block = create_block();
-    let cid = node.put_block(block).await?;
+    let cid = node.put_block(&block).await?;
     node.insert_pin(&cid).await?;
     let removed = node.gc().await?;
     assert!(removed.is_empty());
