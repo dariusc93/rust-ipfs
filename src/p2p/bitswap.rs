@@ -693,7 +693,7 @@ mod test {
         swarm2
             .behaviour_mut()
             .bitswap
-            .get(&cid, &[], Some(Duration::from_millis(250)));
+            .get(&cid, &[], Some(Duration::from_millis(150)));
 
         loop {
             tokio::select! {
