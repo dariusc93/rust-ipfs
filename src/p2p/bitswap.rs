@@ -662,6 +662,46 @@ mod test {
     }
 
     #[tokio::test]
+    async fn notify_swarm() -> anyhow::Result<()> {
+        let (_, _, mut swarm1, _) = build_swarm().await;
+
+        let block = create_block();
+
+        let cid = *block.cid();
+
+        swarm1
+            .behaviour_mut()
+            .bitswap
+            .get(&cid, &[], Some(Duration::from_millis(500)));
+
+        let mut notified_counter = 0;
+
+        loop {
+            tokio::select! {
+                e = swarm1.select_next_some() => {
+                    match e {
+                        SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::NeedBlock { cid: inner_cid })) => {
+                            assert_eq!(inner_cid, cid);
+                            notified_counter += 1;
+                        }
+                        SwarmEvent::Behaviour(BehaviourEvent::Bitswap(super::Event::CancelBlock { cid: inner_cid })) => {
+                            assert_eq!(inner_cid, cid);
+                            unreachable!()
+                        }
+                        _ => {}
+                    }
+                },
+            }
+
+            if notified_counter == 2 {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn bitswap_timeout() -> anyhow::Result<()> {
         let (_, _, mut swarm1, _) = build_swarm().await;
         let (peer2, addr2, mut swarm2, _) = build_swarm().await;

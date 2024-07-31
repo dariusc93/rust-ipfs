@@ -69,6 +69,7 @@ impl Debug for WantSessionState {
 enum WantDiscovery {
     Disable,
     Start,
+    SilentStart,
     Running { timer: Delay },
 }
 
@@ -93,6 +94,7 @@ pub struct WantSession {
     repo: Repo,
     state: WantSessionState,
     timeout: Option<Duration>,
+    discovery_timeout: Duration,
     timer: Option<Delay>,
     terminated: Option<bool>,
 }
@@ -109,6 +111,7 @@ impl WantSession {
             state: WantSessionState::Idle,
             timeout,
             timer: timeout.map(Delay::new),
+            discovery_timeout: timeout.map(|d| d / 2).unwrap_or(Duration::from_secs(30)),
             terminated: None,
         }
     }
@@ -350,18 +353,35 @@ impl Stream for WantSession {
                         return Poll::Ready(Some(WantSessionEvent::SendCancel { peer_id }));
                     }
 
+                    if (this.wants.is_empty()
+                        || this
+                            .wants
+                            .values()
+                            .all(|state| matches!(state, PeerWantState::Failed)))
+                        && matches!(this.discovery, WantDiscovery::Disable)
+                    {
+                        this.discovery = WantDiscovery::SilentStart;
+                    }
+
                     match &mut this.discovery {
                         WantDiscovery::Disable => {}
                         WantDiscovery::Start => {
                             this.discovery = WantDiscovery::Running {
-                                timer: Delay::new(Duration::from_secs(60)),
+                                timer: Delay::new(this.discovery_timeout),
                             };
 
                             return Poll::Ready(Some(WantSessionEvent::NeedBlock));
                         }
+                        WantDiscovery::SilentStart => {
+                            this.discovery = WantDiscovery::Running {
+                                timer: Delay::new(this.discovery_timeout),
+                            };
+                            // We are waiting up the task so we could begin to poll the timer
+                            cx.waker().wake_by_ref();
+                        }
                         WantDiscovery::Running { timer } => {
                             if timer.poll_unpin(cx).is_ready() {
-                                timer.reset(Duration::from_secs(60));
+                                timer.reset(this.discovery_timeout);
                                 return Poll::Ready(Some(WantSessionEvent::NeedBlock));
                             }
                         }
@@ -414,11 +434,12 @@ impl Stream for WantSession {
                     tracing::debug!(session = %cid, name = "want_session", "session is idle");
                     this.state = WantSessionState::Idle;
 
-                    if this
-                        .wants
-                        .values()
-                        .all(|state| matches!(state, PeerWantState::Failed))
-                        && matches!(this.discovery, WantDiscovery::Disable)
+                    if this.wants.is_empty()
+                        || this
+                            .wants
+                            .values()
+                            .all(|state| matches!(state, PeerWantState::Failed))
+                            && matches!(this.discovery, WantDiscovery::Disable)
                     {
                         this.discovery = WantDiscovery::Start;
                     }
