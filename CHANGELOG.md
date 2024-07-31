@@ -13,7 +13,8 @@
 - refactor: Remove sessions and redundant code. [PR 255](https://github.com/dariusc93/rust-ipfs/pull/255)
 - refactor: Move from libipld to ipld-core. [PR 257](https://github.com/dariusc93/rust-ipfs/pull/257)
 - chore: Use `Bytes` when creating or using `Block` within bitswap. [PR 264](https://github.com/dariusc93/rust-ipfs/pull/264)
-- refactor: Reference `Block` in `BlockStore::put_block`. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- refactor: Reference `Block` in `BlockStore::put_block`. [PR 272](https://github.com/dariusc93/rust-ipfs/pull/272)
+- feat: Passthrough timeout to WantSession::new. [PR 265](https://github.com/dariusc93/rust-ipfs/pull/265)
 
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.

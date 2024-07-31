@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     future::IntoFuture,
     pin::Pin,
     task::{Context, Poll, Waker},
@@ -7,7 +7,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, ready, stream::FusedStream, FutureExt, Stream};
+use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream};
 use futures_timer::Delay;
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
@@ -18,6 +18,19 @@ use crate::{repo::Repo, Block};
 
 const CAP_THRESHOLD: usize = 100;
 
+// Small macro to set the waker from the state of the sessions when the future (or stream) is pending
+macro_rules! state_ready {
+    ($context:expr, $e:expr, $ee:expr $(,)?) => {
+        match $ee {
+            std::task::Poll::Ready(t) => t,
+            std::task::Poll::Pending => {
+                $e.waker.replace($context.waker().clone());
+                return std::task::Poll::Pending;
+            }
+        }
+    };
+}
+
 #[derive(Debug)]
 pub enum WantSessionEvent {
     Dial { peer_id: PeerId },
@@ -26,6 +39,7 @@ pub enum WantSessionEvent {
     SendBlock { peer_id: PeerId },
     BlockStored,
     NeedBlock,
+    Cancelled,
 }
 
 pub enum WantSessionState {
@@ -41,6 +55,7 @@ pub enum WantSessionState {
         from_peer_id: PeerId,
         fut: BoxFuture<'static, Result<Cid, anyhow::Error>>,
     },
+    Cancel,
     Complete,
 }
 
@@ -54,6 +69,7 @@ impl Debug for WantSessionState {
 enum WantDiscovery {
     Disable,
     Start,
+    SilentStart,
     Running { timer: Delay },
 }
 
@@ -65,6 +81,7 @@ enum PeerWantState {
     Failed,
     Waiting,
     Disconnect { backoff: bool },
+    Cancel,
 }
 
 #[derive(Debug)]
@@ -77,11 +94,13 @@ pub struct WantSession {
     repo: Repo,
     state: WantSessionState,
     timeout: Option<Duration>,
-    cancel: VecDeque<PeerId>,
+    discovery_timeout: Duration,
+    timer: Option<Delay>,
+    terminated: Option<bool>,
 }
 
 impl WantSession {
-    pub fn new(repo: &Repo, cid: Cid) -> Self {
+    pub fn new(repo: &Repo, cid: Cid, timeout: Option<Duration>) -> Self {
         Self {
             cid,
             wants: Default::default(),
@@ -90,8 +109,10 @@ impl WantSession {
             repo: repo.clone(),
             waker: None,
             state: WantSessionState::Idle,
-            timeout: None,
-            cancel: Default::default(),
+            timeout,
+            timer: timeout.map(Delay::new),
+            discovery_timeout: timeout.map(|d| d / 2).unwrap_or(Duration::from_secs(30)),
+            terminated: None,
         }
     }
 
@@ -167,6 +188,7 @@ impl WantSession {
         if !self.contains(peer_id) {
             return false;
         }
+
         if let indexmap::map::Entry::Occupied(mut entry) = self.wants.entry(peer_id) {
             let state = entry.get_mut();
             if let PeerWantState::Disconnect { backoff } = state {
@@ -192,7 +214,10 @@ impl WantSession {
                 from_peer_id: peer_id,
                 fut,
             };
+            // we no longer need to use discovery if a block is found
             self.discovery = WantDiscovery::Disable;
+            // disable/remove the timer to prevent it from timing out while polling the future
+            self.timer.take();
         }
 
         if let Some(w) = self.waker.take() {
@@ -242,14 +267,31 @@ impl Stream for WantSession {
     #[tracing::instrument(level = "trace", name = "WantSession::poll_next", skip(self, cx))]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let cid = self.cid;
-        // We send cancels as we conclude the session.
-        if let Some(peer_id) = self.cancel.pop_back() {
+
+        if let Some(peer_id) = self
+            .wants
+            .iter()
+            .find(|(_, state)| matches!(state, PeerWantState::Cancel))
+            .map(|(peer_id, _)| peer_id)
+            .copied()
+        {
+            self.wants.shift_remove(&peer_id);
             return Poll::Ready(Some(WantSessionEvent::SendCancel { peer_id }));
         }
 
         if self.received {
             // We received the block by this point so there is nothing more to do for the session
             return Poll::Ready(None);
+        }
+
+        if let Some(terminated) = self.terminated.as_mut() {
+            match terminated {
+                true => return Poll::Ready(None),
+                false => {
+                    *terminated = true;
+                    return Poll::Ready(Some(WantSessionEvent::Cancelled));
+                }
+            }
         }
 
         if let Some((peer_id, state)) = self
@@ -267,16 +309,20 @@ impl Stream for WantSession {
             return Poll::Ready(Some(WantSessionEvent::Dial { peer_id: *peer_id }));
         }
 
-        if !matches!(self.state, WantSessionState::Complete) {
+        if !matches!(
+            self.state,
+            WantSessionState::Complete | WantSessionState::Cancel
+        ) {
             if let Some((peer_id, state)) = self
                 .wants
                 .iter_mut()
-                .find(|(_, state)| matches!(state, PeerWantState::Pending))
+                .find(|(_, state)| **state == PeerWantState::Pending)
             {
                 *state = PeerWantState::Sent;
                 tracing::debug!(session = %cid, %peer_id, name = "want_session", "sent want block");
                 return Poll::Ready(Some(WantSessionEvent::SendWant { peer_id: *peer_id }));
             } else if self.wants.capacity() > CAP_THRESHOLD {
+                // TODO: Maybe reduce the capacity of other items in the state to reduce the memory footprint
                 self.wants.shrink_to_fit()
             }
         }
@@ -284,31 +330,62 @@ impl Stream for WantSession {
         let this = &mut *self;
 
         loop {
+            if let Some(timer) = this.timer.as_mut() {
+                if timer.poll_unpin(cx).is_ready() {
+                    // Since the session timed out, we will precede to cancel it
+                    this.state = WantSessionState::Cancel;
+                    this.timer.take();
+                }
+            }
+
             match this.state {
                 WantSessionState::Idle => {
-                    if let Some(peer_id) = this.cancel.pop_back() {
-                        // Kick start the cancel requests.
+                    this.waker = Some(cx.waker().clone());
+
+                    if let Some(peer_id) = this
+                        .wants
+                        .iter()
+                        .find(|(_, state)| matches!(state, PeerWantState::Cancel))
+                        .map(|(peer_id, _)| peer_id)
+                        .copied()
+                    {
+                        this.wants.shift_remove(&peer_id);
                         return Poll::Ready(Some(WantSessionEvent::SendCancel { peer_id }));
+                    }
+
+                    if (this.wants.is_empty()
+                        || this
+                            .wants
+                            .values()
+                            .all(|state| matches!(state, PeerWantState::Failed)))
+                        && matches!(this.discovery, WantDiscovery::Disable)
+                    {
+                        this.discovery = WantDiscovery::SilentStart;
                     }
 
                     match &mut this.discovery {
                         WantDiscovery::Disable => {}
                         WantDiscovery::Start => {
                             this.discovery = WantDiscovery::Running {
-                                timer: Delay::new(Duration::from_secs(60)),
+                                timer: Delay::new(this.discovery_timeout),
                             };
 
                             return Poll::Ready(Some(WantSessionEvent::NeedBlock));
                         }
+                        WantDiscovery::SilentStart => {
+                            this.discovery = WantDiscovery::Running {
+                                timer: Delay::new(this.discovery_timeout),
+                            };
+                            // We are waiting up the task so we could begin to poll the timer
+                            cx.waker().wake_by_ref();
+                        }
                         WantDiscovery::Running { timer } => {
                             if timer.poll_unpin(cx).is_ready() {
-                                timer.reset(Duration::from_secs(60));
+                                timer.reset(this.discovery_timeout);
                                 return Poll::Ready(Some(WantSessionEvent::NeedBlock));
                             }
                         }
                     }
-
-                    this.waker = Some(cx.waker().clone());
 
                     return Poll::Pending;
                 }
@@ -357,11 +434,12 @@ impl Stream for WantSession {
                     tracing::debug!(session = %cid, name = "want_session", "session is idle");
                     this.state = WantSessionState::Idle;
 
-                    if this
-                        .wants
-                        .values()
-                        .all(|state| matches!(state, PeerWantState::Failed))
-                        && matches!(this.discovery, WantDiscovery::Disable)
+                    if this.wants.is_empty()
+                        || this
+                            .wants
+                            .values()
+                            .all(|state| matches!(state, PeerWantState::Failed))
+                            && matches!(this.discovery, WantDiscovery::Disable)
                     {
                         this.discovery = WantDiscovery::Start;
                     }
@@ -371,7 +449,7 @@ impl Stream for WantSession {
                     ref mut timer,
                 } => {
                     // We will wait until the peer respond and if it does not respond in time to timeout the request and proceed to the next block request
-                    ready!(timer.poll_unpin(cx));
+                    state_ready!(cx, this, timer.poll_unpin(cx));
                     tracing::warn!(session = %cid, name = "want_session", %peer_id, "request timeout attempting to get next block");
                     this.state = WantSessionState::NextBlock {
                         previous_peer_id: Some(peer_id),
@@ -382,7 +460,7 @@ impl Stream for WantSession {
                     ref mut fut,
                 } => {
                     let peer_id = from_peer_id;
-                    match ready!(fut.poll_unpin(cx)) {
+                    match state_ready!(cx, this, fut.poll_unpin(cx)) {
                         Ok(cid) => {
                             tracing::info!(session = %self.cid, %peer_id, block = %cid, name = "want_session", "block stored in block store");
                             self.state = WantSessionState::Complete;
@@ -396,17 +474,21 @@ impl Stream for WantSession {
                         }
                     }
                 }
-                WantSessionState::Complete => {
-                    this.received = true;
-                    let mut peers: HashSet<PeerId> = HashSet::new();
-                    // although this may be empty by the time we reach here, its best to clear it anyway since nothing was ever sent
-                    peers.extend(this.wants.keys());
-
-                    tracing::info!(session = %cid, pending_cancellation = peers.len());
-
-                    this.cancel.extend(peers);
+                WantSessionState::Cancel => {
+                    tracing::info!(session = %cid, "cancelled");
+                    for (peer_id, state) in this.wants.iter_mut() {
+                        tracing::info!(%peer_id, session = %cid, "setting peer state to cancel");
+                        *state = PeerWantState::Cancel;
+                    }
                     // Wake up the task so the stream would poll any cancel requests
                     this.state = WantSessionState::Idle;
+                    this.terminated = Some(false);
+                    cx.waker().wake_by_ref();
+                }
+                WantSessionState::Complete => {
+                    tracing::info!(session = %cid, "obtaining block completed.");
+                    this.received = true;
+                    this.state = WantSessionState::Cancel;
                 }
             }
         }
@@ -645,14 +727,14 @@ impl Stream for HaveSession {
                     return Poll::Pending;
                 }
                 HaveSessionState::ContainBlock { ref mut fut } => {
-                    let have = ready!(fut.poll_unpin(cx)).unwrap_or_default();
+                    let have = state_ready!(cx, this, fut.poll_unpin(cx)).unwrap_or_default();
                     this.have = Some(have);
                     this.state = HaveSessionState::Idle;
                 }
                 // Maybe we should have a lock on a single lock to prevent GC from cleaning it up or being removed while waiting for it to be
                 // exchanged. This could probably be done through a temporary pin
                 HaveSessionState::GetBlock { ref mut fut } => {
-                    let result = ready!(fut.poll_unpin(cx));
+                    let result = state_ready!(cx, this, fut.poll_unpin(cx));
                     let (cid, bytes) = match result {
                         Ok(Some(block)) => block.into_inner(),
                         Ok(None) => {
@@ -669,6 +751,7 @@ impl Stream for HaveSession {
                         }
                     };
 
+                    //
                     debug_assert_eq!(cid, this.cid);
 
                     // In case we are sent a block request
