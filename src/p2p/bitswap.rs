@@ -710,8 +710,6 @@ mod test {
 
         let cid = *block.cid();
 
-        // repo.put_block(block.clone()).await?;
-
         let opt = DialOpts::peer_id(peer2)
             .addresses(vec![addr2.clone()])
             .build();
