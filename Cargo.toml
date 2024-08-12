@@ -186,7 +186,7 @@ rand = { default-features = false, version = "0.8", features = [
     "std",
     "std_rng",
 ] }
-tempfile = "3.11.0"
+tempfile = "3.12.0"
 
 clap = { workspace = true }
 
