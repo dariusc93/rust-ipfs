@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tracing::debug;
 
+use libp2p::core::transport::PortUse;
 use libp2p::core::{Endpoint, Multiaddr};
 use libp2p::identity::PeerId;
 
@@ -242,12 +243,14 @@ impl NetworkBehaviour for GossipsubStream {
         peer: PeerId,
         addr: &Multiaddr,
         role_override: Endpoint,
+        port_use: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         self.gossipsub.handle_established_outbound_connection(
             connection_id,
             peer,
             addr,
             role_override,
+            port_use,
         )
     }
 

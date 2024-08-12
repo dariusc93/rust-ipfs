@@ -32,7 +32,6 @@ use libp2p::relay::Behaviour as Relay;
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{autonat, StreamProtocol};
-use std::borrow::Cow;
 use std::fmt::Debug;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
@@ -272,7 +271,7 @@ pub struct KadStoreConfig {
 }
 #[derive(Clone, Debug)]
 pub struct KadConfig {
-    pub protocol: Option<Vec<Cow<'static, str>>>,
+    pub protocol: Option<String>,
     pub disjoint_query_paths: bool,
     pub query_timeout: Duration,
     pub parallelism: Option<NonZeroUsize>,
@@ -316,14 +315,10 @@ impl From<KadInserts> for KademliaBucketInserts {
 
 impl From<KadConfig> for KademliaConfig {
     fn from(config: KadConfig) -> Self {
-        let mut kad_config = KademliaConfig::default();
-        if let Some(protocol) = config.protocol.map(|list| {
-            list.iter()
-                .filter_map(|p| StreamProtocol::try_from_owned(p.to_string()).ok())
-                .collect()
-        }) {
-            kad_config.set_protocol_names(protocol);
-        }
+        let protocol = config.protocol.unwrap_or("/ipfs/kad/1.0.0".to_string());
+        let protocol = StreamProtocol::try_from_owned(protocol).expect("protocol to be valid");
+
+        let mut kad_config = KademliaConfig::new(protocol);
         kad_config.disjoint_query_paths(config.disjoint_query_paths);
         kad_config.set_query_timeout(config.query_timeout);
         if let Some(p) = config.parallelism {

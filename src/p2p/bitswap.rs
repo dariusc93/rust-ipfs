@@ -13,6 +13,7 @@ use std::{
 
 use futures::StreamExt;
 use ipld_core::cid::Cid;
+use libp2p::core::transport::PortUse;
 use libp2p::{
     core::Endpoint,
     swarm::{
@@ -342,6 +343,7 @@ impl NetworkBehaviour for Behaviour {
         _: PeerId,
         _: &Multiaddr,
         _: Endpoint,
+        _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(OneShotHandler::default())
     }
