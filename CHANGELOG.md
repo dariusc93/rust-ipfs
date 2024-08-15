@@ -1,3 +1,6 @@
+# 0.11.21
+- chore: Put libp2p-webrtc-websys behind feature.
+
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.
 

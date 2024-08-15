@@ -7,7 +7,7 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.11.20"
+version = "0.11.21"
 
 [features]
 
@@ -15,7 +15,7 @@ default = []
 
 experimental_stream = ["dep:libp2p-stream"]
 
-webrtc_transport = ["dep:libp2p-webrtc"]
+webrtc_transport = ["dep:libp2p-webrtc", "libp2p-webrtc-websys"]
 
 beetle_bitswap = ["dep:beetle-bitswap-next"]
 libp2p_bitswap = ["dep:libp2p-bitswap-next"]
@@ -155,7 +155,7 @@ futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
 libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "noise", "ping", "yamux", "dns", "ed25519", "secp256k1", "ecdsa", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }
-libp2p-webrtc-websys.workspace = true
+libp2p-webrtc-websys = { workspace = true, optional = true }
 send_wrapper.workspace = true
 serde-wasm-bindgen.workspace = true
 tokio = { default-features = false, features = ["sync", "macros"], workspace = true }
