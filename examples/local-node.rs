@@ -41,6 +41,7 @@ mod ext_behaviour {
         task::{Context, Poll},
     };
 
+    use libp2p::swarm::derive_prelude::PortUse;
     use libp2p::{
         core::Endpoint,
         swarm::{
@@ -104,6 +105,7 @@ mod ext_behaviour {
             _: PeerId,
             _: &Multiaddr,
             _: Endpoint,
+            _: PortUse,
         ) -> Result<THandler<Self>, ConnectionDenied> {
             Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
         }
@@ -113,8 +115,7 @@ mod ext_behaviour {
             _: PeerId,
             _: ConnectionId,
             _: THandlerOutEvent<Self>,
-        ) {
-        }
+        ) {}
 
         fn on_swarm_event(&mut self, event: FromSwarm) {
             match event {
