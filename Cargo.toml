@@ -7,14 +7,14 @@ name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.11.20"
+version = "0.11.21"
 
 [features]
 default = []
 
 experimental_stream = ["dep:libp2p-stream"]
 
-webrtc_transport = ["dep:libp2p-webrtc"]
+webrtc_transport = ["dep:libp2p-webrtc", "dep:libp2p-webrtc-websys"]
 
 sled_data_store = ["dep:sled"]
 redb_data_store = ["dep:redb"]
@@ -41,7 +41,7 @@ getrandom = { version = "0.2.15" }
 hickory-resolver = "0.24.1"
 hkdf = "0.12.4"
 idb = "0.6"
-indexmap = "2.3.0"
+indexmap = "2.4.0"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.1"
 libp2p = { version = "0.54" }
@@ -162,7 +162,7 @@ futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
 libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "noise", "ping", "yamux", "dns", "ed25519", "secp256k1", "ecdsa", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }
-libp2p-webrtc-websys.workspace = true
+libp2p-webrtc-websys = { workspace = true, optional = true }
 send_wrapper.workspace = true
 serde-wasm-bindgen.workspace = true
 tokio = { default-features = false, features = ["sync", "macros"], workspace = true }
@@ -186,7 +186,7 @@ rand = { default-features = false, version = "0.8", features = [
     "std",
     "std_rng",
 ] }
-tempfile = "3.11.0"
+tempfile = "3.12.0"
 
 clap = { workspace = true }
 
