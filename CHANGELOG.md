@@ -16,6 +16,9 @@
 - refactor: Reference `Block` in `BlockStore::put_block`. [PR 272](https://github.com/dariusc93/rust-ipfs/pull/272)
 - feat: Passthrough timeout to WantSession::new. [PR 265](https://github.com/dariusc93/rust-ipfs/pull/265)
 
+# 0.11.21
+- chore: Put libp2p-webrtc-websys behind feature.
+
 # 0.11.20
 - feat: Add Ipfs::{add,remove}_external_address.
 
