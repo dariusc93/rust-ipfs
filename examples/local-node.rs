@@ -115,7 +115,8 @@ mod ext_behaviour {
             _: PeerId,
             _: ConnectionId,
             _: THandlerOutEvent<Self>,
-        ) {}
+        ) {
+        }
 
         fn on_swarm_event(&mut self, event: FromSwarm) {
             match event {

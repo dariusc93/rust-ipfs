@@ -256,7 +256,8 @@ mod ext_behaviour {
             _: PeerId,
             _: ConnectionId,
             _: THandlerOutEvent<Self>,
-        ) {}
+        ) {
+        }
 
         fn on_swarm_event(&mut self, event: FromSwarm) {
             match event {
@@ -267,7 +268,7 @@ mod ext_behaviour {
                             "Listening on {}",
                             addr.clone().with(Protocol::P2p(self.peer_id))
                         )
-                            .expect("");
+                        .expect("");
                     }
                 }
                 FromSwarm::ExternalAddrConfirmed(ev) => {
