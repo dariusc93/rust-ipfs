@@ -279,6 +279,7 @@ pub struct KadConfig {
     pub provider_record_ttl: Option<Duration>,
     pub insert_method: KadInserts,
     pub store_filter: KadStoreInserts,
+    pub automatic_bootstrap: Option<Duration>,
 }
 
 #[derive(Clone, Debug, Default, Copy)]
@@ -328,6 +329,7 @@ impl From<KadConfig> for KademliaConfig {
         kad_config.set_provider_record_ttl(config.provider_record_ttl);
         kad_config.set_kbucket_inserts(config.insert_method.into());
         kad_config.set_record_filtering(config.store_filter.into());
+        kad_config.set_periodic_bootstrap_interval(config.automatic_bootstrap);
         kad_config
     }
 }
@@ -343,6 +345,7 @@ impl Default for KadConfig {
             publication_interval: None,
             insert_method: Default::default(),
             store_filter: Default::default(),
+            automatic_bootstrap: None,
         }
     }
 }
@@ -364,13 +367,13 @@ where
 
         info!("net: starting with peer id {}", peer_id);
 
+        // TODO: Do we want to ignore the protocol if there is an error from Mdns::new?
         #[cfg(not(target_arch = "wasm32"))]
-        let mdns = if protocols.mdns {
-            Mdns::new(Default::default(), peer_id).ok()
-        } else {
-            None
-        }
-        .into();
+        let mdns = protocols
+            .mdns
+            .then(|| Mdns::new(Default::default(), peer_id).ok())
+            .flatten()
+            .into();
 
         let store = {
             //TODO: Make customizable
