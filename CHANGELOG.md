@@ -15,6 +15,7 @@
 - chore: Use `Bytes` when creating or using `Block` within bitswap. [PR 264](https://github.com/dariusc93/rust-ipfs/pull/264)
 - refactor: Reference `Block` in `BlockStore::put_block`. [PR 272](https://github.com/dariusc93/rust-ipfs/pull/272)
 - feat: Passthrough timeout to WantSession::new. [PR 265](https://github.com/dariusc93/rust-ipfs/pull/265)
+- chore: Update libp2p to 0.54. [PR 289](https://github.com/dariusc93/rust-ipfs/pull/289)
 
 # 0.11.21
 - chore: Put libp2p-webrtc-websys behind feature.
