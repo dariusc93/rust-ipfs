@@ -529,7 +529,14 @@ where
         };
 
         for addr in bootstrap {
-            _ = behaviour.add_peer(addr);
+            let Ok(mut opt) = IntoAddPeerOpt::into_opt(addr) else {
+                continue;
+            };
+
+            // explicitly dial the bootstrap peer. If the peer will be bootstrapped via kad, the additional dial will be cancelled
+            opt = opt.set_dial(true);
+
+            _ = behaviour.add_peer(opt);
         }
 
         Ok((behaviour, transport))
