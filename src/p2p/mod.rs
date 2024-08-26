@@ -178,7 +178,7 @@ impl Default for SwarmConfig {
 #[allow(deprecated)]
 //TODO: use libp2p::SwarmBuilder
 /// Creates a new IPFS swarm.
-pub fn create_swarm<C>(
+pub(crate) fn create_swarm<C>(
     keypair: &Keypair,
     options: &IpfsOptions,
     repo: &Repo,
