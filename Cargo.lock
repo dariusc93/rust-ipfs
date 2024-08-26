@@ -760,9 +760,9 @@ dependencies = [
 
 [[package]]
 name = "cbor4ii"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59b4c883b9cc4757b061600d39001d4d0232bece4a3174696cf8f58a14db107d"
+checksum = "472931dd4dfcc785075b09be910147f9c6258883fc4591d0dac6116392b2daa6"
 dependencies = [
  "serde",
 ]
@@ -2899,7 +2899,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1356c9e376a94a75ae830c42cdaea3d4fe1290ba409a22c809033d1b7dcab0a6"
 dependencies = [
  "async-trait",
- "cbor4ii 0.3.2",
+ "cbor4ii 0.3.3",
  "futures",
  "futures-bounded",
  "futures-timer",
@@ -4500,7 +4500,7 @@ dependencies = [
 name = "rust-ipns"
 version = "0.6.0"
 dependencies = [
- "cbor4ii 0.3.2",
+ "cbor4ii 0.3.3",
  "chrono",
  "cid",
  "clap",
