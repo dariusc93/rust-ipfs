@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::AddPeerOpt;
+use libp2p::core::transport::PortUse;
 use libp2p::swarm::ConnectionClosed;
 use libp2p::{
     core::{ConnectedPoint, Endpoint},
@@ -236,6 +237,7 @@ impl NetworkBehaviour for Behaviour {
         peer_id: PeerId,
         _: &Multiaddr,
         _: Endpoint,
+        _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         let keepalive = self.peer_keepalive.contains(&peer_id);
         Ok(handler::Handler::new(keepalive))

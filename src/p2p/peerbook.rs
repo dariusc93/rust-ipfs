@@ -10,6 +10,7 @@ use libp2p::PeerId;
 use std::collections::hash_map::Entry;
 use std::time::Duration;
 
+use libp2p::core::transport::PortUse;
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Default, Debug)]
@@ -113,6 +114,7 @@ impl NetworkBehaviour for Behaviour {
         _: PeerId,
         _: &Multiaddr,
         _: Endpoint,
+        _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(DummyConnectionHandler)
     }

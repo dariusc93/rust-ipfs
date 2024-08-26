@@ -158,7 +158,7 @@ pub(crate) fn build_transport(
 
     let yamux_config = YamuxConfig::default();
 
-    let tcp_config = GenTcpConfig::default().nodelay(true).port_reuse(true);
+    let tcp_config = GenTcpConfig::default().nodelay(true);
 
     let transport = TokioTcpTransport::new(tcp_config.clone());
 

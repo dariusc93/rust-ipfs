@@ -10,6 +10,7 @@ use std::{
 
 use futures::StreamExt;
 use futures_timer::Delay;
+use libp2p::core::transport::PortUse;
 use libp2p::{
     core::Endpoint,
     multiaddr::Protocol,
@@ -767,6 +768,7 @@ impl NetworkBehaviour for Behaviour {
         _peer: PeerId,
         _addr: &Multiaddr,
         _role_override: Endpoint,
+        _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(handler::Handler::default())
     }

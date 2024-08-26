@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::Error;
 use crate::{IntoAddPeerOpt, IpfsOptions};
 
-use crate::p2p::MultiaddrExt;
 use crate::repo::Repo;
 
 use ipld_core::cid::Cid;
@@ -32,7 +31,6 @@ use libp2p::relay::Behaviour as Relay;
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{autonat, StreamProtocol};
-use std::borrow::Cow;
 use std::fmt::Debug;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
@@ -272,7 +270,7 @@ pub struct KadStoreConfig {
 }
 #[derive(Clone, Debug)]
 pub struct KadConfig {
-    pub protocol: Option<Vec<Cow<'static, str>>>,
+    pub protocol: Option<String>,
     pub disjoint_query_paths: bool,
     pub query_timeout: Duration,
     pub parallelism: Option<NonZeroUsize>,
@@ -280,6 +278,7 @@ pub struct KadConfig {
     pub provider_record_ttl: Option<Duration>,
     pub insert_method: KadInserts,
     pub store_filter: KadStoreInserts,
+    pub automatic_bootstrap: Option<Duration>,
 }
 
 #[derive(Clone, Debug, Default, Copy)]
@@ -316,14 +315,10 @@ impl From<KadInserts> for KademliaBucketInserts {
 
 impl From<KadConfig> for KademliaConfig {
     fn from(config: KadConfig) -> Self {
-        let mut kad_config = KademliaConfig::default();
-        if let Some(protocol) = config.protocol.map(|list| {
-            list.iter()
-                .filter_map(|p| StreamProtocol::try_from_owned(p.to_string()).ok())
-                .collect()
-        }) {
-            kad_config.set_protocol_names(protocol);
-        }
+        let protocol = config.protocol.unwrap_or("/ipfs/kad/1.0.0".to_string());
+        let protocol = StreamProtocol::try_from_owned(protocol).expect("protocol to be valid");
+
+        let mut kad_config = KademliaConfig::new(protocol);
         kad_config.disjoint_query_paths(config.disjoint_query_paths);
         kad_config.set_query_timeout(config.query_timeout);
         if let Some(p) = config.parallelism {
@@ -333,6 +328,7 @@ impl From<KadConfig> for KademliaConfig {
         kad_config.set_provider_record_ttl(config.provider_record_ttl);
         kad_config.set_kbucket_inserts(config.insert_method.into());
         kad_config.set_record_filtering(config.store_filter.into());
+        kad_config.set_periodic_bootstrap_interval(config.automatic_bootstrap);
         kad_config
     }
 }
@@ -348,6 +344,7 @@ impl Default for KadConfig {
             publication_interval: None,
             insert_method: Default::default(),
             store_filter: Default::default(),
+            automatic_bootstrap: None,
         }
     }
 }
@@ -363,19 +360,21 @@ where
         repo: &Repo,
         custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
+        let bootstrap = options.bootstrap.clone();
+
         let protocols = options.protocols;
 
         let peer_id = keypair.public().to_peer_id();
 
         info!("net: starting with peer id {}", peer_id);
 
+        // TODO: Do we want to ignore the protocol if there is an error from Mdns::new?
         #[cfg(not(target_arch = "wasm32"))]
-        let mdns = if protocols.mdns {
-            Mdns::new(Default::default(), peer_id).ok()
-        } else {
-            None
-        }
-        .into();
+        let mdns = protocols
+            .mdns
+            .then(|| Mdns::new(Default::default(), peer_id).ok())
+            .flatten()
+            .into();
 
         let store = {
             //TODO: Make customizable
@@ -390,18 +389,9 @@ where
             Either::Right(kad) => kad,
         };
 
-        let mut kademlia: Toggle<Kademlia<MemoryStore>> = Toggle::from(
-            (protocols.kad).then(|| Kademlia::with_config(peer_id, store, kad_config)),
-        );
-
-        if let Some(kad) = kademlia.as_mut() {
-            for mut addr in options.bootstrap.clone() {
-                let Some(peer_id) = addr.extract_peer_id() else {
-                    continue;
-                };
-                kad.add_address(&peer_id, addr);
-            }
-        }
+        let kademlia: Toggle<Kademlia<MemoryStore>> = (protocols.kad)
+            .then(|| Kademlia::with_config(peer_id, store, kad_config))
+            .into();
 
         let autonat = protocols
             .autonat
@@ -461,17 +451,19 @@ where
         };
 
         // Maybe have this enable in conjunction with RelayClient?
-        let dcutr = Toggle::from(protocols.dcutr.then(|| Dcutr::new(peer_id)));
+        let dcutr = protocols.dcutr.then(|| Dcutr::new(peer_id)).into();
         let relay_config = options.relay_server_config.clone().into();
 
-        let relay = Toggle::from(
-            protocols
-                .relay_server
-                .then(|| Relay::new(peer_id, relay_config)),
-        );
+        let relay = protocols
+            .relay_server
+            .then(|| Relay::new(peer_id, relay_config))
+            .into();
 
         #[cfg(not(target_arch = "wasm32"))]
-        let upnp = Toggle::from(protocols.upnp.then(libp2p::upnp::tokio::Behaviour::default));
+        let upnp = protocols
+            .upnp
+            .then(libp2p::upnp::tokio::Behaviour::default)
+            .into();
 
         let (transport, relay_client, relay_manager) = match protocols.relay_client {
             true => {
@@ -503,42 +495,51 @@ where
         #[cfg(feature = "experimental_stream")]
         let stream = protocols.streams.then(libp2p_stream::Behaviour::new).into();
 
-        let connection_limits = Toggle::from(
-            options
-                .connection_limits
-                .clone()
-                .map(libp2p_connection_limits::Behaviour::new),
-        );
+        let connection_limits = options
+            .connection_limits
+            .clone()
+            .map(libp2p_connection_limits::Behaviour::new)
+            .into();
 
-        Ok((
-            Behaviour {
-                connection_limits,
-                #[cfg(not(target_arch = "wasm32"))]
-                mdns,
-                kademlia,
-                bitswap,
-                ping,
-                identify,
-                autonat,
-                pubsub,
-                dcutr,
-                relay,
-                relay_client,
-                relay_manager,
-                block_list,
-                #[cfg(feature = "experimental_stream")]
-                stream,
-                #[cfg(not(target_arch = "wasm32"))]
-                upnp,
-                peerbook,
-                addressbook,
-                protocol,
-                custom,
-                rendezvous_client,
-                rendezvous_server,
-            },
-            transport,
-        ))
+        let mut behaviour = Behaviour {
+            connection_limits,
+            #[cfg(not(target_arch = "wasm32"))]
+            mdns,
+            kademlia,
+            bitswap,
+            ping,
+            identify,
+            autonat,
+            pubsub,
+            dcutr,
+            relay,
+            relay_client,
+            relay_manager,
+            block_list,
+            #[cfg(feature = "experimental_stream")]
+            stream,
+            #[cfg(not(target_arch = "wasm32"))]
+            upnp,
+            peerbook,
+            addressbook,
+            protocol,
+            custom,
+            rendezvous_client,
+            rendezvous_server,
+        };
+
+        for addr in bootstrap {
+            let Ok(mut opt) = IntoAddPeerOpt::into_opt(addr) else {
+                continue;
+            };
+
+            // explicitly dial the bootstrap peer. If the peer will be bootstrapped via kad, the additional dial will be cancelled
+            opt = opt.set_dial(true);
+
+            _ = behaviour.add_peer(opt);
+        }
+
+        Ok((behaviour, transport))
     }
 
     pub fn add_peer<I: IntoAddPeerOpt>(&mut self, opt: I) -> bool {

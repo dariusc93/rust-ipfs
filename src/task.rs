@@ -366,11 +366,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                                     .is_none()
                                 {
                                     if let Some(ret) = self.kad_subscriptions.remove(&id) {
-                                        let _ = ret.send(Ok(KadResult::Peers(peers.clone())));
+                                        let _ = ret.send(Ok(KadResult::Peers(
+                                            peers.iter().map(|info| info.peer_id).collect(),
+                                        )));
                                     }
                                     if let Ok(peer_id) = PeerId::from_bytes(&key) {
                                         if let Some(rets) = self.dht_peer_lookup.remove(&peer_id) {
-                                            if !peers.contains(&peer_id) {
+                                            if !peers.iter().any(|info| info.peer_id == peer_id) {
                                                 for ret in rets {
                                                     let _ = ret.send(Err(anyhow::anyhow!(
                                                         "Could not locate peer"
@@ -730,7 +732,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             }
 
             SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => match event {
-                IdentifyEvent::Received { peer_id, info } => {
+                IdentifyEvent::Received { peer_id, info, .. } => {
                     let IdentifyInfo {
                         listen_addrs,
                         protocols,
