@@ -53,6 +53,7 @@ fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
 
             let len = buffer.len();
 
+            #[allow(clippy::needless_borrows_for_generic_args)]
             let mh = Multihash::wrap(
                 multihash_codetable::Code::Sha2_256.into(),
                 &Sha256::digest(&buffer),
