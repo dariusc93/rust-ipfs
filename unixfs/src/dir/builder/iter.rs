@@ -143,6 +143,7 @@ impl PostOrderIterator {
 
         buffer.truncate(size);
 
+        #[allow(clippy::needless_borrows_for_generic_args)]
         let mh = Multihash::wrap(Code::Sha2_256.into(), &Sha256::digest(&buffer)).unwrap();
         let cid = Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0");
 

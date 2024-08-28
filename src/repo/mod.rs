@@ -709,15 +709,11 @@ impl Repo {
                 futures::pin_mut!(notified_fut);
 
                 match futures::future::select(block_fut, notified_fut).await {
-                    Either::Left((Ok(Ok(block)), _)) => return Ok::<_, Error>(block),
-                    Either::Left((Ok(Err(e)), _)) => {
-                        return Err::<_, Error>(anyhow::anyhow!("{e}"))
-                    }
-                    Either::Left((Err(e), _)) => return Err::<_, Error>(e.into()),
+                    Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
+                    Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
+                    Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
                     Either::Right(((), _)) => {
-                        return Err::<_, Error>(anyhow::anyhow!(
-                            "request for {cid} has been cancelled"
-                        ))
+                        Err::<_, Error>(anyhow::anyhow!("request for {cid} has been cancelled"))
                     }
                 }
             }

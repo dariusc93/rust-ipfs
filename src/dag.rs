@@ -781,7 +781,7 @@ fn resolve_local<'a>(
         let (cid, data) = block.into_inner();
         Ok(resolve_local_dagpb(
             cid,
-            data.into(),
+            data,
             segment,
             segments.peek().is_none(),
             cache,
