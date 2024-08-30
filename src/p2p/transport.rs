@@ -180,8 +180,11 @@ pub(crate) fn build_transport(
                         let mut certs = Vec::with_capacity(cert.len());
                         let kp = KeyPair::from_pem(&kp).map_err(io::Error::other)?;
                         let priv_key = libp2p::websocket::tls::PrivateKey::new(kp.serialize_der());
-                        for cert in cert {
-                            let cert = libp2p::websocket::tls::Certificate::new(cert.into_bytes());
+                        for cert in cert.iter().map(|c| c.as_bytes()) {
+                            let pem = pem::parse(cert)
+                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                            let cert =
+                                libp2p::websocket::tls::Certificate::new(pem.into_contents());
                             certs.push(cert);
                         }
 
