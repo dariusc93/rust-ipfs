@@ -17,6 +17,7 @@
 - feat: Passthrough timeout to WantSession::new. [PR 265](https://github.com/dariusc93/rust-ipfs/pull/265)
 - chore: Update libp2p to 0.54. [PR 289](https://github.com/dariusc93/rust-ipfs/pull/289)
 - chore: Change IpfsOptions visibility, remove UninitializedIpfs::{empty, with_opt}. [PR 294](https://github.com/dariusc93/rust-ipfs/pull/294)
+- refactor: Support multiple certificates for wss. [PR 295](https://github.com/dariusc93/rust-ipfs/pull/295)
 
 # 0.11.21
 - chore: Put libp2p-webrtc-websys behind feature.

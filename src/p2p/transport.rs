@@ -37,7 +37,7 @@ pub struct TransportConfig {
     pub enable_dns: bool,
     pub enable_memory_transport: bool,
     pub enable_webtransport: bool,
-    pub websocket_pem: Option<(String, String)>,
+    pub websocket_pem: Option<(Vec<String>, String)>,
     pub enable_secure_websocket: bool,
     pub support_quic_draft_29: bool,
     pub enable_webrtc: bool,
@@ -175,12 +175,20 @@ pub(crate) fn build_transport(
             let mut ws_transport =
                 libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
             if enable_secure_websocket {
-                let (cert, priv_key) = match websocket_pem {
+                let (certs, priv_key) = match websocket_pem {
                     Some((cert, kp)) => {
+                        let mut certs = Vec::with_capacity(cert.len());
                         let kp = KeyPair::from_pem(&kp).map_err(io::Error::other)?;
                         let priv_key = libp2p::websocket::tls::PrivateKey::new(kp.serialize_der());
-                        let cert = libp2p::websocket::tls::Certificate::new(cert.into_bytes());
-                        (cert, priv_key)
+                        for cert in cert.iter().map(|c| c.as_bytes()) {
+                            let pem = pem::parse(cert)
+                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                            let cert =
+                                libp2p::websocket::tls::Certificate::new(pem.into_contents());
+                            certs.push(cert);
+                        }
+
+                        (certs, priv_key)
                     }
                     None => {
                         let (cert, prv, _) = generate_cert(&keypair, b"libp2p-websocket", false)?;
@@ -189,11 +197,11 @@ pub(crate) fn build_transport(
                         let self_cert =
                             libp2p::websocket::tls::Certificate::new(cert.der().to_vec());
 
-                        (self_cert, priv_key)
+                        (vec![self_cert], priv_key)
                     }
                 };
 
-                let tls_config = libp2p::websocket::tls::Config::new(priv_key, [cert])
+                let tls_config = libp2p::websocket::tls::Config::new(priv_key, certs)
                     .map_err(io::Error::other)?;
                 ws_transport.set_tls_config(tls_config);
             }
