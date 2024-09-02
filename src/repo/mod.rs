@@ -64,7 +64,7 @@ pub enum BlockRmError {
 
 /// This API is being discussed and evolved, which will likely lead to breakage.
 #[async_trait]
-pub trait BlockStore: Debug + Send + Sync + 'static {
+pub trait BlockStore: Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
     /// FIXME: redundant and never called during initialization, which is expected to happen during [`init`].
     async fn open(&self) -> Result<(), Error>;
@@ -88,7 +88,7 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
 
 #[async_trait]
 /// Generic layer of abstraction for a key-value data store.
-pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
+pub trait DataStore: PinStore + Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
     async fn open(&self) -> Result<(), Error>;
     /// Checks if a key is present in the datastore.
