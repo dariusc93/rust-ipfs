@@ -448,72 +448,87 @@ impl Repo {
         }
         let block_migration = {
             async move {
-                let mut stream = self.list_blocks().await;
-                while let Some(cid) = stream.next().await {
-                    match self.get_block_now(&cid).await {
-                        Ok(Some(block)) => match repo.inner.block_store.put(&block).await {
-                            Ok(_) => {}
-                            Err(e) => error!("Error migrating {cid}: {e}"),
-                        },
-                        Ok(None) => error!("{cid} doesnt exist"),
-                        Err(e) => error!("Error getting block {cid}: {e}"),
-                    }
-                }
+                let stream = self.list_blocks().await;
+                stream
+                    .for_each_concurrent(None, |cid| async move {
+                        match self.get_block_now(&cid).await {
+                            Ok(Some(block)) => match repo.inner.block_store.put(&block).await {
+                                Ok(_) => {}
+                                Err(e) => error!("Error migrating {cid}: {e}"),
+                            },
+                            Ok(None) => error!("{cid} doesnt exist"),
+                            Err(e) => error!("Error getting block {cid}: {e}"),
+                        }
+                    })
+                    .await
             }
         };
 
         let data_migration = {
             async move {
-                let mut data_stream = self.data_store().iter().await;
-                while let Some((k, v)) = data_stream.next().await {
-                    if let Err(e) = repo.data_store().put(&k, &v).await {
-                        error!("Unable to migrate {k:?} into repo: {e}");
-                    }
-                }
+                let data_stream = self.data_store().iter().await;
+                data_stream
+                    .for_each_concurrent(None, |(k, v)| async move {
+                        if let Err(e) = repo.data_store().put(&k, &v).await {
+                            error!("Unable to migrate {k:?} into repo: {e}");
+                        }
+                    })
+                    .await;
             }
         };
 
         let pins_migration = {
             async move {
-                let mut stream = self.data_store().list(None).await;
-                while let Some(Ok((cid, pin_mode))) = stream.next().await {
-                    match pin_mode {
-                        PinMode::Direct => match repo.data_store().insert_direct_pin(&cid).await {
-                            Ok(_) => {}
-                            Err(e) => error!("Unable to migrate pin {cid}: {e}"),
-                        },
-                        PinMode::Indirect => {
-                            //No need to track since we will be obtaining the reference from the pin that is recursive
-                            continue;
-                        }
-                        PinMode::Recursive => {
-                            let block = match self
-                                .get_block_now(&cid)
-                                .await
-                                .map(|block| block.and_then(|block| block.to_ipld().ok()))
-                            {
-                                Ok(Some(block)) => block,
-                                Ok(None) => continue,
-                                Err(e) => {
-                                    error!("Block {cid} does not exist but is pinned: {e}");
-                                    continue;
+                let stream = self.data_store().list(None).await;
+                stream
+                    .for_each_concurrent(None, |result| async move {
+                        let (cid, pin_mode) = match result {
+                            Ok(info) => info,
+                            Err(e) => {
+                                error!("unable to migrate pins: {e}");
+                                return;
+                            }
+                        };
+                        match pin_mode {
+                            PinMode::Direct => {
+                                match repo.data_store().insert_direct_pin(&cid).await {
+                                    Ok(_) => {}
+                                    Err(e) => error!("Unable to migrate pin {cid}: {e}"),
                                 }
-                            };
+                            }
+                            PinMode::Indirect => {
+                                //No need to track since we will be obtaining the reference from the pin that is recursive
+                            }
+                            PinMode::Recursive => {
+                                let block = match self
+                                    .get_block_now(&cid)
+                                    .await
+                                    .map(|block| block.and_then(|block| block.to_ipld().ok()))
+                                {
+                                    Ok(Some(block)) => block,
+                                    Ok(None) => {
+                                        return;
+                                    }
+                                    Err(e) => {
+                                        error!("Block {cid} does not exist but is pinned: {e}");
+                                        return;
+                                    }
+                                };
 
-                            let st = crate::refs::IpldRefs::default()
-                                .with_only_unique()
-                                .refs_of_resolved(self, vec![(cid, block.clone())].into_iter())
-                                .map_ok(|crate::refs::Edge { destination, .. }| destination)
-                                .into_stream()
-                                .boxed();
+                                let st = crate::refs::IpldRefs::default()
+                                    .with_only_unique()
+                                    .refs_of_resolved(self, vec![(cid, block)].into_iter())
+                                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                                    .into_stream()
+                                    .boxed();
 
-                            if let Err(e) = repo.insert_recursive_pin(&cid, st).await {
-                                error!("Error migrating pin {cid}: {e}");
-                                continue;
+                                if let Err(e) = repo.insert_recursive_pin(&cid, st).await {
+                                    error!("Error migrating pin {cid}: {e}");
+                                }
                             }
                         }
-                    }
-                }
+                    })
+                    .await;
             }
         };
 
@@ -1367,5 +1382,45 @@ impl std::future::IntoFuture for RepoRemovePin {
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::block::BlockCodec;
+    use crate::repo::Repo;
+    use crate::Block;
+    use ipld_core::cid::Cid;
+    use multihash_codetable::Code;
+    use multihash_derive::MultihashDigest;
+
+    fn create_block() -> Block {
+        let data = b"hello block\n".to_vec();
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
+
+        Block::new_unchecked(cid, data)
+    }
+
+    #[tokio::test]
+    async fn repo_migration() -> anyhow::Result<()> {
+        let repo_1 = Repo::new_memory();
+        let repo_2 = Repo::new_memory();
+
+        let block = create_block();
+
+        let cid_1 = repo_1.put_block(&block).await?;
+
+        repo_1.pin(&cid_1).await?;
+
+        repo_1.migrate(&repo_2).await.expect("offline");
+
+        let current_block = repo_2.get_block_now(&cid_1).await?.expect("block exist");
+
+        let v = repo_2.is_pinned(&cid_1).await?;
+
+        assert!(v);
+
+        assert_eq!(current_block, block);
+        Ok(())
     }
 }
