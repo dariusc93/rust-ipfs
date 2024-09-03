@@ -136,7 +136,7 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
 ) -> BoxStream<'static, (Vec<u8>, Vec<u8>)> {
     let data_path = data_path.as_ref().to_path_buf();
     let path = path.as_ref().to_path_buf();
-    async_stream::stream! {
+    let st = async_stream::stream! {
         if path.is_file() {
             return;
         }
@@ -171,8 +171,9 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
                 }
             }
         }
-    }
-    .boxed()
+    };
+
+    st.boxed()
 }
 
 /// The column operations are all unimplemented pending at least downscoping of the
