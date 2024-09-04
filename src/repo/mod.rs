@@ -64,7 +64,7 @@ pub enum BlockRmError {
 
 /// This API is being discussed and evolved, which will likely lead to breakage.
 #[async_trait]
-pub trait BlockStore: Debug + Send + Sync + 'static {
+pub trait BlockStore: Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
     /// FIXME: redundant and never called during initialization, which is expected to happen during [`init`].
     async fn open(&self) -> Result<(), Error>;
@@ -88,7 +88,7 @@ pub trait BlockStore: Debug + Send + Sync + 'static {
 
 #[async_trait]
 /// Generic layer of abstraction for a key-value data store.
-pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
+pub trait DataStore: PinStore + Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
     async fn open(&self) -> Result<(), Error>;
     /// Checks if a key is present in the datastore.
@@ -179,7 +179,7 @@ impl error::Error for LockError {
 ///
 /// This ensures no two IPFS nodes can be started with the same peer ID, as exclusive access to the
 /// repository is guarenteed. This is most useful when using an fs backed repo.
-pub trait Lock: Debug + Send + Sync + 'static {
+pub trait Lock: Debug + Send + Sync {
     // fn new(path: PathBuf) -> Self;
     fn try_exclusive(&self) -> Result<(), LockError>;
 }
@@ -187,7 +187,7 @@ pub trait Lock: Debug + Send + Sync + 'static {
 type References<'a> = futures::stream::BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
 
 #[async_trait]
-pub trait PinStore: Debug + Send + Sync + Unpin + 'static {
+pub trait PinStore: Debug + Send + Sync {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error>;
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error>;
