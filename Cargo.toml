@@ -24,7 +24,7 @@ test_js_interop = []
 [workspace.dependencies]
 anyhow = "1.0.86"
 async-stream = { version = "0.3.5" }
-async-trait = { version = "0.1.10" }
+async-trait = { version = "0.1.82" }
 asynchronous-codec = "0.7.0"
 base64 = { default-features = false, features = ["alloc"], version = "0.22.0" }
 byteorder = { version = "1.5.0" }
@@ -41,7 +41,7 @@ getrandom = { version = "0.2.15" }
 hickory-resolver = "0.24.1"
 hkdf = "0.12.4"
 idb = "0.6.3"
-indexmap = "2.4.0"
+indexmap = "2.5.0"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.1"
 libp2p = { version = "0.54.1" }
@@ -64,7 +64,7 @@ rand = "0.8.5"
 rand_chacha = "0.3.1"
 rcgen = { version = "0.13.1", features = ["pem", "x509-parser"] }
 redb = { version = "1.3.0" }
-rlimit = "0.10.1"
+rlimit = "0.10.2"
 rust-ipns = { version = "0.6.0", path = "packages/rust-ipns" }
 rust-unixfs = { version = "0.5.0", path = "unixfs" }
 sec1 = { version = "0.7.3", features = ["pem", "pkcs8"] }
@@ -85,7 +85,7 @@ tracing-futures = { default-features = false, features = [
     "futures-03",
 ], version = "0.2.5" }
 
-tokio = { default-features = false, version = "1.39.3" }
+tokio = { default-features = false, version = "1.40.0" }
 tokio-stream = { default-features = false, version = "0.1.15" }
 tokio-util = { default-features = false, version = "0.7.11" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
