@@ -20,7 +20,7 @@
 - refactor: Support multiple certificates for wss. [PR 295](https://github.com/dariusc93/rust-ipfs/pull/295)
 - refactor: Remove redundant static lifetime. [PR 301](https://github.com/dariusc93/rust-ipfs/pull/301)
 - refactor: Remove optional error from `UnixfsStatus`.
-- refactor: Remove sled and redb datastore and dependency.
+- refactor: Remove sled and redb datastore and dependency. [PR 304](https://github.com/dariusc93/rust-ipfs/pull/304)
 
 # 0.11.21
 - chore: Put libp2p-webrtc-websys behind feature.
