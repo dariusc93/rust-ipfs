@@ -19,7 +19,7 @@ use tracing::{Instrument, Span};
 
 use crate::{Ipfs, IpfsPath};
 
-use super::UnixfsStatus;
+use super::{TraversalFailed, UnixfsStatus};
 
 pub enum AddOpt {
     #[cfg(not(target_arch = "wasm32"))]
@@ -150,7 +150,7 @@ impl Stream for UnixfsAdd {
                                 }).await {
                                     Ok(s) => s,
                                     Err(e) => {
-                                        yield UnixfsStatus::FailedStatus { written, total_size: None, error: Some(anyhow::Error::from(e)) };
+                                        yield UnixfsStatus::FailedStatus { written, total_size: None, error: e.into() };
                                         return;
                                     }
                                 },
@@ -167,7 +167,7 @@ impl Stream for UnixfsAdd {
                             let buffer = match buffer {
                                 Ok(buf) => buf,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
                             };
@@ -179,14 +179,14 @@ impl Stream for UnixfsAdd {
                                     let block = match Block::new(cid, block) {
                                         Ok(block) => block,
                                         Err(e) => {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                             return;
                                         }
                                     };
                                     let _cid = match repo.put_block(&block).await {
                                         Ok(cid) => cid,
                                         Err(e) => {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e };
                                             return;
                                         }
                                     };
@@ -205,14 +205,14 @@ impl Stream for UnixfsAdd {
                             let block = match Block::new(cid, block) {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e.into()) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
                             };
                             let _cid = match repo.put_block(&block).await {
                                 Ok(cid) => cid,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e };
                                     return;
                                 }
                             };
@@ -222,7 +222,7 @@ impl Stream for UnixfsAdd {
                         let cid = match last_cid {
                             Some(cid) => cid,
                             None => {
-                                yield UnixfsStatus::FailedStatus { written, total_size, error: None };
+                                yield UnixfsStatus::FailedStatus { written, total_size, error: TraversalFailed::Io(std::io::ErrorKind::InvalidData.into()).into() };
                                 return;
                             }
                         };
@@ -263,7 +263,7 @@ impl Stream for UnixfsAdd {
                                 path = match result.await {
                                     Ok(path) => path,
                                     Err(e) => {
-                                        yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
+                                        yield UnixfsStatus::FailedStatus { written, total_size, error: e };
                                         return;
                                     }
                                 };
@@ -325,7 +325,7 @@ impl std::future::IntoFuture for UnixfsAdd {
                 match status {
                     UnixfsStatus::CompletedStatus { path, .. } => return Ok(path),
                     UnixfsStatus::FailedStatus { error, .. } => {
-                        return Err(error.unwrap_or(anyhow::anyhow!("Unable to add file")));
+                        return Err(error);
                     }
                     _ => {}
                 }
