@@ -190,7 +190,7 @@ impl Stream for UnixfsGet {
 
                                         written += n;
                                     }
-                                    
+
                                     yield UnixfsStatus::ProgressStatus { written, total_size };
 
                                 },
@@ -215,7 +215,7 @@ impl Stream for UnixfsGet {
                         _ = local_only;
                         _ = timeout;
                         _ = dest;
-                        yield UnixfsStatus::FailedStatus { written: 0, total_size: None, error: Some(anyhow::anyhow!("unimplemented")) };
+                        yield UnixfsStatus::FailedStatus { written: 0, total_size: None, error: anyhow::anyhow!("unimplemented") };
                     };
 
                     self.stream = Some(stream.boxed());
