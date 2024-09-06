@@ -409,12 +409,7 @@ impl Repo {
         lockfile_path.push("repo_lock");
 
         let block_store = Box::new(blockstore::flatfs::FsBlockStore::new(blockstore_path));
-        #[cfg(not(any(feature = "sled_data_store", feature = "redb_data_store")))]
         let data_store = Box::new(datastore::flatfs::FsDataStore::new(datastore_path));
-        #[cfg(feature = "sled_data_store")]
-        let data_store = Box::new(datastore::sled::SledDataStore::new(datastore_path));
-        #[cfg(feature = "redb_data_store")]
-        let data_store = Box::new(datastore::redb::RedbDataStore::new(datastore_path));
         let lockfile = Box::new(lock::FsLock::new(lockfile_path));
         Self::new_raw(block_store, data_store, lockfile)
     }
