@@ -61,11 +61,7 @@ async fn main() -> anyhow::Result<()> {
                     None => println!("failed with {written} written"),
                 }
 
-                if let Some(error) = error {
-                    anyhow::bail!(error);
-                } else {
-                    anyhow::bail!("Unknown error while writting to disk");
-                }
+                anyhow::bail!(error);
             }
             UnixfsStatus::CompletedStatus { written, .. } => {
                 let path = dest;

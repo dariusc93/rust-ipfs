@@ -200,7 +200,7 @@ pub enum UnixfsStatus {
     FailedStatus {
         written: usize,
         total_size: Option<usize>,
-        error: Option<anyhow::Error>,
+        error: Error,
     },
 }
 

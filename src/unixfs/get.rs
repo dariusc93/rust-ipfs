@@ -127,7 +127,7 @@ impl Stream for UnixfsGet {
                             .map_err(TraversalFailed::Io) {
                                 Ok(f) => f,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
                             };
@@ -139,7 +139,7 @@ impl Stream for UnixfsGet {
                             .and_then(|(resolved, _)| resolved.into_unixfs_block().map_err(TraversalFailed::Path)) {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
                         };
@@ -154,7 +154,7 @@ impl Stream for UnixfsGet {
                             let block = match repo._get_block(next, &providers, local_only, timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(e) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
                             };
@@ -180,26 +180,24 @@ impl Stream for UnixfsGet {
                                         let next = &slice[n..];
                                         n += next.len();
                                         if let Err(e) = file.write_all(next).await {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                             return;
                                         }
                                         if let Err(e) = file.sync_all().await {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
+                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                             return;
                                         }
 
                                         written += n;
-                                        yield UnixfsStatus::ProgressStatus { written, total_size };
                                     }
+                                    
+                                    yield UnixfsStatus::ProgressStatus { written, total_size };
 
-                                    if segment.is_last() {
-                                        yield UnixfsStatus::ProgressStatus { written, total_size };
-                                    }
                                 },
                                 Ok(ContinuedWalk::Directory( .. )) | Ok(ContinuedWalk::RootDirectory( .. )) => {}, //TODO
                                 Ok(ContinuedWalk::Symlink( .. )) => {},
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: Some(anyhow::Error::from(e)) };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
                             };
@@ -254,8 +252,6 @@ impl std::future::IntoFuture for UnixfsGet {
             while let Some(status) = self.next().await {
                 match status {
                     UnixfsStatus::FailedStatus { error, .. } => {
-                        let error = error
-                            .unwrap_or(anyhow::anyhow!("Unknown error while writting to disk"));
                         return Err(error);
                     }
                     UnixfsStatus::CompletedStatus { .. } => return Ok(()),
