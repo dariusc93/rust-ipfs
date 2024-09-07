@@ -189,6 +189,6 @@ debug = true
 
 [workspace]
 members = ["packages/*", "unixfs", "examples/*"]
-exclude = ["archived", "packages/libp2p-bitswap-next", "packages/beetle-bitswap-next"]
+exclude = ["archived"]
 
 resolver = "2"
