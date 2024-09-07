@@ -1,8 +1,8 @@
 //! IPNS functionality around [`Ipfs`].
 
 use futures_timeout::TimeoutExt;
+use std::borrow::Borrow;
 
-use crate::error::Error;
 use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
 use crate::Ipfs;
@@ -13,7 +13,7 @@ mod dnslink;
 #[derive(Clone, Debug)]
 pub struct Ipns {
     ipfs: Ipfs,
-    resolver: Option<DnsResolver>,
+    resolver: DnsResolver,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -27,22 +27,22 @@ impl Ipns {
     pub fn new(ipfs: Ipfs) -> Self {
         Ipns {
             ipfs,
-            resolver: None,
+            resolver: DnsResolver::default(),
         }
     }
 
     /// Set dns resolver
     pub fn set_resolver(&mut self, resolver: DnsResolver) {
-        self.resolver = Some(resolver);
+        self.resolver = resolver;
     }
 
     /// Resolves a ipns path to an ipld path.
     // TODO: Implement ipns pubsub
     // TODO: Maybe implement a check to the dht store itself too?
-    pub async fn resolve(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
-        let path = path.to_owned();
+    pub async fn resolve<B: Borrow<IpfsPath>>(&self, path: B) -> Result<IpfsPath, IpnsError> {
+        let path = path.borrow();
         match path.root() {
-            PathRoot::Ipld(_) => Ok(path),
+            PathRoot::Ipld(_) => Ok(path.clone()),
             PathRoot::Ipns(peer) => {
                 use std::str::FromStr;
                 use std::time::Duration;
@@ -54,13 +54,14 @@ impl Ipns {
 
                 let mut path_iter = path.iter();
 
-                let hash = Multihash::from_bytes(&peer.to_bytes())?;
+                let hash = Multihash::from_bytes(&peer.to_bytes()).map_err(anyhow::Error::from)?;
 
                 let cid = Cid::new_v1(0x72, hash);
 
                 let mb = format!(
                     "/ipns/{}",
-                    cid.to_string_of_base(multibase::Base::Base36Lower)?
+                    cid.to_string_of_base(multibase::Base::Base36Lower)
+                        .map_err(anyhow::Error::from)?
                 );
 
                 //TODO: Determine if we want to encode the cid of the multihash in base32 or if we can just use the peer id instead
@@ -105,7 +106,7 @@ impl Ipns {
                     .unwrap_or_default();
 
                 if records.is_empty() {
-                    anyhow::bail!("No records found")
+                    return Err(anyhow::anyhow!("No records found").into());
                 }
 
                 records.sort_by_key(|record| record.sequence());
@@ -117,7 +118,7 @@ impl Ipns {
                 let path = String::from_utf8_lossy(data.value()).to_string();
 
                 IpfsPath::from_str(&path)
-                    .map_err(anyhow::Error::from)
+                    .map_err(IpnsError::from)
                     .and_then(|mut internal_path| {
                         internal_path
                             .path
@@ -128,21 +129,25 @@ impl Ipns {
             }
             PathRoot::Dns(domain) => {
                 let path_iter = path.iter();
-                Ok(dnslink::resolve(self.resolver.unwrap_or_default(), domain, path_iter).await?)
+                dnslink::resolve(self.resolver, domain, path_iter)
+                    .await
+                    .map_err(IpnsError::from)
             }
         }
     }
 
-    pub async fn publish(
+    pub async fn publish<B: Borrow<IpfsPath>>(
         &self,
         key: Option<&str>,
-        path: &IpfsPath,
-        option: Option<IpnsOption>,
-    ) -> Result<IpfsPath, Error> {
+        path: B,
+        option: IpnsOption,
+    ) -> Result<IpfsPath, IpnsError> {
         use ipld_core::cid::Cid;
         use libp2p::kad::Quorum;
         use multihash::Multihash;
         use std::str::FromStr;
+
+        let path = path.borrow();
 
         let keypair = match key {
             Some(key) => self.ipfs.keystore().get_keypair(key).await?,
@@ -151,13 +156,14 @@ impl Ipns {
 
         let peer_id = keypair.public().to_peer_id();
 
-        let hash = Multihash::from_bytes(&peer_id.to_bytes())?;
+        let hash = Multihash::from_bytes(&peer_id.to_bytes()).map_err(anyhow::Error::from)?;
 
         let cid = Cid::new_v1(0x72, hash);
 
         let mb = format!(
             "/ipns/{}",
-            cid.to_string_of_base(multibase::Base::Base36Lower)?
+            cid.to_string_of_base(multibase::Base::Base36Lower)
+                .map_err(anyhow::Error::from)?
         );
 
         let repo = self.ipfs.repo();
@@ -178,7 +184,7 @@ impl Ipns {
             let ipfs_path = IpfsPath::from_str(&String::from_utf8_lossy(data.value()))?;
 
             if ipfs_path.eq(path) {
-                return IpfsPath::from_str(&mb);
+                return IpfsPath::from_str(&mb).map_err(IpnsError::from);
             }
 
             // inc req of the record
@@ -199,11 +205,22 @@ impl Ipns {
 
         datastore.put(mb.as_bytes(), &bytes).await?;
 
-        match option.unwrap_or_default() {
+        match option {
             IpnsOption::DHT => self.ipfs.dht_put(&mb, bytes, Quorum::One).await?,
             IpnsOption::Local => {}
         };
 
-        IpfsPath::from_str(&mb)
+        IpfsPath::from_str(&mb).map_err(IpnsError::from)
     }
+}
+
+#[non_exhaustive]
+#[derive(thiserror::Error, Debug)]
+pub enum IpnsError {
+    #[error(transparent)]
+    IpfsPath(#[from] crate::path::IpfsPathError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Any(#[from] anyhow::Error),
 }

@@ -176,12 +176,12 @@ impl IpfsUnixfs {
     /// Retreive a file and saving it to a local path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub fn get<P: AsRef<std::path::Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet {
+    pub fn get<I: Into<IpfsPath>, P: AsRef<std::path::Path>>(&self, path: I, dest: P) -> UnixfsGet {
         UnixfsGet::with_ipfs(&self.ipfs, path, dest)
     }
 
     /// List directory contents
-    pub fn ls(&self, path: IpfsPath) -> UnixfsLs {
+    pub fn ls<I: Into<IpfsPath>>(&self, path: I) -> UnixfsLs {
         UnixfsLs::with_ipfs(&self.ipfs, path)
     }
 }
