@@ -36,8 +36,7 @@ mod transport;
 pub use addr::MultiaddrExt;
 pub use behaviour::KadResult;
 
-/// Type alias for [`libp2p::Swarm`] running the [`behaviour::Behaviour`] with the given [`IpfsTypes`].
-pub type TSwarm<C> = Swarm<behaviour::Behaviour<C>>;
+pub(crate) type TSwarm<C> = Swarm<behaviour::Behaviour<C>>;
 
 /// Abstraction of IdentifyInfo but includes PeerId
 #[derive(Clone, Debug, Eq)]
@@ -89,7 +88,7 @@ impl From<IdentifyInfo> for PeerInfo {
             protocols,
             observed_addr,
         } = info;
-        let peer_id = public_key.clone().into();
+        let peer_id = public_key.to_peer_id();
         let observed_addr = Some(observed_addr);
         Self {
             peer_id,
