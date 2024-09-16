@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 rust-ipfs = { path = "../.." }
 futures = "0.3"
-anyhow = "1.0.86"
+anyhow = "1.0.89"
 wasm-bindgen = "0.2.93"
 wasm-bindgen-futures = "0.4.42"
 web-sys = { version = "0.3", features = ['Document', 'Element', 'HtmlElement', 'Node', 'Response', 'Window'] }
