@@ -56,6 +56,7 @@ multihash-derive = "0.9.0"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "std", "pem"] }
 parking_lot = "0.12.3"
 pem = { version = "3.0.4" }
+pollable-map = "0.1.0-alpha"
 quick-protobuf = { version = "0.8.1" }
 quick-protobuf-codec = "0.3.1"
 rand = "0.8.5"
@@ -118,6 +119,7 @@ multihash-derive.workspace = true
 p256.workspace = true
 parking_lot.workspace = true
 pem.workspace = true
+pollable-map.workspace = true
 quick-protobuf-codec.workspace = true
 quick-protobuf.workspace = true
 rand.workspace = true

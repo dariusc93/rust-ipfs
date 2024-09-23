@@ -3854,6 +3854,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollable-map"
+version = "0.1.0-alpha"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd72e3de13f84c361bcfc905e3fd0dcfbbc68a983a4bcb7382805ada3ab1779"
+dependencies = [
+ "futures",
+]
+
+[[package]]
 name = "polling"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4424,6 +4433,7 @@ dependencies = [
  "p256",
  "parking_lot",
  "pem",
+ "pollable-map",
  "quick-protobuf",
  "quick-protobuf-codec",
  "rand 0.8.5",
