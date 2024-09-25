@@ -7,7 +7,7 @@ use libp2p::{core::UpgradeInfo, InboundUpgrade, OutboundUpgrade, StreamProtocol}
 
 use super::{bitswap_pb, message::BitswapMessage};
 
-const PROTOCOL: StreamProtocol = StreamProtocol::new("/ipfs/bitswap/1.2.0");
+pub(crate) const PROTOCOL: StreamProtocol = StreamProtocol::new("/ipfs/bitswap/1.2.0");
 const MAX_BUF_SIZE: usize = 2_097_152;
 
 #[derive(Debug, Clone, Default)]

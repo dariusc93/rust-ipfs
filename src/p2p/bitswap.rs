@@ -1,3 +1,4 @@
+mod handler;
 mod message;
 mod pb;
 mod prefix;
