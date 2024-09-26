@@ -22,7 +22,7 @@
 - refactor: Remove optional error from `UnixfsStatus`.
 - refactor: Remove sled and redb datastore and dependency. [PR 304](https://github.com/dariusc93/rust-ipfs/pull/304)
 - chore: Replace tokio-stream `StreamMap` with pollable-map `StreamMap`. [PR 306](https://github.com/dariusc93/rust-ipfs/pull/306)
-- chore: Provide `BitswapMessage` instead of `bitswap_pb::Message`. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+- chore: Provide `BitswapMessage` instead of `bitswap_pb::Message`. [PR 308](https://github.com/dariusc93/rust-ipfs/pull/308)
 
 # 0.11.21
 - chore: Put libp2p-webrtc-websys behind feature.
