@@ -378,13 +378,6 @@ impl NetworkBehaviour for Behaviour {
             }
         };
 
-        let message = BitswapMessage::from_proto(message)
-            .map_err(|e| {
-                tracing::error!(error = %e, %peer_id, "unable to parse message");
-                e
-            })
-            .unwrap_or_default();
-
         if message.is_empty() {
             tracing::warn!(%peer_id, %connection_id, "received an empty message");
             return;
