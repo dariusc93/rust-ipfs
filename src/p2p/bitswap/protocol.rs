@@ -26,7 +26,7 @@ impl<TSocket> InboundUpgrade<TSocket> for BitswapProtocol
 where
     TSocket: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Output = bitswap_pb::Message;
+    type Output = BitswapMessage;
     type Error = io::Error;
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
@@ -42,6 +42,11 @@ where
                 .await
                 .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
+
+            let message = BitswapMessage::from_proto(message).map_err(|e| {
+                tracing::error!(error = %e, "unable to parse message");
+                e
+            })?;
 
             Ok(message)
         })
@@ -84,13 +89,13 @@ where
 
 #[derive(Debug)]
 pub enum Message {
-    Receive { message: bitswap_pb::Message },
+    Receive { message: BitswapMessage },
     Sent,
 }
 
-impl From<bitswap_pb::Message> for Message {
+impl From<BitswapMessage> for Message {
     #[inline]
-    fn from(message: bitswap_pb::Message) -> Self {
+    fn from(message: BitswapMessage) -> Self {
         Message::Receive { message }
     }
 }

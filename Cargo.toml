@@ -1,6 +1,6 @@
 [package]
 authors = ["Darius C", "Rust-IPFS contributors"]
-rust-version = "1.70"
+rust-version = "1.80"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 name = "rust-ipfs"
@@ -20,7 +20,7 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-anyhow = "1.0.87"
+anyhow = "1.0.89"
 async-stream = { version = "0.3.5" }
 async-trait = { version = "0.1.82" }
 asynchronous-codec = "0.7.0"
@@ -56,6 +56,7 @@ multihash-derive = "0.9.0"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "std", "pem"] }
 parking_lot = "0.12.3"
 pem = { version = "3.0.4" }
+pollable-map = "0.1.0-alpha"
 quick-protobuf = { version = "0.8.1" }
 quick-protobuf-codec = "0.3.1"
 rand = "0.8.5"
@@ -73,7 +74,7 @@ serde_json = { default-features = false, version = "1.0.127" }
 serde-wasm-bindgen = "0.6"
 sha2 = "0.10.8"
 simple_x509 = "=1.1.0"
-thiserror = { default-features = false, version = "1.0.63" }
+thiserror = { default-features = false, version = "1.0.64" }
 tracing = { default-features = false, features = ["log"], version = "0.1.40" }
 tracing-futures = { default-features = false, features = [
     "std-future",
@@ -118,6 +119,7 @@ multihash-derive.workspace = true
 p256.workspace = true
 parking_lot.workspace = true
 pem.workspace = true
+pollable-map.workspace = true
 quick-protobuf-codec.workspace = true
 quick-protobuf.workspace = true
 rand.workspace = true
