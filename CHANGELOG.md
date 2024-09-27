@@ -1,5 +1,5 @@
 
-# next
+# 0.12.0
 - chore: Cleanup Keystore logic and implementation. [PR 222](https://github.com/dariusc93/rust-ipfs/pull/222)
 - feat: Add {Into}AddPeerOpt. [PR 226](https://github.com/dariusc93/rust-ipfs/pull/226)
 - refactor: Simplify bitswap WantSession. [PR 234](https://github.com/dariusc93/rust-ipfs/pull/234)
@@ -23,6 +23,7 @@
 - refactor: Remove sled and redb datastore and dependency. [PR 304](https://github.com/dariusc93/rust-ipfs/pull/304)
 - chore: Replace tokio-stream `StreamMap` with pollable-map `StreamMap`. [PR 306](https://github.com/dariusc93/rust-ipfs/pull/306)
 - chore: Provide `BitswapMessage` instead of `bitswap_pb::Message`. [PR 308](https://github.com/dariusc93/rust-ipfs/pull/308)
+- refactor: bump msrv to 1.80
 
 # 0.11.21
 - chore: Put libp2p-webrtc-websys behind feature.
