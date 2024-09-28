@@ -24,7 +24,7 @@
 - chore: Replace tokio-stream `StreamMap` with pollable-map `StreamMap`. [PR 306](https://github.com/dariusc93/rust-ipfs/pull/306)
 - chore: Provide `BitswapMessage` instead of `bitswap_pb::Message`. [PR 308](https://github.com/dariusc93/rust-ipfs/pull/308)
 - refactor: bump msrv to 1.80
-- refactor: Add custom error for ipns, added `Borrow<IpfsPath>` and `Into<IpfsPath>`. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX) 
+- refactor: Add custom error for ipns, added `Borrow<Cid>`, `Borrow<IpfsPath>` and `Into<IpfsPath>` to different function signatures. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX) 
 
 # 0.11.21
 - chore: Put libp2p-webrtc-websys behind feature.

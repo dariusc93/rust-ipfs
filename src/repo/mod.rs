@@ -609,9 +609,9 @@ impl Repo {
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
     #[inline]
-    pub async fn get_block(
+    pub async fn get_block<C: Borrow<Cid>>(
         &self,
-        cid: &Cid,
+        cid: C,
         peers: &[PeerId],
         local_only: bool,
     ) -> Result<Block, Error> {
@@ -738,13 +738,14 @@ impl Repo {
         Ok(blocks.boxed())
     }
 
-    pub(crate) async fn _get_block(
+    pub(crate) async fn _get_block<C: Borrow<Cid>>(
         &self,
-        cid: &Cid,
+        cid: C,
         peers: &[PeerId],
         local_only: bool,
         timeout: impl Into<Option<Duration>>,
     ) -> Result<Block, Error> {
+        let cid = cid.borrow();
         let cids = vec![*cid];
         let mut blocks = self._get_blocks(&cids, peers, local_only, timeout).await?;
 
@@ -755,12 +756,14 @@ impl Repo {
     }
 
     /// Retrieves a block from the block store if it's available locally.
-    pub async fn get_block_now(&self, cid: &Cid) -> Result<Option<Block>, Error> {
+    pub async fn get_block_now<C: Borrow<Cid>>(&self, cid: C) -> Result<Option<Block>, Error> {
+        let cid = cid.borrow();
         self.inner.block_store.get(cid).await
     }
 
     /// Check to determine if blockstore contain a block
-    pub async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
+    pub async fn contains<C: Borrow<Cid>>(&self, cid: C) -> Result<bool, Error> {
+        let cid = cid.borrow();
         self.inner.block_store.contains(cid).await
     }
 
@@ -770,9 +773,13 @@ impl Repo {
     }
 
     /// Remove block from the block store.
-    pub async fn remove_block(&self, cid: &Cid, recursive: bool) -> Result<Vec<Cid>, Error> {
+    pub async fn remove_block<C: Borrow<Cid>>(
+        &self,
+        cid: C,
+        recursive: bool,
+    ) -> Result<Vec<Cid>, Error> {
         let _guard = self.inner.gclock.read().await;
-
+        let cid = cid.borrow();
         if self.is_pinned(cid).await? {
             return Err(anyhow::anyhow!("block to remove is pinned"));
         }
@@ -851,8 +858,8 @@ impl Repo {
     ///
     /// Recursively pinned Cids cannot be re-pinned non-recursively but non-recursively pinned Cids
     /// can be "upgraded to" being recursively pinned.
-    pub fn pin(&self, cid: &Cid) -> RepoInsertPin {
-        RepoInsertPin::new(self.clone(), *cid)
+    pub fn pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin {
+        RepoInsertPin::new(self.clone(), cid)
     }
 
     /// Unpins a given Cid recursively or only directly.
@@ -861,12 +868,12 @@ impl Repo {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin(&self, cid: &Cid) -> RepoRemovePin {
-        RepoRemovePin::new(self.clone(), *cid)
+    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin {
+        RepoRemovePin::new(self.clone(), cid)
     }
 
-    pub fn fetch(&self, cid: &Cid) -> RepoFetch {
-        RepoFetch::new(self.clone(), *cid)
+    pub fn fetch<C: Borrow<Cid>>(&self, cid: C) -> RepoFetch {
+        RepoFetch::new(self.clone(), cid)
     }
 
     /// Pins a given Cid recursively or directly (non-recursively).
@@ -949,7 +956,8 @@ impl Repo {
     }
 
     /// Checks if a `Cid` is pinned.
-    pub async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
+    pub async fn is_pinned<C: Borrow<Cid>>(&self, cid: C) -> Result<bool, Error> {
+        let cid = cid.borrow();
         self.inner.data_store.is_pinned(cid).await
     }
 
@@ -1061,10 +1069,11 @@ pub struct RepoFetch {
 }
 
 impl RepoFetch {
-    pub fn new(repo: Repo, cid: Cid) -> Self {
+    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+        let cid = cid.borrow();
         Self {
             repo,
-            cid,
+            cid: *cid,
             recursive: false,
             providers: vec![],
             timeout: None,
@@ -1172,10 +1181,11 @@ pub struct RepoInsertPin {
 }
 
 impl RepoInsertPin {
-    pub fn new(repo: Repo, cid: Cid) -> Self {
+    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+        let cid = cid.borrow();
         Self {
             repo,
-            cid,
+            cid: *cid,
             recursive: false,
             providers: vec![],
             local: false,
@@ -1298,10 +1308,11 @@ pub struct RepoRemovePin {
 }
 
 impl RepoRemovePin {
-    pub fn new(repo: Repo, cid: Cid) -> Self {
+    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+        let cid = cid.borrow();
         Self {
             repo,
-            cid,
+            cid: *cid,
             recursive: false,
             refs: Default::default(),
             span: None,

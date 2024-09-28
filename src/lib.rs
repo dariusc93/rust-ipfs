@@ -1111,7 +1111,7 @@ impl Ipfs {
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
-    pub async fn get_block(&self, cid: &Cid) -> Result<Block, Error> {
+    pub async fn get_block<C: Borrow<Cid>>(&self, cid: C) -> Result<Block, Error> {
         self.repo
             .get_block(cid, &[], false)
             .instrument(self.span.clone())
@@ -1119,9 +1119,13 @@ impl Ipfs {
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
-    pub async fn remove_block(&self, cid: Cid, recursive: bool) -> Result<Vec<Cid>, Error> {
+    pub async fn remove_block<C: Borrow<Cid>>(
+        &self,
+        cid: C,
+        recursive: bool,
+    ) -> Result<Vec<Cid>, Error> {
         self.repo
-            .remove_block(&cid, recursive)
+            .remove_block(cid, recursive)
             .instrument(self.span.clone())
             .await
     }
@@ -1152,7 +1156,7 @@ impl Ipfs {
     /// If a recursive `insert_pin` operation is interrupted because of a crash or the crash
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
-    pub fn insert_pin(&self, cid: &Cid) -> RepoInsertPin {
+    pub fn insert_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin {
         self.repo().pin(cid).span(self.span.clone())
     }
 
@@ -1162,7 +1166,7 @@ impl Ipfs {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin(&self, cid: &Cid) -> RepoRemovePin {
+    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin {
         self.repo().remove_pin(cid).span(self.span.clone())
     }
 
@@ -1179,8 +1183,8 @@ impl Ipfs {
     /// Works correctly only under no-crash situations. Workaround for hitting a crash is to re-pin
     /// any existing recursive pins.
     ///
-    pub async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
-        let span = debug_span!(parent: &self.span, "is_pinned", cid = %cid);
+    pub async fn is_pinned<C: Borrow<Cid>>(&self, cid: C) -> Result<bool, Error> {
+        let span = debug_span!(parent: &self.span, "is_pinned", cid = %cid.borrow());
         self.repo.is_pinned(cid).instrument(span).await
     }
 
