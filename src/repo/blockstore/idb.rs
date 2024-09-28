@@ -70,10 +70,6 @@ impl BlockStore for IdbBlockStore {
         Ok(())
     }
 
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
         let database = self.get_db().clone();
         let (tx, rx) = oneshot::channel();

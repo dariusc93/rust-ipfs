@@ -318,10 +318,6 @@ impl DataStore for MemDataStore {
         Ok(())
     }
 
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
         let contains = self.inner.lock().await.contains_key(key);
         Ok(contains)
@@ -600,7 +596,6 @@ mod tests {
         let value = [5, 6, 7, 8];
 
         store.init().await.unwrap();
-        store.open().await.unwrap();
 
         let contains = store.contains(&key);
         assert!(!contains.await.unwrap());

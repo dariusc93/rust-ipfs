@@ -42,10 +42,6 @@ impl BlockStore for FsBlockStore {
         Ok(())
     }
 
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
         let inner = &*self.inner.read().await;
         inner.contains(cid).await
@@ -335,7 +331,6 @@ mod tests {
         let block = Block::new(cid, data).unwrap();
 
         store.init().await.unwrap();
-        store.open().await.unwrap();
 
         let contains = store.contains(&cid).await.unwrap();
         assert!(!contains);
@@ -373,13 +368,11 @@ mod tests {
 
         let block_store = FsBlockStore::new(tmp.clone());
         block_store.init().await.unwrap();
-        block_store.open().await.unwrap();
 
         assert!(!block_store.contains(block.cid()).await.unwrap());
         block_store.put(&block).await.unwrap();
 
         let block_store = FsBlockStore::new(tmp.clone());
-        block_store.open().await.unwrap();
         assert!(block_store.contains(block.cid()).await.unwrap());
         assert_eq!(block_store.get(block.cid()).await.unwrap().unwrap(), block);
 
@@ -394,7 +387,6 @@ mod tests {
 
         let block_store = FsBlockStore::new(tmp.clone());
         block_store.init().await.unwrap();
-        block_store.open().await.unwrap();
 
         for data in &[b"1", b"2", b"3"] {
             let data_slice = data.to_vec();

@@ -22,7 +22,6 @@ impl<T: DataStore> DSTestContext<T> {
         let ds = factory(p);
 
         ds.init().await.unwrap();
-        ds.open().await.unwrap();
 
         DSTestContext {
             tempdir,

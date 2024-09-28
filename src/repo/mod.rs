@@ -66,8 +66,11 @@ pub enum BlockRmError {
 #[async_trait]
 pub trait BlockStore: Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
-    /// FIXME: redundant and never called during initialization, which is expected to happen during [`init`].
-    async fn open(&self) -> Result<(), Error>;
+
+    #[deprecated]
+    async fn open(&self) -> Result<(), Error> {
+        Ok(())
+    }
     /// Returns whether a block is present in the blockstore.
     async fn contains(&self, cid: &Cid) -> Result<bool, Error>;
     /// Returns a block from the blockstore.
@@ -90,7 +93,10 @@ pub trait BlockStore: Debug + Send + Sync {
 /// Generic layer of abstraction for a key-value data store.
 pub trait DataStore: PinStore + Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
-    async fn open(&self) -> Result<(), Error>;
+    #[deprecated]
+    async fn open(&self) -> Result<(), Error> {
+        Ok(())
+    }
     /// Checks if a key is present in the datastore.
     async fn contains(&self, key: &[u8]) -> Result<bool, Error>;
     /// Returns the value associated with a key from the datastore.
@@ -574,30 +580,10 @@ impl Repo {
             log::debug!("lockfile tried");
         }
 
-        let f1 = self.inner.block_store.init();
-        let f2 = self.inner.data_store.init();
-        let (r1, r2) = futures::future::join(f1, f2).await;
-        let init = &self.inner.initialized;
-        if r1.is_err() {
-            r1.map(|_| {
-                init.store(true, Ordering::SeqCst);
-            })
-        } else {
-            r2.map(|_| {
-                init.store(true, Ordering::SeqCst);
-            })
-        }
-    }
-
-    pub async fn open(&self) -> Result<(), Error> {
-        let f1 = self.inner.block_store.open();
-        let f2 = self.inner.data_store.open();
-        let (r1, r2) = futures::future::join(f1, f2).await;
-        if r1.is_err() {
-            r1
-        } else {
-            r2
-        }
+        self.inner.block_store.init().await?;
+        self.inner.data_store.init().await?;
+        self.inner.initialized.store(true, Ordering::SeqCst);
+        Ok(())
     }
 
     /// Puts a block into the block store.

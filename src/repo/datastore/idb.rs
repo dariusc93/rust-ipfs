@@ -75,10 +75,6 @@ impl DataStore for IdbDataStore {
         Ok(())
     }
 
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
     /// Checks if a key is present in the datastore.
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
         let database = self.get_db().to_owned();

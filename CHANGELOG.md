@@ -25,6 +25,7 @@
 - chore: Provide `BitswapMessage` instead of `bitswap_pb::Message`. [PR 308](https://github.com/dariusc93/rust-ipfs/pull/308)
 - refactor: bump msrv to 1.80
 - refactor: Add custom error for ipns, added `Borrow<Cid>`, `Borrow<IpfsPath>` and `Into<IpfsPath>` to different function signatures. [PR 309](https://github.com/dariusc93/rust-ipfs/pull/309) 
+- refactor: deprecate `{BlockStore, DataStore}::open`
 
 # 0.11.21
 - chore: Put libp2p-webrtc-websys behind feature.

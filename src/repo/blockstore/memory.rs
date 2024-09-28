@@ -48,10 +48,6 @@ impl BlockStore for MemBlockStore {
         Ok(())
     }
 
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
     async fn contains(&self, cid: &Cid) -> Result<bool, Error> {
         let inner = &*self.inner.read().await;
         Ok(inner.blocks.contains_key(cid))
@@ -149,7 +145,6 @@ mod tests {
         let block = Block::new(cid, data).unwrap();
 
         store.init().await.unwrap();
-        store.open().await.unwrap();
 
         let contains = store.contains(&cid);
         assert!(!contains.await.unwrap());
@@ -179,7 +174,6 @@ mod tests {
         let mem_store = MemBlockStore::new(tmp);
 
         mem_store.init().await.unwrap();
-        mem_store.open().await.unwrap();
 
         for data in &[b"1", b"2", b"3"] {
             let data_slice = data.to_vec();

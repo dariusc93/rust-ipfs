@@ -1284,7 +1284,9 @@ impl Ipfs {
     pub async fn publish_ipns<B: Borrow<IpfsPath>>(&self, path: B) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
-            ipns.publish(None, path, Default::default()).await.map_err(anyhow::Error::from)
+            ipns.publish(None, path, Default::default())
+                .await
+                .map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await

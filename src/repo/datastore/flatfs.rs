@@ -185,10 +185,6 @@ impl DataStore for FsDataStore {
         Ok(())
     }
 
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
         let _g = self.ds_guard.read().await;
         Ok(self._contains(key))
@@ -779,7 +775,6 @@ mod test {
         let value = [5, 6, 7, 8];
 
         store.init().await?;
-        store.open().await?;
 
         let contains = store.contains(&key).await.unwrap();
         assert!(!contains);
