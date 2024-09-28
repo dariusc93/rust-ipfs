@@ -1284,7 +1284,7 @@ impl Ipfs {
     pub async fn publish_ipns<B: Borrow<IpfsPath>>(&self, path: B) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
-            return Ok(ipns.publish(None, path, Default::default()).await?);
+            ipns.publish(None, path, Default::default()).await.map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await
@@ -2760,7 +2760,7 @@ mod tests {
         let cid = ipfs.put_dag(data.clone()).pin(false).await.unwrap();
 
         assert!(ipfs.is_pinned(&cid).await.unwrap());
-        ipfs.remove_pin(&cid).await.unwrap();
+        ipfs.remove_pin(cid).await.unwrap();
         assert!(!ipfs.is_pinned(&cid).await.unwrap());
     }
 }
