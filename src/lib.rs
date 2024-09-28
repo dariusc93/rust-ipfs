@@ -72,8 +72,15 @@ use tracing_futures::Instrument;
 use unixfs::UnixfsGet;
 use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsLs};
 
+use self::{
+    dag::IpldDag,
+    ipns::Ipns,
+    p2p::{create_swarm, TSwarm},
+    repo::Repo,
+};
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
+use std::borrow::Borrow;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
@@ -81,13 +88,6 @@ use std::{
     path::Path,
     sync::Arc,
     time::Duration,
-};
-
-use self::{
-    dag::IpldDag,
-    ipns::Ipns,
-    p2p::{create_swarm, TSwarm},
-    repo::Repo,
 };
 
 pub use self::p2p::gossipsub::SubscriptionStream;
@@ -1111,7 +1111,7 @@ impl Ipfs {
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
-    pub async fn get_block(&self, cid: &Cid) -> Result<Block, Error> {
+    pub async fn get_block<C: Borrow<Cid>>(&self, cid: C) -> Result<Block, Error> {
         self.repo
             .get_block(cid, &[], false)
             .instrument(self.span.clone())
@@ -1119,9 +1119,13 @@ impl Ipfs {
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
-    pub async fn remove_block(&self, cid: Cid, recursive: bool) -> Result<Vec<Cid>, Error> {
+    pub async fn remove_block<C: Borrow<Cid>>(
+        &self,
+        cid: C,
+        recursive: bool,
+    ) -> Result<Vec<Cid>, Error> {
         self.repo
-            .remove_block(&cid, recursive)
+            .remove_block(cid, recursive)
             .instrument(self.span.clone())
             .await
     }
@@ -1152,7 +1156,7 @@ impl Ipfs {
     /// If a recursive `insert_pin` operation is interrupted because of a crash or the crash
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
-    pub fn insert_pin(&self, cid: &Cid) -> RepoInsertPin {
+    pub fn insert_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin {
         self.repo().pin(cid).span(self.span.clone())
     }
 
@@ -1162,7 +1166,7 @@ impl Ipfs {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin(&self, cid: &Cid) -> RepoRemovePin {
+    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin {
         self.repo().remove_pin(cid).span(self.span.clone())
     }
 
@@ -1179,8 +1183,8 @@ impl Ipfs {
     /// Works correctly only under no-crash situations. Workaround for hitting a crash is to re-pin
     /// any existing recursive pins.
     ///
-    pub async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
-        let span = debug_span!(parent: &self.span, "is_pinned", cid = %cid);
+    pub async fn is_pinned<C: Borrow<Cid>>(&self, cid: C) -> Result<bool, Error> {
+        let span = debug_span!(parent: &self.span, "is_pinned", cid = %cid.borrow());
         self.repo.is_pinned(cid).instrument(span).await
     }
 
@@ -1242,17 +1246,21 @@ impl Ipfs {
     }
 
     /// Retreive a file and saving it to a path.
-    pub fn get_unixfs<P: AsRef<Path>>(&self, path: IpfsPath, dest: P) -> UnixfsGet {
+    pub fn get_unixfs<I: Into<IpfsPath>, P: AsRef<Path>>(&self, path: I, dest: P) -> UnixfsGet {
         self.unixfs().get(path, dest).span(self.span.clone())
     }
 
     /// List directory contents
-    pub fn ls_unixfs(&self, path: IpfsPath) -> UnixfsLs {
+    pub fn ls_unixfs<I: Into<IpfsPath>>(&self, path: I) -> UnixfsLs {
         self.unixfs().ls(path).span(self.span.clone())
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.
-    pub async fn resolve_ipns(&self, path: &IpfsPath, recursive: bool) -> Result<IpfsPath, Error> {
+    pub async fn resolve_ipns<B: Borrow<IpfsPath>>(
+        &self,
+        path: B,
+        recursive: bool,
+    ) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
             let mut resolved = ipns.resolve(path).await;
@@ -1266,17 +1274,17 @@ impl Ipfs {
                     resolved = ipns.resolve(res).await;
                 }
             }
-            resolved
+            Ok(resolved?)
         }
         .instrument(self.span.clone())
         .await
     }
 
     /// Publish ipns record to DHT
-    pub async fn publish_ipns(&self, path: &IpfsPath) -> Result<IpfsPath, Error> {
+    pub async fn publish_ipns<B: Borrow<IpfsPath>>(&self, path: B) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
-            ipns.publish(None, path, None).await
+            ipns.publish(None, path, Default::default()).await.map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await
@@ -2752,7 +2760,7 @@ mod tests {
         let cid = ipfs.put_dag(data.clone()).pin(false).await.unwrap();
 
         assert!(ipfs.is_pinned(&cid).await.unwrap());
-        ipfs.remove_pin(&cid).await.unwrap();
+        ipfs.remove_pin(cid).await.unwrap();
         assert!(!ipfs.is_pinned(&cid).await.unwrap());
     }
 }
