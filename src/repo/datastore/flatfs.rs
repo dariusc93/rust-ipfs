@@ -20,8 +20,6 @@ use tokio_util::either::Either;
 /// their indirect descendants. Pin files are separated by their file extensions.
 ///
 /// When modifying, single lock is used.
-///
-/// For the [`crate::repo::PinStore`] implementation see `fs/pinstore.rs`.
 #[derive(Debug)]
 pub struct FsDataStore {
     /// The base directory under which we have a sharded directory structure, and the individual
@@ -439,7 +437,7 @@ impl PinStore for FsDataStore {
     async fn list(
         &self,
         requirement: Option<PinMode>,
-    ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>> {
+    ) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
         // no locking, dirty reads are probably good enough until gc
         let cids = self.list_pinfiles().await;
 

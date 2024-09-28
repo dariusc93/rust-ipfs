@@ -184,7 +184,7 @@ pub trait Lock: Debug + Send + Sync {
     fn try_exclusive(&self) -> Result<(), LockError>;
 }
 
-type References<'a> = futures::stream::BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
+type References<'a> = BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
 
 #[async_trait]
 pub trait PinStore: Debug + Send + Sync {
@@ -303,12 +303,11 @@ pub enum PinKind<C: Borrow<Cid>> {
 
 impl<C: Borrow<Cid>> PinKind<C> {
     fn as_ref(&self) -> PinKind<&'_ Cid> {
-        use PinKind::*;
         match self {
-            IndirectFrom(c) => PinKind::IndirectFrom(c.borrow()),
-            Direct => PinKind::Direct,
-            Recursive(count) => PinKind::Recursive(*count),
-            RecursiveIntention => PinKind::RecursiveIntention,
+            PinKind::IndirectFrom(c) => PinKind::IndirectFrom(c.borrow()),
+            PinKind::Direct => PinKind::Direct,
+            PinKind::Recursive(count) => PinKind::Recursive(*count),
+            PinKind::RecursiveIntention => PinKind::RecursiveIntention,
         }
     }
 }
@@ -956,7 +955,7 @@ impl Repo {
     pub async fn list_pins(
         &self,
         mode: impl Into<Option<PinMode>>,
-    ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>> {
+    ) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
         let mode = mode.into();
         self.inner.data_store.list(mode).await
     }
@@ -1119,8 +1118,8 @@ impl RepoFetch {
     }
 }
 
-impl std::future::IntoFuture for RepoFetch {
-    type Output = Result<(), anyhow::Error>;
+impl IntoFuture for RepoFetch {
+    type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -1247,8 +1246,8 @@ impl RepoInsertPin {
     }
 }
 
-impl std::future::IntoFuture for RepoInsertPin {
-    type Output = Result<(), anyhow::Error>;
+impl IntoFuture for RepoInsertPin {
+    type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -1321,8 +1320,8 @@ impl RepoRemovePin {
     }
 }
 
-impl std::future::IntoFuture for RepoRemovePin {
-    type Output = Result<(), anyhow::Error>;
+impl IntoFuture for RepoRemovePin {
+    type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -1352,7 +1351,7 @@ impl std::future::IntoFuture for RepoRemovePin {
                     .refs
                     .with_only_unique()
                     .with_existing_blocks()
-                    .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
+                    .refs_of_resolved(&repo, vec![(cid, ipld)])
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
                     .into_stream()
                     .boxed();
