@@ -3,7 +3,7 @@ async fn main() -> anyhow::Result<()> {
     use ipld_core::ipld;
     use rust_ipfs::Ipfs;
     use rust_ipfs::IpfsPath;
-    use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+    use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon

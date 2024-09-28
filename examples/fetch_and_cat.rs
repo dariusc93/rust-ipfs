@@ -4,7 +4,7 @@ use futures::stream::StreamExt;
 use rust_ipfs::p2p::PeerInfo;
 use rust_ipfs::{Ipfs, IpfsPath, Multiaddr};
 
-use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
 
 use std::process::exit;
 use tokio::io::AsyncWriteExt;

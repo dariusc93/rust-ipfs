@@ -2,7 +2,7 @@ use clap::Parser;
 use libp2p::Multiaddr;
 use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::Ipfs;
-use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
 
 #[derive(Debug, Parser)]
 #[clap(name = "rendezvous-client")]

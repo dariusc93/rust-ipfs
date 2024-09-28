@@ -502,7 +502,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
     gc_repo_duration: Option<Duration>,
 }
 
-pub type UninitializedIpfsNoop = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
+pub type UninitializedIpfsDefault = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> Default for UninitializedIpfs<C> {
     fn default() -> Self {
@@ -2637,7 +2637,7 @@ mod node {
         pub async fn with_options(span: Option<Span>, addr: Option<Vec<Multiaddr>>) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let mut uninit = UninitializedIpfsNoop::new()
+            let mut uninit = UninitializedIpfsDefault::new()
                 .with_default()
                 .set_transport_configuration(TransportConfig {
                     enable_memory_transport: true,

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
 use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::io::AsyncWriteExt;
 

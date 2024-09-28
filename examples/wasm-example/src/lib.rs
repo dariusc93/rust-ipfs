@@ -1,5 +1,5 @@
 use ipld_core::ipld;
-use rust_ipfs::UninitializedIpfsNoop as UninitializedIpfs;
+use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
 use rust_ipfs::{Multiaddr, Protocol};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
