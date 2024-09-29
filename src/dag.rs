@@ -357,7 +357,10 @@ impl IpldDag {
         loop {
             let block = match self
                 .repo
-                ._get_block(&current, providers, local_only, timeout)
+                .get_block(current)
+                .providers(providers)
+                .set_local(local_only)
+                .timeout(timeout)
                 .await
             {
                 Ok(block) => block,
@@ -414,7 +417,12 @@ impl IpldDag {
         loop {
             let (next, _) = lookup.pending_links();
 
-            let block = self.repo.get_block(next, providers, local_only).await?;
+            let block = self
+                .repo
+                .get_block(next)
+                .providers(providers)
+                .set_local(local_only)
+                .await?;
 
             match lookup.continue_walk(block.data(), cache)? {
                 NeedToLoadMore(next) => lookup = next,

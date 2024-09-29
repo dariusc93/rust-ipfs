@@ -218,7 +218,7 @@ impl Stream for UnixfsCat {
                             let (next, _) = visit.pending_links();
 
                             let borrow = &repo;
-                            let block = borrow._get_block(next, &providers, local_only, timeout).await.map_err(|e| TraversalFailed::Loading(*next, e))?;
+                            let block = borrow.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await.map_err(|e| TraversalFailed::Loading(*next, e))?;
 
                             let (bytes, next_visit) = visit.continue_walk(block.data(), &mut cache).map_err(|e| TraversalFailed::Walking(*block.cid(), e))?;
 
