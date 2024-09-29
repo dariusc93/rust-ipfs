@@ -1111,11 +1111,8 @@ impl Ipfs {
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
-    pub async fn get_block<C: Borrow<Cid>>(&self, cid: C) -> Result<Block, Error> {
-        self.repo
-            .get_block(cid, &[], false)
-            .instrument(self.span.clone())
-            .await
+    pub fn get_block<C: Borrow<Cid>>(&self, cid: C) -> RepoGetBlock {
+        self.repo.get_block(cid).span(self.span.clone())
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
@@ -2588,6 +2585,7 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
 }
 
 use crate::p2p::AddressBookConfig;
+use crate::repo::RepoGetBlock;
 #[doc(hidden)]
 pub use node::Node;
 

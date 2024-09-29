@@ -151,7 +151,7 @@ impl Stream for UnixfsGet {
 
                         while walker.should_continue() {
                             let (next, _) = walker.pending_links();
-                            let block = match repo._get_block(next, &providers, local_only, timeout).await {
+                            let block = match repo.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
                                     yield UnixfsStatus::FailedStatus { written, total_size, error: e };

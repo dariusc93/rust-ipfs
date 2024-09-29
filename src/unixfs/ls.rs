@@ -150,7 +150,7 @@ impl Stream for UnixfsLs {
                         let mut root_directory = String::new();
                         while walker.should_continue() {
                             let (next, _) = walker.pending_links();
-                            let block = match repo._get_block(next, &providers, local_only, timeout).await {
+                            let block = match repo.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await {
                                 Ok(block) => block,
                                 Err(error) => {
                                     yield Entry::Error { error };

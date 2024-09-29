@@ -7,22 +7,24 @@ use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
-use std::future::IntoFuture;
+use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};
 use tokio::sync::{Notify, RwLockReadGuard};
-use tracing::{log, Span};
-use tracing_futures::Instrument;
+use tracing::{log, Instrument, Span};
 
 #[macro_use]
 #[cfg(test)]
@@ -594,25 +596,15 @@ impl Repo {
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
     #[inline]
-    pub async fn get_block<C: Borrow<Cid>>(
-        &self,
-        cid: C,
-        peers: &[PeerId],
-        local_only: bool,
-    ) -> Result<Block, Error> {
-        self._get_block(cid, peers, local_only, None).await
+    pub fn get_block<C: Borrow<Cid>>(&self, cid: C) -> RepoGetBlock {
+        RepoGetBlock::new(self.clone(), cid)
     }
 
     /// Retrives a set of blocks from the block store, or starts fetching them from the network and awaits
     /// until it has been fetched.
     #[inline]
-    pub async fn get_blocks(
-        &self,
-        cids: &[Cid],
-        peers: &[PeerId],
-        local_only: bool,
-    ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
-        self._get_blocks(cids, peers, local_only, None).await
+    pub fn get_blocks(&self, cids: impl IntoIterator<Item = impl Borrow<Cid>>) -> RepoGetBlocks {
+        RepoGetBlocks::new(self.clone()).blocks(cids)
     }
 
     /// Get the size of listed blocks
@@ -625,119 +617,6 @@ impl Repo {
     #[inline]
     pub async fn get_total_size(&self) -> Result<usize, Error> {
         self.inner.block_store.total_size().await
-    }
-
-    pub(crate) async fn _get_blocks(
-        &self,
-        cids: &[Cid],
-        peers: &[PeerId],
-        local_only: bool,
-        timeout: impl Into<Option<Duration>>,
-    ) -> Result<BoxStream<'static, Result<Block, Error>>, Error> {
-        let timeout = timeout.into();
-
-        let _guard = self.inner.gclock.read().await;
-        let mut blocks = FuturesOrdered::new();
-        let mut missing = cids.to_vec();
-        for cid in cids {
-            match self.get_block_now(cid).await {
-                Ok(Some(block)) => {
-                    blocks.push_back(async { Ok(block) }.boxed());
-                    if let Some(index) = missing.iter().position(|c| c == cid) {
-                        missing.remove(index);
-                    }
-                }
-                Ok(None) | Err(_) => {}
-            }
-        }
-
-        if missing.is_empty() {
-            return Ok(blocks.boxed());
-        }
-
-        if local_only || !self.is_online() {
-            anyhow::bail!("Unable to locate missing blocks {missing:?}");
-        }
-
-        // sending only fails if no one is listening anymore
-        // and that is okay with us.
-
-        let mut events = self
-            .repo_channel()
-            .ok_or(anyhow::anyhow!("Channel is not available"))?;
-
-        let mut notified: HashMap<Cid, Vec<_>> = HashMap::new();
-
-        let timeout = timeout.or(Some(Duration::from_secs(60)));
-
-        for cid in &missing {
-            let cid = *cid;
-            let (tx, rx) = futures::channel::oneshot::channel();
-            self.inner
-                .subscriptions
-                .lock()
-                .entry(cid)
-                .or_default()
-                .push(tx);
-
-            let mut events = events.clone();
-            let signal = Arc::new(Notify::new());
-            let s2 = signal.clone();
-            let task = async move {
-                let block_fut = rx;
-                let notified_fut = signal.notified();
-                futures::pin_mut!(notified_fut);
-
-                match futures::future::select(block_fut, notified_fut).await {
-                    Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
-                    Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
-                    Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
-                    Either::Right(((), _)) => {
-                        Err::<_, Error>(anyhow::anyhow!("request for {cid} has been cancelled"))
-                    }
-                }
-            }
-            .map_err(move |e| {
-                // Although we request would eventually be cancelled if timeout or cancelled, we can still signal to swarm
-                // about the block being unwanted for future changes.
-                _ = events.try_send(RepoEvent::UnwantBlock(cid));
-                e
-            })
-            .boxed();
-
-            notified.entry(cid).or_default().push(s2);
-
-            blocks.push_back(task);
-        }
-
-        events
-            .send(RepoEvent::WantBlock(
-                missing,
-                peers.to_vec(),
-                timeout,
-                Some(notified),
-            ))
-            .await
-            .ok();
-
-        Ok(blocks.boxed())
-    }
-
-    pub(crate) async fn _get_block<C: Borrow<Cid>>(
-        &self,
-        cid: C,
-        peers: &[PeerId],
-        local_only: bool,
-        timeout: impl Into<Option<Duration>>,
-    ) -> Result<Block, Error> {
-        let cid = cid.borrow();
-        let cids = vec![*cid];
-        let mut blocks = self._get_blocks(&cids, peers, local_only, timeout).await?;
-
-        blocks
-            .next()
-            .await
-            .ok_or(anyhow::anyhow!("Unable to locate {} block", *cid))?
     }
 
     /// Retrieves a block from the block store if it's available locally.
@@ -982,6 +861,251 @@ impl Repo {
     }
 }
 
+pub struct RepoGetBlock {
+    instance: RepoGetBlocks,
+}
+
+impl RepoGetBlock {
+    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+        let instance = RepoGetBlocks::new(repo).block(cid);
+        Self { instance }
+    }
+
+    pub fn span<S: Borrow<Span>>(mut self, span: S) -> Self {
+        self.instance = self.instance.span(span);
+        self
+    }
+
+    pub fn timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
+        self.instance = self.instance.timeout(timeout);
+        self
+    }
+
+    pub fn local(mut self) -> Self {
+        self.instance = self.instance.local();
+        self
+    }
+
+    pub fn set_local(mut self, local: bool) -> Self {
+        self.instance = self.instance.set_local(local);
+        self
+    }
+
+    /// Peer that may contain the block
+    pub fn provider(mut self, peer_id: PeerId) -> Self {
+        self.instance = self.instance.provider(peer_id);
+        self
+    }
+
+    /// List of peers that may contain the block
+    pub fn providers(mut self, providers: impl IntoIterator<Item = impl Borrow<PeerId>>) -> Self {
+        self.instance = self.instance.providers(providers);
+        self
+    }
+}
+
+impl Future for RepoGetBlock {
+    type Output = Result<Block, Error>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut self;
+        match futures::ready!(this.instance.poll_next_unpin(cx)) {
+            Some(result) => Poll::Ready(result),
+            None => Poll::Ready(Err(anyhow::anyhow!("block does not exist"))),
+        }
+    }
+}
+
+pub struct RepoGetBlocks {
+    repo: Option<Repo>,
+    cids: IndexSet<Cid>,
+    providers: IndexSet<PeerId>,
+    local: bool,
+    span: Span,
+    timeout: Option<Duration>,
+    stream: Option<BoxStream<'static, Result<Block, Error>>>,
+}
+
+impl RepoGetBlocks {
+    pub fn new(repo: Repo) -> Self {
+        Self {
+            repo: Some(repo),
+            cids: IndexSet::new(),
+            providers: IndexSet::new(),
+            local: false,
+            span: Span::current(),
+            timeout: None,
+            stream: None,
+        }
+    }
+
+    pub fn blocks(mut self, cids: impl IntoIterator<Item = impl Borrow<Cid>>) -> Self {
+        self.cids.extend(cids.into_iter().map(|cid| *cid.borrow()));
+        self
+    }
+
+    pub fn block<C: Borrow<Cid>>(self, cid: C) -> Self {
+        self.blocks([cid])
+    }
+
+    pub fn span<S: Borrow<Span>>(mut self, span: S) -> Self {
+        let span = span.borrow();
+        self.span = span.clone();
+        self
+    }
+
+    pub fn timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
+        self.timeout = timeout.into();
+        self
+    }
+
+    pub fn local(mut self) -> Self {
+        self.local = true;
+        self
+    }
+
+    pub fn set_local(mut self, local: bool) -> Self {
+        self.local = local;
+        self
+    }
+
+    pub fn provider<C: Borrow<PeerId>>(self, peer_id: C) -> Self {
+        self.providers([peer_id])
+    }
+
+    pub fn providers(mut self, providers: impl IntoIterator<Item = impl Borrow<PeerId>>) -> Self {
+        self.providers
+            .extend(providers.into_iter().map(|k| *k.borrow()));
+        self
+    }
+}
+
+impl Stream for RepoGetBlocks {
+    type Item = Result<Block, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.stream.is_none() && self.repo.is_none() {
+            return Poll::Ready(None);
+        }
+
+        let this = &mut *self;
+
+        loop {
+            match &mut this.stream {
+                Some(stream) => {
+                    let _g = this.span.enter();
+                    match futures::ready!(stream.poll_next_unpin(cx)) {
+                        Some(item) => return Poll::Ready(Some(item)),
+                        None => {
+                            this.stream.take();
+                            return Poll::Ready(None);
+                        }
+                    }
+                }
+                None => {
+                    let repo = this.repo.take().expect("valid repo instance");
+                    let providers = std::mem::take(&mut this.providers);
+                    let cids = std::mem::take(&mut this.cids);
+                    let local_only = this.local;
+                    let timeout = this.timeout;
+
+                    let st = async_stream::stream! {
+                        let _guard = repo.gc_guard().await;
+                        let mut missing: IndexSet<Cid> = cids.clone();
+                        for cid in &cids {
+                            match repo.get_block_now(cid).await {
+                                Ok(Some(block)) => {
+                                    yield Ok(block);
+                                    missing.shift_remove(cid);
+                                }
+                                Ok(None) | Err(_) => {}
+                            }
+                        }
+
+                        if missing.is_empty() {
+                            return;
+                        }
+
+                        if local_only || !repo.is_online() {
+                            yield Err(anyhow::anyhow!("Unable to locate missing blocks {missing:?}"));
+                            return;
+                        }
+
+                        let mut events = match repo.repo_channel() {
+                            Some(events) => events,
+                            None => {
+                                yield Err(anyhow::anyhow!("Channel is not available"));
+                                return;
+                            }
+                        };
+
+                        let mut notified: HashMap<Cid, Vec<_>> = HashMap::new();
+
+                        let timeout = timeout.or(Some(Duration::from_secs(60)));
+
+                        let mut blocks = FuturesOrdered::new();
+
+                        for cid in &missing {
+                            let cid = *cid;
+                            let (tx, rx) = futures::channel::oneshot::channel();
+                            repo.inner
+                                .subscriptions
+                                .lock()
+                                .entry(cid)
+                                .or_default()
+                                .push(tx);
+
+                            let mut events = events.clone();
+                            let signal = Arc::new(Notify::new());
+                            let s2 = signal.clone();
+                            let task = async move {
+                                let block_fut = rx;
+                                let notified_fut = signal.notified();
+                                futures::pin_mut!(notified_fut);
+
+                                match futures::future::select(block_fut, notified_fut).await {
+                                    Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
+                                    Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
+                                    Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
+                                    Either::Right(((), _)) => {
+                                        Err::<_, Error>(anyhow::anyhow!("request for {cid} has been cancelled"))
+                                    }
+                                }
+                            }
+                            .map_err(move |e| {
+                                // Although we request would eventually be cancelled if timeout or cancelled, we can still signal to swarm
+                                // about the block being unwanted for future changes.
+                                _ = events.try_send(RepoEvent::UnwantBlock(cid));
+                                e
+                            })
+                            .boxed();
+
+                            notified.entry(cid).or_default().push(s2);
+
+                            blocks.push_back(task);
+                        }
+
+                        events
+                            .send(RepoEvent::WantBlock(
+                                Vec::from_iter(missing),
+                                Vec::from_iter(providers),
+                                timeout,
+                                Some(notified),
+                            ))
+                            .await
+                            .ok();
+
+                        for await block in blocks {
+                            yield block
+                        }
+                    };
+
+                    this.stream.replace(Box::pin(st));
+                }
+            }
+        }
+    }
+}
+
 pub struct RepoPutBlock<'a> {
     repo: Repo,
     block: &'a Block,
@@ -1129,7 +1253,11 @@ impl IntoFuture for RepoFetch {
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo._get_block(&cid, &providers, false, timeout).await?;
+            let block = repo
+                .get_block(&cid)
+                .providers(&providers)
+                .timeout(timeout)
+                .await?;
 
             if !recursive {
                 return Ok(());
@@ -1259,7 +1387,12 @@ impl IntoFuture for RepoInsertPin {
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
-            let block = repo._get_block(&cid, &providers, local, timeout).await?;
+            let block = repo
+                .get_block(&cid)
+                .providers(&providers)
+                .set_local(local)
+                .timeout(timeout)
+                .await?;
 
             if !recursive {
                 repo.insert_direct_pin(&cid).await?
