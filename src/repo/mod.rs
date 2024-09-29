@@ -1106,6 +1106,18 @@ impl Stream for RepoGetBlocks {
     }
 }
 
+impl IntoFuture for RepoGetBlocks {
+    type Output = Result<Vec<Block>, Error>;
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        async move {
+            let col = self.try_collect().await?;
+            Ok(col)
+        }
+        .boxed()
+    }
+}
+
 pub struct RepoPutBlock<'a> {
     repo: Repo,
     block: &'a Block,
