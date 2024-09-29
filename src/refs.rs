@@ -225,7 +225,7 @@ where
             let borrowed = repo.borrow();
 
             let block = if download_blocks {
-                match borrowed.get_block(&cid).providers(&providers).set_local(!download_blocks).timeout(timeout).await {
+                match borrowed.get_block(cid).providers(&providers).set_local(!download_blocks).timeout(timeout).await {
                     Ok(block) => block,
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);
@@ -416,7 +416,7 @@ mod tests {
             "QmRgutAxd8t7oGkSm4wmeuByG6M51wcTso6cubDdQtuEfL",
         );
 
-        let root_block = ipfs.get_block(&Cid::try_from(root).unwrap()).await.unwrap();
+        let root_block = ipfs.get_block(Cid::try_from(root).unwrap()).await.unwrap();
         let ipld = root_block.to_ipld().unwrap();
 
         let all_edges: Vec<_> =
@@ -464,7 +464,7 @@ mod tests {
             "QmRgutAxd8t7oGkSm4wmeuByG6M51wcTso6cubDdQtuEfL",
         );
 
-        let root_block = ipfs.get_block(&Cid::try_from(root).unwrap()).await.unwrap();
+        let root_block = ipfs.get_block(Cid::try_from(root).unwrap()).await.unwrap();
         let ipld = root_block.to_ipld().unwrap();
 
         let destinations: HashSet<_> =

@@ -2738,7 +2738,7 @@ mod tests {
         let block = Block::new(cid, data).unwrap();
 
         let cid: Cid = ipfs.put_block(&block).await.unwrap();
-        let new_block = ipfs.get_block(&cid).await.unwrap();
+        let new_block = ipfs.get_block(cid).await.unwrap();
         assert_eq!(block, new_block);
     }
 
@@ -2759,8 +2759,8 @@ mod tests {
         let data = ipld!([-1, -2, -3]);
         let cid = ipfs.put_dag(data.clone()).pin(false).await.unwrap();
 
-        assert!(ipfs.is_pinned(&cid).await.unwrap());
+        assert!(ipfs.is_pinned(cid).await.unwrap());
         ipfs.remove_pin(cid).await.unwrap();
-        assert!(!ipfs.is_pinned(&cid).await.unwrap());
+        assert!(!ipfs.is_pinned(cid).await.unwrap());
     }
 }

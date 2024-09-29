@@ -35,7 +35,7 @@ async fn bitswap_stress_test() {
 
     for (i, node) in nodes.iter().enumerate() {
         if !filter(i) {
-            node.get_block(&cid).await.unwrap();
+            node.get_block(cid).await.unwrap();
         }
     }
 }

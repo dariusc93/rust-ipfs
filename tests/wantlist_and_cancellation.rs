@@ -65,7 +65,7 @@ async fn wantlist_cancellation() {
     // start a get_request future
     let ipfs_clone = ipfs.clone();
     let (abort_handle1, abort_reg) = AbortHandle::new_pair();
-    let abortable_req = Abortable::new(async move { ipfs_clone.get_block(&cid).await }, abort_reg);
+    let abortable_req = Abortable::new(async move { ipfs_clone.get_block(cid).await }, abort_reg);
     let _get_request1 = task::spawn(abortable_req);
 
     // verify that the requested Cid is in the wantlist
@@ -86,7 +86,7 @@ async fn wantlist_cancellation() {
 
     // fire up an additional get request, this time within the same async task...
     let ipfs_clone = ipfs.clone();
-    let get_request2 = ipfs_clone.get_block(&cid);
+    let get_request2 = ipfs_clone.get_block(cid);
     let get_timeout = timeout(Duration::from_millis(100), pending::<()>());
     let get_request2 = match select(get_timeout.boxed(), get_request2.boxed()).await {
         Either::Left((_, fut)) => fut,
@@ -98,7 +98,7 @@ async fn wantlist_cancellation() {
 
     // ...and an additional one within the same task, for good measure
     let ipfs_clone = ipfs.clone();
-    let get_request3 = ipfs_clone.get_block(&cid);
+    let get_request3 = ipfs_clone.get_block(cid);
     let get_timeout = timeout(Duration::from_millis(100), pending::<()>());
     let get_request3 = match select(get_timeout.boxed(), get_request3.boxed()).await {
         Either::Left((_, fut)) => fut,

@@ -1,4 +1,3 @@
-use futures_timeout::TimeoutExt;
 use ipld_core::cid::Cid;
 use multihash_codetable::{Code, MultihashDigest};
 use rust_ipfs::Block;
@@ -26,8 +25,7 @@ async fn two_node_put_get() {
         .get_block(block.cid())
         .timeout(Duration::from_secs(10))
         .await
-        .expect("get_block did not complete in time")
-        .unwrap();
+        .expect("get_block did not complete in time");
 
     assert_eq!(block.data(), found_block.data());
 }

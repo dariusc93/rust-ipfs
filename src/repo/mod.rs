@@ -1266,7 +1266,7 @@ impl IntoFuture for RepoFetch {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
             let block = repo
-                .get_block(&cid)
+                .get_block(cid)
                 .providers(&providers)
                 .timeout(timeout)
                 .await?;
@@ -1400,7 +1400,7 @@ impl IntoFuture for RepoInsertPin {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
             let _g = repo.inner.gclock.read().await;
             let block = repo
-                .get_block(&cid)
+                .get_block(cid)
                 .providers(&providers)
                 .set_local(local)
                 .timeout(timeout)

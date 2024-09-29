@@ -1,5 +1,4 @@
 use futures::{pin_mut, StreamExt};
-use futures_timeout::TimeoutExt;
 use ipld_core::cid::Cid;
 use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
 use multihash_codetable::{Code, MultihashDigest};
@@ -150,7 +149,7 @@ async fn dht_popular_content_discovery() {
         .unwrap();
 
     assert!(peer
-        .get_block(&cid)
+        .get_block(cid)
         .timeout(Duration::from_secs(10))
         .await
         .is_ok());
