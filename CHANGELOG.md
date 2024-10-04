@@ -1,3 +1,5 @@
+# 0.12.1
+- fix: enable "wasm-bindgen" feature for `instant` when building wasm32 target.
 
 # 0.12.0
 - chore: Cleanup Keystore logic and implementation. [PR 222](https://github.com/dariusc93/rust-ipfs/pull/222)
