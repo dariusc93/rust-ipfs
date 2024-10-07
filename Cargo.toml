@@ -32,7 +32,7 @@ chrono = { version = "0.4.35" }
 clap = { version = "4.5.16", features = ["derive"] }
 either = { version = "1.13.0" }
 fs2 = "0.4.3"
-futures = { version = "0.3.30" }
+futures = { version = "0.3.31" }
 futures-timeout = "0.1.0"
 futures-timer = "3.0.0"
 getrandom = { version = "0.2.15" }
