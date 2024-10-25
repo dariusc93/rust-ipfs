@@ -1,6 +1,5 @@
 # 0.12.2
-- feat: Reimplement ConnectionEvents and PeerConnectionEvents stream via `Ipfs::{connection_events, peer_connection_events}`. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
-
+- feat: Reimplement ConnectionEvents and PeerConnectionEvents stream via `Ipfs::{connection_events, peer_connection_events}`. [PR 320](https://github.com/dariusc93/rust-ipfs/pull/320)
 
 # 0.12.1
 - fix: enable "wasm-bindgen" feature for `instant` when building wasm32 target.
