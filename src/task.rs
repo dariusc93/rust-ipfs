@@ -38,6 +38,7 @@ use multibase::Base;
 use libp2p::core::ConnectedPoint;
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::Event as MdnsEvent;
+use libp2p::multiaddr::Protocol;
 use libp2p::{
     autonat,
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
@@ -262,6 +263,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 if let Some(ch_list) = self.peer_connection_events.get_mut(&peer_id) {
                     let ev = match &endpoint {
                         ConnectedPoint::Dialer { address, .. } => {
+                            let mut address = address.clone();
+                            if matches!(address.iter().last(), Some(Protocol::P2p(_))) {
+                                address.pop();
+                            }
                             PeerConnectionEvents::OutgoingConnection {
                                 connection_id,
                                 addr: address.clone(),
@@ -288,6 +293,10 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 for ch in &mut self.connection_events {
                     let ev = match &endpoint {
                         ConnectedPoint::Dialer { address, .. } => {
+                            let mut address = address.clone();
+                            if matches!(address.iter().last(), Some(Protocol::P2p(_))) {
+                                address.pop();
+                            }
                             ConnectionEvents::OutgoingConnection {
                                 peer_id,
                                 connection_id,
