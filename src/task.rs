@@ -35,7 +35,7 @@ pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
 use multibase::Base;
 
-use libp2p::core::ConnectedPoint;
+use libp2p::core::{ConnectedPoint, Endpoint};
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::Event as MdnsEvent;
 use libp2p::multiaddr::Protocol;
@@ -260,63 +260,49 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     _ = ch.send(Ok(()));
                 }
 
+                let (ep, mut addr) = match &endpoint {
+                    ConnectedPoint::Dialer { address, .. } => (Endpoint::Dialer, address.clone()),
+                    ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
+                        (Endpoint::Listener, local_addr.clone())
+                    }
+                    ConnectedPoint::Listener { send_back_addr, .. } => {
+                        (Endpoint::Listener, send_back_addr.clone())
+                    }
+                };
+
+                if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                    addr.pop();
+                }
+
                 if let Some(ch_list) = self.peer_connection_events.get_mut(&peer_id) {
-                    let ev = match &endpoint {
-                        ConnectedPoint::Dialer { address, .. } => {
-                            let mut address = address.clone();
-                            if matches!(address.iter().last(), Some(Protocol::P2p(_))) {
-                                address.pop();
-                            }
-                            PeerConnectionEvents::OutgoingConnection {
-                                connection_id,
-                                addr: address.clone(),
-                            }
-                        }
-                        ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
-                            PeerConnectionEvents::IncomingConnection {
-                                connection_id,
-                                addr: local_addr.clone(),
-                            }
-                        }
-                        ConnectedPoint::Listener { send_back_addr, .. } => {
-                            PeerConnectionEvents::IncomingConnection {
-                                connection_id,
-                                addr: send_back_addr.clone(),
-                            }
-                        }
+                    let ev = match ep {
+                        Endpoint::Dialer => PeerConnectionEvents::OutgoingConnection {
+                            connection_id,
+                            addr: addr.clone(),
+                        },
+                        Endpoint::Listener => PeerConnectionEvents::IncomingConnection {
+                            connection_id,
+                            addr: addr.clone(),
+                        },
                     };
+
                     for ch in ch_list {
                         let _ = ch.try_send(ev.clone());
                     }
                 }
 
                 for ch in &mut self.connection_events {
-                    let ev = match &endpoint {
-                        ConnectedPoint::Dialer { address, .. } => {
-                            let mut address = address.clone();
-                            if matches!(address.iter().last(), Some(Protocol::P2p(_))) {
-                                address.pop();
-                            }
-                            ConnectionEvents::OutgoingConnection {
-                                peer_id,
-                                connection_id,
-                                addr: address.clone(),
-                            }
-                        }
-                        ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
-                            ConnectionEvents::IncomingConnection {
-                                peer_id,
-                                connection_id,
-                                addr: local_addr.clone(),
-                            }
-                        }
-                        ConnectedPoint::Listener { send_back_addr, .. } => {
-                            ConnectionEvents::IncomingConnection {
-                                peer_id,
-                                connection_id,
-                                addr: send_back_addr.clone(),
-                            }
-                        }
+                    let ev = match ep {
+                        Endpoint::Dialer => ConnectionEvents::OutgoingConnection {
+                            peer_id,
+                            connection_id,
+                            addr: addr.clone(),
+                        },
+                        Endpoint::Listener => ConnectionEvents::IncomingConnection {
+                            peer_id,
+                            connection_id,
+                            addr: addr.clone(),
+                        },
                     };
 
                     let _ = ch.try_send(ev);
