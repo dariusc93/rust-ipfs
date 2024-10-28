@@ -114,6 +114,7 @@ pub use libp2p::{
 };
 
 use libp2p::swarm::dial_opts::PeerCondition;
+use libp2p::swarm::ConnectionId;
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
     kad::{store::MemoryStoreConfig, Mode, Record},
@@ -122,7 +123,6 @@ use libp2p::{
     swarm::dial_opts::DialOpts,
     StreamProtocol,
 };
-
 pub use libp2p_connection_limits::ConnectionLimits;
 use serde::Serialize;
 
@@ -235,6 +235,9 @@ struct IpfsOptions {
 
     pub connection_limits: Option<ConnectionLimits>,
 
+    /// Channel capacity for emitting connection events over.
+    pub connection_event_cap: usize,
+
     pub(crate) protocols: Libp2pProtocol,
 }
 
@@ -293,6 +296,7 @@ impl Default for IpfsOptions {
             transport_configuration: TransportConfig::default(),
             pubsub_config: PubsubConfig::default(),
             swarm_configuration: SwarmConfig::default(),
+            connection_event_cap: 256,
             span: None,
             protocols: Default::default(),
             connection_limits: None,
@@ -377,6 +381,11 @@ enum IpfsEvent {
     RemoveListeningAddress(Multiaddr, Channel<()>),
     AddExternalAddress(Multiaddr, Channel<()>),
     RemoveExternalAddress(Multiaddr, Channel<()>),
+    ConnectionEvents(Channel<futures::channel::mpsc::Receiver<ConnectionEvents>>),
+    PeerConnectionEvents(
+        PeerId,
+        Channel<futures::channel::mpsc::Receiver<PeerConnectionEvents>>,
+    ),
     Bootstrap(Channel<ReceiverChannel<KadResult>>),
     AddPeer(AddPeerOpt, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
@@ -485,6 +494,39 @@ pub enum FDLimit {
     Custom(u64),
 }
 
+#[derive(Debug, Clone)]
+pub enum PeerConnectionEvents {
+    IncomingConnection {
+        connection_id: ConnectionId,
+        addr: Multiaddr,
+    },
+    OutgoingConnection {
+        connection_id: ConnectionId,
+        addr: Multiaddr,
+    },
+    ClosedConnection {
+        connection_id: ConnectionId,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum ConnectionEvents {
+    IncomingConnection {
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+        addr: Multiaddr,
+    },
+    OutgoingConnection {
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+        addr: Multiaddr,
+    },
+    ClosedConnection {
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+    },
+}
+
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
 pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
@@ -554,6 +596,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     /// Set a connection limit
     pub fn set_connection_limits(mut self, connection_limits: ConnectionLimits) -> Self {
         self.options.connection_limits.replace(connection_limits);
+        self
+    }
+
+    /// Set connection event capacity
+    pub fn set_connection_event_capacity(mut self, cap: usize) -> Self {
+        self.options.connection_event_cap = cap;
         self
     }
 
@@ -1031,7 +1079,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             });
         }
 
-        let mut fut = task::IpfsTask::new(swarm, repo_events.fuse(), receiver.fuse(), &ipfs.repo);
+        let mut fut = task::IpfsTask::new(
+            swarm,
+            repo_events.fuse(),
+            receiver.fuse(),
+            &ipfs.repo,
+            options.connection_event_cap,
+        );
         fut.swarm_event = swarm_event;
         fut.local_external_addr = local_external_addr;
 
@@ -1503,8 +1557,8 @@ impl Ipfs {
 
             Ok(stream.boxed())
         }
-        .instrument(self.span.clone())
-        .await
+            .instrument(self.span.clone())
+            .await
     }
 
     /// Publishes to the topic which may have been subscribed to earlier
@@ -1760,6 +1814,41 @@ impl Ipfs {
                 .await?;
 
             rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnectionEvents>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::ConnectionEvents(tx))
+                .await?;
+
+            let rx = rx.await??;
+            Ok(rx.boxed())
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn peer_connection_events(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<BoxStream<'static, PeerConnectionEvents>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::PeerConnectionEvents(peer_id, tx))
+                .await?;
+
+            let rx = rx.await??;
+            Ok(rx.boxed())
         }
         .instrument(self.span.clone())
         .await

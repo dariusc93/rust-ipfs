@@ -9,8 +9,8 @@ use futures::{
     FutureExt, StreamExt,
 };
 
-use crate::TSwarmEvent;
 use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
+use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -35,6 +35,10 @@ pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
 use multibase::Base;
 
+use libp2p::core::{ConnectedPoint, Endpoint};
+#[cfg(not(target_arch = "wasm32"))]
+use libp2p::mdns::Event as MdnsEvent;
+use libp2p::multiaddr::Protocol;
 use libp2p::{
     autonat,
     identify::{Event as IdentifyEvent, Info as IdentifyInfo},
@@ -46,9 +50,6 @@ use libp2p::{
     rendezvous::{Cookie, Namespace},
     swarm::{ConnectionId, SwarmEvent},
 };
-
-#[cfg(not(target_arch = "wasm32"))]
-use libp2p::mdns::Event as MdnsEvent;
 use tokio::sync::Notify;
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
@@ -77,10 +78,16 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
         HashMap<(PeerId, Namespace), Vec<Channel<HashMap<PeerId, Vec<Multiaddr>>>>>,
     pub(crate) rzv_cookie: HashMap<PeerId, Option<Cookie>>,
 
+    pub(crate) peer_connection_events:
+        HashMap<PeerId, Vec<futures::channel::mpsc::Sender<PeerConnectionEvents>>>,
+    pub(crate) connection_events: Vec<futures::channel::mpsc::Sender<ConnectionEvents>>,
+
     pub(crate) pending_connection: HashMap<ConnectionId, Channel<()>>,
     pub(crate) pending_disconnection: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) pending_add_listener: HashMap<ListenerId, Channel<Multiaddr>>,
     pub(crate) pending_remove_listener: HashMap<ListenerId, Channel<()>>,
+
+    pub(crate) event_capacity: usize,
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
@@ -89,11 +96,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
         repo_events: Fuse<Receiver<RepoEvent>>,
         from_facade: Fuse<Receiver<IpfsEvent>>,
         repo: &Repo,
+        event_capacity: usize,
     ) -> Self {
         IpfsTask {
             repo_events,
             from_facade,
             swarm,
+            event_capacity,
             provider_stream: HashMap::new(),
             record_stream: HashMap::new(),
             dht_peer_lookup: Default::default(),
@@ -110,6 +119,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             rzv_discover_pending: Default::default(),
             rzv_cookie: Default::default(),
             listening_addresses: HashMap::new(),
+            peer_connection_events: HashMap::new(),
+            connection_events: Vec::new(),
             pending_disconnection: Default::default(),
             pending_connection: Default::default(),
             pending_add_listener: Default::default(),
@@ -158,6 +169,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 
         if self.timer.event_cleanup.poll_unpin(cx).is_ready() {
             self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+            self.connection_events.retain(|ch| !ch.is_closed());
+            self.peer_connection_events.retain(|_, ch_list| {
+                ch_list.retain(|ch| !ch.is_closed());
+                !ch_list.is_empty()
+            });
             self.timer.event_cleanup.reset(Duration::from_secs(60));
         }
 
@@ -186,6 +202,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 },
                 _ = &mut event_cleanup => {
                     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+                    self.connection_events.retain(|ch| !ch.is_closed());
+                    self.peer_connection_events.retain(|_, ch_list| {
+                        ch_list.retain(|ch| !ch.is_closed());
+                        !ch_list.is_empty()
+                    });
                     event_cleanup.reset(Duration::from_secs(60));
                 }
             }
@@ -229,9 +250,62 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     let _ = ret.send(Ok(address));
                 }
             }
-            SwarmEvent::ConnectionEstablished { connection_id, .. } => {
+            SwarmEvent::ConnectionEstablished {
+                peer_id,
+                connection_id,
+                endpoint,
+                ..
+            } => {
                 if let Some(ch) = self.pending_connection.remove(&connection_id) {
-                    _ = ch.send(Ok(()));
+                    let _ = ch.send(Ok(()));
+                }
+
+                let (ep, mut addr) = match &endpoint {
+                    ConnectedPoint::Dialer { address, .. } => (Endpoint::Dialer, address.clone()),
+                    ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
+                        (Endpoint::Listener, local_addr.clone())
+                    }
+                    ConnectedPoint::Listener { send_back_addr, .. } => {
+                        (Endpoint::Listener, send_back_addr.clone())
+                    }
+                };
+
+                if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
+                    addr.pop();
+                }
+
+                if let Some(ch_list) = self.peer_connection_events.get_mut(&peer_id) {
+                    let ev = match ep {
+                        Endpoint::Dialer => PeerConnectionEvents::OutgoingConnection {
+                            connection_id,
+                            addr: addr.clone(),
+                        },
+                        Endpoint::Listener => PeerConnectionEvents::IncomingConnection {
+                            connection_id,
+                            addr: addr.clone(),
+                        },
+                    };
+
+                    for ch in ch_list {
+                        let _ = ch.try_send(ev.clone());
+                    }
+                }
+
+                for ch in &mut self.connection_events {
+                    let ev = match ep {
+                        Endpoint::Dialer => ConnectionEvents::OutgoingConnection {
+                            peer_id,
+                            connection_id,
+                            addr: addr.clone(),
+                        },
+                        Endpoint::Listener => ConnectionEvents::IncomingConnection {
+                            peer_id,
+                            connection_id,
+                            addr: addr.clone(),
+                        },
+                    };
+
+                    let _ = ch.try_send(ev);
                 }
             }
             SwarmEvent::OutgoingConnectionError {
@@ -240,14 +314,32 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 ..
             } => {
                 if let Some(ch) = self.pending_connection.remove(&connection_id) {
-                    _ = ch.send(Err(anyhow::Error::from(error)));
+                    let _ = ch.send(Err(anyhow::Error::from(error)));
                 }
             }
-            SwarmEvent::ConnectionClosed { peer_id, .. } => {
+            SwarmEvent::ConnectionClosed {
+                peer_id,
+                connection_id,
+                ..
+            } => {
                 if let Some(ch) = self.pending_disconnection.remove(&peer_id) {
                     for ch in ch {
                         let _ = ch.send(Ok(()));
                     }
+                }
+
+                if let Some(ch_list) = self.peer_connection_events.get_mut(&peer_id) {
+                    for ch in ch_list {
+                        let _ =
+                            ch.try_send(PeerConnectionEvents::ClosedConnection { connection_id });
+                    }
+                }
+
+                for ch in &mut self.connection_events {
+                    let _ = ch.try_send(ConnectionEvents::ClosedConnection {
+                        peer_id,
+                        connection_id,
+                    });
                 }
             }
             SwarmEvent::ExpiredListenAddr {
@@ -558,7 +650,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                         trace!("kad: pending routable peer {} ({})", peer, address);
                     }
                     KademliaEvent::ModeChanged { new_mode } => {
-                        _ = new_mode;
+                        let _ = new_mode;
                     }
                 }
             }
@@ -818,7 +910,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 let connection_id = target.connection_id();
 
                 if let Err(e) = self.swarm.dial(target) {
-                    _ = ret.send(Err(anyhow::Error::from(e)));
+                    let _ = ret.send(Err(anyhow::Error::from(e)));
                     return;
                 }
                 self.pending_connection.insert(connection_id, ret);
@@ -834,7 +926,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     return;
                 };
 
-                _ = ret.send(Ok(stream.new_control()))
+                let _ = ret.send(Ok(stream.new_control()));
             }
             #[cfg(feature = "experimental_stream")]
             IpfsEvent::NewStream(protocol, ret) => {
@@ -843,12 +935,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     return;
                 };
 
-                _ = ret.send(
+                let _ = ret.send(
                     stream
                         .new_control()
                         .accept(protocol)
                         .map_err(anyhow::Error::from),
-                )
+                );
             }
             IpfsEvent::Addresses(ret) => {
                 let addrs = self.swarm.behaviour_mut().addrs();
@@ -877,7 +969,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             }
             IpfsEvent::Disconnect(peer, ret) => {
                 if self.swarm.disconnect_peer_id(peer).is_err() {
-                    _ = ret.send(Err(anyhow::anyhow!("Peer is not connected")));
+                    let _ = ret.send(Err(anyhow::anyhow!("Peer is not connected")));
                     return;
                 }
 
@@ -1002,11 +1094,24 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
             }
             IpfsEvent::AddExternalAddress(addr, ret) => {
                 self.swarm.add_external_address(addr);
-                _ = ret.send(Ok(()))
+                let _ = ret.send(Ok(()));
             }
             IpfsEvent::RemoveExternalAddress(addr, ret) => {
                 self.swarm.remove_external_address(&addr);
-                _ = ret.send(Ok(()))
+                let _ = ret.send(Ok(()));
+            }
+            IpfsEvent::ConnectionEvents(ret) => {
+                let (tx, rx) = futures::channel::mpsc::channel(self.event_capacity);
+                self.connection_events.push(tx);
+                let _ = ret.send(Ok(rx));
+            }
+            IpfsEvent::PeerConnectionEvents(peer_id, ret) => {
+                let (tx, rx) = futures::channel::mpsc::channel(self.event_capacity);
+                self.peer_connection_events
+                    .entry(peer_id)
+                    .or_default()
+                    .push(tx);
+                let _ = ret.send(Ok(rx));
             }
             IpfsEvent::Bootstrap(ret) => {
                 let Some(kad) = self.swarm.behaviour_mut().kademlia.as_mut() else {

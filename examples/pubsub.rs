@@ -67,9 +67,8 @@ async fn main() -> anyhow::Result<()> {
 
     let ipfs: Ipfs = uninitialized.start().await?;
 
-    ipfs.default_bootstrap().await?;
-
     if opt.bootstrap {
+        ipfs.default_bootstrap().await?;
         if let Err(_e) = ipfs.bootstrap().await {}
     }
 
@@ -94,6 +93,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    let mut st = ipfs.connection_events().await?;
+
     for addr in opt.connect {
         let Some(peer_id) = addr.peer_id() else {
             writeln!(stdout, ">{addr} does not contain a p2p protocol. skipping")?;
@@ -110,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut event_stream = ipfs.pubsub_events(&topic).await?;
 
-    let stream = ipfs.pubsub_subscribe(topic.to_string()).await?;
+    let stream = ipfs.pubsub_subscribe(&topic).await?;
 
     pin_mut!(stream);
 
@@ -123,6 +124,11 @@ async fn main() -> anyhow::Result<()> {
             data = stream.next() => {
                 if let Some(msg) = data {
                     writeln!(stdout, "{}: {}", msg.source.expect("Message should contain a source peer_id"), String::from_utf8_lossy(&msg.data))?;
+                }
+            }
+            conn_ev = st.next() => {
+                if let Some(ev) = conn_ev {
+                    writeln!(stdout, "connection event: {ev:?}")?;
                 }
             }
             Some(event) = event_stream.next() => {
