@@ -67,7 +67,7 @@ rust-ipns = { version = "0.6.0", path = "packages/rust-ipns" }
 rust-unixfs = { version = "0.5.0", path = "unixfs" }
 sec1 = { version = "0.7.3", features = ["pem", "pkcs8"] }
 send_wrapper = "0.6.0"
-serde = { default-features = false, version = "1.0.209" }
+serde = { default-features = false, version = "1.0.215" }
 serde_ipld_dagcbor = "0.6.1"
 serde_ipld_dagjson = "0.2.0"
 serde_json = { default-features = false, version = "1.0.127" }
