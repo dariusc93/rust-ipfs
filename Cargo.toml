@@ -82,7 +82,7 @@ tracing-futures = { default-features = false, features = [
     "futures-03",
 ], version = "0.2.5" }
 
-tokio = { default-features = false, version = "1.41.0" }
+tokio = { default-features = false, version = "1.41.1" }
 tokio-stream = { default-features = false, version = "0.1.15" }
 tokio-util = { default-features = false, version = "0.7.11" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
