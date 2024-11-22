@@ -449,7 +449,7 @@ impl From<DhtMode> for Option<Mode> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PubsubEvent {
     /// Subscription event to a given topic
     Subscribe {

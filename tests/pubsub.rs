@@ -1,7 +1,7 @@
 use futures::future::pending;
 use futures::stream::StreamExt;
 use futures_timeout::TimeoutExt;
-use rust_ipfs::Node;
+use rust_ipfs::{Node, PubsubEvent};
 use std::time::Duration;
 
 mod common;
@@ -177,6 +177,76 @@ async fn publish_between_two_nodes_single_topic() {
     }
 
     assert!(disappeared, "timed out before a saw b's unsubscription");
+}
+
+#[tokio::test]
+async fn pubsub_event_without_filter() {
+    use futures::stream::StreamExt;
+
+    let nodes = spawn_nodes::<2>(Topology::Line).await;
+    let node_a = &nodes[0];
+    let node_a_peer_id = node_a.id;
+    let node_b = &nodes[1];
+    let node_b_peer_id = node_b.id;
+
+    let mut ev_a = node_a.pubsub_events(None).await.unwrap();
+    let mut ev_b = node_b.pubsub_events(None).await.unwrap();
+
+    let _st_a = node_a.pubsub_subscribe("test0").await.unwrap();
+    let _st_b = node_b.pubsub_subscribe("test1").await.unwrap();
+
+    let next_ev_a = ev_a.next().await.unwrap();
+    let next_ev_b = ev_b.next().await.unwrap();
+
+    assert_eq!(
+        next_ev_a,
+        PubsubEvent::Subscribe {
+            peer_id: node_b_peer_id,
+            topic: Some("test1".to_string())
+        }
+    );
+    assert_eq!(
+        next_ev_b,
+        PubsubEvent::Subscribe {
+            peer_id: node_a_peer_id,
+            topic: Some("test0".to_string())
+        }
+    );
+}
+
+#[tokio::test]
+async fn pubsub_event_with_filter() {
+    use futures::stream::StreamExt;
+
+    let nodes = spawn_nodes::<2>(Topology::Line).await;
+    let node_a = &nodes[0];
+    let node_a_peer_id = node_a.id;
+    let node_b = &nodes[1];
+    let node_b_peer_id = node_b.id;
+
+    let mut ev_a = node_a.pubsub_events("test0".to_string()).await.unwrap();
+    let mut ev_b = node_b.pubsub_events("test0".to_string()).await.unwrap();
+
+    let _st_a = node_a.pubsub_subscribe("test0").await.unwrap();
+    let _st_b = node_b.pubsub_subscribe("test0").await.unwrap();
+
+    let next_ev_a = ev_a.next().await.unwrap();
+    let next_ev_b = ev_b.next().await.unwrap();
+
+    assert_eq!(
+        next_ev_a,
+        PubsubEvent::Subscribe {
+            peer_id: node_b_peer_id,
+            topic: None,
+        }
+    );
+    assert_eq!(
+        next_ev_b,
+        PubsubEvent::Subscribe {
+            peer_id: node_a_peer_id,
+            topic: None,
+        }
+    );
 }
 
 #[tokio::test]
