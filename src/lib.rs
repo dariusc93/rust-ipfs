@@ -449,13 +449,19 @@ impl From<DhtMode> for Option<Mode> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PubsubEvent {
     /// Subscription event to a given topic
-    Subscribe { peer_id: PeerId },
+    Subscribe {
+        peer_id: PeerId,
+        topic: Option<String>,
+    },
 
     /// Unsubscribing event to a given topic
-    Unsubscribe { peer_id: PeerId },
+    Unsubscribe {
+        peer_id: PeerId,
+        topic: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -465,15 +471,6 @@ pub(crate) enum InnerPubsubEvent {
 
     /// Unsubscribing event to a given topic
     Unsubscribe { topic: String, peer_id: PeerId },
-}
-
-impl From<InnerPubsubEvent> for PubsubEvent {
-    fn from(event: InnerPubsubEvent) -> Self {
-        match event {
-            InnerPubsubEvent::Subscribe { peer_id, .. } => PubsubEvent::Subscribe { peer_id },
-            InnerPubsubEvent::Unsubscribe { peer_id, .. } => PubsubEvent::Unsubscribe { peer_id },
-        }
-    }
 }
 
 type TSwarmEvent<C> = <TSwarm<C> as Stream>::Item;
@@ -1527,13 +1524,12 @@ impl Ipfs {
         .await
     }
 
-    /// Stream that returns [`PubsubEvent`] for a given topic
+    /// Stream that returns [`PubsubEvent`] for a given topic. if a topic is not supplied, it will provide all events emitted for any topic.
     pub async fn pubsub_events(
         &self,
-        topic: impl Into<String>,
+        topic: impl Into<Option<String>>,
     ) -> Result<BoxStream<'static, PubsubEvent>, Error> {
         async move {
-            let topic = topic.into();
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1541,24 +1537,42 @@ impl Ipfs {
                 .send(IpfsEvent::PubsubEventStream(tx))
                 .await?;
 
-            let mut receiver = rx
-                .await?;
+            let receiver = rx.await?;
 
-            let defined_topic = topic.to_string();
+            let defined_topic = topic.into();
 
-            let stream = async_stream::stream! {
-                while let Some(event) = receiver.next().await {
-                    match &event {
-                        InnerPubsubEvent::Subscribe { topic, .. } | InnerPubsubEvent::Unsubscribe { topic, .. } if topic.eq(&defined_topic) => yield event.into(),
-                        _ => {}
-                    }
+            let stream = receiver.filter_map(move |event| {
+                let defined_topic = defined_topic.clone();
+                async move {
+                    let ev = match event {
+                        InnerPubsubEvent::Subscribe { topic, peer_id } => {
+                            let topic = match defined_topic {
+                                Some(defined_topic) if defined_topic.eq(&topic) => None,
+                                Some(defined_topic) if defined_topic.ne(&topic) => return None,
+                                Some(_) => return None,
+                                None => Some(topic),
+                            };
+                            PubsubEvent::Subscribe { peer_id, topic }
+                        }
+                        InnerPubsubEvent::Unsubscribe { topic, peer_id } => {
+                            let topic = match defined_topic {
+                                Some(defined_topic) if defined_topic.eq(&topic) => None,
+                                Some(defined_topic) if defined_topic.ne(&topic) => return None,
+                                Some(_) => return None,
+                                None => Some(topic),
+                            };
+                            PubsubEvent::Unsubscribe { peer_id, topic }
+                        }
+                    };
+
+                    Some(ev)
                 }
-            };
+            });
 
             Ok(stream.boxed())
         }
-            .instrument(self.span.clone())
-            .await
+        .instrument(self.span.clone())
+        .await
     }
 
     /// Publishes to the topic which may have been subscribed to earlier
