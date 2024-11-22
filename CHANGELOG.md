@@ -1,3 +1,6 @@
+# 0.13.0
+- refactor: provide topic in pubsub event. If a topic filter is supplied, the topic will be excluded from the event. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.12.2
 - feat: Reimplement ConnectionEvents and PeerConnectionEvents stream via `Ipfs::{connection_events, peer_connection_events}`. [PR 320](https://github.com/dariusc93/rust-ipfs/pull/320)
 
