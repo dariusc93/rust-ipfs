@@ -1524,7 +1524,7 @@ impl Ipfs {
         .await
     }
 
-    /// Stream that returns [`PubsubEvent`] for a given topic
+    /// Stream that returns [`PubsubEvent`] for a given topic. if a topic is not supplied, it will provide all events emitted for any topic.
     pub async fn pubsub_events(
         &self,
         topic: impl Into<Option<String>>,
