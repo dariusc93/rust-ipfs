@@ -1569,23 +1569,6 @@ impl Ipfs {
                 }
             });
 
-            // let stream = async_stream::stream! {
-            //     while let Some(event) = receiver.next().await {
-            //         let ev = match event {
-            //             InnerPubsubEvent::Subscribe { topic, peer_id } => {
-            //                 let topic = defined_topic.as_ref().is_some_and(|inner_topic| inner_topic.eq(&topic)).then_some(topic);
-            //                 PubsubEvent::Subscribe { peer_id, topic }
-            //             }
-            //             InnerPubsubEvent::Unsubscribe { topic, peer_id } => {
-            //                 let topic = defined_topic.as_ref().is_some_and(|inner_topic| inner_topic.eq(&topic)).then_some(topic);
-            //                 PubsubEvent::Unsubscribe { peer_id, topic }
-            //             }
-            //         };
-            //
-            //         yield ev;
-            //     }
-            // };
-
             Ok(stream.boxed())
         }
         .instrument(self.span.clone())
