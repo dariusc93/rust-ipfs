@@ -1696,10 +1696,16 @@ impl Ipfs {
     pub async fn send_request(
         &self,
         peer_id: PeerId,
-        request: impl Into<Bytes>,
+        request: impl IntoRequest,
     ) -> Result<Bytes, Error> {
-        let request = request.into();
+        let request = request.into_request();
         async move {
+            if request.is_empty() {
+                return Err(
+                    std::io::Error::new(std::io::ErrorKind::Other, "request is empty").into(),
+                );
+            }
+
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -1717,12 +1723,18 @@ impl Ipfs {
     pub async fn send_requests(
         &self,
         peers: impl IntoIterator<Item = PeerId>,
-        request: impl Into<Bytes>,
+        request: impl IntoRequest,
     ) -> Result<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>, Error> {
         let peers = IndexSet::from_iter(peers);
-        let request = request.into();
+        let request = request.into_request();
 
         async move {
+            if request.is_empty() {
+                return Err(
+                    std::io::Error::new(std::io::ErrorKind::Other, "request is empty").into(),
+                );
+            }
+
             let (tx, rx) = oneshot_channel();
 
             self.to_task
@@ -2559,6 +2571,10 @@ pub trait IntoStreamProtocol {
     fn into_protocol(self) -> std::io::Result<StreamProtocol>;
 }
 
+pub trait IntoRequest {
+    fn into_request(self) -> Bytes;
+}
+
 impl IntoStreamProtocol for StreamProtocol {
     fn into_protocol(self) -> std::io::Result<StreamProtocol> {
         Ok(self)
@@ -2574,6 +2590,48 @@ impl IntoStreamProtocol for String {
 impl IntoStreamProtocol for &'static str {
     fn into_protocol(self) -> std::io::Result<StreamProtocol> {
         Ok(StreamProtocol::new(self))
+    }
+}
+
+impl IntoRequest for Bytes {
+    fn into_request(self) -> Bytes {
+        self
+    }
+}
+
+impl<const N: usize> IntoRequest for [u8; N] {
+    fn into_request(self) -> Bytes {
+        Bytes::copy_from_slice(&self)
+    }
+}
+
+impl<const N: usize> IntoRequest for &[u8; N] {
+    fn into_request(self) -> Bytes {
+        Bytes::copy_from_slice(self)
+    }
+}
+
+impl IntoRequest for Vec<u8> {
+    fn into_request(self) -> Bytes {
+        Bytes::from(self)
+    }
+}
+
+impl IntoRequest for &[u8] {
+    fn into_request(self) -> Bytes {
+        Bytes::copy_from_slice(self)
+    }
+}
+
+impl IntoRequest for String {
+    fn into_request(self) -> Bytes {
+        Bytes::from(self.into_bytes())
+    }
+}
+
+impl IntoRequest for &'static str {
+    fn into_request(self) -> Bytes {
+        IntoRequest::into_request(self.to_string())
     }
 }
 
