@@ -332,19 +332,11 @@ impl NetworkBehaviour for Behaviour {
                     self.process_inbound_failure(request_id, peer, error);
                     continue;
                 }
-                other @ (ToSwarm::ExternalAddrConfirmed(_)
-                | ToSwarm::ExternalAddrExpired(_)
-                | ToSwarm::NewExternalAddrCandidate(_)
-                | ToSwarm::NotifyHandler { .. }
-                | ToSwarm::Dial { .. }
-                | ToSwarm::CloseConnection { .. }
-                | ToSwarm::ListenOn { .. }
-                | ToSwarm::RemoveListener { .. }) => {
+                other => {
                     let new_to_swarm =
                         other.map_out(|_| unreachable!("we manually map `GenerateEvent` variants"));
                     return Poll::Ready(new_to_swarm);
                 }
-                _ => {}
             };
         }
 
