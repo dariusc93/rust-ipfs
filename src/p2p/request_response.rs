@@ -84,7 +84,7 @@ impl Behaviour {
         request: Bytes,
     ) -> BoxFuture<'static, std::io::Result<Bytes>> {
         // Since we are only requesting from a single peer, we will only accept one response, if any, from the stream
-        let st = self.send_requests([peer_id], request).take(1);
+        let st = self.send_requests([peer_id], request);
         Box::pin(async move {
             pin_mut!(st);
             match st.next().await {
