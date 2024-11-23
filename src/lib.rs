@@ -55,11 +55,12 @@ use futures::{
     FutureExt, StreamExt, TryStreamExt,
 };
 
+use indexmap::IndexSet;
 use keystore::Keystore;
 
 use p2p::{
     IdentifyConfiguration, KadConfig, KadStoreConfig, MultiaddrExt, PeerInfo, PubsubConfig,
-    RelayConfig, SwarmConfig, TransportConfig,
+    RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
     BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
@@ -205,6 +206,9 @@ struct IpfsOptions {
     /// Pubsub configuration
     pub pubsub_config: crate::p2p::PubsubConfig,
 
+    /// Request Response configuration
+    pub request_response_config: crate::p2p::RequestResponseConfig,
+
     /// Kad configuration
     pub kad_configuration: Either<KadConfig, libp2p::kad::Config>,
 
@@ -260,6 +264,7 @@ pub(crate) struct Libp2pProtocol {
     pub(crate) ping: bool,
     #[cfg(feature = "experimental_stream")]
     pub(crate) streams: bool,
+    pub(crate) request_response: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -292,6 +297,7 @@ impl Default for IpfsOptions {
             provider: Default::default(),
             keystore: Keystore::in_memory(),
             connection_idle: Duration::from_secs(30),
+            request_response_config: Default::default(),
             listening_addrs: vec![],
             transport_configuration: TransportConfig::default(),
             pubsub_config: PubsubConfig::default(),
@@ -406,6 +412,18 @@ enum IpfsEvent {
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(Channel<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
+
+    RequestStream(Channel<BoxStream<'static, (PeerId, Bytes, OneshotSender<Bytes>)>>),
+    SendRequest(
+        PeerId,
+        Bytes,
+        Channel<BoxFuture<'static, std::io::Result<Bytes>>>,
+    ),
+    SendRequests(
+        IndexSet<PeerId>,
+        Bytes,
+        Channel<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>>,
+    ),
 
     AddRelay(PeerId, Multiaddr, Channel<()>),
     RemoveRelay(PeerId, Multiaddr, Channel<()>),
@@ -708,6 +726,13 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     pub fn with_pubsub(mut self, config: PubsubConfig) -> Self {
         self.options.protocols.pubsub = true;
         self.options.pubsub_config = config;
+        self
+    }
+
+    /// Enables pubsub
+    pub fn with_request_response(mut self, config: RequestResponseConfig) -> Self {
+        self.options.protocols.request_response = true;
+        self.options.request_response_config = config;
         self
     }
 
@@ -1646,6 +1671,66 @@ impl Ipfs {
                 .await?;
 
             rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn requests_subscribe(
+        &self,
+    ) -> Result<BoxStream<'static, (PeerId, Bytes, OneshotSender<Bytes>)>, Error> {
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RequestStream(tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn send_request(
+        &self,
+        peer_id: PeerId,
+        request: impl Into<Bytes>,
+    ) -> Result<Bytes, Error> {
+        let request = request.into();
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::SendRequest(peer_id, request, tx))
+                .await?;
+
+            let fut = rx.await??;
+            fut.await.map_err(anyhow::Error::from)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    pub async fn send_requests(
+        &self,
+        peers: impl IntoIterator<Item = PeerId>,
+        request: impl Into<Bytes>,
+    ) -> Result<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>, Error> {
+        let peers = IndexSet::from_iter(peers);
+        let request = request.into();
+
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::SendRequests(peers, request, tx))
+                .await?;
+
+            rx.await?.map_err(anyhow::Error::from)
         }
         .instrument(self.span.clone())
         .await

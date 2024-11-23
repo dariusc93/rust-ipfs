@@ -1,5 +1,5 @@
 use super::gossipsub::GossipsubStream;
-use super::{addressbook, protocol};
+use super::{addressbook, protocol, request_response};
 
 use libp2p_allow_block_list::BlockedPeers;
 
@@ -72,6 +72,7 @@ where
     pub stream: Toggle<libp2p_stream::Behaviour>,
 
     pub autonat: Toggle<autonat::Behaviour>,
+    pub request_response: Toggle<request_response::Behaviour>,
 
     // custom behaviours
     pub custom: Toggle<C>,
@@ -482,6 +483,11 @@ where
         let protocol = protocol::Behaviour::default();
         let custom = Toggle::from(custom);
 
+        let request_response = protocols
+            .request_response
+            .then(|| request_response::Behaviour::new(options.request_response_config.clone()))
+            .into();
+
         let rendezvous_client = protocols
             .rendezvous_client
             .then(|| libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
@@ -526,6 +532,7 @@ where
             custom,
             rendezvous_client,
             rendezvous_server,
+            request_response,
         };
 
         for addr in bootstrap {
