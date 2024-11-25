@@ -111,14 +111,12 @@ impl Behaviour {
                 .insert(id, tx);
             oneshots.insert(
                 peer_id,
-                Box::pin(
-                    rx.map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))
-                        .map(move |r| match r {
-                            Ok(Ok(bytes)) => Ok(bytes),
-                            Ok(Err(e)) => Err(e),
-                            Err(e) => Err(e),
-                        }),
-                ),
+                rx.map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))
+                    .map(move |r| match r {
+                        Ok(Ok(bytes)) => Ok(bytes),
+                        Ok(Err(e)) => Err(e),
+                        Err(e) => Err(e),
+                    }),
             );
         }
         oneshots.boxed()

@@ -34,13 +34,13 @@ async fn main() -> anyhow::Result<()> {
     let mut node_a_st = node_a.requests_subscribe().await?;
 
     tokio::spawn(async move {
-        while let Some((pid, request, response)) = node_a_st.next().await {
-            let res_str = String::from_utf8_lossy(&request);
-            println!("{pid} requested {res_str} from {peer_id}");
-            let res = Bytes::copy_from_slice(b"pong");
-            let _ = response.send(res);
-            break;
-        }
+        let Some((pid, request, response)) = node_a_st.next().await else {
+            return;
+        };
+        let res_str = String::from_utf8_lossy(&request);
+        println!("{pid} requested {res_str} from {peer_id}");
+        let res = Bytes::copy_from_slice(b"pong");
+        let _ = response.send(res);
     });
 
     let response = node_b.send_request(peer_id, b"ping").await?;
