@@ -273,12 +273,17 @@ impl NetworkBehaviour for Behaviour {
         {
             let response = match res {
                 Ok(data) => data,
-                Err(_) => continue,
+                Err(_) => {
+                    tracing::warn!(%id, %peer_id, "response channel has been dropped. Ignoring");
+                    continue;
+                }
             };
 
             if let Some(responses) = self.pending_request.get_mut(&peer_id) {
                 if let Some(ch) = responses.remove(&id) {
-                    let _ = self.rr_behaviour.send_response(ch, response);
+                    if self.rr_behaviour.send_response(ch, response).is_err() {
+                        tracing::warn!(%id, %peer_id, "error sending a response");
+                    }
                 }
             }
         }
@@ -288,47 +293,40 @@ impl NetworkBehaviour for Behaviour {
                 ToSwarm::GenerateEvent(request_response::Event::Message {
                     peer: peer_id,
                     message,
-                }) => {
-                    match message {
-                        request_response::Message::Response {
-                            request_id,
-                            response,
-                        } => self.process_response(request_id, peer_id, response),
-                        request_response::Message::Request {
-                            request_id,
-                            request,
-                            channel,
-                        } => {
-                            self.process_request(request_id, peer_id, request, channel);
-                        }
+                }) => match message {
+                    request_response::Message::Response {
+                        request_id,
+                        response,
+                    } => self.process_response(request_id, peer_id, response),
+                    request_response::Message::Request {
+                        request_id,
+                        request,
+                        channel,
+                    } => {
+                        self.process_request(request_id, peer_id, request, channel);
                     }
-
-                    continue;
-                }
+                },
                 ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
                     peer: peer_id,
                     request_id,
                 }) => {
-                    tracing::trace!(%peer_id, ?request_id, "response sent");
-                    continue;
+                    tracing::trace!(%peer_id, %request_id, "response sent");
                 }
                 ToSwarm::GenerateEvent(request_response::Event::OutboundFailure {
                     peer,
                     request_id,
                     error,
                 }) => {
-                    tracing::error!(peer_id = %peer, ?request_id, ?error, direction="outbound");
+                    tracing::error!(peer_id = %peer, %request_id, ?error, direction="outbound");
                     self.process_outbound_failure(request_id, peer, error);
-                    continue;
                 }
                 ToSwarm::GenerateEvent(request_response::Event::InboundFailure {
                     peer,
                     request_id,
                     error,
                 }) => {
-                    tracing::error!(peer_id = %peer, ?request_id, ?error, direction="inbound");
+                    tracing::error!(peer_id = %peer, %request_id, ?error, direction="inbound");
                     self.process_inbound_failure(request_id, peer, error);
-                    continue;
                 }
                 other => {
                     let new_to_swarm =
