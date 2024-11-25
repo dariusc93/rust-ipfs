@@ -70,7 +70,7 @@ send_wrapper = "0.6.0"
 serde = { default-features = false, version = "1.0.215" }
 serde_ipld_dagcbor = "0.6.1"
 serde_ipld_dagjson = "0.2.0"
-serde_json = { default-features = false, version = "1.0.127" }
+serde_json = { default-features = false, version = "1.0.133" }
 serde-wasm-bindgen = "0.6"
 sha2 = "0.10.8"
 simple_x509 = "=1.1.0"
