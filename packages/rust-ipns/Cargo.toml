@@ -21,7 +21,7 @@ multihash.workspace = true
 sha2.workspace = true
 chrono.workspace = true
 
-libp2p-identity = { version = "0.2.9", optional = true, features = [
+libp2p-identity = { version = "0.2.10", optional = true, features = [
     "ecdsa",
     "ed25519",
     "peerid",
