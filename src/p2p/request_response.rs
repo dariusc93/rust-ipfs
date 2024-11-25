@@ -40,7 +40,7 @@ pub struct Behaviour {
 
 impl Behaviour {
     pub fn new(config: RequestResponseConfig) -> Self {
-        let mut cfg = libp2p::request_response::Config::default()
+        let mut cfg = request_response::Config::default()
             .with_request_timeout(config.timeout.unwrap_or(Duration::from_secs(120)));
         if let Some(size) = config.concurrent_streams {
             cfg = cfg.with_max_concurrent_streams(size);
@@ -57,7 +57,7 @@ impl Behaviour {
 
         let codec = Codec::new(config.max_request_size, config.max_response_size);
 
-        let rr_behaviour = libp2p::request_response::Behaviour::with_codec(codec, protocol, cfg);
+        let rr_behaviour = request_response::Behaviour::with_codec(codec, protocol, cfg);
 
         Self {
             pending_response: HashMap::new(),
@@ -195,7 +195,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler =
-        <libp2p::request_response::Behaviour<Codec> as NetworkBehaviour>::ConnectionHandler;
+        <request_response::Behaviour<Codec> as NetworkBehaviour>::ConnectionHandler;
     type ToSwarm = void::Void;
 
     fn handle_pending_inbound_connection(
