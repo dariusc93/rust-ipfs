@@ -55,11 +55,12 @@ use futures::{
     FutureExt, StreamExt, TryStreamExt,
 };
 
+use indexmap::IndexSet;
 use keystore::Keystore;
 
 use p2p::{
     IdentifyConfiguration, KadConfig, KadStoreConfig, MultiaddrExt, PeerInfo, PubsubConfig,
-    RelayConfig, SwarmConfig, TransportConfig,
+    RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
     BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
@@ -205,6 +206,9 @@ struct IpfsOptions {
     /// Pubsub configuration
     pub pubsub_config: crate::p2p::PubsubConfig,
 
+    /// Request Response configuration
+    pub request_response_config: Either<RequestResponseConfig, Vec<RequestResponseConfig>>,
+
     /// Kad configuration
     pub kad_configuration: Either<KadConfig, libp2p::kad::Config>,
 
@@ -260,6 +264,7 @@ pub(crate) struct Libp2pProtocol {
     pub(crate) ping: bool,
     #[cfg(feature = "experimental_stream")]
     pub(crate) streams: bool,
+    pub(crate) request_response: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -292,6 +297,7 @@ impl Default for IpfsOptions {
             provider: Default::default(),
             keystore: Keystore::in_memory(),
             connection_idle: Duration::from_secs(30),
+            request_response_config: Either::Left(Default::default()),
             listening_addrs: vec![],
             transport_configuration: TransportConfig::default(),
             pubsub_config: PubsubConfig::default(),
@@ -406,6 +412,23 @@ enum IpfsEvent {
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(Channel<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
+
+    RequestStream(
+        Option<StreamProtocol>,
+        Channel<BoxStream<'static, (PeerId, Bytes, OneshotSender<Bytes>)>>,
+    ),
+    SendRequest(
+        Option<StreamProtocol>,
+        PeerId,
+        Bytes,
+        Channel<BoxFuture<'static, std::io::Result<Bytes>>>,
+    ),
+    SendRequests(
+        Option<StreamProtocol>,
+        IndexSet<PeerId>,
+        Bytes,
+        Channel<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>>,
+    ),
 
     AddRelay(PeerId, Multiaddr, Channel<()>),
     RemoveRelay(PeerId, Multiaddr, Channel<()>),
@@ -708,6 +731,24 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
     pub fn with_pubsub(mut self, config: PubsubConfig) -> Self {
         self.options.protocols.pubsub = true;
         self.options.pubsub_config = config;
+        self
+    }
+
+    /// Enables request response.
+    /// Note: At this time, this option will only support up to 10 request-response behaviours.
+    ///       with any additional being ignored. Additionally, any duplicated protocols that are
+    ///       provided will be ignored.
+    pub fn with_request_response(mut self, mut config: Vec<RequestResponseConfig>) -> Self {
+        debug_assert!(config.len() < 10);
+        self.options.protocols.request_response = true;
+        let cfg = match config.is_empty() {
+            true => Either::Left(Default::default()),
+            false if config.len() == 1 => Either::Left(config.remove(0)),
+            false => Either::Right(config),
+        };
+
+        self.options.request_response_config = cfg;
+
         self
     }
 
@@ -1651,6 +1692,96 @@ impl Ipfs {
         .await
     }
 
+    /// Subscribe to a stream of request. If a protocol is not supplied,
+    /// it will subscribe to the first or default protocol that was set in
+    /// [UninitializedIpfs::with_request_response]
+    pub async fn requests_subscribe(
+        &self,
+        protocol: impl Into<OptionalStreamProtocol>,
+    ) -> Result<BoxStream<'static, (PeerId, Bytes, OneshotSender<Bytes>)>, Error> {
+        let protocol = protocol.into().into_inner();
+        async move {
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::RequestStream(protocol, tx))
+                .await?;
+
+            rx.await?
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Sends a request to a specific peer.
+    /// If a protocol is not supplied, it will use the first/default protocol that was set in
+    /// [UninitializedIpfs::with_request_response].
+    pub async fn send_request(
+        &self,
+        peer_id: PeerId,
+        request: impl IntoRequest,
+    ) -> Result<Bytes, Error> {
+        let (protocol, request) = request.into_request();
+        async move {
+            if request.is_empty() {
+                return Err(
+                    std::io::Error::new(std::io::ErrorKind::Other, "request is empty").into(),
+                );
+            }
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::SendRequest(protocol, peer_id, request, tx))
+                .await?;
+
+            let fut = rx.await??;
+            fut.await.map_err(anyhow::Error::from)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Sends a request to a list of peers.
+    /// If a protocol is not supplied, it will use the first/default protocol that was set in
+    /// [UninitializedIpfs::with_request_response]
+    pub async fn send_requests(
+        &self,
+        peers: impl IntoIterator<Item = PeerId>,
+        request: impl IntoRequest,
+    ) -> Result<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>, Error> {
+        let peers = IndexSet::from_iter(peers);
+        let (protocol, request) = request.into_request();
+
+        async move {
+            if peers.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "no peers were provided",
+                )
+                .into());
+            }
+            if request.is_empty() {
+                return Err(
+                    std::io::Error::new(std::io::ErrorKind::Other, "request is empty").into(),
+                );
+            }
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::SendRequests(protocol, peers, request, tx))
+                .await?;
+
+            rx.await?.map_err(anyhow::Error::from)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
     /// Returns the known wantlist for the local node when the `peer` is `None` or the wantlist of the given `peer`
     pub async fn bitswap_wantlist(
         &self,
@@ -2492,6 +2623,216 @@ impl IntoStreamProtocol for &'static str {
     }
 }
 
+pub struct OptionalStreamProtocol(pub(crate) Option<StreamProtocol>);
+
+impl OptionalStreamProtocol {
+    pub(crate) fn into_inner(self) -> Option<StreamProtocol> {
+        self.0
+    }
+}
+
+impl From<()> for OptionalStreamProtocol {
+    fn from(_: ()) -> Self {
+        Self(None)
+    }
+}
+
+impl From<StreamProtocol> for OptionalStreamProtocol {
+    fn from(protocol: StreamProtocol) -> Self {
+        Self(Some(protocol))
+    }
+}
+
+impl From<String> for OptionalStreamProtocol {
+    fn from(protocol: String) -> Self {
+        let protocol = StreamProtocol::try_from_owned(protocol).ok();
+        Self(protocol)
+    }
+}
+
+impl From<&'static str> for OptionalStreamProtocol {
+    fn from(protocol: &'static str) -> Self {
+        let protocol = StreamProtocol::new(protocol);
+        Self(Some(protocol))
+    }
+}
+
+// TODO: Move into a macro
+pub trait IntoRequest {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes);
+}
+
+impl IntoRequest for Bytes {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        (None, self)
+    }
+}
+
+impl<const N: usize> IntoRequest for [u8; N] {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request(Bytes::copy_from_slice(&self))
+    }
+}
+
+impl<const N: usize> IntoRequest for &[u8; N] {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request(Bytes::copy_from_slice(self))
+    }
+}
+
+impl IntoRequest for Vec<u8> {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request(Bytes::from(self))
+    }
+}
+
+impl IntoRequest for &[u8] {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request(Bytes::copy_from_slice(self))
+    }
+}
+
+impl IntoRequest for String {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request(Bytes::from(self.into_bytes()))
+    }
+}
+
+impl IntoRequest for &'static str {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request(self.to_string())
+    }
+}
+
+impl IntoRequest for (StreamProtocol, Bytes) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        (Some(self.0), self.1)
+    }
+}
+
+impl<const N: usize> IntoRequest for (StreamProtocol, [u8; N]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(&self.1)))
+    }
+}
+
+impl<const N: usize> IntoRequest for (StreamProtocol, &[u8; N]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
+    }
+}
+
+impl IntoRequest for (StreamProtocol, Vec<u8>) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::from(self.1)))
+    }
+}
+
+impl IntoRequest for (StreamProtocol, &[u8]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
+    }
+}
+
+impl IntoRequest for (StreamProtocol, String) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::from(self.1.into_bytes())))
+    }
+}
+
+impl IntoRequest for (StreamProtocol, &'static str) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, self.1.to_string()))
+    }
+}
+
+impl IntoRequest for (String, Bytes) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        (
+            Some(StreamProtocol::try_from_owned(self.0).expect("valid protocol")),
+            self.1,
+        )
+    }
+}
+
+impl<const N: usize> IntoRequest for (String, [u8; N]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(&self.1)))
+    }
+}
+
+impl<const N: usize> IntoRequest for (String, &[u8; N]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
+    }
+}
+
+impl IntoRequest for (String, Vec<u8>) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::from(self.1)))
+    }
+}
+
+impl IntoRequest for (String, &[u8]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
+    }
+}
+
+impl IntoRequest for (String, String) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::from(self.1.into_bytes())))
+    }
+}
+
+impl IntoRequest for (String, &'static str) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, self.1.to_string()))
+    }
+}
+
+impl IntoRequest for (&'static str, Bytes) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        (Some(StreamProtocol::new(self.0)), self.1)
+    }
+}
+
+impl<const N: usize> IntoRequest for (&'static str, [u8; N]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(&self.1)))
+    }
+}
+
+impl<const N: usize> IntoRequest for (&'static str, &[u8; N]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
+    }
+}
+
+impl IntoRequest for (&'static str, Vec<u8>) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::from(self.1)))
+    }
+}
+
+impl IntoRequest for (&'static str, &[u8]) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
+    }
+}
+
+impl IntoRequest for (&'static str, String) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, Bytes::from(self.1.into_bytes())))
+    }
+}
+
+impl IntoRequest for (&'static str, &'static str) {
+    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
+        IntoRequest::into_request((self.0, self.1.to_string()))
+    }
+}
+
 #[derive(Debug)]
 pub struct AddPeerOpt {
     peer_id: PeerId,
@@ -2740,6 +3081,7 @@ mod node {
             // given span
             let mut uninit = UninitializedIpfsDefault::new()
                 .with_default()
+                .with_request_response(Default::default())
                 .set_transport_configuration(TransportConfig {
                     enable_memory_transport: true,
                     ..Default::default()

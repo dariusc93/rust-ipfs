@@ -1,10 +1,10 @@
 //! P2P handling for IPFS nodes.
-use std::convert::TryInto;
-use std::num::{NonZeroU8, NonZeroUsize};
-
 use crate::error::Error;
 use crate::repo::Repo;
 use crate::{IpfsOptions, TTransportFn};
+use std::convert::TryInto;
+use std::num::{NonZeroU8, NonZeroUsize};
+use std::time::Duration;
 
 use libp2p::gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
@@ -19,6 +19,7 @@ pub(crate) mod addressbook;
 pub mod bitswap;
 pub(crate) mod peerbook;
 pub mod protocol;
+pub(crate) mod rr_man;
 
 mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;
@@ -31,6 +32,7 @@ pub use self::behaviour::{RateLimit, RelayConfig};
 pub use self::transport::generate_cert;
 pub use self::transport::{DnsResolver, TransportConfig, UpgradeVersion};
 pub(crate) mod gossipsub;
+mod request_response;
 mod transport;
 
 pub use addr::MultiaddrExt;
@@ -150,6 +152,29 @@ impl Default for PubsubConfig {
             max_transmit_size: 2 * 1024 * 1024,
             validate: PubsubValidation::Strict,
             floodsub_compat: false,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RequestResponseConfig {
+    pub protocol: String,
+    pub timeout: Option<Duration>,
+    pub max_request_size: usize,
+    pub max_response_size: usize,
+    pub concurrent_streams: Option<usize>,
+    pub channel_buffer: usize,
+}
+
+impl Default for RequestResponseConfig {
+    fn default() -> Self {
+        Self {
+            protocol: "/ipfs/request-response".into(),
+            timeout: None,
+            max_request_size: 512 * 1024,
+            max_response_size: 2 * 1024 * 1024,
+            concurrent_streams: None,
+            channel_buffer: 128,
         }
     }
 }

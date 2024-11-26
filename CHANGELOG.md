@@ -1,4 +1,5 @@
 # 0.13.0
+- feat: Add request-response functionality. [PR 339](https://github.com/dariusc93/rust-ipfs/pull/339)
 - refactor: provide topic in pubsub event. If a topic filter is supplied, the topic will be excluded from the event. [PR 337](https://github.com/dariusc93/rust-ipfs/pull/337)
 
 # 0.12.2
