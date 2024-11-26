@@ -6,7 +6,6 @@ use libp2p::Multiaddr;
 use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{ConnectionEvents, Ipfs, Keypair, PubsubEvent, UninitializedIpfs};
 
-use parking_lot::Mutex;
 use pollable_map::stream::StreamMap;
 use rustyline_async::Readline;
 use std::time::Duration;
@@ -43,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
 
     let topic = opt.topic.unwrap_or_else(|| String::from("ipfs-chat"));
 
-    let main_topic = Arc::new(Mutex::new(topic.clone()));
+    let main_topic = Arc::new(tokio::sync::Mutex::new(topic.clone()));
 
     let keypair = Keypair::generate_ed25519();
 
@@ -165,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
                     let line = line.trim();
                     if !line.starts_with('/') {
                         if !line.is_empty() {
-                            let topic_to_publish = &*main_topic.lock();
+                            let topic_to_publish = &*main_topic.lock().await;
                             if let Err(e) = ipfs.pubsub_publish(topic_to_publish.clone(), line.as_bytes().to_vec()).await {
                                 writeln!(stdout, "> error publishing message: {e}")?;
                                 continue;
@@ -195,13 +194,13 @@ async fn main() -> anyhow::Result<()> {
                             listener_st.insert(topic.clone(), st);
                             main_events.insert(topic.clone(), event_st);
                             writeln!(stdout, "> subscribed to {}", topic)?;
-                            *main_topic.lock() = topic;
+                            *main_topic.lock().await = topic;
                             continue;
                         }
                         Some("/unsubscribe") => {
                             let topic = match command.next() {
                                 Some(topic) => topic.to_string(),
-                                None => main_topic.lock().clone()
+                                None => main_topic.lock().await.clone()
                             };
 
                             listener_st.remove(&topic);
@@ -214,7 +213,7 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "> unsubscribe from {}", topic)?;
                             if let Some(some_topic) = main_events.keys().next() {
-                                *main_topic.lock() = some_topic.clone();
+                                *main_topic.lock().await = some_topic.clone();
                                 writeln!(stdout, "> setting current topic to {}", some_topic)?;
                             }
                             continue;
@@ -226,7 +225,7 @@ async fn main() -> anyhow::Result<()> {
                                 continue;
                             }
 
-                            let current_topic = main_topic.lock().clone();
+                            let current_topic = main_topic.lock().await.clone();
 
                             writeln!(stdout, "> list of topics")?;
                             for topic in topics {
@@ -236,7 +235,7 @@ async fn main() -> anyhow::Result<()> {
                         Some("/set-current-topic") => {
                             let topic = match command.next() {
                                 Some(topic) if !topic.is_empty() => topic.to_string(),
-                                None | _ => {
+                                _ => {
                                     writeln!(stdout, "> topic must be provided")?;
                                     continue;
                                 }
@@ -248,7 +247,7 @@ async fn main() -> anyhow::Result<()> {
                                 continue;
                             }
 
-                            *main_topic.lock() = topic.clone();
+                            *main_topic.lock().await = topic.clone();
 
                             writeln!(stdout, "> topic set to {topic}")?;
                         }
