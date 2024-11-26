@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         let _ = response.send(res);
     });
 
-    let response = node_b.send_request(peer_id, ("/ping/0", b"ping")).await?;
+    let response = node_b.send_request(peer_id, b"ping").await?;
 
     println!(
         "{peer_id} responded with {}",
