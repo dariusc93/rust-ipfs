@@ -67,8 +67,7 @@ impl NetworkBehaviour for Behaviour {
         Ok(dummy::ConnectionHandler)
     }
 
-    fn on_swarm_event(&mut self, _: libp2p::swarm::FromSwarm) {
-    }
+    fn on_swarm_event(&mut self, _: libp2p::swarm::FromSwarm) {}
 
     fn on_connection_handler_event(
         &mut self,
@@ -78,11 +77,7 @@ impl NetworkBehaviour for Behaviour {
     ) {
     }
 
-    fn poll(
-        &mut self,
-        _: &mut Context
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>>
-    {
+    fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         Poll::Pending
     }
 }
