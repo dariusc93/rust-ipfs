@@ -1,21 +1,33 @@
 use bytes::Bytes;
 use futures::StreamExt;
 
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::{p2p::RequestResponseConfig, UninitializedIpfsDefault as UninitializedIpfs};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     let node_a = UninitializedIpfs::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
-        .with_request_response(Default::default())
+        .with_request_response(vec![
+            RequestResponseConfig {
+                protocol: "/ping/0".into(),
+                ..Default::default()
+            },
+        ])
         .start()
         .await?;
 
     let node_b = UninitializedIpfs::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
-        .with_request_response(Default::default())
+        .with_request_response(vec![
+            RequestResponseConfig {
+                protocol: "/ping/0".into(),
+                ..Default::default()
+            },
+        ])
         .start()
         .await?;
 
@@ -31,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         node_b.add_peer((peer_id, addr)).await?;
     }
 
-    let mut node_a_st = node_a.requests_subscribe().await?;
+    let mut node_a_st = node_a.requests_subscribe("/ping/0").await?;
 
     tokio::spawn(async move {
         let Some((pid, request, response)) = node_a_st.next().await else {
@@ -43,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         let _ = response.send(res);
     });
 
-    let response = node_b.send_request(peer_id, b"ping").await?;
+    let response = node_b.send_request(peer_id, ("/ping/0", b"ping")).await?;
 
     println!(
         "{peer_id} responded with {}",

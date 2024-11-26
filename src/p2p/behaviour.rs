@@ -1,6 +1,7 @@
 use super::gossipsub::GossipsubStream;
-use super::{addressbook, protocol, request_response};
+use super::{addressbook, protocol, request_response, rr_man};
 
+use indexmap::IndexMap;
 use libp2p_allow_block_list::BlockedPeers;
 
 use super::peerbook::{self};
@@ -72,7 +73,19 @@ where
     pub stream: Toggle<libp2p_stream::Behaviour>,
 
     pub autonat: Toggle<autonat::Behaviour>,
-    pub request_response: Toggle<request_response::Behaviour>,
+
+    // TODO: Write a macro or behaviour to support multiple request-response behaviour
+    pub rr_man: Toggle<rr_man::Behaviour>,
+    pub rr_1: Toggle<request_response::Behaviour>,
+    pub rr_2: Toggle<request_response::Behaviour>,
+    pub rr_3: Toggle<request_response::Behaviour>,
+    pub rr_4: Toggle<request_response::Behaviour>,
+    pub rr_5: Toggle<request_response::Behaviour>,
+    pub rr_6: Toggle<request_response::Behaviour>,
+    pub rr_7: Toggle<request_response::Behaviour>,
+    pub rr_8: Toggle<request_response::Behaviour>,
+    pub rr_9: Toggle<request_response::Behaviour>,
+    pub rr_0: Toggle<request_response::Behaviour>,
 
     // custom behaviours
     pub custom: Toggle<C>,
@@ -483,11 +496,6 @@ where
         let protocol = protocol::Behaviour::default();
         let custom = Toggle::from(custom);
 
-        let request_response = protocols
-            .request_response
-            .then(|| request_response::Behaviour::new(options.request_response_config.clone()))
-            .into();
-
         let rendezvous_client = protocols
             .rendezvous_client
             .then(|| libp2p::rendezvous::client::Behaviour::new(keypair.clone()))
@@ -532,8 +540,148 @@ where
             custom,
             rendezvous_client,
             rendezvous_server,
-            request_response,
+            rr_man: Toggle::from(None),
+            rr_0: Toggle::from(None),
+            rr_1: Toggle::from(None),
+            rr_2: Toggle::from(None),
+            rr_3: Toggle::from(None),
+            rr_4: Toggle::from(None),
+            rr_5: Toggle::from(None),
+            rr_6: Toggle::from(None),
+            rr_7: Toggle::from(None),
+            rr_8: Toggle::from(None),
+            rr_9: Toggle::from(None),
         };
+
+        let mut existing_protocol: IndexMap<StreamProtocol, _> = IndexMap::new();
+
+        match options.request_response_config {
+            Either::Left(ref config) => {
+                let protocol = StreamProtocol::try_from_owned(config.protocol.clone())
+                    .expect("valid protocol");
+                existing_protocol.insert(protocol, 0);
+                behaviour.rr_0 = protocols
+                    .request_response
+                    .then(|| request_response::Behaviour::new(config.clone()))
+                    .into();
+            }
+            Either::Right(ref configs) => {
+                for (index, config) in configs.iter().enumerate() {
+                    let protocol = StreamProtocol::try_from_owned(config.protocol.clone())
+                        .expect("valid protocol");
+                    if existing_protocol.contains_key(&protocol) {
+                        continue;
+                    };
+
+                    match index {
+                        0 => {
+                            if behaviour.rr_0.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_0 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        1 => {
+                            if behaviour.rr_1.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_1 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        2 => {
+                            if behaviour.rr_2.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_2 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        3 => {
+                            if !behaviour.rr_3.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_3 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        4 => {
+                            if !behaviour.rr_4.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_4 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        5 => {
+                            if !behaviour.rr_5.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_5 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        6 => {
+                            if !behaviour.rr_6.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_6 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        7 => {
+                            if !behaviour.rr_7.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_7 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        8 => {
+                            if !behaviour.rr_8.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_8 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        9 => {
+                            if !behaviour.rr_9.is_enabled() {
+                                continue;
+                            }
+                            behaviour.rr_9 = protocols
+                                .request_response
+                                .then(|| request_response::Behaviour::new(config.clone()))
+                                .into();
+                        }
+                        _ => break,
+                    }
+
+                    existing_protocol.insert(protocol, index);
+                }
+            }
+        }
+
+        if !existing_protocol.is_empty() {
+            behaviour.rr_man = Toggle::from(Some(rr_man::Behaviour::new(existing_protocol)))
+        }
+
+        // for (index, cfg) in options.re
+
+        /*        let request_response = protocols
+        .request_response
+        .then(|| request_response::Behaviour::new(options.request_response_config.clone()))
+        .into(); */
 
         for addr in bootstrap {
             let Ok(mut opt) = IntoAddPeerOpt::into_opt(addr) else {
@@ -586,6 +734,31 @@ where
 
     pub fn pubsub(&mut self) -> Option<&mut GossipsubStream> {
         self.pubsub.as_mut()
+    }
+
+    pub fn request_response(
+        &mut self,
+        protocol: Option<StreamProtocol>,
+    ) -> Option<&mut request_response::Behaviour> {
+        let Some(protocol) = protocol else {
+            return self.rr_0.as_mut();
+        };
+
+        let manager = self.rr_man.as_ref()?;
+        let index = manager.get_protocol(protocol)?;
+        match index {
+            0 => self.rr_0.as_mut(),
+            1 => self.rr_1.as_mut(),
+            2 => self.rr_2.as_mut(),
+            3 => self.rr_3.as_mut(),
+            4 => self.rr_4.as_mut(),
+            5 => self.rr_5.as_mut(),
+            6 => self.rr_6.as_mut(),
+            7 => self.rr_7.as_mut(),
+            8 => self.rr_8.as_mut(),
+            9 => self.rr_9.as_mut(),
+            _ => None,
+        }
     }
 }
 

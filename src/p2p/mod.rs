@@ -19,6 +19,7 @@ pub(crate) mod addressbook;
 pub mod bitswap;
 pub(crate) mod peerbook;
 pub mod protocol;
+pub(crate) mod rr_man;
 
 mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;
@@ -157,7 +158,7 @@ impl Default for PubsubConfig {
 
 #[derive(Clone)]
 pub struct RequestResponseConfig {
-    pub protocol: Option<String>,
+    pub protocol: String,
     pub timeout: Option<Duration>,
     pub max_request_size: usize,
     pub max_response_size: usize,
@@ -168,7 +169,7 @@ pub struct RequestResponseConfig {
 impl Default for RequestResponseConfig {
     fn default() -> Self {
         Self {
-            protocol: None,
+            protocol: "/ipfs/request-response".into(),
             timeout: None,
             max_request_size: 512 * 1024,
             max_response_size: 2 * 1024 * 1024,

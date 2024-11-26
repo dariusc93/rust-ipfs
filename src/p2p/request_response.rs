@@ -46,9 +46,7 @@ impl Behaviour {
             cfg = cfg.with_max_concurrent_streams(size);
         }
 
-        let protocol = config
-            .protocol
-            .unwrap_or(String::from("/ipfs/request-response"));
+        let protocol = config.protocol;
 
         let protocol = vec![(
             StreamProtocol::try_from_owned(protocol).expect("valid protocol"),
@@ -112,7 +110,7 @@ impl Behaviour {
             oneshots.insert(
                 peer_id,
                 rx.map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))
-                    .map(move |r| match r {
+                    .map(|r| match r {
                         Ok(Ok(bytes)) => Ok(bytes),
                         Ok(Err(e)) => Err(e),
                         Err(e) => Err(e),
