@@ -665,7 +665,10 @@ where
                                 .then(|| request_response::Behaviour::new(config.clone()))
                                 .into();
                         }
-                        _ => break,
+                        _ => {
+                            tracing::warn!("local node can only support up to 10 request-response protocols at this time.");
+                            break;
+                        }
                     }
 
                     existing_protocol.insert(protocol, index);
