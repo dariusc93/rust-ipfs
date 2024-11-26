@@ -36,6 +36,13 @@ impl libp2p::request_response::Codec for Codec {
         io.take(self.max_request_size as u64)
             .read_to_end(&mut buffer)
             .await?;
+
+        if buffer.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "request is empty",
+            ));
+        }
         Ok(Bytes::from(buffer))
     }
 
@@ -51,6 +58,13 @@ impl libp2p::request_response::Codec for Codec {
         io.take(self.max_response_size as u64)
             .read_to_end(&mut buffer)
             .await?;
+
+        if buffer.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "response is empty",
+            ));
+        }
         Ok(Bytes::from(buffer))
     }
 
@@ -63,8 +77,18 @@ impl libp2p::request_response::Codec for Codec {
     where
         T: AsyncWrite + Unpin + Send,
     {
+        if req.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "request is empty",
+            ));
+        }
+
         if req.len() > self.max_request_size {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "request exceeds max size",
+            ));
         }
 
         io.write_all(&req).await?;
@@ -80,8 +104,17 @@ impl libp2p::request_response::Codec for Codec {
     where
         T: AsyncWrite + Unpin + Send,
     {
+        if res.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "response is empty",
+            ));
+        }
         if res.len() > self.max_response_size {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "response exceeds max size",
+            ));
         }
         io.write_all(&res).await?;
         Ok(())
