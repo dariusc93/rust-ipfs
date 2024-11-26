@@ -3061,6 +3061,7 @@ mod node {
             // given span
             let mut uninit = UninitializedIpfsDefault::new()
                 .with_default()
+                .with_request_response(Default::default())
                 .set_transport_configuration(TransportConfig {
                     enable_memory_transport: true,
                     ..Default::default()
