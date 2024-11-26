@@ -1012,12 +1012,9 @@ impl Stream for RepoGetBlocks {
                         let _guard = repo.gc_guard().await;
                         let mut missing: IndexSet<Cid> = cids.clone();
                         for cid in &cids {
-                            match repo.get_block_now(cid).await {
-                                Ok(Some(block)) => {
-                                    yield Ok(block);
-                                    missing.shift_remove(cid);
-                                }
-                                Ok(None) | Err(_) => {}
+                            if let Ok(Some(block)) = repo.get_block_now(cid).await {
+                                yield Ok(block);
+                                missing.shift_remove(cid);
                             }
                         }
 

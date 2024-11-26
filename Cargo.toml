@@ -45,7 +45,7 @@ ipld-dagpb = "0.2.1"
 libp2p = { version = "0.54.1" }
 libp2p-allow-block-list = "0.4.0"
 libp2p-connection-limits = "0.4.0"
-libp2p-relay-manager = { version = "0.3.0", path = "packages/libp2p-relay-manager" }
+libp2p-relay-manager = { version = "0.3.1", path = "packages/libp2p-relay-manager" }
 libp2p-stream = { version = "0.2.0-alpha" }
 libp2p-webrtc = { version = "=0.8.0-alpha", features = ["pem"] }
 libp2p-webrtc-websys = "0.4.0-alpha"

@@ -1,3 +1,5 @@
+# 0.3.1
+
 # 0.3.0
 - chore: Update libp2p to 0.54. [PR 289](https://github.com/dariusc93/rust-ipfs/pull/289)
 
