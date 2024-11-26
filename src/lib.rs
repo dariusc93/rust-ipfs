@@ -734,8 +734,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Enables pubsub
+    /// Enables request response.
+    /// Note: At this time, this option will only support up to 10 request-response behaviours.
+    ///       with any additional being ignored. Additionally, any duplicated protocols that are
+    ///       provided will be ignored.
     pub fn with_request_response(mut self, mut config: Vec<RequestResponseConfig>) -> Self {
+        debug_assert!(config.len() < 10);
         self.options.protocols.request_response = true;
         let cfg = match config.is_empty() {
             true => Either::Left(Default::default()),
@@ -1688,6 +1692,9 @@ impl Ipfs {
         .await
     }
 
+    /// Subscribe to a stream of request. If a protocol is not supplied,
+    /// it will subscribe to the first or default protocol that was set in
+    /// [UninitializedIpfs::with_request_response]
     pub async fn requests_subscribe(
         &self,
         protocol: impl Into<OptionalStreamProtocol>,
@@ -1707,6 +1714,9 @@ impl Ipfs {
         .await
     }
 
+    /// Sends a request to a specific peer.
+    /// If a protocol is not supplied, it will use the first/default protocol that was set in
+    /// [UninitializedIpfs::with_request_response].
     pub async fn send_request(
         &self,
         peer_id: PeerId,
@@ -1734,6 +1744,9 @@ impl Ipfs {
         .await
     }
 
+    /// Sends a request to a list of peers.
+    /// If a protocol is not supplied, it will use the first/default protocol that was set in
+    /// [UninitializedIpfs::with_request_response]
     pub async fn send_requests(
         &self,
         peers: impl IntoIterator<Item = PeerId>,
@@ -1743,6 +1756,13 @@ impl Ipfs {
         let (protocol, request) = request.into_request();
 
         async move {
+            if peers.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "no peers were provided",
+                )
+                .into());
+            }
             if request.is_empty() {
                 return Err(
                     std::io::Error::new(std::io::ErrorKind::Other, "request is empty").into(),
