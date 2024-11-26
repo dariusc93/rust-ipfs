@@ -1688,11 +1688,11 @@ impl Ipfs {
         .await
     }
 
-    pub async fn requests_subscribe<S: IntoOptionalStreamProtocol>(
+    pub async fn requests_subscribe(
         &self,
-        protocol: S,
+        protocol: impl Into<OptionalStreamProtocol>,
     ) -> Result<BoxStream<'static, (PeerId, Bytes, OneshotSender<Bytes>)>, Error> {
-        let protocol = protocol.into_protocol();
+        let protocol = protocol.into().into_inner();
         async move {
             let (tx, rx) = oneshot_channel();
 
@@ -2603,46 +2603,37 @@ impl IntoStreamProtocol for &'static str {
     }
 }
 
-pub trait IntoOptionalStreamProtocol {
-    fn into_protocol(self) -> Option<StreamProtocol>;
-}
+pub struct OptionalStreamProtocol(pub(crate) Option<StreamProtocol>);
 
-impl IntoOptionalStreamProtocol for StreamProtocol {
-    fn into_protocol(self) -> Option<StreamProtocol> {
-        Some(self)
+impl OptionalStreamProtocol {
+    pub(crate) fn into_inner(self) -> Option<StreamProtocol> {
+        self.0
     }
 }
 
-impl IntoOptionalStreamProtocol for Option<StreamProtocol> {
-    fn into_protocol(self) -> Option<StreamProtocol> {
-        self
+impl From<()> for OptionalStreamProtocol {
+    fn from(_: ()) -> Self {
+        Self(None)
     }
 }
 
-impl IntoOptionalStreamProtocol for String {
-    fn into_protocol(self) -> Option<StreamProtocol> {
-        IntoOptionalStreamProtocol::into_protocol(StreamProtocol::try_from_owned(self).ok())
+impl From<StreamProtocol> for OptionalStreamProtocol {
+    fn from(protocol: StreamProtocol) -> Self {
+        Self(Some(protocol))
     }
 }
 
-impl IntoOptionalStreamProtocol for Option<String> {
-    fn into_protocol(self) -> Option<StreamProtocol> {
-        IntoOptionalStreamProtocol::into_protocol(
-            self.map(StreamProtocol::try_from_owned)
-                .and_then(Result::ok),
-        )
+impl From<String> for OptionalStreamProtocol {
+    fn from(protocol: String) -> Self {
+        let protocol = StreamProtocol::try_from_owned(protocol).ok();
+        Self(protocol)
     }
 }
 
-impl IntoOptionalStreamProtocol for &'static str {
-    fn into_protocol(self) -> Option<StreamProtocol> {
-        IntoOptionalStreamProtocol::into_protocol(StreamProtocol::new(self))
-    }
-}
-
-impl IntoOptionalStreamProtocol for Option<&'static str> {
-    fn into_protocol(self) -> Option<StreamProtocol> {
-        IntoOptionalStreamProtocol::into_protocol(self.map(StreamProtocol::new))
+impl From<&'static str> for OptionalStreamProtocol {
+    fn from(protocol: &'static str) -> Self {
+        let protocol = StreamProtocol::new(protocol);
+        Self(Some(protocol))
     }
 }
 

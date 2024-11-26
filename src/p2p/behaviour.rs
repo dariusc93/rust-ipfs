@@ -570,6 +570,7 @@ where
                     let protocol = StreamProtocol::try_from_owned(config.protocol.clone())
                         .expect("valid protocol");
                     if existing_protocol.contains_key(&protocol) {
+                        tracing::warn!(%protocol, "request-response protocol is already registered");
                         continue;
                     };
 
@@ -675,13 +676,6 @@ where
         if !existing_protocol.is_empty() {
             behaviour.rr_man = Toggle::from(Some(rr_man::Behaviour::new(existing_protocol)))
         }
-
-        // for (index, cfg) in options.re
-
-        /*        let request_response = protocols
-        .request_response
-        .then(|| request_response::Behaviour::new(options.request_response_config.clone()))
-        .into(); */
 
         for addr in bootstrap {
             let Ok(mut opt) = IntoAddPeerOpt::into_opt(addr) else {

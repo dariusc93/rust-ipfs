@@ -10,24 +10,20 @@ async fn main() -> anyhow::Result<()> {
     let node_a = UninitializedIpfs::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
-        .with_request_response(vec![
-            RequestResponseConfig {
-                protocol: "/ping/0".into(),
-                ..Default::default()
-            },
-        ])
+        .with_request_response(vec![RequestResponseConfig {
+            protocol: "/ping/0".into(),
+            ..Default::default()
+        }])
         .start()
         .await?;
 
     let node_b = UninitializedIpfs::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
-        .with_request_response(vec![
-            RequestResponseConfig {
-                protocol: "/ping/0".into(),
-                ..Default::default()
-            },
-        ])
+        .with_request_response(vec![RequestResponseConfig {
+            protocol: "/ping/0".into(),
+            ..Default::default()
+        }])
         .start()
         .await?;
 
@@ -43,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
         node_b.add_peer((peer_id, addr)).await?;
     }
 
-    let mut node_a_st = node_a.requests_subscribe("/ping/0").await?;
+    let mut node_a_st = node_a.requests_subscribe(()).await?;
 
     tokio::spawn(async move {
         let Some((pid, request, response)) = node_a_st.next().await else {
