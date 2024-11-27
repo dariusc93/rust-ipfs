@@ -82,7 +82,7 @@ pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
         HashMap<PeerId, Vec<futures::channel::mpsc::Sender<PeerConnectionEvents>>>,
     pub(crate) connection_events: Vec<futures::channel::mpsc::Sender<ConnectionEvents>>,
 
-    pub(crate) pending_connection: HashMap<ConnectionId, Channel<()>>,
+    pub(crate) pending_connection: HashMap<ConnectionId, Channel<ConnectionId>>,
     pub(crate) pending_disconnection: HashMap<PeerId, Vec<Channel<()>>>,
     pub(crate) pending_add_listener: HashMap<ListenerId, Channel<Multiaddr>>,
     pub(crate) pending_remove_listener: HashMap<ListenerId, Channel<()>>,
@@ -257,7 +257,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                 ..
             } => {
                 if let Some(ch) = self.pending_connection.remove(&connection_id) {
-                    let _ = ch.send(Ok(()));
+                    let _ = ch.send(Ok(connection_id));
                 }
 
                 let (ep, mut addr) = match &endpoint {

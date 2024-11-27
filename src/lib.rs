@@ -357,7 +357,7 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 #[allow(clippy::type_complexity)]
 enum IpfsEvent {
     /// Connect
-    Connect(DialOpts, Channel<()>),
+    Connect(DialOpts, Channel<ConnectionId>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     /// Addresses
@@ -1382,7 +1382,7 @@ impl Ipfs {
     }
 
     /// Connects to the peer
-    pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<(), Error> {
+    pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<ConnectionId, Error> {
         async move {
             let target = target.into();
             let (tx, rx) = oneshot_channel();
@@ -3072,7 +3072,7 @@ mod node {
                     return Ok(());
                 }
             }
-            self.ipfs.connect(opts).await
+            self.ipfs.connect(opts).await.map(|_| ())
         }
 
         /// Returns a new `Node` based on `IpfsOptions`.
