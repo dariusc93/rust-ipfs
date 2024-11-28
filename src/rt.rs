@@ -12,6 +12,12 @@ pub struct JoinHandle<T> {
     inner: InnerJoinHandle<T>,
 }
 
+impl<T> Debug for JoinHandle<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JoinHandle").finish()
+    }
+}
+
 enum InnerJoinHandle<T> {
     #[cfg(not(target_arch = "wasm32"))]
     TokioHandle(tokio::task::JoinHandle<T>),
@@ -21,6 +27,20 @@ enum InnerJoinHandle<T> {
         handle: AbortHandle,
     },
     Empty,
+}
+
+impl<T> Default for InnerJoinHandle<T> {
+    fn default() -> Self {
+        Self::Empty
+    }
+}
+
+impl<T> JoinHandle<T> {
+    pub(crate) fn empty() -> Self {
+        JoinHandle {
+            inner: InnerJoinHandle::Empty,
+        }
+    }
 }
 
 impl<T> JoinHandle<T> {
@@ -48,8 +68,13 @@ impl<T> JoinHandle<T> {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn replace(&mut self, handle: JoinHandle<T>) {
-        self.inner = handle.inner;
+    pub(crate) fn replace(&mut self, mut handle: JoinHandle<T>) {
+        self.inner = std::mem::take(&mut handle.inner);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn replace_mut(&mut self, handle: &mut JoinHandle<T>) {
+        self.inner = std::mem::take(&mut handle.inner);
     }
 }
 
@@ -122,9 +147,7 @@ impl<T> AbortableJoinHandle<T> {
     pub(crate) fn empty() -> Self {
         Self {
             handle: Arc::new(InnerHandle {
-                inner: parking_lot::Mutex::new(JoinHandle {
-                    inner: InnerJoinHandle::Empty,
-                }),
+                inner: parking_lot::Mutex::new(JoinHandle::empty()),
             }),
         }
     }
@@ -142,7 +165,9 @@ impl<T> AbortableJoinHandle<T> {
     }
 
     pub(crate) fn replace(&mut self, inner: AbortableJoinHandle<T>) {
-        self.handle = inner.handle;
+        let current_handle = &mut *self.handle.inner.lock();
+        let inner_handle = &mut *inner.handle.inner.lock();
+        current_handle.replace_mut(inner_handle);
     }
 }
 
