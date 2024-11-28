@@ -1,4 +1,5 @@
 # 0.13.1
+- feat: Add Executor trait and impl for tokio and wasm-bindgen-futures.
 - refactor: return `ConnectionId` when establishing connection.
 
 # 0.13.0
