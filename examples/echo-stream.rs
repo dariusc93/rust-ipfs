@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize the repo and start a daemon
     let ipfs = UninitializedIpfs::new()
         .set_keypair(&keypair)
-        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
         .with_streams()
         .start()
         .await?;

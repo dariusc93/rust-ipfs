@@ -1,6 +1,5 @@
 use clap::Parser;
 use futures::FutureExt;
-use ipld_core::ipld;
 use libp2p::futures::StreamExt;
 use libp2p::Multiaddr;
 use rust_ipfs::p2p::MultiaddrExt;
@@ -278,10 +277,10 @@ async fn main() -> anyhow::Result<()> {
 
 //Note: This is temporary as a similar implementation will be used internally in the future
 async fn topic_discovery(ipfs: Ipfs, topic: String) -> anyhow::Result<()> {
-    let cid = ipfs.put_dag(ipld!(topic)).await?;
-    ipfs.provide(cid).await?;
+    let topic_bytes = topic.as_bytes().to_vec();
+    ipfs.dht_provide(topic_bytes.clone()).await?;
     loop {
-        let mut stream = ipfs.get_providers(cid).await?.boxed();
+        let mut stream = ipfs.dht_get_providers(topic_bytes.clone()).await?.boxed();
         while let Some(_providers) = stream.next().await {}
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
