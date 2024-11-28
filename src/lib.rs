@@ -66,7 +66,7 @@ use repo::{
     BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
 };
 
-use tokio_util::sync::{CancellationToken, DropGuard};
+use rt::{AbortableJoinHandle, Executor, ExecutorSwitch};
 use tracing::Span;
 use tracing_futures::Instrument;
 
@@ -340,7 +340,9 @@ pub struct Ipfs {
     identify_conf: IdentifyConfiguration,
     to_task: Sender<IpfsEvent>,
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
-    _guard: Arc<DropGuard>,
+    _guard: AbortableJoinHandle<()>,
+    _gc_guard: AbortableJoinHandle<()>,
+    executor: ExecutorSwitch,
 }
 
 impl std::fmt::Debug for Ipfs {
@@ -909,6 +911,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             ..
         } = self;
 
+        let executor = ExecutorSwitch;
+
         let keys = keys.unwrap_or(Keypair::generate_ed25519());
 
         let root_span = Option::take(&mut options.span)
@@ -972,15 +976,15 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        let token = CancellationToken::new();
-        let _guard = Arc::new(token.clone().drop_guard());
+        let mut _guard = AbortableJoinHandle::empty();
+        let mut _gc_guard = AbortableJoinHandle::empty();
 
         let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone();
 
         let keystore = options.keystore.clone();
 
-        let ipfs = Ipfs {
+        let mut ipfs = Ipfs {
             span: facade_span,
             repo,
             identify_conf: id_conf,
@@ -989,6 +993,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             to_task,
             record_key_validator,
             _guard,
+            _gc_guard,
+            executor,
         };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
@@ -1032,6 +1038,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         let swarm = create_swarm(
             &keys,
             &options,
+            executor,
             &ipfs.repo,
             exec_span,
             (custom_behaviour, custom_transport),
@@ -1041,10 +1048,9 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             listening_addrs, ..
         } = options;
 
-        if let Some(config) = gc_config {
-            rt::spawn({
+        let gc_handle = gc_config.map(|config| {
+            executor.spawn_abortable({
                 let repo = ipfs.repo.clone();
-                let token = token.clone();
                 async move {
                     let GCConfig { duration, trigger } = config;
                     let use_config_timer = duration != Duration::ZERO;
@@ -1062,10 +1068,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
 
                     loop {
                         tokio::select! {
-                            _ = token.cancelled() => {
-                                tracing::debug!("gc task cancelled");
-                                break
-                            },
                             _ = &mut interval => {
                                 let _g = repo.inner.gclock.write().await;
                                 tracing::debug!("preparing gc operation");
@@ -1114,8 +1116,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                         }
                     }
                 }
-            });
-        }
+            })
+        }).unwrap_or(AbortableJoinHandle::empty());
 
         let mut fut = task::IpfsTask::new(
             swarm,
@@ -1153,7 +1155,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        rt::spawn({
+        ipfs._guard.replace(executor.spawn_abortable({
             async move {
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
@@ -1164,13 +1166,11 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                     fut.run().boxed()
                 };
 
-                tokio::select! {
-                    _ = fut => {}
-                    _ = token.cancelled() => {},
-                };
+                fut.await
             }
             .instrument(swarm_span)
-        });
+        }));
+        ipfs._gc_guard.replace(gc_handle);
         Ok(ipfs)
     }
 }
@@ -2512,7 +2512,7 @@ impl Ipfs {
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
         let fut = rx.await??;
 
-        rt::spawn(async move {
+        self.executor.dispatch(async move {
             if let Err(e) = fut.await.map_err(|e| anyhow!(e)) {
                 tracing::error!(error = %e, "failed to bootstrap");
             }
@@ -2598,6 +2598,10 @@ impl Ipfs {
 
         // ignoring the error because it'd mean that the background task had already been dropped
         let _ = self.to_task.try_send(IpfsEvent::Exit);
+
+        // terminte task that handles GC and spawn task
+        self._gc_guard.abort();
+        self._guard.abort();
     }
 }
 
