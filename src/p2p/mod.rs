@@ -157,7 +157,7 @@ impl Default for PubsubConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RequestResponseConfig {
     pub protocol: String,
     pub timeout: Option<Duration>,

@@ -1,4 +1,5 @@
 # 0.13.2
+- chore: add `Debug` derive to `RequestResponseConfig`.
 - chore: update thiserror dep.
 
 # 0.13.1
