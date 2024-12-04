@@ -1,3 +1,6 @@
+# 0.13.2
+- chore: update thiserror dep.
+
 # 0.13.1
 - feat: Add Executor trait and impl for tokio and wasm-bindgen-futures.
 - refactor: return `ConnectionId` when establishing connection.

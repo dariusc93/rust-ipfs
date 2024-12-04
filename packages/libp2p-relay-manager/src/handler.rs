@@ -83,9 +83,7 @@ impl ConnectionHandler for Handler {
                     (false, true) => {
                         self.supported = false;
                         self.events
-                            .push_back(ConnectionHandlerEvent::NotifyBehaviour(
-                                Out::Unsupported,
-                            ));
+                            .push_back(ConnectionHandlerEvent::NotifyBehaviour(Out::Unsupported));
                     }
                     (true, true) => {}
                     _ => {}
