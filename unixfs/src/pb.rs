@@ -85,7 +85,7 @@ pub(crate) struct FlatUnixFs<'a> {
     pub(crate) data: UnixFs<'a>,
 }
 
-impl<'a> quick_protobuf::message::MessageWrite for FlatUnixFs<'a> {
+impl quick_protobuf::message::MessageWrite for FlatUnixFs<'_> {
     fn get_size(&self) -> usize {
         use quick_protobuf::sizeofs::sizeof_len;
         let links = self

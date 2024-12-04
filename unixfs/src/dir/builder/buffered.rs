@@ -407,7 +407,7 @@ mod tests {
 
         struct Hex<'a>(&'a [u8]);
 
-        impl<'a> fmt::Debug for Hex<'a> {
+        impl fmt::Debug for Hex<'_> {
             fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
                 for b in self.0 {
                     write!(fmt, "{b:02x}")?;

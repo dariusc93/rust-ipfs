@@ -323,9 +323,7 @@ impl<C: Borrow<Cid>> PinKind<C> {
 type SubscriptionsMap = HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>;
 
 /// Describes a repo.
-///
 /// Consolidates a blockstore, a datastore and a subscription registry.
-
 #[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
 pub struct Repo {
@@ -1143,7 +1141,7 @@ impl<'a> RepoPutBlock<'a> {
     }
 }
 
-impl<'a> IntoFuture for RepoPutBlock<'a> {
+impl IntoFuture for RepoPutBlock<'_> {
     type IntoFuture = BoxFuture<'static, Self::Output>;
     type Output = Result<Cid, Error>;
     fn into_future(self) -> Self::IntoFuture {

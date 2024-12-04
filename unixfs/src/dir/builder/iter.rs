@@ -322,7 +322,7 @@ pub struct TreeNode<'a> {
     pub block: &'a [u8],
 }
 
-impl<'a> fmt::Debug for TreeNode<'a> {
+impl fmt::Debug for TreeNode<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("TreeNode")
             .field("path", &format_args!("{:?}", self.path))

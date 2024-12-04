@@ -11,7 +11,7 @@ pub(super) struct CustomFlatUnixFs<'a> {
     pub(super) data: UnixFs<'a>,
 }
 
-impl<'a> CustomFlatUnixFs<'a> {
+impl CustomFlatUnixFs<'_> {
     fn mapped(&self) -> impl Iterator<Item = NamedLeafAsPBLink<'_>> + '_ {
         self.links
             .iter()
@@ -22,7 +22,7 @@ impl<'a> CustomFlatUnixFs<'a> {
     }
 }
 
-impl<'a> MessageWrite for CustomFlatUnixFs<'a> {
+impl MessageWrite for CustomFlatUnixFs<'_> {
     fn get_size(&self) -> usize {
         use quick_protobuf::sizeofs::*;
 
@@ -44,7 +44,7 @@ impl<'a> MessageWrite for CustomFlatUnixFs<'a> {
 /// Custom NamedLeaf as PBLink "adapter."
 struct NamedLeafAsPBLink<'a>(&'a NamedLeaf);
 
-impl<'a> MessageWrite for NamedLeafAsPBLink<'a> {
+impl MessageWrite for NamedLeafAsPBLink<'_> {
     fn get_size(&self) -> usize {
         use quick_protobuf::sizeofs::*;
 
@@ -69,7 +69,7 @@ impl<'a> MessageWrite for NamedLeafAsPBLink<'a> {
 /// Newtype around Cid to allow embedding it as PBLink::Hash without allocating a vector.
 struct WriteableCid<'a>(&'a Cid);
 
-impl<'a> MessageWrite for WriteableCid<'a> {
+impl MessageWrite for WriteableCid<'_> {
     fn get_size(&self) -> usize {
         use ipld_core::cid::Version::*;
         use quick_protobuf::sizeofs::*;
