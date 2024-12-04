@@ -603,7 +603,7 @@ where
                                 .into();
                         }
                         3 => {
-                            if !behaviour.rr_3.is_enabled() {
+                            if behaviour.rr_3.is_enabled() {
                                 continue;
                             }
                             behaviour.rr_3 = protocols
@@ -612,7 +612,7 @@ where
                                 .into();
                         }
                         4 => {
-                            if !behaviour.rr_4.is_enabled() {
+                            if behaviour.rr_4.is_enabled() {
                                 continue;
                             }
                             behaviour.rr_4 = protocols
@@ -621,7 +621,7 @@ where
                                 .into();
                         }
                         5 => {
-                            if !behaviour.rr_5.is_enabled() {
+                            if behaviour.rr_5.is_enabled() {
                                 continue;
                             }
                             behaviour.rr_5 = protocols
@@ -630,7 +630,7 @@ where
                                 .into();
                         }
                         6 => {
-                            if !behaviour.rr_6.is_enabled() {
+                            if behaviour.rr_6.is_enabled() {
                                 continue;
                             }
                             behaviour.rr_6 = protocols
@@ -639,7 +639,7 @@ where
                                 .into();
                         }
                         7 => {
-                            if !behaviour.rr_7.is_enabled() {
+                            if behaviour.rr_7.is_enabled() {
                                 continue;
                             }
                             behaviour.rr_7 = protocols
@@ -648,7 +648,7 @@ where
                                 .into();
                         }
                         8 => {
-                            if !behaviour.rr_8.is_enabled() {
+                            if behaviour.rr_8.is_enabled() {
                                 continue;
                             }
                             behaviour.rr_8 = protocols
@@ -657,7 +657,7 @@ where
                                 .into();
                         }
                         9 => {
-                            if !behaviour.rr_9.is_enabled() {
+                            if behaviour.rr_9.is_enabled() {
                                 continue;
                             }
                             behaviour.rr_9 = protocols

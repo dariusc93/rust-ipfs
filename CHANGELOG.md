@@ -1,3 +1,6 @@
+# 0.13.3
+- fix: perform correct condition check when enabling request-response behaviour.
+
 # 0.13.2
 - chore: add `Debug` derive to `RequestResponseConfig`.
 - chore: update thiserror dep.
