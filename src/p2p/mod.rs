@@ -169,13 +169,12 @@ pub struct RequestResponseConfig {
     pub protocol_direction: RequestResponseDirection,
 }
 
-
 #[derive(Debug, Clone, Default)]
 pub enum RequestResponseDirection {
     In,
     Out,
     #[default]
-    Both
+    Both,
 }
 
 impl From<RequestResponseDirection> for ProtocolSupport {
