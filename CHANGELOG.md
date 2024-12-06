@@ -1,4 +1,5 @@
 # 0.14.0
+- chore: bump rust-version to 1.83.
 - feat: Add `Ipfs::send_response` and use request id in request stream. [PR 348](https://github.com/dariusc93/rust-ipfs/pull/348)
 
 # 0.13.3
