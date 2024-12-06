@@ -10,6 +10,7 @@ use std::time::Duration;
 use libp2p::gossipsub::ValidationMode;
 use libp2p::identify::Info as IdentifyInfo;
 use libp2p::identity::{Keypair, PublicKey};
+use libp2p::request_response::ProtocolSupport;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{Multiaddr, PeerId};
 use libp2p::{StreamProtocol, Swarm};
@@ -165,6 +166,25 @@ pub struct RequestResponseConfig {
     pub max_response_size: usize,
     pub concurrent_streams: Option<usize>,
     pub channel_buffer: usize,
+    pub protocol_direction: RequestResponseDirection,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum RequestResponseDirection {
+    In,
+    Out,
+    #[default]
+    Both,
+}
+
+impl From<RequestResponseDirection> for ProtocolSupport {
+    fn from(direction: RequestResponseDirection) -> Self {
+        match direction {
+            RequestResponseDirection::In => ProtocolSupport::Inbound,
+            RequestResponseDirection::Out => ProtocolSupport::Outbound,
+            RequestResponseDirection::Both => ProtocolSupport::Full,
+        }
+    }
 }
 
 impl Default for RequestResponseConfig {
@@ -176,6 +196,7 @@ impl Default for RequestResponseConfig {
             max_response_size: 2 * 1024 * 1024,
             concurrent_streams: None,
             channel_buffer: 128,
+            protocol_direction: RequestResponseDirection::default(),
         }
     }
 }

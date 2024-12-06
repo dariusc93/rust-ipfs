@@ -1595,6 +1595,20 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
 
                 let _ = res.send(Ok(st));
             }
+            IpfsEvent::SendResponse(protocol, peer_id, id, response, res) => {
+                let Some(rr) = self.swarm.behaviour_mut().request_response(protocol) else {
+                    let _ = res.send(Err(anyhow::anyhow!(
+                        "request-response behaviour is not enabled"
+                    )));
+                    return;
+                };
+
+                let result = rr
+                    .send_response(peer_id, id, response)
+                    .map_err(anyhow::Error::from);
+
+                let _ = res.send(result);
+            }
             IpfsEvent::Exit => {
                 // FIXME: we could do a proper teardown
             }
