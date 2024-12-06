@@ -16,24 +16,27 @@ async fn send_request_to_peer() {
     let node_0_id = nodes[0].id;
     let node_1_id = nodes[1].id;
 
-    tokio::spawn(async move {
+    tokio::spawn({
+        let node_0 = nodes[0].clone();
+        let node_1 = nodes[1].clone();
+        async move {
         loop {
             tokio::select! {
-                Some((peer_id, request, response)) = node_0_st.next() => {
+                Some((peer_id, id, request)) = node_0_st.next() => {
                     assert_eq!(peer_id, node_1_id);
                     assert_eq!(&request[..], &b"ping"[..]);
                     let res = Bytes::copy_from_slice(b"pong");
-                    let _ = response.send(res);
+                    node_0.send_response(peer_id, id, res).await.expect("able to response");
                 },
-                Some((peer_id, request, response)) = node_1_st.next() => {
+                Some((peer_id, id, request)) = node_1_st.next() => {
                     assert_eq!(peer_id, node_0_id);
                     assert_eq!(&request[..], &b"ping"[..]);
                     let res = Bytes::copy_from_slice(b"pong");
-                    let _ = response.send(res);
+                    node_1.send_response(peer_id, id, res).await.expect("able to response");
                 },
             }
         }
-    });
+    }});
 
     let response = nodes[0]
         .send_request(node_1_id, b"ping")

@@ -114,7 +114,6 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
-use libp2p::swarm::dial_opts::PeerCondition;
 use libp2p::swarm::ConnectionId;
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
@@ -124,6 +123,7 @@ use libp2p::{
     swarm::dial_opts::DialOpts,
     StreamProtocol,
 };
+use libp2p::{request_response::InboundRequestId, swarm::dial_opts::PeerCondition};
 pub use libp2p_connection_limits::ConnectionLimits;
 use serde::Serialize;
 
@@ -414,10 +414,9 @@ enum IpfsEvent {
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(Channel<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
-
     RequestStream(
         Option<StreamProtocol>,
-        Channel<BoxStream<'static, (PeerId, Bytes, OneshotSender<Bytes>)>>,
+        Channel<BoxStream<'static, (PeerId, InboundRequestId, Bytes)>>,
     ),
     SendRequest(
         Option<StreamProtocol>,
@@ -431,7 +430,13 @@ enum IpfsEvent {
         Bytes,
         Channel<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>>,
     ),
-
+    SendResponse(
+        Option<StreamProtocol>,
+        PeerId,
+        InboundRequestId,
+        Bytes,
+        Channel<()>,
+    ),
     AddRelay(PeerId, Multiaddr, Channel<()>),
     RemoveRelay(PeerId, Multiaddr, Channel<()>),
     EnableRelay(Option<PeerId>, Channel<()>),
@@ -1698,7 +1703,7 @@ impl Ipfs {
     pub async fn requests_subscribe(
         &self,
         protocol: impl Into<OptionalStreamProtocol>,
-    ) -> Result<BoxStream<'static, (PeerId, Bytes, OneshotSender<Bytes>)>, Error> {
+    ) -> Result<BoxStream<'static, (PeerId, InboundRequestId, Bytes)>, Error> {
         let protocol = protocol.into().into_inner();
         async move {
             let (tx, rx) = oneshot_channel();
@@ -1774,6 +1779,36 @@ impl Ipfs {
             self.to_task
                 .clone()
                 .send(IpfsEvent::SendRequests(protocol, peers, request, tx))
+                .await?;
+
+            rx.await?.map_err(anyhow::Error::from)
+        }
+        .instrument(self.span.clone())
+        .await
+    }
+
+    /// Sends a request to a specific peer.
+    /// If a protocol is not supplied, it will use the first/default protocol that was set in
+    /// [UninitializedIpfs::with_request_response].
+    pub async fn send_response(
+        &self,
+        peer_id: PeerId,
+        id: InboundRequestId,
+        response: impl IntoRequest,
+    ) -> Result<(), Error> {
+        let (protocol, response) = response.into_request();
+        async move {
+            if response.is_empty() {
+                return Err(
+                    std::io::Error::new(std::io::ErrorKind::Other, "response is empty").into(),
+                );
+            }
+
+            let (tx, rx) = oneshot_channel();
+
+            self.to_task
+                .clone()
+                .send(IpfsEvent::SendResponse(protocol, peer_id, id, response, tx))
                 .await?;
 
             rx.await?.map_err(anyhow::Error::from)

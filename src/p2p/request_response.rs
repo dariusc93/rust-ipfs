@@ -6,15 +6,14 @@ use crate::p2p::RequestResponseConfig;
 use crate::Multiaddr;
 use bytes::Bytes;
 use futures::channel::mpsc::Sender as MpscSender;
-use futures::channel::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
+use futures::channel::oneshot::Sender as OneshotSender;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use futures::{pin_mut, TryFutureExt};
 use libp2p::core::transport::PortUse;
 use libp2p::core::Endpoint;
 use libp2p::request_response::{
-    InboundFailure, InboundRequestId, OutboundFailure, OutboundRequestId, ProtocolSupport,
-    ResponseChannel,
+    InboundFailure, InboundRequestId, OutboundFailure, OutboundRequestId, ResponseChannel,
 };
 use libp2p::swarm::{
     ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler, THandlerInEvent,
@@ -23,16 +22,16 @@ use libp2p::swarm::{
 use libp2p::{request_response, PeerId, StreamProtocol};
 use pollable_map::futures::FutureMap;
 use std::collections::HashMap;
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 pub struct Behaviour {
     pending_request: HashMap<PeerId, HashMap<InboundRequestId, ResponseChannel<Bytes>>>,
-    awaiting_response: FutureMap<(PeerId, InboundRequestId), OneshotReceiver<Bytes>>,
 
     pending_response:
         HashMap<PeerId, HashMap<OutboundRequestId, OneshotSender<std::io::Result<Bytes>>>>,
-    broadcast_request: Vec<MpscSender<(PeerId, Bytes, OneshotSender<Bytes>)>>,
+    broadcast_request: Vec<MpscSender<(PeerId, InboundRequestId, Bytes)>>,
     rr_behaviour: request_response::Behaviour<Codec>,
 
     channel_buffer: usize,
@@ -48,10 +47,9 @@ impl Behaviour {
 
         let protocol = config.protocol;
 
-        let protocol = vec![(
-            StreamProtocol::try_from_owned(protocol).expect("valid protocol"),
-            ProtocolSupport::Full,
-        )];
+        let st_protocol = StreamProtocol::try_from_owned(protocol).expect("valid protocol");
+
+        let protocol = vec![(st_protocol, config.protocol_direction.into())];
 
         let codec = Codec::new(config.max_request_size, config.max_response_size);
 
@@ -59,7 +57,6 @@ impl Behaviour {
 
         Self {
             pending_response: HashMap::new(),
-            awaiting_response: FutureMap::new(),
             pending_request: HashMap::new(),
             broadcast_request: Vec::new(),
             rr_behaviour,
@@ -69,8 +66,7 @@ impl Behaviour {
 
     pub fn subscribe(
         &mut self,
-    ) -> futures::channel::mpsc::Receiver<(PeerId, Bytes, futures::channel::oneshot::Sender<Bytes>)>
-    {
+    ) -> futures::channel::mpsc::Receiver<(PeerId, InboundRequestId, Bytes)> {
         let (tx, rx) = futures::channel::mpsc::channel(self.channel_buffer);
         self.broadcast_request.push(tx);
         rx
@@ -92,6 +88,29 @@ impl Behaviour {
                 None => Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)),
             }
         })
+    }
+
+    pub fn send_response(
+        &mut self,
+        peer_id: PeerId,
+        id: InboundRequestId,
+        response: Bytes,
+    ) -> std::io::Result<()> {
+        let pending_list = self.pending_request.get_mut(&peer_id).ok_or(IoError::new(
+            IoErrorKind::NotFound,
+            "no pending request available from peer",
+        ))?;
+
+        let ch = pending_list.remove(&id).ok_or(IoError::new(
+            IoErrorKind::NotFound,
+            "no pending request available",
+        ))?;
+
+        if self.rr_behaviour.send_response(ch, response).is_err() {
+            return Err(IoError::new(IoErrorKind::BrokenPipe, "unable to send response. request either timed out, connection dropped, or unexpected behaviour occurred"));
+        }
+
+        Ok(())
     }
 
     pub fn send_requests(
@@ -141,12 +160,10 @@ impl Behaviour {
             .insert(id, response_channel);
 
         for tx in self.broadcast_request.iter_mut() {
-            let (rtx, rrx) = futures::channel::oneshot::channel();
-            if let Err(_e) = tx.try_send((peer_id, request.clone(), rtx)) {
+            if let Err(_e) = tx.try_send((peer_id, id, request.clone())) {
                 // TODO: channel is full or closed
                 continue;
             }
-            self.awaiting_response.insert((peer_id, id), rrx);
         }
     }
 
@@ -266,26 +283,6 @@ impl NetworkBehaviour for Behaviour {
     }
 
     fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        while let Poll::Ready(Some(((peer_id, id), res))) =
-            self.awaiting_response.poll_next_unpin(cx)
-        {
-            let response = match res {
-                Ok(data) => data,
-                Err(_) => {
-                    tracing::warn!(%id, %peer_id, "response channel has been dropped. Ignoring");
-                    continue;
-                }
-            };
-
-            if let Some(responses) = self.pending_request.get_mut(&peer_id) {
-                if let Some(ch) = responses.remove(&id) {
-                    if self.rr_behaviour.send_response(ch, response).is_err() {
-                        tracing::warn!(%id, %peer_id, "error sending a response");
-                    }
-                }
-            }
-        }
-
         while let Poll::Ready(event) = self.rr_behaviour.poll(cx) {
             match event {
                 ToSwarm::GenerateEvent(request_response::Event::Message {
