@@ -401,8 +401,9 @@ impl Stream for WantSession {
                         // Either way, we will move the peer to a failed status and in the future,
                         // pass this to the behaviour or to another session to keep score of successful or failed exchanges
                         // so we can prioritize those who will likely exchange blocks more successfully.
-                        let state = this.wants.get_mut(&peer_id).expect("peer exist in state");
-                        *state = PeerWantState::Failed;
+                        if let Some(state) = this.wants.get_mut(&peer_id) {
+                            *state = PeerWantState::Failed;
+                        }
                     }
 
                     if let Some((next_peer_id, state)) = this
