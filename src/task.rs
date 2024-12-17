@@ -56,38 +56,38 @@ use tokio::sync::Notify;
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
-pub(crate) struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
-    pub(crate) swarm: TSwarm<C>,
-    pub(crate) repo_events: Fuse<Receiver<RepoEvent>>,
-    pub(crate) from_facade: Fuse<Receiver<IpfsEvent>>,
-    pub(crate) bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
-    pub(crate) listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
-    pub(crate) provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
-    pub(crate) record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub(crate) repo: Repo,
-    pub(crate) kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
-    pub(crate) dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
-    pub(crate) bootstraps: HashSet<Multiaddr>,
-    pub(crate) swarm_event: Option<TSwarmEventFn<C>>,
-    pub(crate) pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
-    pub(crate) timer: TaskTimer,
-    pub(crate) local_external_addr: bool,
-    pub(crate) relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
-    pub(crate) rzv_register_pending: HashMap<(PeerId, Namespace), Vec<Channel<()>>>,
-    pub(crate) rzv_discover_pending:
+pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
+    pub swarm: TSwarm<C>,
+    pub repo_events: Fuse<Receiver<RepoEvent>>,
+    pub from_facade: Fuse<Receiver<IpfsEvent>>,
+    pub bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
+    pub listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
+    pub provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
+    pub record_stream: HashMap<QueryId, UnboundedSender<Record>>,
+    pub repo: Repo,
+    pub kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
+    pub dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
+    pub bootstraps: HashSet<Multiaddr>,
+    pub swarm_event: Option<TSwarmEventFn<C>>,
+    pub pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
+    pub timer: TaskTimer,
+    pub local_external_addr: bool,
+    pub relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
+    pub rzv_register_pending: HashMap<(PeerId, Namespace), Vec<Channel<()>>>,
+    pub rzv_discover_pending:
         HashMap<(PeerId, Namespace), Vec<Channel<HashMap<PeerId, Vec<Multiaddr>>>>>,
-    pub(crate) rzv_cookie: HashMap<PeerId, Option<Cookie>>,
+    pub rzv_cookie: HashMap<PeerId, Option<Cookie>>,
 
-    pub(crate) peer_connection_events:
+    pub peer_connection_events:
         HashMap<PeerId, Vec<futures::channel::mpsc::Sender<PeerConnectionEvents>>>,
-    pub(crate) connection_events: Vec<futures::channel::mpsc::Sender<ConnectionEvents>>,
+    pub connection_events: Vec<futures::channel::mpsc::Sender<ConnectionEvents>>,
 
-    pub(crate) pending_connection: HashMap<ConnectionId, Channel<ConnectionId>>,
-    pub(crate) pending_disconnection: HashMap<PeerId, Vec<Channel<()>>>,
-    pub(crate) pending_add_listener: HashMap<ListenerId, Channel<Multiaddr>>,
-    pub(crate) pending_remove_listener: HashMap<ListenerId, Channel<()>>,
+    pub pending_connection: HashMap<ConnectionId, Channel<ConnectionId>>,
+    pub pending_disconnection: HashMap<PeerId, Vec<Channel<()>>>,
+    pub pending_add_listener: HashMap<ListenerId, Channel<Multiaddr>>,
+    pub pending_remove_listener: HashMap<ListenerId, Channel<()>>,
 
-    pub(crate) event_capacity: usize,
+    pub event_capacity: usize,
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
@@ -129,8 +129,8 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
     }
 }
 
-pub(crate) struct TaskTimer {
-    pub(crate) event_cleanup: Delay,
+pub struct TaskTimer {
+    pub event_cleanup: Delay,
 }
 
 impl Default for TaskTimer {
@@ -182,7 +182,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
 }
 
 impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
-    pub(crate) async fn run(&mut self) {
+    pub async fn run(&mut self) {
         let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
 
         loop {
@@ -651,6 +651,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
                     }
                     KademliaEvent::ModeChanged { new_mode } => {
                         let _ = new_mode;
+                        trace!("kad: mode changed to {:?}", new_mode);
                     }
                 }
             }
