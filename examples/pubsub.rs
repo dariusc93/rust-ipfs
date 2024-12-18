@@ -2,13 +2,16 @@ use clap::Parser;
 use futures::FutureExt;
 use libp2p::futures::StreamExt;
 use libp2p::Multiaddr;
-use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{ConnectionEvents, Ipfs, Keypair, PubsubEvent, UninitializedIpfs};
+use rust_ipfs::p2p::{MultiaddrExt, PubsubConfig, PubsubMessageValidation};
+use rust_ipfs::{
+    ConnectionEvents, GossipsubMessage, Ipfs, Keypair, PubsubEvent, UninitializedIpfs,
+};
 
 use pollable_map::stream::StreamMap;
 use rustyline_async::Readline;
 use std::time::Duration;
 use std::{io::Write, sync::Arc};
+use libp2p::gossipsub::MessageAcceptance;
 use tokio::sync::Notify;
 
 #[derive(Debug, Parser)]
@@ -129,6 +132,10 @@ async fn main() -> anyhow::Result<()> {
     loop {
         tokio::select! {
             Some((topic, msg)) = listener_st.next() => {
+                let GossipsubMessage { message: msg, validate_response, .. } = msg;
+                if let Some(ch) = validate_response {
+                    _ = ch.send(MessageAcceptance::Accept);
+                }
                 writeln!(stdout, "> {topic}: {}: {}", msg.source.expect("Message should contain a source peer_id"), String::from_utf8_lossy(&msg.data))?;
             }
             Some(conn_ev) = st.next() => {

@@ -1,5 +1,5 @@
 use super::gossipsub::GossipsubStream;
-use super::{addressbook, protocol, request_response, rr_man};
+use super::{addressbook, protocol, request_response, rr_man, PubsubMessageValidation};
 
 use indexmap::IndexMap;
 use libp2p_allow_block_list::BlockedPeers;
@@ -450,6 +450,10 @@ where
 
             builder.validation_mode(pubsub_config.validate.into());
 
+            if pubsub_config.validate_messages != PubsubMessageValidation::All {
+                builder.validate_messages();
+            }
+
             let config = builder.build().map_err(anyhow::Error::from)?;
 
             let gossipsub = libp2p::gossipsub::Behaviour::new(
@@ -460,7 +464,7 @@ where
 
             protocols
                 .pubsub
-                .then(|| GossipsubStream::from(gossipsub))
+                .then(|| GossipsubStream::new(gossipsub, pubsub_config.validate_messages))
                 .into()
         };
 

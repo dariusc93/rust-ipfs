@@ -95,6 +95,7 @@ pub use self::p2p::gossipsub::SubscriptionStream;
 
 pub use self::{
     error::Error,
+    p2p::gossipsub::GossipsubMessage,
     p2p::BehaviourEvent,
     p2p::KadResult,
     path::IpfsPath,

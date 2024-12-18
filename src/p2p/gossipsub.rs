@@ -1,6 +1,7 @@
 use futures::channel::mpsc::{self as channel};
+use futures::channel::oneshot;
+use futures::channel::oneshot::Canceled;
 use futures::stream::{FusedStream, Stream};
-use libp2p::gossipsub::PublishError;
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
@@ -11,13 +12,16 @@ use libp2p::core::transport::PortUse;
 use libp2p::core::{Endpoint, Multiaddr};
 use libp2p::identity::PeerId;
 
+use crate::p2p::PubsubMessageValidation;
 use libp2p::gossipsub::{
-    Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic,
-    Message as GossipsubMessage, MessageId, TopicHash,
+    Behaviour as Gossipsub, Event as GossipsubEvent, IdentTopic as Topic, Message,
+    MessageAcceptance, MessageId, PublishError, TopicHash,
 };
 use libp2p::swarm::{
     ConnectionDenied, ConnectionId, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
 };
+use pollable_map::futures::FutureMap;
+use pollable_map::stream::StreamMap;
 
 /// Currently a thin wrapper around Gossipsub.
 /// Allows single subscription to a topic with only unbounded senders. Tracks the peers subscribed
@@ -35,7 +39,31 @@ pub struct GossipsubStream {
         channel::UnboundedSender<TopicHash>,
         channel::UnboundedReceiver<TopicHash>,
     ),
+
+    validation_responses:
+        StreamMap<TopicHash, FutureMap<(MessageId, PeerId), oneshot::Receiver<MessageAcceptance>>>,
+
+    validate_message: PubsubMessageValidation,
 }
+
+/// A message that has been received
+#[derive(Debug)]
+pub struct GossipsubMessage {
+    pub message_id: MessageId,
+    pub propagating_peer: PeerId,
+    pub message: Message,
+    pub validate_response: Option<oneshot::Sender<MessageAcceptance>>,
+}
+
+impl PartialEq for GossipsubMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.message_id.eq(&other.message_id)
+            && self.propagating_peer.eq(&other.propagating_peer)
+            && self.message.eq(&other.message)
+    }
+}
+
+impl Eq for GossipsubMessage {}
 
 impl core::ops::Deref for GossipsubStream {
     type Target = Gossipsub;
@@ -110,13 +138,15 @@ impl FusedStream for SubscriptionStream {
     }
 }
 
-impl From<Gossipsub> for GossipsubStream {
-    fn from(gossipsub: Gossipsub) -> Self {
+impl GossipsubStream {
+    pub fn new(gossipsub: Gossipsub, validate: PubsubMessageValidation) -> Self {
         let (tx, rx) = channel::unbounded();
         GossipsubStream {
             streams: HashMap::new(),
             gossipsub,
             unsubscriptions: (tx, rx),
+            validation_responses: StreamMap::new(),
+            validate_message: validate,
         }
     }
 }
@@ -135,6 +165,19 @@ impl GossipsubStream {
         if !self.gossipsub.subscribe(&topic)? {
             anyhow::bail!("Already subscribed to topic")
         }
+
+        // TODO: supply validation to subscription stream
+        match self.validate_message {
+            PubsubMessageValidation::All => {}
+            PubsubMessageValidation::Manual => {
+                self.validation_responses
+                    .insert(topic.hash(), FutureMap::new());
+            }
+            PubsubMessageValidation::ManualPerTopic => {
+                self.validation_responses
+                    .insert(topic.hash(), FutureMap::new());
+            }
+        };
 
         let (tx, rx) = futures::channel::mpsc::channel(15000);
         self.streams.insert(topic.hash(), tx);
@@ -273,6 +316,7 @@ impl NetworkBehaviour for GossipsubStream {
                                 .unwrap_or_default(),
                             "Failed to unsubscribe a dropped subscription"
                         );
+                        self.validation_responses.remove(&dropped);
                     }
                 }
                 Poll::Ready(None) => unreachable!("we own the sender"),
@@ -281,10 +325,65 @@ impl NetworkBehaviour for GossipsubStream {
         }
 
         loop {
+            match self.validation_responses.poll_next_unpin(ctx) {
+                Poll::Ready(Some((_, ((message_id, peer_id), response)))) => {
+                    let acceptance = match response {
+                        Ok(acceptance) => acceptance,
+                        Err(Canceled) => {
+                            continue;
+                        }
+                    };
+                    match self.gossipsub.report_message_validation_result(
+                        &message_id,
+                        &peer_id,
+                        acceptance,
+                    ) {
+                        Ok(true) => {
+                            debug!(%message_id, %peer_id, "message reported valid. propagating in network");
+                        }
+                        Ok(false) => {
+                            warn!(%message_id, %peer_id, "message is not in cache.");
+                        }
+                        Err(e) => {
+                            error!(error = %e, "error validating message");
+                        }
+                    }
+                }
+                Poll::Ready(None) => break,
+                Poll::Pending => break,
+            }
+        }
+
+        loop {
             match futures::ready!(self.gossipsub.poll(ctx)) {
-                ToSwarm::GenerateEvent(GossipsubEvent::Message { message, .. }) => {
+                ToSwarm::GenerateEvent(GossipsubEvent::Message {
+                    message,
+                    propagation_source,
+                    message_id,
+                }) => {
                     let topic = message.topic.clone();
-                    if let Entry::Occupied(mut oe) = self.streams.entry(topic) {
+                    if let Entry::Occupied(mut oe) = self.streams.entry(topic.clone()) {
+                        let validate_response = match self.validate_message {
+                            PubsubMessageValidation::All => None,
+                            _ => match self.validation_responses.get_mut(&topic) {
+                                Some(futs) => {
+                                    let message_id = message_id.clone();
+                                    let peer_id = propagation_source.clone();
+                                    let (tx, rx) = oneshot::channel();
+                                    futs.insert((message_id, peer_id), rx);
+                                    Some(tx)
+                                }
+                                None => None,
+                            },
+                        };
+
+                        let message = GossipsubMessage {
+                            message_id,
+                            propagating_peer: propagation_source,
+                            message,
+                            validate_response,
+                        };
+
                         if let Err(e) = oe.get_mut().try_send(message) {
                             if e.is_full() {
                                 continue;
@@ -298,6 +397,7 @@ impl NetworkBehaviour for GossipsubStream {
                                     .unwrap_or_default(),
                                 "Failed to unsubscribe following SendError"
                             );
+                            self.validation_responses.remove(&topic);
                         }
                     }
                     continue;

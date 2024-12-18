@@ -119,6 +119,22 @@ pub struct PubsubConfig {
 
     /// Validation
     pub validate: PubsubValidation,
+
+    /// Validate messages
+    pub validate_messages: PubsubMessageValidation,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PubsubMessageValidation {
+    /// Automatically accept all messages, propagating them through the network
+    All,
+
+    /// Manually accept, reject, or ignore messages on every topic.
+    Manual,
+
+    /// Automatically accept all messages unless otherwise set on the given stream to manually
+    /// accept, reject, or ignore messages.
+    ManualPerTopic,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -154,6 +170,7 @@ impl Default for PubsubConfig {
             max_transmit_size: 2 * 1024 * 1024,
             validate: PubsubValidation::Strict,
             floodsub_compat: false,
+            validate_messages: PubsubMessageValidation::All,
         }
     }
 }

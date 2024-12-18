@@ -137,6 +137,7 @@ async fn publish_between_two_nodes_single_topic() {
     ] {
         let received = st
             .take(1)
+            .map(|msg| msg.message)
             .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
             .collect::<Vec<_>>()
             .timeout(Duration::from_secs(2))
@@ -331,6 +332,7 @@ async fn publish_between_two_nodes_different_topics() {
     for (st, own_peer_id) in &mut [(b_msgs.by_ref(), node_b.id), (a_msgs.by_ref(), node_a.id)] {
         let received = st
             .take(1)
+            .map(|msg| msg.message)
             .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
             .next()
             .timeout(Duration::from_secs(2))
