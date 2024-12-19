@@ -368,7 +368,7 @@ impl NetworkBehaviour for GossipsubStream {
                             _ => match self.validation_responses.get_mut(&topic) {
                                 Some(futs) => {
                                     let message_id = message_id.clone();
-                                    let peer_id = propagation_source.clone();
+                                    let peer_id = propagation_source;
                                     let (tx, rx) = oneshot::channel();
                                     futs.insert((message_id, peer_id), rx);
                                     Some(tx)
