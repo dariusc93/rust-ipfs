@@ -1,3 +1,6 @@
+# 0.14.2
+- feat: Add reconnect option to address book. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.14.1
 - fix: remove expect when session failed to get next block.
 
