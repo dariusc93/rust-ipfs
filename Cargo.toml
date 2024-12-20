@@ -87,7 +87,7 @@ tokio-stream = { default-features = false, version = "0.1.17" }
 tokio-util = { default-features = false, version = "0.7.13" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
 void = { default-features = false, version = "1.0.2" }
-wasm-bindgen-futures = { version = "0.4.47" }
+wasm-bindgen-futures = { version = "0.4.49" }
 web-time = "1.1.0"
 zeroize = "1.8.1"
 
