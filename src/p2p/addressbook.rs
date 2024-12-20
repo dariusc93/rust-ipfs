@@ -177,6 +177,10 @@ impl Behaviour {
 
         self.reconnect_peers.remove(&peer_id);
 
+        if self.config.keep_connection_alive && !self.peer_keepalive.contains(&peer_id) {
+            self.keep_peer_alive(&peer_id);
+        }
+
         if !self.config.store_on_connection {
             return;
         }
