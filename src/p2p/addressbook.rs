@@ -208,9 +208,12 @@ impl Behaviour {
             list.remove(&connection_id);
             if list.is_empty() && remaining_established == 0 {
                 entry.remove();
-                if let Some((duration, attempts)) = self.can_reconnect.remove(&peer_id) {
-                    self.reconnect_peers.insert(peer_id, Delay::new(duration));
-                    self.peer_reconnect_attempts.insert(peer_id, attempts);
+                if let Some((duration, attempts)) = self.can_reconnect.get(&peer_id) {
+                    if *attempts == 0 {
+                        return;
+                    }
+                    self.reconnect_peers.insert(peer_id, Delay::new(*duration));
+                    self.peer_reconnect_attempts.insert(peer_id, 0);
                 }
             }
         }
@@ -282,26 +285,24 @@ impl Behaviour {
             DialError::Transport(_) => {}
         }
 
-        if let Some((duration, _)) = self.can_reconnect.get(&peer_id) {
-            if let Entry::Occupied(mut entry) = self.peer_reconnect_attempts.entry(peer_id) {
-                let current_attempts = entry.get_mut();
-                if *current_attempts == 0 {
-                    entry.remove();
-                    self.reconnect_peers.remove(&peer_id);
-                    self.peer_reconnect_attempts.remove(&peer_id);
-                    return;
-                }
-                *current_attempts -= 1;
+        if let Some((duration, attempts)) = self.can_reconnect.get(&peer_id) {
+            let current_attempts = self.peer_reconnect_attempts.entry(peer_id).or_insert(0);
+            if *current_attempts >= *attempts {
+                self.peer_reconnect_attempts.remove(&peer_id);
+                self.reconnect_peers.remove(&peer_id);
+                return;
+            }
 
-                if !self.reconnect_peers.contains_key(&peer_id) {
-                    self.reconnect_peers.insert(peer_id, Delay::new(*duration));
-                } else {
-                    let timer = self
-                        .reconnect_peers
-                        .get_mut(&peer_id)
-                        .expect("timer available");
-                    timer.reset(*duration);
-                }
+            *current_attempts += 1;
+
+            if !self.reconnect_peers.contains_key(&peer_id) {
+                self.reconnect_peers.insert(peer_id, Delay::new(*duration));
+            } else {
+                let timer = self
+                    .reconnect_peers
+                    .get_mut(&peer_id)
+                    .expect("timer available");
+                timer.reset(*duration);
             }
         }
     }
