@@ -45,13 +45,7 @@ pub struct Behaviour {
 
 impl Debug for Behaviour {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Behaviour")
-            .field("connections", &self.connections)
-            .field("peer_addresses", &self.peer_addresses)
-            .field("peer_keepalive", &self.peer_keepalive)
-            .field("can_reconnect", &self.can_reconnect)
-            .field("config", &self.config)
-            .finish()
+        f.debug_struct("Behaviour").finish()
     }
 }
 
