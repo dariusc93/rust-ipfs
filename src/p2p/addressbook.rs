@@ -5,7 +5,7 @@ use futures::StreamExt;
 use futures_timer::Delay;
 use libp2p::core::transport::PortUse;
 use libp2p::swarm::dial_opts::DialOpts;
-use libp2p::swarm::{ConnectionClosed, DialError, DialFailure};
+use libp2p::swarm::{ConnectionClosed, DialError, DialFailure, NewExternalAddrOfPeer};
 use libp2p::{
     core::{ConnectedPoint, Endpoint},
     multiaddr::Protocol,
@@ -305,6 +305,16 @@ impl Behaviour {
             }
         }
     }
+
+    fn on_external_addr_of_peer(
+        &mut self,
+        NewExternalAddrOfPeer { peer_id, addr }: NewExternalAddrOfPeer,
+    ) {
+        self.peer_addresses
+            .entry(peer_id)
+            .or_default()
+            .insert(addr.clone());
+    }
 }
 
 impl NetworkBehaviour for Behaviour {
@@ -369,6 +379,7 @@ impl NetworkBehaviour for Behaviour {
             FromSwarm::ConnectionEstablished(ev) => self.on_connection_established(ev),
             FromSwarm::ConnectionClosed(ev) => self.on_connection_closed(ev),
             FromSwarm::DialFailure(ev) => self.on_dial_failure(ev),
+            FromSwarm::NewExternalAddrOfPeer(ev) => self.on_external_addr_of_peer(ev),
             FromSwarm::ListenFailure(_) => {}
             FromSwarm::NewListener(_) => {}
             FromSwarm::NewListenAddr(_) => {}
