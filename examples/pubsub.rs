@@ -7,11 +7,11 @@ use rust_ipfs::{
     ConnectionEvents, GossipsubMessage, Ipfs, Keypair, PubsubEvent, UninitializedIpfs,
 };
 
+use libp2p::gossipsub::MessageAcceptance;
 use pollable_map::stream::StreamMap;
 use rustyline_async::Readline;
 use std::time::Duration;
 use std::{io::Write, sync::Arc};
-use libp2p::gossipsub::MessageAcceptance;
 use tokio::sync::Notify;
 
 #[derive(Debug, Parser)]
