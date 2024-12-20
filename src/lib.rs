@@ -2880,6 +2880,7 @@ pub struct AddPeerOpt {
     condition: Option<PeerCondition>,
     dial: bool,
     keepalive: bool,
+    reconnect: Option<(Duration, u8)>,
 }
 
 impl AddPeerOpt {
@@ -2890,6 +2891,7 @@ impl AddPeerOpt {
             condition: None,
             dial: false,
             keepalive: false,
+            reconnect: None,
         }
     }
 
@@ -2932,6 +2934,16 @@ impl AddPeerOpt {
         self
     }
 
+    pub fn set_reconnect(mut self, reconnect: impl Into<Option<(Duration, u8)>>) -> Self {
+        self.reconnect = reconnect.into();
+        self
+    }
+
+    pub fn reconnect(mut self, duration: Duration, interval: u8) -> Self {
+        self.reconnect = Some((duration, interval));
+        self
+    }
+
     pub fn keepalive(mut self) -> Self {
         self.keepalive = true;
         self
@@ -2954,6 +2966,10 @@ impl AddPeerOpt {
 
     pub fn can_keep_alive(&self) -> bool {
         self.keepalive
+    }
+
+    pub fn reconnect_opt(&self) -> Option<(Duration, u8)> {
+        self.reconnect
     }
 
     pub fn to_dial_opts(&self) -> Option<DialOpts> {
