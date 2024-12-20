@@ -1,13 +1,11 @@
 mod handler;
 
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    task::{Context, Poll},
-};
-
 use crate::AddPeerOpt;
+use futures::StreamExt;
+use futures_timer::Delay;
 use libp2p::core::transport::PortUse;
-use libp2p::swarm::ConnectionClosed;
+use libp2p::swarm::dial_opts::DialOpts;
+use libp2p::swarm::{ConnectionClosed, DialError, DialFailure, NewExternalAddrOfPeer};
 use libp2p::{
     core::{ConnectedPoint, Endpoint},
     multiaddr::Protocol,
@@ -16,6 +14,13 @@ use libp2p::{
         FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
     },
     Multiaddr, PeerId,
+};
+use pollable_map::futures::FutureMap;
+use std::fmt::Debug;
+use std::time::Duration;
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    task::{Context, Poll},
 };
 
 #[derive(Default, Debug, Copy, Clone)]
@@ -26,13 +31,22 @@ pub struct Config {
     pub keep_connection_alive: bool,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<ConnectionId>>,
     peer_addresses: HashMap<PeerId, HashSet<Multiaddr>>,
     peer_keepalive: HashSet<PeerId>,
+    can_reconnect: HashMap<PeerId, (Duration, u8)>,
+    peer_reconnect_attempts: HashMap<PeerId, u8>,
+    reconnect_peers: FutureMap<PeerId, Delay>,
     config: Config,
+}
+
+impl Debug for Behaviour {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Behaviour").finish()
+    }
 }
 
 impl Behaviour {
@@ -64,6 +78,10 @@ impl Behaviour {
             && self.peer_addresses.contains_key(peer_id)
         {
             self.keep_peer_alive(peer_id);
+        }
+
+        if let Some(opt) = opt.reconnect_opt() {
+            self.can_reconnect.insert(*peer_id, opt);
         }
 
         true
@@ -157,17 +175,17 @@ impl Behaviour {
             .or_default()
             .insert(connection_id);
 
+        self.reconnect_peers.remove(&peer_id);
+
+        if self.config.keep_connection_alive && !self.peer_keepalive.contains(&peer_id) {
+            self.keep_peer_alive(&peer_id);
+        }
+
         if !self.config.store_on_connection {
             return;
         }
 
-        let mut addr = match endpoint {
-            ConnectedPoint::Dialer { address, .. } => address.clone(),
-            ConnectedPoint::Listener { local_addr, .. } if endpoint.is_relayed() => {
-                local_addr.clone()
-            }
-            ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
-        };
+        let mut addr = address_from_connection_point(endpoint);
 
         if matches!(addr.iter().last(), Some(Protocol::P2p(_))) {
             addr.pop();
@@ -190,8 +208,112 @@ impl Behaviour {
             list.remove(&connection_id);
             if list.is_empty() && remaining_established == 0 {
                 entry.remove();
+                if let Some((duration, attempts)) = self.can_reconnect.remove(&peer_id) {
+                    self.reconnect_peers.insert(peer_id, Delay::new(duration));
+                    self.peer_reconnect_attempts.insert(peer_id, attempts);
+                }
             }
         }
+    }
+
+    fn on_address_change(
+        &mut self,
+        AddressChange {
+            peer_id, old, new, ..
+        }: AddressChange,
+    ) {
+        let mut old = address_from_connection_point(old);
+
+        if matches!(old.iter().last(), Some(Protocol::P2p(_))) {
+            old.pop();
+        }
+
+        let mut new = address_from_connection_point(new);
+
+        if matches!(new.iter().last(), Some(Protocol::P2p(_))) {
+            new.pop();
+        }
+
+        if let Entry::Occupied(mut e) = self.peer_addresses.entry(peer_id) {
+            let entry = e.get_mut();
+            entry.insert(new);
+            entry.remove(&old);
+        }
+    }
+
+    fn on_dial_failure(
+        &mut self,
+        DialFailure {
+            peer_id,
+            error,
+            connection_id,
+        }: DialFailure,
+    ) {
+        let Some(peer_id) = peer_id else {
+            return;
+        };
+
+        match error {
+            DialError::LocalPeerId { .. } => {
+                tracing::error!(%peer_id, %connection_id, "local peer id is not allowed to dial");
+                self.reconnect_peers.remove(&peer_id);
+                self.peer_reconnect_attempts.remove(&peer_id);
+                self.peer_keepalive.remove(&peer_id);
+                self.peer_addresses.remove(&peer_id);
+                return;
+            }
+            DialError::NoAddresses => {
+                tracing::error!(%peer_id, %connection_id, "no addresses to dial");
+                self.reconnect_peers.remove(&peer_id);
+                self.peer_reconnect_attempts.remove(&peer_id);
+                return;
+            }
+            DialError::DialPeerConditionFalse(_) => {}
+            DialError::Aborted => {}
+            DialError::WrongPeerId { .. } => {
+                tracing::error!(%peer_id, %connection_id, "wrong peer id");
+                self.reconnect_peers.remove(&peer_id);
+                self.peer_reconnect_attempts.remove(&peer_id);
+                self.peer_keepalive.remove(&peer_id);
+                self.peer_addresses.remove(&peer_id);
+                return;
+            }
+            DialError::Denied { .. } => {}
+            DialError::Transport(_) => {}
+        }
+
+        if let Some((duration, _)) = self.can_reconnect.get(&peer_id) {
+            if let Entry::Occupied(mut entry) = self.peer_reconnect_attempts.entry(peer_id) {
+                let current_attempts = entry.get_mut();
+                if *current_attempts == 0 {
+                    entry.remove();
+                    self.reconnect_peers.remove(&peer_id);
+                    self.peer_reconnect_attempts.remove(&peer_id);
+                    return;
+                }
+                *current_attempts -= 1;
+
+                if !self.reconnect_peers.contains_key(&peer_id) {
+                    self.reconnect_peers.insert(peer_id, Delay::new(*duration));
+                } else {
+                    let timer = self
+                        .reconnect_peers
+                        .get_mut(&peer_id)
+                        .expect("timer available");
+                    timer.reset(*duration);
+                }
+            }
+        }
+    }
+
+    fn on_external_addr_of_peer(
+        &mut self,
+        NewExternalAddrOfPeer { peer_id, addr }: NewExternalAddrOfPeer,
+    ) {
+        self.peer_addresses
+            .entry(peer_id)
+            .or_default()
+            .insert(addr.clone());
     }
 }
 
@@ -253,42 +375,11 @@ impl NetworkBehaviour for Behaviour {
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
-            FromSwarm::AddressChange(AddressChange {
-                peer_id, old, new, ..
-            }) => {
-                let mut old = match old {
-                    ConnectedPoint::Dialer { address, .. } => address.clone(),
-                    ConnectedPoint::Listener { local_addr, .. } if old.is_relayed() => {
-                        local_addr.clone()
-                    }
-                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
-                };
-
-                if matches!(old.iter().last(), Some(Protocol::P2p(_))) {
-                    old.pop();
-                }
-
-                let mut new = match new {
-                    ConnectedPoint::Dialer { address, .. } => address.clone(),
-                    ConnectedPoint::Listener { local_addr, .. } if new.is_relayed() => {
-                        local_addr.clone()
-                    }
-                    ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
-                };
-
-                if matches!(new.iter().last(), Some(Protocol::P2p(_))) {
-                    new.pop();
-                }
-
-                if let Entry::Occupied(mut e) = self.peer_addresses.entry(peer_id) {
-                    let entry = e.get_mut();
-                    entry.insert(new);
-                    entry.remove(&old);
-                }
-            }
+            FromSwarm::AddressChange(ev) => self.on_address_change(ev),
             FromSwarm::ConnectionEstablished(ev) => self.on_connection_established(ev),
             FromSwarm::ConnectionClosed(ev) => self.on_connection_closed(ev),
-            FromSwarm::DialFailure(_) => {}
+            FromSwarm::DialFailure(ev) => self.on_dial_failure(ev),
+            FromSwarm::NewExternalAddrOfPeer(ev) => self.on_external_addr_of_peer(ev),
             FromSwarm::ListenFailure(_) => {}
             FromSwarm::NewListener(_) => {}
             FromSwarm::NewListenAddr(_) => {}
@@ -302,11 +393,27 @@ impl NetworkBehaviour for Behaviour {
         }
     }
 
-    fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
+
+        while let Poll::Ready(Some((peer_id, _))) = self.reconnect_peers.poll_next_unpin(cx) {
+            let opts = DialOpts::peer_id(peer_id).build();
+            self.events.push_back(ToSwarm::Dial { opts });
+        }
+
         Poll::Pending
+    }
+}
+
+fn address_from_connection_point(connection_point: &ConnectedPoint) -> Multiaddr {
+    match connection_point {
+        ConnectedPoint::Dialer { address, .. } => address.clone(),
+        ConnectedPoint::Listener { local_addr, .. } if connection_point.is_relayed() => {
+            local_addr.clone()
+        }
+        ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr.clone(),
     }
 }
 
