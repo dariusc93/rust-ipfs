@@ -397,6 +397,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-rt"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7ec56063c15a7e614415d6daf5fd9ae0a29d6b8c024addd886521843b0bfda2"
+dependencies = [
+ "futures",
+ "parking_lot",
+ "tokio",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "async-signal"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4485,6 +4497,7 @@ name = "rust-ipfs"
 version = "0.14.1"
 dependencies = [
  "anyhow",
+ "async-rt",
  "async-stream",
  "async-trait",
  "asynchronous-codec",

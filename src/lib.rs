@@ -32,7 +32,6 @@ pub mod p2p;
 pub mod path;
 pub mod refs;
 pub mod repo;
-pub(crate) mod rt;
 mod task;
 pub mod unixfs;
 
@@ -66,19 +65,20 @@ use repo::{
     BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
 };
 
-use rt::{AbortableJoinHandle, Executor, ExecutorSwitch};
 use tracing::Span;
 use tracing_futures::Instrument;
 
 use unixfs::UnixfsGet;
 use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsLs};
 
+pub use self::p2p::gossipsub::SubscriptionStream;
 use self::{
     dag::IpldDag,
     ipns::Ipns,
     p2p::{create_swarm, TSwarm},
     repo::Repo,
 };
+use async_rt::AbortableJoinHandle;
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
 use std::borrow::Borrow;
@@ -90,8 +90,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
-pub use self::p2p::gossipsub::SubscriptionStream;
 
 pub use self::{
     error::Error,
@@ -342,7 +340,6 @@ pub struct Ipfs {
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
     _guard: AbortableJoinHandle<()>,
     _gc_guard: AbortableJoinHandle<()>,
-    executor: ExecutorSwitch,
 }
 
 impl std::fmt::Debug for Ipfs {
@@ -916,8 +913,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             ..
         } = self;
 
-        let executor = ExecutorSwitch;
-
         let keys = keys.unwrap_or(Keypair::generate_ed25519());
 
         let root_span = Option::take(&mut options.span)
@@ -999,7 +994,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             record_key_validator,
             _guard,
             _gc_guard,
-            executor,
         };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
@@ -1043,7 +1037,6 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         let swarm = create_swarm(
             &keys,
             &options,
-            executor,
             &ipfs.repo,
             exec_span,
             (custom_behaviour, custom_transport),
@@ -1054,7 +1047,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
         } = options;
 
         let gc_handle = gc_config.map(|config| {
-            executor.spawn_abortable({
+            async_rt::task::spawn_abortable({
                 let repo = ipfs.repo.clone();
                 async move {
                     let GCConfig { duration, trigger } = config;
@@ -1160,7 +1153,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
             }
         }
 
-        ipfs._guard.replace(executor.spawn_abortable({
+        let main_handle = async_rt::task::spawn_abortable({
             async move {
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
@@ -1174,8 +1167,12 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
                 fut.await
             }
             .instrument(swarm_span)
-        }));
-        ipfs._gc_guard.replace(gc_handle);
+        });
+
+        unsafe {
+            ipfs._guard.replace(main_handle);
+            ipfs._gc_guard.replace(gc_handle);
+        }
         Ok(ipfs)
     }
 }
@@ -2547,7 +2544,7 @@ impl Ipfs {
         self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
         let fut = rx.await??;
 
-        self.executor.dispatch(async move {
+        async_rt::task::dispatch(async move {
             if let Err(e) = fut.await.map_err(|e| anyhow!(e)) {
                 tracing::error!(error = %e, "failed to bootstrap");
             }

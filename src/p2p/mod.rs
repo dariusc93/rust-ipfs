@@ -1,7 +1,6 @@
 //! P2P handling for IPFS nodes.
 use crate::error::Error;
 use crate::repo::Repo;
-use crate::rt::{Executor, ExecutorSwitch};
 use crate::{IpfsOptions, TTransportFn};
 use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
@@ -227,7 +226,6 @@ impl Default for SwarmConfig {
 pub(crate) fn create_swarm<C>(
     keypair: &Keypair,
     options: &IpfsOptions,
-    executor: ExecutorSwitch,
     repo: &Repo,
     span: Span,
     (custom, custom_transport): (Option<C>, Option<TTransportFn>),
@@ -256,7 +254,7 @@ where
         transport,
         behaviour,
         peer_id,
-        libp2p::swarm::Config::with_executor(SpannedExecutor { executor, span })
+        libp2p::swarm::Config::with_executor(SpannedExecutor { span })
             .with_notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
             .with_per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
             .with_dial_concurrency_factor(swarm_config.dial_concurrency_factor)
@@ -268,7 +266,6 @@ where
 }
 
 struct SpannedExecutor {
-    executor: ExecutorSwitch,
     span: Span,
 }
 
@@ -278,6 +275,6 @@ impl libp2p::swarm::Executor for SpannedExecutor {
         future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static + Send>>,
     ) {
         use tracing_futures::Instrument;
-        self.executor.dispatch(future.instrument(self.span.clone()));
+        async_rt::task::dispatch(future.instrument(self.span.clone()));
     }
 }
