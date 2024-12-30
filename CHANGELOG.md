@@ -1,5 +1,6 @@
 # 0.14.2
 - feat: Add reconnect option to address book. [PR 356](https://github.com/dariusc93/rust-ipfs/pull/356)
+- chore: use async-rt in place of rt utils. [PR 362](https://github.com/dariusc93/rust-ipfs/pull/362)
 
 # 0.14.1
 - fix: remove expect when session failed to get next block.
