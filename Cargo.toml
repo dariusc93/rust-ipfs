@@ -20,7 +20,7 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-anyhow = "1.0.94"
+anyhow = "1.0.95"
 async-rt = "0.1.2"
 async-stream = { version = "0.3.6" }
 async-trait = { version = "0.1.82" }
