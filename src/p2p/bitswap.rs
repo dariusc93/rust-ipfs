@@ -1,3 +1,4 @@
+mod handler;
 mod message;
 mod pb;
 mod prefix;
@@ -39,7 +40,7 @@ use crate::{repo::Repo, Block};
 
 use self::{
     message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType},
-    protocol::{BitswapProtocol, Message},
+    protocol::BitswapProtocol,
     sessions::{HaveSession, HaveSessionEvent, WantSession, WantSessionEvent},
 };
 
@@ -300,7 +301,8 @@ impl Behaviour {
 }
 
 impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = OneShotHandler<BitswapProtocol, BitswapMessage, Message>;
+    type ConnectionHandler = handler::Handler;
+    //OneShotHandler<BitswapProtocol, BitswapMessage, Message>;
     type ToSwarm = Event;
 
     fn handle_pending_inbound_connection(
@@ -329,7 +331,7 @@ impl NetworkBehaviour for Behaviour {
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::default())
+        Ok(handler::Handler::new())
     }
 
     fn handle_established_outbound_connection(
@@ -340,7 +342,7 @@ impl NetworkBehaviour for Behaviour {
         _: Endpoint,
         _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::default())
+        Ok(handler::Handler::new())
     }
 
     fn on_connection_handler_event(
@@ -349,33 +351,38 @@ impl NetworkBehaviour for Behaviour {
         connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
-        let message = match event {
-            Ok(Message::Receive { message }) => {
-                tracing::trace!(%peer_id, %connection_id, "message received");
-                if let Entry::Occupied(mut e) = self.blacklist_connections.entry(peer_id) {
-                    let list = e.get_mut();
-                    list.remove(&connection_id);
-                    if list.is_empty() {
-                        e.remove();
-                    }
-                }
+        // let message = match event {
+        //     Ok(Message::Receive { message }) => {
+        //         tracing::trace!(%peer_id, %connection_id, "message received");
+        //         if let Entry::Occupied(mut e) = self.blacklist_connections.entry(peer_id) {
+        //             let list = e.get_mut();
+        //             list.remove(&connection_id);
+        //             if list.is_empty() {
+        //                 e.remove();
+        //             }
+        //         }
+        //
+        //         message
+        //     }
+        //     Ok(Message::Sent) => {
+        //         tracing::trace!(%peer_id, %connection_id, "message sent");
+        //         return;
+        //     }
+        //     Err(e) => {
+        //         tracing::error!(%peer_id, %connection_id, error = %e, "error sending or receiving message");
+        //         //TODO: Depending on the underlining error, maybe blacklist the peer from further sending/receiving
+        //         //      until a valid response or request is produced?
+        //         self.blacklist_connections
+        //             .entry(peer_id)
+        //             .or_default()
+        //             .insert(connection_id);
+        //         return;
+        //     }
+        // };
 
-                message
-            }
-            Ok(Message::Sent) => {
-                tracing::trace!(%peer_id, %connection_id, "message sent");
-                return;
-            }
-            Err(e) => {
-                tracing::error!(%peer_id, %connection_id, error = %e, "error sending or receiving message");
-                //TODO: Depending on the underlining error, maybe blacklist the peer from further sending/receiving
-                //      until a valid response or request is produced?
-                self.blacklist_connections
-                    .entry(peer_id)
-                    .or_default()
-                    .insert(connection_id);
-                return;
-            }
+        let message = match event {
+            handler::Out::Received { message } => message,
+            _ => unreachable!(),
         };
 
         if message.is_empty() {
@@ -477,24 +484,30 @@ impl NetworkBehaviour for Behaviour {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_response(cid, BitswapResponse::Have(true)),
+                        event: handler::In::Send {
+                            message: BitswapMessage::default()
+                                .add_response(cid, BitswapResponse::Have(true)),
+                        },
                     });
                 }
                 HaveSessionEvent::DontHave { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_response(cid, BitswapResponse::Have(false)),
+                        event: handler::In::Send {
+                            message: BitswapMessage::default()
+                                .add_response(cid, BitswapResponse::Have(false)),
+                        },
                     })
                 }
                 HaveSessionEvent::Block { peer_id, bytes } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_response(cid, BitswapResponse::Block(bytes)),
+                        event: handler::In::Send {
+                            message: BitswapMessage::default()
+                                .add_response(cid, BitswapResponse::Block(bytes)),
+                        },
                     })
                 }
                 HaveSessionEvent::Cancelled => {
@@ -510,15 +523,20 @@ impl NetworkBehaviour for Behaviour {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_request(BitswapRequest::have(cid).send_dont_have(true)),
+                        event: handler::In::Send {
+                            message: BitswapMessage::default()
+                                .add_request(BitswapRequest::have(cid).send_dont_have(true)),
+                        },
                     });
                 }
                 WantSessionEvent::SendCancel { peer_id } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
-                        event: BitswapMessage::default().add_request(BitswapRequest::cancel(cid)),
+                        event: handler::In::Send {
+                            message: BitswapMessage::default()
+                                .add_request(BitswapRequest::cancel(cid)),
+                        },
                     });
                 }
                 WantSessionEvent::SendBlock { peer_id } => {
@@ -527,8 +545,10 @@ impl NetworkBehaviour for Behaviour {
                     return Poll::Ready(ToSwarm::NotifyHandler {
                         peer_id,
                         handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_request(BitswapRequest::block(cid).send_dont_have(true)),
+                        event: handler::In::Send {
+                            message: BitswapMessage::default()
+                                .add_request(BitswapRequest::block(cid).send_dont_have(true)),
+                        },
                     });
                 }
                 WantSessionEvent::NeedBlock => {
@@ -580,6 +600,7 @@ mod test {
 
     #[tokio::test]
     async fn exchange_blocks() -> anyhow::Result<()> {
+        tracing_subscriber::fmt::init();
         let (_, _, mut swarm1, repo) = build_swarm().await;
         let (peer2, addr2, mut swarm2, repo2) = build_swarm().await;
 
