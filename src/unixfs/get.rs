@@ -150,57 +150,65 @@ impl Stream for UnixfsGet {
                         let mut walker = Walker::new(*cid, root_name);
 
                         while walker.should_continue() {
-                            let (next, _) = walker.pending_links();
-                            let block = match repo.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await {
-                                Ok(block) => block,
-                                Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e };
-                                    return;
-                                }
-                            };
-                            let block_data = block.data();
+                            let (next, pending) = walker.pending_links();
 
-                            match walker.next(block_data, &mut cache) {
-                                Ok(ContinuedWalk::Bucket(..)) => {}
-                                Ok(ContinuedWalk::File(segment, _, _, _, size)) => {
+                            let list = std::iter::once(next).chain(pending);
 
-                                    if segment.is_first() {
-                                        total_size = Some(size as usize);
+                            let mut blocks = repo.get_blocks(list).providers(&providers).set_local(local_only).timeout(timeout);
+
+                            while let Some(result) = blocks.next().await {
+                                let block = match result {
+                                    Ok(block) => block,
+                                    Err(e) => {
+                                        yield UnixfsStatus::FailedStatus { written, total_size, error: e };
+                                        return;
+                                    }
+                                };
+
+                                let block_data = block.data();
+
+                                match walker.next(block_data, &mut cache) {
+                                    Ok(ContinuedWalk::Bucket(..)) => {}
+                                    Ok(ContinuedWalk::File(segment, _, _, _, size)) => {
+
+                                        if segment.is_first() {
+                                            total_size = Some(size as usize);
+                                            yield UnixfsStatus::ProgressStatus { written, total_size };
+                                        }
+                                        // even if the largest of files can have 256 kB blocks and about the same
+                                        // amount of content, try to consume it in small parts not to grow the buffers
+                                        // too much.
+
+                                        let mut n = 0usize;
+                                        let slice = segment.as_ref();
+                                        let total = slice.len();
+
+                                        while n < total {
+                                            let next = &slice[n..];
+                                            n += next.len();
+                                            if let Err(e) = file.write_all(next).await {
+                                                yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
+                                                return;
+                                            }
+                                            if let Err(e) = file.sync_all().await {
+                                                yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
+                                                return;
+                                            }
+
+                                            written += n;
+                                        }
+
                                         yield UnixfsStatus::ProgressStatus { written, total_size };
+
+                                    },
+                                    Ok(ContinuedWalk::Directory( .. )) | Ok(ContinuedWalk::RootDirectory( .. )) => {}, //TODO
+                                    Ok(ContinuedWalk::Symlink( .. )) => {},
+                                    Err(e) => {
+                                        yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
+                                        return;
                                     }
-                                    // even if the largest of files can have 256 kB blocks and about the same
-                                    // amount of content, try to consume it in small parts not to grow the buffers
-                                    // too much.
-
-                                    let mut n = 0usize;
-                                    let slice = segment.as_ref();
-                                    let total = slice.len();
-
-                                    while n < total {
-                                        let next = &slice[n..];
-                                        n += next.len();
-                                        if let Err(e) = file.write_all(next).await {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
-                                            return;
-                                        }
-                                        if let Err(e) = file.sync_all().await {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
-                                            return;
-                                        }
-
-                                        written += n;
-                                    }
-
-                                    yield UnixfsStatus::ProgressStatus { written, total_size };
-
-                                },
-                                Ok(ContinuedWalk::Directory( .. )) | Ok(ContinuedWalk::RootDirectory( .. )) => {}, //TODO
-                                Ok(ContinuedWalk::Symlink( .. )) => {},
-                                Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
-                                    return;
-                                }
-                            };
+                                };
+                            }
                         };
 
                         yield UnixfsStatus::CompletedStatus { path, written, total_size }
