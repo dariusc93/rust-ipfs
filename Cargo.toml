@@ -23,7 +23,7 @@ test_js_interop = []
 anyhow = "1.0.95"
 async-rt = "0.1.2"
 async-stream = { version = "0.3.6" }
-async-trait = { version = "0.1.82" }
+async-trait = { version = "0.1.84" }
 asynchronous-codec = "0.7.0"
 base64 = { default-features = false, features = ["alloc"], version = "0.22.1" }
 byteorder = { version = "1.5.0" }
