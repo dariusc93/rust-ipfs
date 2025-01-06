@@ -4611,12 +4611,11 @@ dependencies = [
 
 [[package]]
 name = "rustyline-async"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b8a29112291cda41f18306ed8919c49360e5273328162445ca250aae37c8f89"
+checksum = "6fa3f78c2ea57b827be4c11adbfed26e5fe1b49fb6fb7826e2a9eebbc2e8db10"
 dependencies = [
  "crossterm",
- "futures-channel",
  "futures-util",
  "pin-project",
  "thingbuf",
