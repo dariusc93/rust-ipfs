@@ -369,9 +369,9 @@ dependencies = [
 
 [[package]]
 name = "async-rt"
-version = "0.1.2"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7ec56063c15a7e614415d6daf5fd9ae0a29d6b8c024addd886521843b0bfda2"
+checksum = "0d018649f3650c4901efcf689d7dc4934302a6723f15c675f344cd359e3ed498"
 dependencies = [
  "futures",
  "parking_lot",
@@ -469,9 +469,9 @@ checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
-version = "0.1.83"
+version = "0.1.84"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "721cae7de5c34fbb2acd27e21e6d2cf7b886dce0c27388d46c4e6c47ea4318dd"
+checksum = "1b1244b10dcd56c92219da4e14caa97e312079e185f04ba3eea25061561dc0a0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3893,9 +3893,9 @@ dependencies = [
 
 [[package]]
 name = "pollable-map"
-version = "0.1.0-alpha.1"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "725f80d816cdea0b38b748783af2e978e42174c506c7e4ae19ede0d937032c60"
+checksum = "5bef5bf6d654e4ad48848bc97f0c331378361a8d9673a7b8a8f54b0a26a133ae"
 dependencies = [
  "futures",
 ]
@@ -4611,12 +4611,11 @@ dependencies = [
 
 [[package]]
 name = "rustyline-async"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b8a29112291cda41f18306ed8919c49360e5273328162445ca250aae37c8f89"
+checksum = "6fa3f78c2ea57b827be4c11adbfed26e5fe1b49fb6fb7826e2a9eebbc2e8db10"
 dependencies = [
  "crossterm",
- "futures-channel",
  "futures-util",
  "pin-project",
  "thingbuf",
@@ -5203,12 +5202,13 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.14.0"
+version = "3.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28cce251fcbc87fac86a866eeb0d6c2d536fc16d06f184bb61aeae11aa4cee0c"
+checksum = "9a8a559c81686f576e8cd0290cd2a24a2a9ad80c98b3478856500fcbd7acd704"
 dependencies = [
  "cfg-if",
  "fastrand",
+ "getrandom 0.2.15",
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",

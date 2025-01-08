@@ -21,9 +21,9 @@ test_js_interop = []
 
 [workspace.dependencies]
 anyhow = "1.0.95"
-async-rt = "0.1.2"
+async-rt = "0.1.5"
 async-stream = { version = "0.3.6" }
-async-trait = { version = "0.1.82" }
+async-trait = { version = "0.1.84" }
 asynchronous-codec = "0.7.0"
 base64 = { default-features = false, features = ["alloc"], version = "0.22.1" }
 byteorder = { version = "1.5.0" }
@@ -57,7 +57,7 @@ multihash-derive = "0.9.0"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "std", "pem"] }
 parking_lot = "0.12.3"
 pem = { version = "3.0.4" }
-pollable-map = "0.1.0-alpha.1"
+pollable-map = "0.1.0"
 quick-protobuf = { version = "0.8.1" }
 quick-protobuf-codec = "0.3.1"
 rand = "0.8.5"
@@ -185,7 +185,7 @@ rand = { default-features = false, version = "0.8", features = [
     "std",
     "std_rng",
 ] }
-tempfile = "3.14.0"
+tempfile = "3.15.0"
 
 clap = { workspace = true }
 
