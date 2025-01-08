@@ -17,12 +17,12 @@ use libp2p::{
 };
 use pollable_map::futures::FutureMap;
 use std::fmt::Debug;
+use std::task::Waker;
 use std::time::Duration;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
-use std::task::Waker;
 
 #[derive(Default, Debug, Copy, Clone)]
 pub struct Config {
@@ -83,13 +83,14 @@ impl Behaviour {
         }
 
         if let Some((duration, attempts)) = opt.reconnect_opt() {
-            self.can_reconnect.insert(*peer_id, (duration, attempts, false));
+            self.can_reconnect
+                .insert(*peer_id, (duration, attempts, false));
         }
-        
+
         if let Some(waker) = self.waker.take() {
             waker.wake();
         }
-        
+
         true
     }
 
@@ -189,12 +190,12 @@ impl Behaviour {
 
         self.reconnect_peers.remove(&peer_id);
         self.peer_reconnect_attempts.remove(&peer_id);
-        
+
         if let Entry::Occupied(mut e) = self.can_reconnect.entry(peer_id) {
             let (_, _, backoff) = e.get_mut();
             *backoff = false;
         }
-        
+
         if self.config.keep_connection_alive && !self.peer_keepalive.contains(&peer_id) {
             self.keep_peer_alive(&peer_id);
         }
@@ -316,15 +317,15 @@ impl Behaviour {
                 tracing::debug!(%peer_id, current_attempts, max_attempts = attempts, "unable to reconnect. backing off on attempts at reconnection");
                 return;
             }
-            
+
             if *backoff {
                 return;
             }
-            
+
             *current_attempts += 1;
 
             tracing::info!(%peer_id, next_attempt = *current_attempts, max_attempts = attempts, "attempting reconnection to peer");
-            
+
             // We perform this check because entry may have been ejected from `FutureMap` at some point after its task was completed.
             // In which case, we would check to determine if the entry exist and if so, reset the delay, otherwise insert a new one
 
