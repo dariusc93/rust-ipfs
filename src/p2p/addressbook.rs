@@ -23,6 +23,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
+use std::convert::Infallible;
 
 #[derive(Default, Debug, Copy, Clone)]
 pub struct Config {
@@ -358,7 +359,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = handler::Handler;
-    type ToSwarm = void::Void;
+    type ToSwarm = Infallible;
 
     fn handle_pending_outbound_connection(
         &mut self,

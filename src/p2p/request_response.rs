@@ -286,6 +286,7 @@ impl NetworkBehaviour for Behaviour {
         while let Poll::Ready(event) = self.rr_behaviour.poll(cx) {
             match event {
                 ToSwarm::GenerateEvent(request_response::Event::Message {
+                    connection_id: _,
                     peer: peer_id,
                     message,
                 }) => match message {
@@ -301,13 +302,15 @@ impl NetworkBehaviour for Behaviour {
                         self.process_request(request_id, peer_id, request, channel);
                     }
                 },
-                ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
+                ToSwarm::GenerateEvent(request_response::Event::ResponseSent { 
+                    connection_id: _,
                     peer: peer_id,
                     request_id,
                 }) => {
                     tracing::trace!(%peer_id, %request_id, "response sent");
                 }
                 ToSwarm::GenerateEvent(request_response::Event::OutboundFailure {
+                    connection_id: _,
                     peer,
                     request_id,
                     error,
@@ -316,6 +319,7 @@ impl NetworkBehaviour for Behaviour {
                     self.process_outbound_failure(request_id, peer, error);
                 }
                 ToSwarm::GenerateEvent(request_response::Event::InboundFailure {
+                    connection_id: _,
                     peer,
                     request_id,
                     error,

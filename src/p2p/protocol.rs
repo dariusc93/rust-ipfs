@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     task::{Context, Poll},
 };
-
+use std::convert::Infallible;
 use libp2p::core::transport::PortUse;
 use libp2p::{
     core::Endpoint,
@@ -29,7 +29,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = handler::Handler;
-    type ToSwarm = void::Void;
+    type ToSwarm = Infallible;
 
     fn handle_pending_inbound_connection(
         &mut self,

@@ -40,7 +40,7 @@ mod ext_behaviour {
         collections::HashSet,
         task::{Context, Poll},
     };
-
+    use std::convert::Infallible;
     use libp2p::swarm::derive_prelude::PortUse;
     use libp2p::{
         core::Endpoint,
@@ -68,7 +68,7 @@ mod ext_behaviour {
 
     impl NetworkBehaviour for Behaviour {
         type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
-        type ToSwarm = void::Void;
+        type ToSwarm = Infallible;
 
         fn handle_pending_inbound_connection(
             &mut self,
