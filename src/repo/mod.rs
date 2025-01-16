@@ -69,10 +69,6 @@ pub enum BlockRmError {
 pub trait BlockStore: Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
 
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
     /// Returns whether a block is present in the blockstore.
     async fn contains(&self, cid: &Cid) -> Result<bool, Error>;
     /// Returns a block from the blockstore.
@@ -95,10 +91,7 @@ pub trait BlockStore: Debug + Send + Sync {
 /// Generic layer of abstraction for a key-value data store.
 pub trait DataStore: PinStore + Debug + Send + Sync {
     async fn init(&self) -> Result<(), Error>;
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
+
     /// Checks if a key is present in the datastore.
     async fn contains(&self, key: &[u8]) -> Result<bool, Error>;
     /// Returns the value associated with a key from the datastore.
