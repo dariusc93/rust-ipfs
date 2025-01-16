@@ -18,7 +18,6 @@ quick-protobuf.workspace = true
 cid.workspace = true
 serde = { workspace = true, features = ["derive"] }
 multihash.workspace = true
-sha2.workspace = true
 chrono.workspace = true
 
 libp2p-identity = { version = "0.2.10", optional = true, features = [

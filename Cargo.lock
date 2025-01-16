@@ -2941,9 +2941,7 @@ dependencies = [
  "futures-timer",
  "getrandom 0.2.15",
  "libp2p",
- "log",
  "rand 0.8.5",
- "thiserror 2.0.11",
  "tokio",
  "void",
 ]
@@ -4418,7 +4416,6 @@ dependencies = [
  "async-trait",
  "asynchronous-codec",
  "base64 0.22.1",
- "byteorder",
  "bytes",
  "chrono",
  "clap",
@@ -4499,7 +4496,6 @@ dependencies = [
  "multihash",
  "quick-protobuf",
  "serde",
- "sha2 0.10.8",
 ]
 
 [[package]]
