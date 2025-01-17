@@ -165,7 +165,6 @@ tokio = { default-features = false, features = ["sync", "macros"], workspace = t
 tokio-stream = { workspace = true, default-features = false }
 tokio-util = { workspace = true, default-features = false }
 wasm-bindgen-futures.workspace = true
-instant = { version = "0.1.13", features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 criterion = { default-features = false, version = "0.5" }
