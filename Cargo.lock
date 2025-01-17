@@ -4406,7 +4406,6 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "criterion",
  "either",
  "fs2",
  "futures",
