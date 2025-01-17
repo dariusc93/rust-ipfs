@@ -36,11 +36,6 @@ async fn main() -> anyhow::Result<()> {
 }
 
 mod ext_behaviour {
-    use std::{
-        collections::HashSet,
-        task::{Context, Poll},
-    };
-    use std::convert::Infallible;
     use libp2p::swarm::derive_prelude::PortUse;
     use libp2p::{
         core::Endpoint,
@@ -51,6 +46,11 @@ mod ext_behaviour {
         Multiaddr, PeerId,
     };
     use rust_ipfs::NetworkBehaviour;
+    use std::convert::Infallible;
+    use std::{
+        collections::HashSet,
+        task::{Context, Poll},
+    };
 
     #[derive(Default, Debug)]
     pub struct Behaviour {

@@ -302,7 +302,7 @@ impl NetworkBehaviour for Behaviour {
                         self.process_request(request_id, peer_id, request, channel);
                     }
                 },
-                ToSwarm::GenerateEvent(request_response::Event::ResponseSent { 
+                ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
                     connection_id: _,
                     peer: peer_id,
                     request_id,

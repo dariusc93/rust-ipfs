@@ -54,19 +54,14 @@ impl ConnectionHandler for Handler {
 
     fn on_connection_event(
         &mut self,
-        _: ConnectionEvent<
-            Self::InboundProtocol,
-            Self::OutboundProtocol
-        >,
+        _: ConnectionEvent<Self::InboundProtocol, Self::OutboundProtocol>,
     ) {
     }
 
     fn poll(
         &mut self,
         _: &mut Context<'_>,
-    ) -> Poll<
-        ConnectionHandlerEvent<Self::OutboundProtocol, (), Self::ToBehaviour>,
-    > {
+    ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, (), Self::ToBehaviour>> {
         Poll::Pending
     }
 }

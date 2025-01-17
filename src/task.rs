@@ -12,17 +12,17 @@ use futures::{
 use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
+use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
+use futures_timer::Delay;
+use ipld_core::cid::Cid;
+use std::convert::Infallible;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     time::Duration,
 };
-use std::convert::Infallible;
-use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
-use futures_timer::Delay;
-use ipld_core::cid::Cid;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use crate::{
     p2p::TSwarm,

@@ -16,6 +16,7 @@ use libp2p::{
     Multiaddr, PeerId,
 };
 use pollable_map::futures::FutureMap;
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::task::Waker;
 use std::time::Duration;
@@ -23,7 +24,6 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
-use std::convert::Infallible;
 
 #[derive(Default, Debug, Copy, Clone)]
 pub struct Config {

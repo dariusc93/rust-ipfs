@@ -78,10 +78,18 @@ use self::{
     p2p::{create_swarm, TSwarm},
     repo::Repo,
 };
+pub use self::{
+    error::Error,
+    p2p::BehaviourEvent,
+    p2p::KadResult,
+    path::IpfsPath,
+    repo::{PinKind, PinMode},
+};
 use async_rt::AbortableJoinHandle;
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
 use std::borrow::Borrow;
+use std::convert::Infallible;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
@@ -89,14 +97,6 @@ use std::{
     path::Path,
     sync::Arc,
     time::Duration,
-};
-use std::convert::Infallible;
-pub use self::{
-    error::Error,
-    p2p::BehaviourEvent,
-    p2p::KadResult,
-    path::IpfsPath,
-    repo::{PinKind, PinMode},
 };
 
 pub use libp2p::{

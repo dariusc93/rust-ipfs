@@ -73,7 +73,8 @@ async fn main() -> anyhow::Result<()> {
         .with_behaviour(|kp, relay_client| Behaviour {
             ping: Ping::new(Default::default()),
             identify: Identify::new({
-                identify::Config::new("/test/0.1.0".to_string(), kp.public()).with_push_listen_addr_updates(true)
+                identify::Config::new("/test/0.1.0".to_string(), kp.public())
+                    .with_push_listen_addr_updates(true)
             }),
             relay_client,
             relay_manager: libp2p_relay_manager::Behaviour::default(),

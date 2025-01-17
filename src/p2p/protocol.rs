@@ -1,8 +1,3 @@
-use std::{
-    collections::VecDeque,
-    task::{Context, Poll},
-};
-use std::convert::Infallible;
 use libp2p::core::transport::PortUse;
 use libp2p::{
     core::Endpoint,
@@ -11,6 +6,11 @@ use libp2p::{
         THandlerInEvent, ToSwarm,
     },
     Multiaddr, PeerId, StreamProtocol,
+};
+use std::convert::Infallible;
+use std::{
+    collections::VecDeque,
+    task::{Context, Poll},
 };
 
 mod handler;
