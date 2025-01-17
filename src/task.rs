@@ -12,17 +12,17 @@ use futures::{
 use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
+use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
+use futures_timer::Delay;
+use ipld_core::cid::Cid;
+use std::convert::Infallible;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     time::Duration,
 };
-
-use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
-use futures_timer::Delay;
-use ipld_core::cid::Cid;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use crate::{
     p2p::TSwarm,
@@ -56,7 +56,7 @@ use tokio::sync::Notify;
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
-pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
+pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
     pub swarm: TSwarm<C>,
     pub repo_events: Fuse<Receiver<RepoEvent>>,
     pub from_facade: Fuse<Receiver<IpfsEvent>>,
@@ -90,7 +90,7 @@ pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = void::Void>> {
     pub event_capacity: usize,
 }
 
-impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
     pub fn new(
         swarm: TSwarm<C>,
         repo_events: Fuse<Receiver<RepoEvent>>,
@@ -141,7 +141,7 @@ impl Default for TaskTimer {
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible>> futures::Future for IpfsTask<C> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -181,7 +181,7 @@ impl<C: NetworkBehaviour<ToSwarm = void::Void>> futures::Future for IpfsTask<C> 
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = void::Void>> IpfsTask<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
     pub async fn run(&mut self) {
         let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
 

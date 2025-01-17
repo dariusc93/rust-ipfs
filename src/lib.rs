@@ -78,10 +78,18 @@ use self::{
     p2p::{create_swarm, TSwarm},
     repo::Repo,
 };
+pub use self::{
+    error::Error,
+    p2p::BehaviourEvent,
+    p2p::KadResult,
+    path::IpfsPath,
+    repo::{PinKind, PinMode},
+};
 use async_rt::AbortableJoinHandle;
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
 use std::borrow::Borrow;
+use std::convert::Infallible;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
@@ -89,14 +97,6 @@ use std::{
     path::Path,
     sync::Arc,
     time::Duration,
-};
-
-pub use self::{
-    error::Error,
-    p2p::BehaviourEvent,
-    p2p::KadResult,
-    path::IpfsPath,
-    repo::{PinKind, PinMode},
 };
 
 pub use libp2p::{
@@ -553,7 +553,7 @@ pub enum ConnectionEvents {
 
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
-pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
+pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send> {
     keys: Option<Keypair>,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
@@ -570,13 +570,13 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = void::Void> + Send> {
 
 pub type UninitializedIpfsDefault = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
 
-impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> Default for UninitializedIpfs<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> Default for UninitializedIpfs<C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = void::Void> + Send> UninitializedIpfs<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     /// New uninitualized instance
     pub fn new() -> Self {
         UninitializedIpfs {

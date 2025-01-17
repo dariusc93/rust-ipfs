@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::task::{Context, Poll};
 
 use libp2p::{
@@ -6,7 +7,6 @@ use libp2p::{
         handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
     },
 };
-use void::Void;
 
 #[derive(Default, Debug)]
 pub struct Handler {
@@ -27,13 +27,13 @@ pub enum In {
 
 impl ConnectionHandler for Handler {
     type FromBehaviour = In;
-    type ToBehaviour = Void;
+    type ToBehaviour = Infallible;
     type InboundProtocol = DeniedUpgrade;
     type OutboundProtocol = DeniedUpgrade;
     type InboundOpenInfo = ();
-    type OutboundOpenInfo = Void;
+    type OutboundOpenInfo = ();
 
-    fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
+    fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol> {
         SubstreamProtocol::new(DeniedUpgrade, ())
     }
 
@@ -54,21 +54,14 @@ impl ConnectionHandler for Handler {
 
     fn on_connection_event(
         &mut self,
-        _: ConnectionEvent<
-            Self::InboundProtocol,
-            Self::OutboundProtocol,
-            Self::InboundOpenInfo,
-            Self::OutboundOpenInfo,
-        >,
+        _: ConnectionEvent<Self::InboundProtocol, Self::OutboundProtocol>,
     ) {
     }
 
     fn poll(
         &mut self,
         _: &mut Context<'_>,
-    ) -> Poll<
-        ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
-    > {
+    ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, (), Self::ToBehaviour>> {
         Poll::Pending
     }
 }

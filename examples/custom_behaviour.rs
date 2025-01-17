@@ -21,6 +21,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 mod ext_behaviour {
+    use std::convert::Infallible;
     use std::task::{Context, Poll};
 
     use libp2p::swarm::derive_prelude::PortUse;
@@ -39,7 +40,7 @@ mod ext_behaviour {
 
     impl NetworkBehaviour for Behaviour {
         type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
-        type ToSwarm = void::Void;
+        type ToSwarm = Infallible;
 
         fn handle_pending_inbound_connection(
             &mut self,

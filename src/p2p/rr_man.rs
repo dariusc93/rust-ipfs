@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::task::{Context, Poll};
 
 use indexmap::IndexMap;
@@ -5,7 +6,6 @@ use libp2p::{
     swarm::{dummy, NetworkBehaviour, THandlerInEvent, ToSwarm},
     StreamProtocol,
 };
-use void::Void;
 
 #[derive(Debug)]
 pub struct Behaviour {
@@ -25,7 +25,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = dummy::ConnectionHandler;
-    type ToSwarm = Void;
+    type ToSwarm = Infallible;
 
     fn handle_pending_inbound_connection(
         &mut self,
