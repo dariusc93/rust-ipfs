@@ -2931,7 +2931,6 @@ dependencies = [
  "libp2p",
  "rand 0.8.5",
  "tokio",
- "void",
 ]
 
 [[package]]
@@ -4463,7 +4462,6 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "unsigned-varint 0.8.0",
- "void",
  "wasm-bindgen-futures",
  "web-time",
  "zeroize",
@@ -5667,12 +5665,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "void"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "waitgroup"

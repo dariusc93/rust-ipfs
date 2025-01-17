@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::task::{Context, Poll};
 
 use libp2p::{
@@ -6,7 +7,6 @@ use libp2p::{
         handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
     },
 };
-use void::Void;
 
 #[derive(Default, Debug)]
 pub struct Handler {
@@ -27,7 +27,7 @@ pub enum In {
 
 impl ConnectionHandler for Handler {
     type FromBehaviour = In;
-    type ToBehaviour = Void;
+    type ToBehaviour = Infallible;
     type InboundProtocol = DeniedUpgrade;
     type OutboundProtocol = DeniedUpgrade;
     type InboundOpenInfo = ();

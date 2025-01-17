@@ -86,7 +86,6 @@ tokio = { default-features = false, version = "1.43.0" }
 tokio-stream = { default-features = false, version = "0.1.17" }
 tokio-util = { default-features = false, version = "0.7.13" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
-void = { default-features = false, version = "1.0.2" }
 wasm-bindgen-futures = { version = "0.4.50" }
 web-time = "1.1.0"
 zeroize = "1.8.1"
@@ -136,7 +135,6 @@ thiserror = { default-features = false, workspace = true }
 tracing = { default-features = false, features = ["log"], workspace = true }
 tracing-futures = { workspace = true }
 unsigned-varint.workspace = true
-void = { default-features = false, workspace = true }
 web-time.workspace = true
 zeroize.workspace = true
 

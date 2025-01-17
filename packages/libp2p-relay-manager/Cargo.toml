@@ -17,7 +17,6 @@ libp2p = { workspace = true, features = ["relay"] }
 anyhow = "1.0"
 futures = "0.3"
 
-void = "1.0"
 rand = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

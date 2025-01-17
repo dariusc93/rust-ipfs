@@ -209,7 +209,7 @@ impl Behaviour {
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler =
         <request_response::Behaviour<Codec> as NetworkBehaviour>::ConnectionHandler;
-    type ToSwarm = void::Void;
+    type ToSwarm = ();
 
     fn handle_pending_inbound_connection(
         &mut self,
