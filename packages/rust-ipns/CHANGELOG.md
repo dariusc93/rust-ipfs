@@ -1,3 +1,6 @@
+# 0.7.0
+- chore: update to libp2p 0.55.0. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.6.0
 - chore: Promote `multiaddr` and `cid` to workspace dependency.
 - chore: Update libp2p to 0.54. [PR 289](https://github.com/dariusc93/rust-ipfs/pull/289)
