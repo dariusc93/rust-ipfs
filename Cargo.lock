@@ -2920,7 +2920,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-relay-manager"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4395,7 +4395,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ipfs"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "async-rt",
@@ -4468,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "rust-ipns"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "cbor4ii 0.3.3",
  "chrono",
