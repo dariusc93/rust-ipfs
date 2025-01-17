@@ -14,7 +14,7 @@ default = []
 
 experimental_stream = ["dep:libp2p-stream"]
 
-webrtc_transport = ["dep:libp2p-webrtc", "dep:libp2p-webrtc-websys"]
+webrtc_transport = ["dep:libp2p-webrtc"]
 
 test_go_interop = []
 test_js_interop = []
@@ -156,7 +156,7 @@ futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
 libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "noise", "ping", "yamux", "dns", "ed25519", "secp256k1", "ecdsa", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }
-libp2p-webrtc-websys = { workspace = true, optional = true }
+libp2p-webrtc-websys = { workspace = true }
 send_wrapper.workspace = true
 serde-wasm-bindgen.workspace = true
 tokio = { default-features = false, features = ["sync", "macros"], workspace = true }
