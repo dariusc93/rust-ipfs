@@ -1,6 +1,6 @@
 [package]
 name = "libp2p-relay-manager"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 description = "(WIP) Implementation of a relay-manager"
@@ -14,12 +14,9 @@ exclude = [".gitignore"]
 
 [dependencies]
 libp2p = { workspace = true, features = ["relay"] }
-thiserror = "2.0"
 anyhow = "1.0"
 futures = "0.3"
 
-log = "0.4"
-void = "1.0"
 rand = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -58,7 +58,7 @@ pub enum ResolveError {
     NoLinks(Cid, SlashedPath),
 
     /// Path attempted to resolve through a property, index or link which did not exist.
-    #[error("no link named in path {1:?}")]
+    #[error("no link named {n:?} under {0}", n = .1.iter().last().unwrap())]
     NotFound(Cid, SlashedPath),
 
     /// Tried to use a path neiter containing nor resolving to a Cid.

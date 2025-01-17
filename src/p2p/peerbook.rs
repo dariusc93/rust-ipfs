@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use libp2p::core::transport::PortUse;
 use std::collections::{HashMap, VecDeque};
+use std::convert::Infallible;
 
 #[derive(Default, Debug)]
 pub struct Behaviour {
@@ -77,7 +78,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = DummyConnectionHandler;
-    type ToSwarm = void::Void;
+    type ToSwarm = Infallible;
 
     fn handle_pending_inbound_connection(
         &mut self,

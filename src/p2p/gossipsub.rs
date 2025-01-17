@@ -160,9 +160,7 @@ impl GossipsubStream {
             .remove(&topic.hash())
             .expect("subscribed to topic");
 
-        self.gossipsub
-            .unsubscribe(&topic)
-            .map_err(anyhow::Error::from)
+        Ok(self.gossipsub.unsubscribe(&topic))
     }
 
     /// Publish to subscribed topic
@@ -268,9 +266,7 @@ impl NetworkBehaviour for GossipsubStream {
                         sender.close_channel();
                         debug!("unsubscribing via drop from {:?}", dropped);
                         assert!(
-                            self.gossipsub
-                                .unsubscribe(&Topic::new(dropped.to_string()))
-                                .unwrap_or_default(),
+                            self.gossipsub.unsubscribe(&Topic::new(dropped.to_string())),
                             "Failed to unsubscribe a dropped subscription"
                         );
                     }
@@ -293,9 +289,7 @@ impl NetworkBehaviour for GossipsubStream {
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
                             assert!(
-                                self.gossipsub
-                                    .unsubscribe(&Topic::new(topic.to_string()))
-                                    .unwrap_or_default(),
+                                self.gossipsub.unsubscribe(&Topic::new(topic.to_string())),
                                 "Failed to unsubscribe following SendError"
                             );
                         }

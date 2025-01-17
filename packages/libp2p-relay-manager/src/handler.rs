@@ -10,7 +10,6 @@ use libp2p::{
         SupportedProtocols,
     },
 };
-use void::Void;
 
 #[allow(clippy::type_complexity)]
 #[allow(deprecated)]
@@ -37,12 +36,12 @@ pub enum Out {
 
 #[allow(deprecated)]
 impl ConnectionHandler for Handler {
-    type FromBehaviour = Void;
+    type FromBehaviour = ();
     type ToBehaviour = Out;
     type InboundProtocol = DeniedUpgrade;
     type OutboundProtocol = DeniedUpgrade;
     type InboundOpenInfo = ();
-    type OutboundOpenInfo = Void;
+    type OutboundOpenInfo = ();
 
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
         SubstreamProtocol::new(DeniedUpgrade, ())
@@ -53,7 +52,7 @@ impl ConnectionHandler for Handler {
     }
 
     fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
-        void::unreachable(event)
+        _ = event;
     }
 
     #[allow(clippy::wildcard_in_or_patterns)]

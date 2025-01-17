@@ -16,6 +16,7 @@ use libp2p::{
     Multiaddr, PeerId,
 };
 use pollable_map::futures::FutureMap;
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::task::Waker;
 use std::time::Duration;
@@ -358,7 +359,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = handler::Handler;
-    type ToSwarm = void::Void;
+    type ToSwarm = Infallible;
 
     fn handle_pending_outbound_connection(
         &mut self,

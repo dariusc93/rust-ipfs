@@ -1,4 +1,5 @@
-# 0.14.2
+# 0.15.0
+- chore: update libp2p to 0.55.0. [PR 375](https://github.com/dariusc93/rust-ipfs/pull/375)
 - feat: Add reconnect option to address book. [PR 356](https://github.com/dariusc93/rust-ipfs/pull/356)
 - chore: use async-rt in place of rt utils. [PR 362](https://github.com/dariusc93/rust-ipfs/pull/362)
 

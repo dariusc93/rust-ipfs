@@ -209,7 +209,7 @@ impl Behaviour {
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler =
         <request_response::Behaviour<Codec> as NetworkBehaviour>::ConnectionHandler;
-    type ToSwarm = void::Void;
+    type ToSwarm = ();
 
     fn handle_pending_inbound_connection(
         &mut self,
@@ -286,6 +286,7 @@ impl NetworkBehaviour for Behaviour {
         while let Poll::Ready(event) = self.rr_behaviour.poll(cx) {
             match event {
                 ToSwarm::GenerateEvent(request_response::Event::Message {
+                    connection_id: _,
                     peer: peer_id,
                     message,
                 }) => match message {
@@ -302,12 +303,14 @@ impl NetworkBehaviour for Behaviour {
                     }
                 },
                 ToSwarm::GenerateEvent(request_response::Event::ResponseSent {
+                    connection_id: _,
                     peer: peer_id,
                     request_id,
                 }) => {
                     tracing::trace!(%peer_id, %request_id, "response sent");
                 }
                 ToSwarm::GenerateEvent(request_response::Event::OutboundFailure {
+                    connection_id: _,
                     peer,
                     request_id,
                     error,
@@ -316,6 +319,7 @@ impl NetworkBehaviour for Behaviour {
                     self.process_outbound_failure(request_id, peer, error);
                 }
                 ToSwarm::GenerateEvent(request_response::Event::InboundFailure {
+                    connection_id: _,
                     peer,
                     request_id,
                     error,
