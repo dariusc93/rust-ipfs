@@ -24,7 +24,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};
 use tokio::sync::{Notify, RwLockReadGuard};
-use tracing::{log, Instrument, Span};
+use tracing::{Instrument, Span};
 
 #[macro_use]
 #[cfg(test)]
@@ -575,9 +575,9 @@ impl Repo {
         // Dropping the guard (even though not strictly necessary to compile) to avoid potential
         // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
-            log::debug!("Trying lockfile");
+            tracing::debug!("Trying lockfile");
             self.inner.lockfile.try_exclusive()?;
-            log::debug!("lockfile tried");
+            tracing::debug!("lockfile tried");
         }
 
         self.inner.block_store.init().await?;

@@ -14,20 +14,20 @@ exclude = [".gitignore"]
 
 [dependencies]
 libp2p = { workspace = true, features = ["relay"] }
-anyhow = "1.0"
-futures = "0.3"
+anyhow = "1.0.95"
+futures = "0.3.31"
 
-rand = "0.8"
+rand = "0.8.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-futures-timer = { version = "3.0" }
+futures-timer = { version = "3.0.3" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["js"] }
-futures-timer = { version = "3.0", features = ["wasm-bindgen"] }
+futures-timer = { version = "3.0.3", features = ["wasm-bindgen"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 libp2p = { workspace = true, features = ["full"] }
 tokio = { workspace = true, features = ["full"] }
-clap = { version = "4.5", features = ["derive"] }
-env_logger = "0.11"
+clap = { version = "4.5.26", features = ["derive"] }
+env_logger = "0.11.6"
