@@ -39,7 +39,7 @@ getrandom = { version = "0.2.15" }
 hickory-resolver = "0.25.0-alpha.4"
 hkdf = "0.12.4"
 idb = "0.6.4"
-indexmap = "2.7.0"
+indexmap = "2.7.1"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.1"
 libp2p = { version = "0.55.0" }
