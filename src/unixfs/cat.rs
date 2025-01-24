@@ -215,32 +215,37 @@ impl Stream for UnixfsCat {
                             // would probably always cost many unnecessary clones, but it would be nice to "shut"
                             // the subscriber so that it will only resolve to a value but still keep the operation
                             // going. Not that we have any "operation" concept of the Want yet.
-                            let (next, _) = visit.pending_links();
-
+                            let (next, pending) = visit.pending_links();
+                            
                             let borrow = &repo;
-                            let block = borrow.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await.map_err(|e| TraversalFailed::Loading(*next, e))?;
+                            
+                            let list = std::iter::once(next).chain(pending);
+                            
+                            let mut block = borrow.get_blocks(list).providers(&providers).set_local(local_only).timeout(timeout);
+                            
+                            while let Some(block) = block.next().await {
+                                let block = block.map_err(|e| TraversalFailed::Io(std::io::Error::other(e)))?;
+                                let (bytes, next_visit) = visit.continue_walk(block.data(), &mut cache).map_err(|e| TraversalFailed::Walking(*block.cid(), e))?;
 
-                            let (bytes, next_visit) = visit.continue_walk(block.data(), &mut cache).map_err(|e| TraversalFailed::Walking(*block.cid(), e))?;
-
-                            size += bytes.len();
-
-                            if let Some(length) = length {
-                                if size > length {
-                                    let fn_err = || Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
-                                    fn_err()?;
-                                    return;
+                                size += bytes.len();
+    
+                                if let Some(length) = length {
+                                    if size > length {
+                                        let fn_err = || Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
+                                        fn_err()?;
+                                        return;
+                                    }
+                                }
+    
+                                if !bytes.is_empty() {
+                                    yield Bytes::copy_from_slice(bytes);
+                                }
+    
+                                match next_visit {
+                                    Some(v) => visit = v,
+                                    None => return,
                                 }
                             }
-
-                            if !bytes.is_empty() {
-                                yield Bytes::copy_from_slice(bytes);
-                            }
-
-                            match next_visit {
-                                Some(v) => visit = v,
-                                None => return,
-                            }
-
                         }
                     }.boxed();
 
@@ -265,8 +270,8 @@ impl std::future::IntoFuture for UnixfsCat {
             }
             Ok(data.into())
         }
-        .instrument(span)
-        .boxed()
+            .instrument(span)
+            .boxed()
     }
 }
 
