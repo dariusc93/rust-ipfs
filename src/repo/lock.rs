@@ -7,9 +7,15 @@ use super::{Lock, LockError};
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct FsLock {
-    file: parking_lot::Mutex<Option<std::fs::File>>,
+    inner: parking_lot::Mutex<FsLockInner>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct FsLockInner {
+    file: Option<std::fs::File>,
     path: std::path::PathBuf,
-    state: parking_lot::Mutex<State>,
+    state: State,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -22,10 +28,13 @@ enum State {
 #[cfg(not(target_arch = "wasm32"))]
 impl FsLock {
     pub fn new(path: std::path::PathBuf) -> Self {
-        Self {
-            file: parking_lot::Mutex::new(None),
+        let inner = FsLockInner {
+            file: None,
             path,
-            state: parking_lot::Mutex::new(State::Unlocked),
+            state: State::Unlocked,
+        };
+        Self {
+            inner: parking_lot::Mutex::new(inner)
         }
     }
 }
@@ -33,6 +42,9 @@ impl FsLock {
 #[cfg(not(target_arch = "wasm32"))]
 impl Lock for FsLock {
     fn try_exclusive(&self) -> Result<(), LockError> {
+
+        let mut inner = self.inner.lock();
+
         use fs2::FileExt;
         use std::fs::OpenOptions;
 
@@ -41,12 +53,12 @@ impl Lock for FsLock {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&self.path)?;
+            .open(&inner.path)?;
 
         file.try_lock_exclusive()?;
 
-        *self.state.lock() = State::Exclusive;
-        *self.file.lock() = Some(file);
+        inner.state = State::Exclusive;
+        inner.file = Some(file);
 
         Ok(())
     }
