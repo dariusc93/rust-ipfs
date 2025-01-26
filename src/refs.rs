@@ -230,7 +230,7 @@ where
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);
                         if exit_on_error {
-                            yield Err(IpldRefsError::from(e));
+                            yield Err(IpldRefsError::from(anyhow::Error::from(e)));
                             return;
                         }
                         continue;

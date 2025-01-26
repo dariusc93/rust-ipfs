@@ -153,6 +153,7 @@ impl Stream for UnixfsLs {
                             let block = match repo.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await {
                                 Ok(block) => block,
                                 Err(error) => {
+                                    let error = error.into();
                                     yield Entry::Error { error };
                                     return;
                                 }

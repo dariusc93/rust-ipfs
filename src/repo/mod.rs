@@ -903,12 +903,15 @@ impl RepoGetBlock {
 }
 
 impl Future for RepoGetBlock {
-    type Output = Result<Block, Error>;
+    type Output = io::Result<Block>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut self;
         match futures::ready!(this.instance.poll_next_unpin(cx)) {
             Some(result) => Poll::Ready(result),
-            None => Poll::Ready(Err(anyhow::anyhow!("block does not exist"))),
+            None => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "block does not exist",
+            ))),
         }
     }
 }
@@ -920,7 +923,7 @@ pub struct RepoGetBlocks {
     local: bool,
     span: Span,
     timeout: Option<Duration>,
-    stream: Option<BoxStream<'static, Result<Block, Error>>>,
+    stream: Option<BoxStream<'static, io::Result<Block>>>,
 }
 
 impl RepoGetBlocks {
@@ -978,7 +981,7 @@ impl RepoGetBlocks {
 }
 
 impl Stream for RepoGetBlocks {
-    type Item = Result<Block, Error>;
+    type Item = io::Result<Block>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.stream.is_none() && self.repo.is_none() {
@@ -1021,14 +1024,14 @@ impl Stream for RepoGetBlocks {
                         }
 
                         if local_only || !repo.is_online() {
-                            yield Err(anyhow::anyhow!("Unable to locate missing blocks {missing:?}"));
+                            yield Err(io::Error::new(io::ErrorKind::NotFound, "Unable to locate missing blocks {missing:?}"));
                             return;
                         }
 
                         let mut events = match repo.repo_channel() {
                             Some(events) => events,
                             None => {
-                                yield Err(anyhow::anyhow!("Channel is not available"));
+                                yield Err(io::Error::new(io::ErrorKind::Other, "Channel is not available"));
                                 return;
                             }
                         };
@@ -1058,11 +1061,11 @@ impl Stream for RepoGetBlocks {
                                 futures::pin_mut!(notified_fut);
 
                                 match futures::future::select(block_fut, notified_fut).await {
-                                    Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
-                                    Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
-                                    Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
+                                    Either::Left((Ok(Ok(block)), _)) => Ok::<_, io::Error>(block),
+                                    Either::Left((Ok(Err(e)), _)) => Err::<_, io::Error>(io::Error::new(io::ErrorKind::NotFound, e)),
+                                    Either::Left((Err(e), _)) => Err::<_, io::Error>(io::Error::new(io::ErrorKind::BrokenPipe, e)),
                                     Either::Right(((), _)) => {
-                                        Err::<_, Error>(anyhow::anyhow!("request for {cid} has been cancelled"))
+                                        Err::<_, io::Error>(io::Error::new(io::ErrorKind::Interrupted, "request for {cid} has been cancelled"))
                                     }
                                 }
                             }

@@ -364,7 +364,7 @@ impl IpldDag {
                 .await
             {
                 Ok(block) => block,
-                Err(e) => return Err(RawResolveLocalError::Loading(current, e)),
+                Err(e) => return Err(RawResolveLocalError::Loading(current, e.into())),
             };
 
             let start = total;

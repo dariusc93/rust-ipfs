@@ -154,7 +154,7 @@ impl Stream for UnixfsGet {
                             let block = match repo.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await {
                                 Ok(block) => block,
                                 Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e };
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
                             };
