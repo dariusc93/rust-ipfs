@@ -1,4 +1,19 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
+
+#[macro_use]
+#[cfg(test)]
+mod common_tests;
+
+pub mod blockstore;
+pub mod datastore;
+pub mod lock;
+
+mod interface;
+
+/// Path mangling done for pins and blocks
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod paths;
+
 use crate::error::Error;
 use crate::{Block, StorageType};
 use core::fmt::Debug;
@@ -24,21 +39,7 @@ use std::time::Duration;
 use tokio::sync::{Notify, RwLockReadGuard};
 use tracing::{Instrument, Span};
 
-#[macro_use]
-#[cfg(test)]
-mod common_tests;
-
-pub mod blockstore;
-pub mod datastore;
-pub mod lock;
-
-mod interface;
-
 pub use interface::*;
-
-/// Path mangling done for pins and blocks
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod paths;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GCConfig {

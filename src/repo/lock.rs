@@ -34,7 +34,7 @@ impl FsLock {
             state: State::Unlocked,
         };
         Self {
-            inner: parking_lot::Mutex::new(inner)
+            inner: parking_lot::Mutex::new(inner),
         }
     }
 }
@@ -42,7 +42,6 @@ impl FsLock {
 #[cfg(not(target_arch = "wasm32"))]
 impl Lock for FsLock {
     fn try_exclusive(&self) -> Result<(), LockError> {
-
         let mut inner = self.inner.lock();
 
         use fs2::FileExt;
