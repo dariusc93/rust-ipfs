@@ -1,8 +1,15 @@
+#[cfg(not(target_arch = "wasm32"))]
 use crate::repo::blockstore::flatfs::FsBlockStore;
+#[cfg(target_arch = "wasm32")]
+use crate::repo::blockstore::idb::IdbBlockStore;
 use crate::repo::blockstore::memory::MemBlockStore;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::repo::datastore::flatfs::FsDataStore;
+#[cfg(target_arch = "wasm32")]
+use crate::repo::datastore::idb::IdbDataStore;
+use crate::repo::datastore::memory::MemDataStore;
 use crate::repo::{
-    datastore, lock, BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References,
-    RepoStorage,
+    lock, BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References, RepoStorage,
 };
 use crate::{Block, PinKind, PinMode};
 use anyhow::Error;
@@ -12,34 +19,61 @@ use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
 #[derive(Debug)]
+#[cfg(not(target_arch = "wasm32"))]
 pub struct DefaultStorage {
     blockstore: Either<MemBlockStore, FsBlockStore>,
-    datastore: Either<datastore::memory::MemDataStore, datastore::flatfs::FsDataStore>,
+    datastore: Either<MemDataStore, FsDataStore>,
     lockfile: Either<lock::MemLock, lock::FsLock>,
+}
+
+#[derive(Debug)]
+#[cfg(target_arch = "wasm32")]
+pub struct DefaultStorage {
+    blockstore: Either<MemBlockStore, IdbBlockStore>,
+    datastore: Either<MemDataStore, IdbDataStore>,
+    lockfile: Either<lock::MemLock, lock::MemLock>,
 }
 
 impl Default for DefaultStorage {
     fn default() -> Self {
         Self {
             blockstore: Either::Left(MemBlockStore::new(Default::default())),
-            datastore: Either::Left(datastore::memory::MemDataStore::new(Default::default())),
+            datastore: Either::Left(MemDataStore::new(Default::default())),
             lockfile: Either::Left(lock::MemLock),
         }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DefaultStorage {
     /// Set path to trigger persistent storage
     pub(crate) fn set_path(&mut self, path: impl AsRef<std::path::Path>) {
         let path = path.as_ref().to_path_buf();
         self.blockstore = Either::Right(FsBlockStore::new(path.clone()));
-        self.datastore = Either::Right(datastore::flatfs::FsDataStore::new(path.clone()));
+        self.datastore = Either::Right(FsDataStore::new(path.clone()));
         self.lockfile = Either::Right(lock::FsLock::new(path.clone()));
     }
 
     pub(crate) fn remove_path(&mut self) {
         self.blockstore = Either::Left(MemBlockStore::new(Default::default()));
-        self.datastore = Either::Left(datastore::memory::MemDataStore::new(Default::default()));
+        self.datastore = Either::Left(MemDataStore::new(Default::default()));
+        self.lockfile = Either::Left(lock::MemLock);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl DefaultStorage {
+    /// Set path to trigger persistent storage
+    pub(crate) fn set_namespace(&mut self, namespace: impl Into<Option<String>>) {
+        let namespace = namespace.into();
+        self.blockstore = Either::Right(IdbBlockStore::new(namespace.clone()));
+        self.datastore = Either::Right(IdbDataStore::new(namespace.clone()));
+        self.lockfile = Either::Right(lock::MemLock);
+    }
+
+    pub(crate) fn remove_namespace(&mut self) {
+        self.blockstore = Either::Left(MemBlockStore::new(Default::default()));
+        self.datastore = Either::Left(MemDataStore::new(Default::default()));
         self.lockfile = Either::Left(lock::MemLock);
     }
 }
