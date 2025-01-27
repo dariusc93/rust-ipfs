@@ -10,6 +10,8 @@ pub mod lock;
 
 mod interface;
 
+mod default_storage;
+
 /// Path mangling done for pins and blocks
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod paths;

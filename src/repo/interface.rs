@@ -7,6 +7,8 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::{error, fmt, io};
 
+pub trait RepoStorage: BlockStore + DataStore + PinStore + Debug + Send + Sync {}
+
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum BlockPut {
