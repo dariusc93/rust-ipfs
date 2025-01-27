@@ -1,4 +1,5 @@
 mod default;
+mod storage;
 
 use crate::Block;
 use anyhow::Error;
