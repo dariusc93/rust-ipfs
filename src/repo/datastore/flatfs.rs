@@ -148,7 +148,8 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
         for await entry in st {
             let path = entry.path();
             if path.is_dir() {
-                for await item in build_kv(&data_path, &path) {
+                let kv_st = build_kv(&data_path, &path);
+                for await item in kv_st {
                     yield item;
                 }
             } else {
