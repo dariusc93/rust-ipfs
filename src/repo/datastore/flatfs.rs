@@ -20,7 +20,7 @@ use tokio_util::either::Either;
 /// their indirect descendants. Pin files are separated by their file extensions.
 ///
 /// When modifying, single lock is used.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FsDataStore {
     /// The base directory under which we have a sharded directory structure, and the individual
     /// blocks are stored under the shard. See unixfs/examples/cat.rs for read example.

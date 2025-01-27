@@ -16,7 +16,7 @@ use tokio_stream::wrappers::ReadDirStream;
 /// File system backed block store.
 ///
 /// For information on path mangling, please see `block_path` and `filestem_to_block_cid`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FsBlockStore {
     inner: Arc<RwLock<FsBlockStoreInner>>,
 }

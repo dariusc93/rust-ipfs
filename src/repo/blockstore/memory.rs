@@ -16,6 +16,8 @@ use std::sync::Arc;
 /// Describes an in-memory block store.
 ///
 /// Blocks are stored as a `HashMap` of the `Cid` and `Block`.
+
+#[derive(Clone)]
 pub struct MemBlockStore {
     inner: Arc<RwLock<MemBlockInner>>,
 }

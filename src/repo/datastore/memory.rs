@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use ipld_core::cid::{self, Cid};
 use std::path::PathBuf;
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::Mutex;
 
 use std::collections::hash_map::Entry;
 
@@ -14,12 +14,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Describes an in-memory `DataStore`.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MemDataStore {
-    inner: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
-    // this could also be PinDocument however doing any serialization allows to see the required
-    // error types easier
-    pin: Arc<Mutex<HashMap<Vec<u8>, Vec<u8>>>>,
+    inner: Arc<MemDataStoreInner>,
+}
+
+#[derive(Debug, Default)]
+struct MemDataStoreInner {
+    pub inner: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
+    pub pin: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 impl MemDataStore {
@@ -29,7 +32,7 @@ impl MemDataStore {
 
     /// Returns true if the pin document was changed, false otherwise.
     fn insert_pin<'a>(
-        g: &mut OwnedMutexGuard<HashMap<Vec<u8>, Vec<u8>>>,
+        g: &mut HashMap<Vec<u8>, Vec<u8>>,
         target: &'a Cid,
         kind: &'a PinKind<&'_ Cid>,
     ) -> Result<bool, Error> {
@@ -75,7 +78,7 @@ impl MemDataStore {
 
     /// Returns true if the pin document was changed, false otherwise.
     fn remove_pin<'a>(
-        g: &mut OwnedMutexGuard<HashMap<Vec<u8>, Vec<u8>>>,
+        g: &mut HashMap<Vec<u8>, Vec<u8>>,
         target: &'a Cid,
         kind: &'a PinKind<&'_ Cid>,
     ) -> Result<bool, Error> {
@@ -109,8 +112,7 @@ impl MemDataStore {
 impl PinStore for MemDataStore {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         let key = block.to_bytes();
-
-        let g = self.pin.lock().await;
+        let g = self.inner.pin.lock().await;
 
         // the use of PinKind::RecursiveIntention necessitates the only return fast for
         // only the known pins; we should somehow now query to see if there are any
@@ -123,14 +125,14 @@ impl PinStore for MemDataStore {
     }
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
-        Self::insert_pin(&mut g, target, &PinKind::Direct)?;
+        let inner = &mut *self.inner.pin.lock().await;
+        Self::insert_pin(inner, target, &PinKind::Direct)?;
         Ok(())
     }
 
     async fn remove_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
-        Self::remove_pin(&mut g, target, &PinKind::Direct)?;
+        let inner = &mut *self.inner.pin.lock().await;
+        Self::remove_pin(inner, target, &PinKind::Direct)?;
         Ok(())
     }
 
@@ -141,10 +143,10 @@ impl PinStore for MemDataStore {
     ) -> Result<(), Error> {
         use futures::stream::TryStreamExt;
 
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
+        let g = &mut *self.inner.pin.lock().await;
 
         // this must fail if it is already fully pinned
-        Self::insert_pin(&mut g, target, &PinKind::RecursiveIntention)?;
+        Self::insert_pin(g, target, &PinKind::RecursiveIntention)?;
 
         let target_v1 = if target.version() == cid::Version::V1 {
             target.to_owned()
@@ -161,12 +163,12 @@ impl PinStore for MemDataStore {
         let kind = PinKind::IndirectFrom(&target_v1);
         while let Some(next) = refs.try_next().await? {
             // no rollback, nothing
-            Self::insert_pin(&mut g, &next, &kind)?;
+            Self::insert_pin(g, &next, &kind)?;
             count += 1;
         }
 
         let kind = PinKind::Recursive(count as u64);
-        Self::insert_pin(&mut g, target, &kind)?;
+        Self::insert_pin(g, target, &kind)?;
 
         Ok(())
     }
@@ -178,7 +180,7 @@ impl PinStore for MemDataStore {
     ) -> Result<(), Error> {
         use futures::TryStreamExt;
 
-        let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
+        let g = &mut *self.inner.pin.lock().await;
 
         let doc: PinDocument = match g.get(&target.to_bytes()) {
             Some(raw) => match serde_json::from_slice(raw) {
@@ -193,7 +195,7 @@ impl PinStore for MemDataStore {
             Some(Ok(kind @ PinKind::Recursive(_)))
             | Some(Ok(kind @ PinKind::RecursiveIntention)) => kind,
             Some(Ok(PinKind::Direct)) => {
-                Self::remove_pin(&mut g, target, &PinKind::Direct)?;
+                Self::remove_pin(g, target, &PinKind::Direct)?;
                 return Ok(());
             }
             Some(Ok(PinKind::IndirectFrom(cid))) => {
@@ -204,7 +206,7 @@ impl PinStore for MemDataStore {
         };
 
         // this must fail if it is already fully pinned
-        Self::remove_pin(&mut g, target, &kind.as_ref())?;
+        Self::remove_pin(g, target, &kind.as_ref())?;
 
         let target_v1 = if target.version() == cid::Version::V1 {
             target.to_owned()
@@ -216,7 +218,7 @@ impl PinStore for MemDataStore {
         let kind = PinKind::IndirectFrom(&target_v1);
         while let Some(next) = refs.try_next().await? {
             // no rollback, nothing
-            Self::remove_pin(&mut g, &next, &kind)?;
+            Self::remove_pin(g, &next, &kind)?;
         }
 
         Ok(())
@@ -228,7 +230,7 @@ impl PinStore for MemDataStore {
     ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>> {
         use futures::stream::StreamExt;
         use std::convert::TryFrom;
-        let g = self.pin.lock().await;
+        let g = &*self.inner.pin.lock().await;
 
         let requirement = PinModeRequirement::from(requirement);
 
@@ -258,7 +260,7 @@ impl PinStore for MemDataStore {
         cids: Vec<Cid>,
         requirement: Option<PinMode>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
-        let g = self.pin.lock().await;
+        let g = &*self.inner.pin.lock().await;
 
         let requirement = PinModeRequirement::from(requirement);
 
@@ -319,12 +321,13 @@ impl DataStore for MemDataStore {
     }
 
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
-        let contains = self.inner.lock().await.contains_key(key);
+        let contains = self.inner.inner.lock().await.contains_key(key);
         Ok(contains)
     }
 
     async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         let value = self
+            .inner
             .inner
             .lock()
             .await
@@ -335,6 +338,7 @@ impl DataStore for MemDataStore {
 
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
         self.inner
+            .inner
             .lock()
             .await
             .insert(key.to_owned(), value.to_owned());
@@ -342,12 +346,12 @@ impl DataStore for MemDataStore {
     }
 
     async fn remove(&self, key: &[u8]) -> Result<(), Error> {
-        self.inner.lock().await.remove(key);
+        self.inner.inner.lock().await.remove(key);
         Ok(())
     }
 
     async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)> {
-        let list = self.inner.lock().await.clone();
+        let list = self.inner.inner.lock().await.clone();
 
         let stream = async_stream::stream! {
             for (k, v) in list {

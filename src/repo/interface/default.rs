@@ -18,6 +18,9 @@ use futures::future::Either;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
+#[cfg(target_arch = "wasm32")]
+use std::sync::Arc;
+
 #[derive(Debug)]
 #[cfg(not(target_arch = "wasm32"))]
 pub struct DefaultStorage {
@@ -29,8 +32,8 @@ pub struct DefaultStorage {
 #[derive(Debug)]
 #[cfg(target_arch = "wasm32")]
 pub struct DefaultStorage {
-    blockstore: Either<MemBlockStore, IdbBlockStore>,
-    datastore: Either<MemDataStore, IdbDataStore>,
+    blockstore: Either<MemBlockStore, Arc<IdbBlockStore>>,
+    datastore: Either<MemDataStore, Arc<IdbDataStore>>,
     lockfile: Either<lock::MemLock, lock::MemLock>,
 }
 
@@ -66,8 +69,8 @@ impl DefaultStorage {
     /// Set path to trigger persistent storage
     pub(crate) fn set_namespace(&mut self, namespace: impl Into<Option<String>>) {
         let namespace = namespace.into();
-        self.blockstore = Either::Right(IdbBlockStore::new(namespace.clone()));
-        self.datastore = Either::Right(IdbDataStore::new(namespace.clone()));
+        self.blockstore = Either::Right(Arc::new(IdbBlockStore::new(namespace.clone())));
+        self.datastore = Either::Right(Arc::new(IdbDataStore::new(namespace.clone())));
         self.lockfile = Either::Right(lock::MemLock);
     }
 
@@ -75,6 +78,16 @@ impl DefaultStorage {
         self.blockstore = Either::Left(MemBlockStore::new(Default::default()));
         self.datastore = Either::Left(MemDataStore::new(Default::default()));
         self.lockfile = Either::Left(lock::MemLock);
+    }
+}
+
+impl Clone for DefaultStorage {
+    fn clone(&self) -> Self {
+        Self {
+            blockstore: self.blockstore.clone(),
+            datastore: self.datastore.clone(),
+            lockfile: self.lockfile.clone(),
+        }
     }
 }
 

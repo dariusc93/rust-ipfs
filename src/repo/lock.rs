@@ -5,9 +5,9 @@
 use super::{Lock, LockError};
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FsLock {
-    inner: parking_lot::Mutex<FsLockInner>,
+    inner: std::sync::Arc<parking_lot::Mutex<FsLockInner>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,7 +34,7 @@ impl FsLock {
             state: State::Unlocked,
         };
         Self {
-            inner: parking_lot::Mutex::new(inner),
+            inner: std::sync::Arc::new(parking_lot::Mutex::new(inner)),
         }
     }
 }
@@ -63,7 +63,7 @@ impl Lock for FsLock {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MemLock;
 
 impl Lock for MemLock {
