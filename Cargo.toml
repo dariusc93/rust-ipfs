@@ -29,7 +29,7 @@ base64 = { version = "0.22.1" }
 bytes = "1.9.0"
 cid = "0.11.1"
 chrono = { version = "0.4.39" }
-clap = { version = "4.5.26", features = ["derive"] }
+clap = { version = "4.5.27", features = ["derive"] }
 either = { version = "1.13.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
