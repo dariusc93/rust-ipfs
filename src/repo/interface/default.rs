@@ -57,7 +57,22 @@ impl DefaultStorage {
         self.lockfile = Either::Right(lock::FsLock::new(path.clone()));
     }
 
-    pub(crate) fn remove_path(&mut self) {
+    pub(crate) fn set_blockstore_path(&mut self, path: impl AsRef<std::path::Path>) {
+        let path = path.as_ref().to_path_buf();
+        self.blockstore = Either::Right(FsBlockStore::new(path.clone()));
+    }
+
+    pub(crate) fn set_datastore_path(&mut self, path: impl AsRef<std::path::Path>) {
+        let path = path.as_ref().to_path_buf();
+        self.datastore = Either::Right(FsDataStore::new(path.clone()));
+    }
+
+    pub(crate) fn set_lockfile(&mut self, path: impl AsRef<std::path::Path>) {
+        let path = path.as_ref().to_path_buf();
+        self.lockfile = Either::Right(lock::FsLock::new(path.clone()));
+    }
+
+    pub(crate) fn remove_paths(&mut self) {
         self.blockstore = Either::Left(MemBlockStore::new(Default::default()));
         self.datastore = Either::Left(MemDataStore::new(Default::default()));
         self.lockfile = Either::Left(lock::MemLock);
