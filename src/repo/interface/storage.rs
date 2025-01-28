@@ -1,7 +1,11 @@
-use crate::repo::{BlockPut, BlockStore, DataStore, Lock, PinStore, References, RepoStorage};
+use crate::repo::{
+    BlockPut, BlockStore, DataStore, DefaultStorage, Lock, LockError, PinStore, References,
+    RepoStorage,
+};
 use crate::{Block, PinKind, PinMode};
 use anyhow::Error;
 use async_trait::async_trait;
+use futures::future::Either;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
@@ -147,5 +151,11 @@ impl<B: BlockStore, D: DataStore, L: Lock> PinStore for Storage<B, D, L> {
         requirement: Option<PinMode>,
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
         self.datastore.query(ids, requirement).await
+    }
+}
+
+impl<B: BlockStore, D: DataStore, L: Lock> Lock for Storage<B, D, L> {
+    fn try_exclusive(&self) -> Result<(), LockError> {
+        self.lockfile.try_exclusive()
     }
 }
