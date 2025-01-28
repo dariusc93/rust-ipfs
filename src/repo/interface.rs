@@ -1,6 +1,9 @@
 mod default;
 mod storage;
 
+pub use default::DefaultStorage;
+pub use storage::Storage;
+
 use crate::Block;
 use anyhow::Error;
 use async_trait::async_trait;
@@ -10,7 +13,7 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::{error, fmt, io};
 
-pub trait RepoStorage: BlockStore + DataStore + PinStore + Debug + Send + Sync {}
+pub trait RepoStorage: BlockStore + DataStore + Lock + Debug + Send + Sync {}
 
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
