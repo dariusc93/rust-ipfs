@@ -29,7 +29,7 @@ base64 = { version = "0.22.1" }
 bytes = "1.9.0"
 cid = "0.11.1"
 chrono = { version = "0.4.39" }
-clap = { version = "4.5.26", features = ["derive"] }
+clap = { version = "4.5.27", features = ["derive"] }
 either = { version = "1.13.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
@@ -39,7 +39,7 @@ getrandom = { version = "0.2.15" }
 hickory-resolver = "0.25.0-alpha.4"
 hkdf = "0.12.4"
 idb = "0.6.4"
-indexmap = "2.7.0"
+indexmap = "2.7.1"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.1"
 libp2p = { version = "0.55.0" }
@@ -71,7 +71,7 @@ send_wrapper = "0.6.0"
 serde = { version = "1.0.215" }
 serde_ipld_dagcbor = "0.6.1"
 serde_ipld_dagjson = "0.2.0"
-serde_json = { version = "1.0.135" }
+serde_json = { version = "1.0.138" }
 serde-wasm-bindgen = "0.6.5"
 sha2 = "0.10.8"
 simple_x509 = "=1.1.0"
@@ -168,7 +168,7 @@ tokio = { features = ["full"], workspace = true }
 rustyline-async = { version = "0.4.5" }
 tracing-subscriber = { features = ["env-filter"], version = "0.3.19" }
 rand = { workspace = true }
-tempfile = "3.15.0"
+tempfile = "3.16.0"
 
 clap = { workspace = true }
 
