@@ -1,7 +1,3 @@
-use std::{
-    collections::VecDeque,
-    task::{Context, Poll},
-};
 use libp2p::{
     core::upgrade::DeniedUpgrade,
     swarm::{
@@ -9,6 +5,10 @@ use libp2p::{
         SupportedProtocols,
     },
     StreamProtocol,
+};
+use std::{
+    collections::VecDeque,
+    task::{Context, Poll},
 };
 
 #[allow(clippy::type_complexity)]

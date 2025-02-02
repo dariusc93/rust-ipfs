@@ -17,7 +17,7 @@ libp2p = { workspace = true, features = ["relay"] }
 anyhow = "1.0.95"
 futures = "0.3.31"
 
-rand = "0.8.5"
+rand.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures-timer = { version = "3.0.3" }
@@ -29,5 +29,5 @@ futures-timer = { version = "3.0.3", features = ["wasm-bindgen"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 libp2p = { workspace = true, features = ["full"] }
 tokio = { workspace = true, features = ["full"] }
-clap = { version = "4.5.26", features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
 env_logger = "0.11.6"
