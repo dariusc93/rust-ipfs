@@ -64,6 +64,20 @@ impl Default for IpldRefs {
 }
 
 impl IpldRefs {
+    /// Empty the contents from this struct into a new struct
+    pub fn take(&mut self) -> Self {
+        Self {
+            max_depth: self.max_depth.take(),
+            unique: self.unique,
+            download_blocks: self.download_blocks,
+            exit_on_error: self.exit_on_error,
+            providers: std::mem::take(&mut self.providers),
+            timeout: self.timeout.take(),
+        }
+    }
+}
+
+impl IpldRefs {
     /// Overrides the default maximum depth of "unlimited" with the given maximum depth. Zero is
     /// allowed and will result in an empty stream.
     #[allow(dead_code)]

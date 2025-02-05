@@ -62,7 +62,7 @@ use p2p::{
     RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
-    BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
+    BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin, RepoStorage,
 };
 
 use tracing::Span;
@@ -330,9 +330,9 @@ impl fmt::Debug for IpfsOptions {
 /// The facade is created through [`UninitializedIpfs`] which is configured with [`IpfsOptions`].
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
-pub struct Ipfs {
+pub struct Ipfs<S: RepoStorage> {
     span: Span,
-    repo: Repo,
+    repo: Repo<S>,
     key: Keypair,
     keystore: Keystore,
     identify_conf: IdentifyConfiguration,
@@ -342,7 +342,7 @@ pub struct Ipfs {
     _gc_guard: AbortableJoinHandle<()>,
 }
 
-impl std::fmt::Debug for Ipfs {
+impl<S: RepoStorage> std::fmt::Debug for Ipfs<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Ipfs").finish()
     }
@@ -500,8 +500,8 @@ pub(crate) enum InnerPubsubEvent {
     Unsubscribe { topic: String, peer_id: PeerId },
 }
 
-type TSwarmEvent<C> = <TSwarm<C> as Stream>::Item;
-type TSwarmEventFn<C> = Arc<dyn Fn(&mut TSwarm<C>, &TSwarmEvent<C>) + Sync + Send>;
+type TSwarmEvent<S, C> = <TSwarm<S, C> as Stream>::Item;
+type TSwarmEventFn<S, C> = Arc<dyn Fn(&mut TSwarm<S, C>, &TSwarmEvent<S, C>) + Sync + Send>;
 type TTransportFn = Box<
     dyn Fn(
             &Keypair,
@@ -553,13 +553,13 @@ pub enum ConnectionEvents {
 
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
-pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send> {
+pub struct UninitializedIpfs<S: RepoStorage, C: NetworkBehaviour<ToSwarm = Infallible> + Send> {
     keys: Option<Keypair>,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
-    repo_handle: Option<Repo>,
+    repo_handle: Option<Repo<S>>,
     local_external_addr: bool,
-    swarm_event: Option<TSwarmEventFn<C>>,
+    swarm_event: Option<TSwarmEventFn<S, C>>,
     // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
     custom_behaviour: Option<C>,
@@ -568,15 +568,15 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send> {
     gc_repo_duration: Option<Duration>,
 }
 
-pub type UninitializedIpfsDefault = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
+pub type UninitializedIpfsDefault<S> = UninitializedIpfs<S, libp2p::swarm::dummy::Behaviour>;
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> Default for UninitializedIpfs<C> {
+impl<S: RepoStorage, C: NetworkBehaviour<ToSwarm = Infallible> + Send> Default for UninitializedIpfs<S, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
+impl<S: RepoStorage, C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<S, C> {
     /// New uninitualized instance
     pub fn new() -> Self {
         UninitializedIpfs {
@@ -853,7 +853,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     }
 
     /// Set block and data repo
-    pub fn set_repo(mut self, repo: &Repo) -> Self {
+    pub fn set_repo(mut self, repo: &Repo<S>) -> Self {
         self.repo_handle = Some(repo.clone());
         self
     }
@@ -891,14 +891,14 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     /// Handle libp2p swarm events
     pub fn swarm_events<F>(mut self, func: F) -> Self
     where
-        F: Fn(&mut TSwarm<C>, &TSwarmEvent<C>) + Sync + Send + 'static,
+        F: Fn(&mut TSwarm<S, C>, &TSwarmEvent<S, C>) + Sync + Send + 'static,
     {
         self.swarm_event = Some(Arc::new(func));
         self
     }
 
     /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync.
-    pub async fn start(self) -> Result<Ipfs, Error> {
+    pub async fn start(self) -> Result<Ipfs<S>, Error> {
         let UninitializedIpfs {
             keys,
             fdlimit,
@@ -946,7 +946,9 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
                         tokio::fs::create_dir_all(path).await?;
                     }
                 }
-                Repo::new(&mut options.ipfs_path)
+                
+                // Repo::new(&mut options.ipfs_path)
+                todo!()
             }
         };
 
@@ -1177,14 +1179,14 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     }
 }
 
-impl Ipfs {
+impl<S: RepoStorage> Ipfs<S> {
     /// Return an [`IpldDag`] for DAG operations
     pub fn dag(&self) -> IpldDag {
         IpldDag::new(self.clone())
     }
 
     /// Return an [`Repo`] to access the internal repo of the node
-    pub fn repo(&self) -> &Repo {
+    pub fn repo(&self) -> &Repo<S> {
         &self.repo
     }
 
@@ -1205,7 +1207,7 @@ impl Ipfs {
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
-    pub fn get_block<C: Borrow<Cid>>(&self, cid: C) -> RepoGetBlock {
+    pub fn get_block<C: Borrow<Cid>>(&self, cid: C) -> RepoGetBlock<S> {
         self.repo.get_block(cid).span(self.span.clone())
     }
 
@@ -1247,7 +1249,7 @@ impl Ipfs {
     /// If a recursive `insert_pin` operation is interrupted because of a crash or the crash
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
-    pub fn insert_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin {
+    pub fn insert_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin<S> {
         self.repo().pin(cid).span(self.span.clone())
     }
 
@@ -1257,7 +1259,7 @@ impl Ipfs {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin {
+    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin<S> {
         self.repo().remove_pin(cid).span(self.span.clone())
     }
 
@@ -1332,7 +1334,7 @@ impl Ipfs {
     }
 
     /// Add a file through a stream of data to the blockstore
-    pub fn add_unixfs(&self, opt: impl Into<AddOpt>) -> UnixfsAdd {
+    pub fn add_unixfs(&self, opt: impl Into<AddOpt>) -> UnixfsAdd<S> {
         self.unixfs().add(opt).span(self.span.clone())
     }
 
@@ -2139,7 +2141,7 @@ impl Ipfs {
     }
 
     /// Fetches the block, and, if set, recursively walk the graph loading all the blocks to the blockstore.
-    pub fn fetch(&self, cid: &Cid) -> RepoFetch {
+    pub fn fetch(&self, cid: &Cid) -> RepoFetch<S> {
         self.repo.fetch(cid).span(self.span.clone())
     }
 
@@ -3087,13 +3089,15 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
+    use repo::DefaultStorage;
+
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
     /// easier.
     pub struct Node {
         /// The Ipfs facade.
-        pub ipfs: Ipfs,
+        pub ipfs: Ipfs<DefaultStorage>,
         /// The peer identifier on the network.
         pub id: PeerId,
         /// The listened to and externally visible addresses. The addresses are suffixed with the

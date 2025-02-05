@@ -35,7 +35,7 @@ mod bitswap_pb {
     }
 }
 
-use crate::{repo::Repo, Block};
+use crate::{repo::{Repo, RepoStorage}, Block};
 
 use self::{
     message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType},
@@ -58,18 +58,18 @@ pub enum Event {
     CancelBlock { cid: Cid },
 }
 
-pub struct Behaviour {
+pub struct Behaviour<S: RepoStorage> {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<ConnectionId>>,
     blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
-    store: Repo,
-    want_session: StreamMap<Cid, WantSession>,
-    have_session: StreamMap<Cid, HaveSession>,
+    store: Repo<S>,
+    want_session: StreamMap<Cid, WantSession<S>>,
+    have_session: StreamMap<Cid, HaveSession<S>>,
     waker: Option<Waker>,
 }
 
-impl Behaviour {
-    pub fn new(store: &Repo) -> Self {
+impl<S: RepoStorage> Behaviour<S> {
+    pub fn new(store: &Repo<S>) -> Self {
         Self {
             events: Default::default(),
             connections: Default::default(),
@@ -299,7 +299,7 @@ impl Behaviour {
     }
 }
 
-impl NetworkBehaviour for Behaviour {
+impl<S: RepoStorage> NetworkBehaviour for Behaviour<S> {
     type ConnectionHandler = OneShotHandler<BitswapProtocol, BitswapMessage, Message>;
     type ToSwarm = Event;
 
@@ -559,7 +559,7 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use crate::block::BlockCodec;
+    use crate::{block::BlockCodec, repo::DefaultStorage};
     use futures::StreamExt;
     use ipld_core::cid::Cid;
     use libp2p::{
@@ -966,7 +966,7 @@ mod test {
         Ok(())
     }
 
-    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<Behaviour>, Repo) {
+    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<Behaviour>, Repo<DefaultStorage>) {
         let repo = Repo::new_memory();
 
         let mut swarm = SwarmBuilder::with_new_identity()
@@ -1005,7 +1005,7 @@ mod test {
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
-        bitswap: super::Behaviour,
+        bitswap: super::Behaviour<DefaultStorage>,
         address_book: crate::p2p::addressbook::Behaviour,
     }
 }

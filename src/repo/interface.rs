@@ -13,7 +13,19 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::{error, fmt, io};
 
-pub trait RepoStorage: BlockStore + DataStore + Lock + Debug + Send + Sync {}
+pub trait RepoStorage {
+    type BlockStore: BlockStore;
+    type DataStore: DataStore;
+    type Lock: Lock;
+
+    fn blockstore(&self) -> &Self::BlockStore;
+
+    fn datastore(&self) -> &Self::DataStore;
+
+    fn lock(&self) -> &Self::Lock;
+}
+
+
 
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
@@ -43,13 +55,8 @@ pub enum BlockRmError {
 
 /// This API is being discussed and evolved, which will likely lead to breakage.
 #[async_trait]
-pub trait BlockStore: Debug + Send + Sync {
+pub trait BlockStore: Debug + Send + Sync + 'static {
     async fn init(&self) -> Result<(), Error>;
-
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
     /// Returns whether a block is present in the blockstore.
     async fn contains(&self, cid: &Cid) -> Result<bool, Error>;
     /// Returns a block from the blockstore.
@@ -70,12 +77,8 @@ pub trait BlockStore: Debug + Send + Sync {
 
 #[async_trait]
 /// Generic layer of abstraction for a key-value data store.
-pub trait DataStore: PinStore + Debug + Send + Sync {
+pub trait DataStore: PinStore + Debug + Send + Sync + 'static {
     async fn init(&self) -> Result<(), Error>;
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
     /// Checks if a key is present in the datastore.
     async fn contains(&self, key: &[u8]) -> Result<bool, Error>;
     /// Returns the value associated with a key from the datastore.
@@ -92,7 +95,7 @@ pub trait DataStore: PinStore + Debug + Send + Sync {
 ///
 /// This ensures no two IPFS nodes can be started with the same peer ID, as exclusive access to the
 /// repository is guarenteed. This is most useful when using an fs backed repo.
-pub trait Lock: Debug + Send + Sync {
+pub trait Lock: Debug + Send + Sync + 'static {
     // fn new(path: PathBuf) -> Self;
     fn try_exclusive(&self) -> Result<(), LockError>;
 }
@@ -139,7 +142,7 @@ impl error::Error for LockError {
 pub(crate) type References<'a> = BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
 
 #[async_trait]
-pub trait PinStore: Debug + Send + Sync {
+pub trait PinStore: Debug + Send + Sync + 'static {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error>;
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error>;

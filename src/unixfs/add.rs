@@ -17,9 +17,9 @@ use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use tokio_util::io::ReaderStream;
 use tracing::{Instrument, Span};
 
-use crate::{Ipfs, IpfsPath};
-
 use super::{TraversalFailed, UnixfsStatus};
+use crate::repo::RepoStorage;
+use crate::{Ipfs, IpfsPath};
 
 pub enum AddOpt {
     #[cfg(not(target_arch = "wasm32"))]
@@ -46,8 +46,8 @@ impl From<&Path> for AddOpt {
 }
 
 #[must_use = "does nothing unless you `.await` or poll the stream"]
-pub struct UnixfsAdd {
-    core: Option<Either<Ipfs, Repo>>,
+pub struct UnixfsAdd<S: RepoStorage> {
+    core: Option<Either<Ipfs<S>, Repo<S>>>,
     opt: Option<AddOpt>,
     span: Span,
     chunk: Chunker,
@@ -57,16 +57,16 @@ pub struct UnixfsAdd {
     stream: Option<BoxStream<'static, UnixfsStatus>>,
 }
 
-impl UnixfsAdd {
-    pub fn with_ipfs(ipfs: &Ipfs, opt: impl Into<AddOpt>) -> Self {
+impl<S: RepoStorage> UnixfsAdd<S> {
+    pub fn with_ipfs(ipfs: &Ipfs<S>, opt: impl Into<AddOpt>) -> Self {
         Self::with_either(Either::Left(ipfs.clone()), opt)
     }
 
-    pub fn with_repo(repo: &Repo, opt: impl Into<AddOpt>) -> Self {
+    pub fn with_repo(repo: &Repo<S>, opt: impl Into<AddOpt>) -> Self {
         Self::with_either(Either::Right(repo.clone()), opt)
     }
 
-    fn with_either(core: Either<Ipfs, Repo>, opt: impl Into<AddOpt>) -> Self {
+    fn with_either(core: Either<Ipfs<S>, Repo<S>>, opt: impl Into<AddOpt>) -> Self {
         let opt = opt.into();
         Self {
             core: Some(core),
@@ -106,7 +106,7 @@ impl UnixfsAdd {
     }
 }
 
-impl Stream for UnixfsAdd {
+impl<S: RepoStorage + Unpin> Stream for UnixfsAdd<S> {
     type Item = UnixfsStatus;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -313,7 +313,7 @@ impl Stream for UnixfsAdd {
     }
 }
 
-impl std::future::IntoFuture for UnixfsAdd {
+impl<S: RepoStorage + Unpin> std::future::IntoFuture for UnixfsAdd<S> {
     type Output = Result<IpfsPath, anyhow::Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -337,7 +337,7 @@ impl std::future::IntoFuture for UnixfsAdd {
     }
 }
 
-impl FusedStream for UnixfsAdd {
+impl<S: RepoStorage + Unpin> FusedStream for UnixfsAdd<S> {
     fn is_terminated(&self) -> bool {
         self.stream.is_none() && self.core.is_none()
     }

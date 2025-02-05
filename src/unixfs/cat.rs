@@ -1,3 +1,4 @@
+use crate::repo::RepoStorage;
 use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::try_stream;
 use bytes::Bytes;
@@ -21,8 +22,8 @@ use super::TraversalFailed;
 ///
 /// Returns a stream of bytes on the file pointed with the Cid.
 #[must_use = "does nothing unless you `.await` or poll the stream"]
-pub struct UnixfsCat {
-    core: Option<Either<Ipfs, Repo>>,
+pub struct UnixfsCat<S: RepoStorage> {
+    core: Option<Either<Ipfs<S>, Repo<S>>>,
     span: Span,
     length: Option<usize>,
     starting_point: Option<StartingPoint>,
@@ -33,16 +34,16 @@ pub struct UnixfsCat {
     stream: Option<BoxStream<'static, Result<Bytes, TraversalFailed>>>,
 }
 
-impl UnixfsCat {
-    pub fn with_ipfs(ipfs: &Ipfs, starting_point: impl Into<StartingPoint>) -> Self {
+impl<S: RepoStorage> UnixfsCat<S> {
+    pub fn with_ipfs(ipfs: &Ipfs<S>, starting_point: impl Into<StartingPoint>) -> Self {
         Self::with_either(Either::Left(ipfs.clone()), starting_point)
     }
 
-    pub fn with_repo(repo: &Repo, starting_point: impl Into<StartingPoint>) -> Self {
+    pub fn with_repo(repo: &Repo<S>, starting_point: impl Into<StartingPoint>) -> Self {
         Self::with_either(Either::Right(repo.clone()), starting_point)
     }
 
-    fn with_either(core: Either<Ipfs, Repo>, starting_point: impl Into<StartingPoint>) -> Self {
+    fn with_either(core: Either<Ipfs<S>, Repo<S>>, starting_point: impl Into<StartingPoint>) -> Self {
         let starting_point = starting_point.into();
         Self {
             core: Some(core),
@@ -119,7 +120,7 @@ impl From<Block> for StartingPoint {
     }
 }
 
-impl Stream for UnixfsCat {
+impl<S: RepoStorage> Stream for UnixfsCat<S> {
     type Item = Result<Bytes, TraversalFailed>;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -163,6 +164,7 @@ impl Stream for UnixfsCat {
                     // using async_stream here at least to get on faster; writing custom streams is not too easy
                     // but this might be easy enough to write open.
                     let stream = try_stream! {
+                        let repo: Repo<_> = repo;
 
                         // Get the root block to start the traversal. The stream does not expose any of the file
                         // metadata. To get to it the user needs to create a Visitor over the first block.
@@ -251,7 +253,7 @@ impl Stream for UnixfsCat {
     }
 }
 
-impl std::future::IntoFuture for UnixfsCat {
+impl<S: RepoStorage + Unpin> std::future::IntoFuture for UnixfsCat<S> {
     type Output = Result<Bytes, TraversalFailed>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -270,7 +272,7 @@ impl std::future::IntoFuture for UnixfsCat {
     }
 }
 
-impl FusedStream for UnixfsCat {
+impl<S: RepoStorage> FusedStream for UnixfsCat<S> {
     fn is_terminated(&self) -> bool {
         self.stream.is_none() && self.core.is_none()
     }

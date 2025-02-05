@@ -14,6 +14,7 @@ use ipld_core::cid::Cid;
 use libp2p::PeerId;
 use std::fmt::Debug;
 
+use crate::repo::RepoStorage;
 use crate::{repo::Repo, Block};
 
 const CAP_THRESHOLD: usize = 100;
@@ -85,13 +86,13 @@ enum PeerWantState {
 }
 
 #[derive(Debug)]
-pub struct WantSession {
+pub struct WantSession<S: RepoStorage> {
     cid: Cid,
     wants: IndexMap<PeerId, PeerWantState>,
     discovery: WantDiscovery,
     received: bool,
     waker: Option<Waker>,
-    repo: Repo,
+    repo: Repo<S>,
     state: WantSessionState,
     timeout: Option<Duration>,
     discovery_timeout: Duration,
@@ -99,22 +100,8 @@ pub struct WantSession {
     terminated: Option<bool>,
 }
 
-impl WantSession {
-    pub fn new(repo: &Repo, cid: Cid, timeout: Option<Duration>) -> Self {
-        Self {
-            cid,
-            wants: Default::default(),
-            discovery: WantDiscovery::Disable,
-            received: false,
-            repo: repo.clone(),
-            waker: None,
-            state: WantSessionState::Idle,
-            timeout,
-            timer: timeout.map(Delay::new),
-            discovery_timeout: timeout.map(|d| d / 2).unwrap_or(Duration::from_secs(30)),
-            terminated: None,
-        }
-    }
+impl<S: RepoStorage> WantSession<S> {
+
 
     pub fn send_have_block(&mut self, peer_id: PeerId) {
         match self.wants.entry(peer_id) {
@@ -203,28 +190,6 @@ impl WantSession {
 
         true
     }
-
-    pub fn put_block(&mut self, peer_id: PeerId, block: Block) {
-        if matches!(self.state, WantSessionState::PutBlock { .. }) {
-            tracing::warn!(session = %self.cid, %peer_id, cid = %block.cid(), name = "want_session", "state already putting block into store");
-        } else {
-            tracing::info!(%peer_id, cid = %block.cid(), name = "want_session", "storing block");
-            let fut = self.repo.put_block(&block).into_future();
-            self.state = WantSessionState::PutBlock {
-                from_peer_id: peer_id,
-                fut,
-            };
-            // we no longer need to use discovery if a block is found
-            self.discovery = WantDiscovery::Disable;
-            // disable/remove the timer to prevent it from timing out while polling the future
-            self.timer.take();
-        }
-
-        if let Some(w) = self.waker.take() {
-            w.wake();
-        }
-    }
-
     pub fn remove_peer(&mut self, peer_id: PeerId) {
         if !self.is_empty() {
             // tracing::debug!(session = %self.cid, %peer_id, name = "want_session", "removing peer from want_session");
@@ -259,9 +224,47 @@ impl WantSession {
     }
 }
 
-impl Unpin for WantSession {}
+impl<S: RepoStorage + Clone + 'static> WantSession<S> {
+    pub fn new(repo: &Repo<S>, cid: Cid, timeout: Option<Duration>) -> Self {
+        Self {
+            cid,
+            wants: Default::default(),
+            discovery: WantDiscovery::Disable,
+            received: false,
+            repo: Repo::clone(repo),
+            waker: None,
+            state: WantSessionState::Idle,
+            timeout,
+            timer: timeout.map(Delay::new),
+            discovery_timeout: timeout.map(|d| d / 2).unwrap_or(Duration::from_secs(30)),
+            terminated: None,
+        }
+    }
+    pub fn put_block(&mut self, peer_id: PeerId, block: Block) {
+        if matches!(self.state, WantSessionState::PutBlock { .. }) {
+            tracing::warn!(session = %self.cid, %peer_id, cid = %block.cid(), name = "want_session", "state already putting block into store");
+        } else {
+            tracing::info!(%peer_id, cid = %block.cid(), name = "want_session", "storing block");
+            let fut = self.repo.put_block(&block).into_future();
+            self.state = WantSessionState::PutBlock {
+                from_peer_id: peer_id,
+                fut,
+            };
+            // we no longer need to use discovery if a block is found
+            self.discovery = WantDiscovery::Disable;
+            // disable/remove the timer to prevent it from timing out while polling the future
+            self.timer.take();
+        }
 
-impl Stream for WantSession {
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+}
+
+impl<S: RepoStorage> Unpin for WantSession<S> {}
+
+impl<S: RepoStorage> Stream for WantSession<S> {
     type Item = WantSessionEvent;
 
     #[tracing::instrument(level = "trace", name = "WantSession::poll_next", skip(self, cx))]
@@ -496,7 +499,7 @@ impl Stream for WantSession {
     }
 }
 
-impl FusedStream for WantSession {
+impl<S: RepoStorage> FusedStream for WantSession<S> {
     fn is_terminated(&self) -> bool {
         self.received
     }
@@ -535,36 +538,17 @@ enum HaveWantState {
     BlockSent,
 }
 
-pub struct HaveSession {
+pub struct HaveSession<S: RepoStorage> {
     cid: Cid,
     want: HashMap<PeerId, HaveWantState>,
     send_dont_have: HashSet<PeerId>,
     have: Option<bool>,
-    repo: Repo,
+    repo: Repo<S>,
     waker: Option<Waker>,
     state: HaveSessionState,
 }
 
-impl HaveSession {
-    pub fn new(repo: &Repo, cid: Cid) -> Self {
-        let mut session = Self {
-            cid,
-            want: HashMap::new(),
-            have: None,
-            repo: repo.clone(),
-            waker: None,
-            send_dont_have: Default::default(),
-            state: HaveSessionState::Idle,
-        };
-        let repo = session.repo.clone();
-        // We perform a precheck against the block to determine if we have it so when a peer send a request
-        // we can respond accordingly
-        let fut = async move { repo.contains(&cid).await }.boxed();
-
-        session.state = HaveSessionState::ContainBlock { fut };
-
-        session
-    }
+impl<S: RepoStorage> HaveSession<S> {
 
     pub fn has_peer(&self, peer_id: PeerId) -> bool {
         self.want.contains_key(&peer_id)
@@ -586,6 +570,44 @@ impl HaveSession {
         }
     }
 
+    pub fn remove_peer(&mut self, peer_id: PeerId) {
+        tracing::info!(session = %self.cid, %peer_id, name = "have_session", "removing peer from have_session");
+        self.want.remove(&peer_id);
+        self.send_dont_have.remove(&peer_id);
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
+
+
+
+    pub fn cancel(&mut self, peer_id: PeerId) {
+        self.want.remove(&peer_id);
+        self.send_dont_have.remove(&peer_id);
+        tracing::info!(session = %self.cid, %peer_id, name = "have_session", "cancelling request");
+    }
+}
+
+impl<S: RepoStorage + Clone + 'static> HaveSession<S> {
+    pub fn new(repo: &Repo<S>, cid: Cid) -> Self {
+        let mut session = Self {
+            cid,
+            want: HashMap::new(),
+            have: None,
+            repo: Repo::clone(repo),
+            waker: None,
+            send_dont_have: Default::default(),
+            state: HaveSessionState::Idle,
+        };
+        let repo = session.repo.clone();
+        // We perform a precheck against the block to determine if we have it so when a peer send a request
+        // we can respond accordingly
+        let fut = async move { repo.contains(&cid).await }.boxed();
+
+        session.state = HaveSessionState::ContainBlock { fut };
+
+        session
+    }
     pub fn need_block(&mut self, peer_id: PeerId) {
         if self
             .want
@@ -621,15 +643,6 @@ impl HaveSession {
         }
     }
 
-    pub fn remove_peer(&mut self, peer_id: PeerId) {
-        tracing::info!(session = %self.cid, %peer_id, name = "have_session", "removing peer from have_session");
-        self.want.remove(&peer_id);
-        self.send_dont_have.remove(&peer_id);
-        if let Some(w) = self.waker.take() {
-            w.wake();
-        }
-    }
-
     pub fn reset(&mut self) {
         // Only reset if we have not resolve block
         if self.have.is_none() || self.have.unwrap_or_default() {
@@ -653,17 +666,11 @@ impl HaveSession {
             w.wake();
         }
     }
-
-    pub fn cancel(&mut self, peer_id: PeerId) {
-        self.want.remove(&peer_id);
-        self.send_dont_have.remove(&peer_id);
-        tracing::info!(session = %self.cid, %peer_id, name = "have_session", "cancelling request");
-    }
 }
 
-impl Unpin for HaveSession {}
+impl<S: RepoStorage> Unpin for HaveSession<S> {}
 
-impl Stream for HaveSession {
+impl<S: RepoStorage> Stream for HaveSession<S> {
     type Item = HaveSessionEvent;
 
     #[tracing::instrument(level = "trace", name = "HaveSession::poll_next", skip(self, cx))]
@@ -791,7 +798,7 @@ impl Stream for HaveSession {
     }
 }
 
-impl FusedStream for HaveSession {
+impl<S: RepoStorage> FusedStream for HaveSession<S> {
     fn is_terminated(&self) -> bool {
         matches!(self.state, HaveSessionState::Complete)
     }

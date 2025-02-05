@@ -106,7 +106,17 @@ impl Clone for DefaultStorage {
     }
 }
 
-impl RepoStorage for DefaultStorage {}
+impl RepoStorage for DefaultStorage {
+    type BlockStore = DefaultStorage;
+    type DataStore = DefaultStorage;
+    type Lock = DefaultStorage;
+
+    fn blockstore(&self) -> &Self::BlockStore {
+        self
+    }
+}
+
+impl Unpin for DefaultStorage {}
 
 #[async_trait]
 impl BlockStore for DefaultStorage {

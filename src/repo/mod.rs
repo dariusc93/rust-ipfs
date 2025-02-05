@@ -15,7 +15,7 @@ mod interface;
 pub(crate) mod paths;
 
 use crate::error::Error;
-use crate::{Block, StorageType};
+use crate::Block;
 use core::fmt::Debug;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
@@ -80,8 +80,10 @@ type SubscriptionsMap = HashMap<Cid, Vec<futures::channel::oneshot::Sender<Resul
 /// Consolidates a blockstore, a datastore and a subscription registry.
 #[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
-pub struct Repo<S> {
-    storage: S,
+pub struct Repo<S: RepoStorage> {
+    blockstore: S::BlockStore,
+    datastore: S::DataStore,
+    lock: S::Lock,
     pub(crate) inner: Arc<RepoInner>,
 }
 
@@ -113,16 +115,20 @@ pub enum RepoEvent {
     RemovedBlock(Cid),
 }
 
-impl<S: RepoStorage + Clone> Repo<S> {
+fn to_stores<S: RepoStorage>(storage: S) -> (S::BlockStore, S::DataStore, S::Lock) {
+    
+}
+
+impl<S: RepoStorage> Repo<S> {
     pub fn new(storage: S) -> Self {
         Repo {
-            storage,
+            blockstore: S::BlockStore,
             inner: Arc::new(RepoInner::default()),
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn new_fs(path: impl AsRef<Path>) -> Self {
+    pub fn new_fs(path: impl AsRef<Path>) -> Repo<DefaultStorage> {
         let path = path.as_ref().to_path_buf();
         let mut blockstore_path = path.clone();
         let mut datastore_path = path.clone();
@@ -135,21 +141,32 @@ impl<S: RepoStorage + Clone> Repo<S> {
         storage.set_blockstore_path(blockstore_path);
         storage.set_datastore_path(datastore_path);
         storage.set_lockfile(lockfile_path);
-        Self::new(storage)
+        Repo {
+            storage,
+            inner: Arc::new(RepoInner::default()),
+        }
     }
 
-    pub fn new_memory() -> Self {
+    pub fn new_memory() -> Repo<DefaultStorage> {
         let storage = DefaultStorage::default();
-        Self::new(storage)
+        Repo {
+            storage,
+            inner: Arc::new(RepoInner::default()),
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn new_idb(namespace: Option<String>) -> Self {
+    pub fn new_idb(namespace: Option<String>) -> Repo<DefaultStorage> {
         let mut storage = DefaultStorage::default();
         storage.set_namespace(namespace);
-        Self::new(storage)
+        Repo {
+            storage,
+            inner: Arc::new(RepoInner::default()),
+        }
     }
+}
 
+impl<S: RepoStorage> Repo<S> {
     pub fn set_max_storage_size(&self, size: usize) {
         self.inner.max_storage_size.store(size, Ordering::SeqCst);
     }
@@ -541,8 +558,9 @@ impl<S: RepoStorage + Clone> Repo<S> {
         &self,
         mode: impl Into<Option<PinMode>>,
     ) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
-        let mode = mode.into();
-        DataStore::list(&self.storage, mode).await
+        let _mode = mode.into();
+        // DataStore::list(&self.storage, mode).await
+        unimplemented!()
     }
 
     pub async fn query_pins(
@@ -574,11 +592,13 @@ impl<S: RepoStorage> Repo<S> {
     }
 }
 
-pub struct RepoGetBlock<S> {
+pub struct RepoGetBlock<S: RepoStorage> {
     instance: RepoGetBlocks<S>,
 }
 
-impl<S: RepoStorage + Clone> RepoGetBlock<S> {
+impl<S: RepoStorage + Unpin> Unpin for RepoGetBlock<S> {}
+
+impl<S: RepoStorage> RepoGetBlock<S> {
     pub fn new<C: Borrow<Cid>>(repo: &Repo<S>, cid: C) -> Self {
         let instance = RepoGetBlocks::new(repo).block(cid);
         Self { instance }
@@ -617,7 +637,7 @@ impl<S: RepoStorage + Clone> RepoGetBlock<S> {
     }
 }
 
-impl<S: RepoStorage + Unpin + 'static> Future for RepoGetBlock<S> {
+impl<S: RepoStorage + Unpin> Future for RepoGetBlock<S> {
     type Output = Result<Block, Error>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut self;
@@ -628,7 +648,7 @@ impl<S: RepoStorage + Unpin + 'static> Future for RepoGetBlock<S> {
     }
 }
 
-pub struct RepoGetBlocks<S> {
+pub struct RepoGetBlocks<S: RepoStorage> {
     repo: Option<Repo<S>>,
     cids: IndexSet<Cid>,
     providers: IndexSet<PeerId>,
@@ -638,7 +658,9 @@ pub struct RepoGetBlocks<S> {
     stream: Option<BoxStream<'static, Result<Block, Error>>>,
 }
 
-impl<S: RepoStorage + Clone> RepoGetBlocks<S> {
+impl<S: RepoStorage + Unpin> Unpin for RepoGetBlocks<S> {}
+
+impl<S: RepoStorage> RepoGetBlocks<S> {
     pub fn new(repo: &Repo<S>) -> Self {
         let repo = Repo::clone(repo);
         Self {
@@ -693,7 +715,7 @@ impl<S: RepoStorage + Clone> RepoGetBlocks<S> {
     }
 }
 
-impl<S: RepoStorage + Clone> Stream for RepoGetBlocks<S> {
+impl<S: RepoStorage + Unpin> Stream for RepoGetBlocks<S> {
     type Item = Result<Block, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -817,7 +839,7 @@ impl<S: RepoStorage + Clone> Stream for RepoGetBlocks<S> {
     }
 }
 
-impl<S: RepoStorage + 'static + Clone> IntoFuture for RepoGetBlocks<S> {
+impl<S: RepoStorage + Unpin> IntoFuture for RepoGetBlocks<S> {
     type Output = Result<Vec<Block>, Error>;
     type IntoFuture = BoxFuture<'static, Self::Output>;
     fn into_future(self) -> Self::IntoFuture {
@@ -829,14 +851,14 @@ impl<S: RepoStorage + 'static + Clone> IntoFuture for RepoGetBlocks<S> {
     }
 }
 
-pub struct RepoPutBlock<'a, S> {
+pub struct RepoPutBlock<'a, S: RepoStorage> {
     repo: Repo<S>,
     block: &'a Block,
     span: Option<Span>,
     broadcast_on_new_block: bool,
 }
 
-impl<'a, S: RepoStorage + Clone> RepoPutBlock<'a, S> {
+impl<'a, S: RepoStorage> RepoPutBlock<'a, S> {
     fn new(repo: &Repo<S>, block: &'a Block) -> Self {
         let repo = Repo::clone(repo);
         Self {
@@ -858,7 +880,7 @@ impl<'a, S: RepoStorage + Clone> RepoPutBlock<'a, S> {
     }
 }
 
-impl<S: RepoStorage + 'static + Clone> IntoFuture for RepoPutBlock<'_, S> {
+impl<S: RepoStorage + Unpin> IntoFuture for RepoPutBlock<'_, S> {
     type IntoFuture = BoxFuture<'static, Self::Output>;
     type Output = Result<Cid, Error>;
     fn into_future(self) -> Self::IntoFuture {
@@ -891,7 +913,7 @@ impl<S: RepoStorage + 'static + Clone> IntoFuture for RepoPutBlock<'_, S> {
     }
 }
 
-pub struct RepoFetch<S> {
+pub struct RepoFetch<S: RepoStorage> {
     repo: Repo<S>,
     cid: Cid,
     span: Option<Span>,
@@ -901,7 +923,7 @@ pub struct RepoFetch<S> {
     refs: crate::refs::IpldRefs,
 }
 
-impl<S: RepoStorage + Clone> RepoFetch<S> {
+impl<S: RepoStorage> RepoFetch<S> {
     pub fn new<C: Borrow<Cid>>(repo: &Repo<S>, cid: C) -> Self {
         let cid = cid.borrow();
         let repo = Repo::clone(repo);
@@ -962,7 +984,7 @@ impl<S: RepoStorage + Clone> RepoFetch<S> {
     }
 }
 
-impl<S: RepoStorage + Clone + Unpin> IntoFuture for RepoFetch<S> {
+impl<S: RepoStorage + Unpin> IntoFuture for RepoFetch<S> {
     type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -1007,8 +1029,8 @@ impl<S: RepoStorage + Clone + Unpin> IntoFuture for RepoFetch<S> {
     }
 }
 
-pub struct RepoInsertPin<S> {
-    repo: Repo<S>,
+pub struct RepoInsertPin<S: RepoStorage> {
+    repo: Option<Repo<S>>,
     cid: Cid,
     span: Option<Span>,
     providers: Vec<PeerId>,
@@ -1016,14 +1038,15 @@ pub struct RepoInsertPin<S> {
     timeout: Option<Duration>,
     local: bool,
     refs: crate::refs::IpldRefs,
+    future: Option<BoxFuture<'static, Result<(), Error>>>,
 }
 
-impl<S: RepoStorage + Clone> RepoInsertPin<S> {
+impl<S: RepoStorage> RepoInsertPin<S> {
     pub fn new<C: Borrow<Cid>>(repo: &Repo<S>, cid: C) -> Self {
         let cid = cid.borrow();
         let repo = Repo::clone(repo);
         Self {
-            repo,
+            repo: Some(repo),
             cid: *cid,
             recursive: false,
             providers: vec![],
@@ -1031,6 +1054,7 @@ impl<S: RepoStorage + Clone> RepoInsertPin<S> {
             timeout: None,
             refs: Default::default(),
             span: None,
+            future: None,
         }
     }
 
@@ -1096,54 +1120,72 @@ impl<S: RepoStorage + Clone> RepoInsertPin<S> {
     }
 }
 
-impl<S: RepoStorage + Clone + Unpin> IntoFuture for RepoInsertPin<S> {
+impl<S: RepoStorage> Future for RepoInsertPin<S> {
     type Output = Result<(), Error>;
-
-    type IntoFuture = BoxFuture<'static, Self::Output>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        let cid = self.cid;
-        let local = self.local;
-        let span = self.span.unwrap_or(Span::current());
-        let recursive = self.recursive;
-        let repo = self.repo;
-        let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
-        let providers = self.providers;
-        let timeout = self.timeout;
-        async move {
-            // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
-            let _g = repo.inner.gclock.read().await;
-            let block = repo
-                .get_block(cid)
-                .providers(&providers)
-                .set_local(local)
-                .timeout(timeout)
-                .await?;
-
-            if !recursive {
-                repo.insert_direct_pin(&cid).await?
-            } else {
-                let ipld = block.to_ipld()?;
-
-                let st = self
-                    .refs
-                    .with_only_unique()
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.future.is_none() && self.repo.is_some() {
+            let cid = self.cid;
+            let local = self.local;
+            let span = self.span.take().unwrap_or(Span::current());
+            let recursive = self.recursive;
+            let repo = self.repo.take().expect("valid repo instance");
+            let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
+            let providers = std::mem::take(&mut self.providers);
+            let timeout = self.timeout;
+            let refs = self.refs.take();
+            let fut = async move {
+                // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
+                let _g = repo.inner.gclock.read().await;
+                let block = repo
+                    .get_block(cid)
                     .providers(&providers)
-                    .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
-                    .map_ok(|crate::refs::Edge { destination, .. }| destination)
-                    .into_stream()
-                    .boxed();
+                    .set_local(local)
+                    .timeout(timeout)
+                    .await?;
 
-                repo.insert_recursive_pin(&cid, st).await?
+                if !recursive {
+                    repo.insert_direct_pin(&cid).await?
+                } else {
+                    let ipld = block.to_ipld()?;
+
+                    let st = refs
+                        .with_only_unique()
+                        .providers(&providers)
+                        .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
+                        .map_ok(|crate::refs::Edge { destination, .. }| destination)
+                        .into_stream()
+                        .boxed();
+
+                    repo.insert_recursive_pin(&cid, st).await?
+                }
+                Ok(())
             }
-            Ok(())
+            .instrument(span)
+            .boxed();
+
+            self.future.replace(fut);
         }
-        .instrument(span)
-        .boxed()
+
+        match self.future.as_mut() {
+            Some(fut) => {
+                let result = futures::ready!(Pin::new(fut).poll(cx));
+                self.future.take();
+                Poll::Ready(result)
+            }
+            None => Poll::Pending,
+        }
     }
 }
 
-pub struct RepoRemovePin<S> {
+// impl<S: RepoStorage + Clone + Unpin> IntoFuture for RepoInsertPin<S> {
+//     type Output = Result<(), Error>;
+//
+//     type IntoFuture = BoxFuture<'static, Self::Output>;
+//
+//     fn into_future(self) -> Self::IntoFuture {}
+// }
+
+pub struct RepoRemovePin<S: RepoStorage> {
     repo: Repo<S>,
     cid: Cid,
     span: Option<Span>,
@@ -1151,7 +1193,7 @@ pub struct RepoRemovePin<S> {
     refs: crate::refs::IpldRefs,
 }
 
-impl<S: RepoStorage + Clone> RepoRemovePin<S> {
+impl<S: RepoStorage> RepoRemovePin<S> {
     pub fn new<C: Borrow<Cid>>(repo: &Repo<S>, cid: C) -> Self {
         let cid = cid.borrow();
         let repo = Repo::clone(repo);
@@ -1177,7 +1219,7 @@ impl<S: RepoStorage + Clone> RepoRemovePin<S> {
     }
 }
 
-impl<S: RepoStorage + Clone + Unpin> IntoFuture for RepoRemovePin<S> {
+impl<S: RepoStorage + Unpin> IntoFuture for RepoRemovePin<S> {
     type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;

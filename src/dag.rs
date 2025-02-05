@@ -3,7 +3,7 @@
 use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
-use crate::repo::Repo;
+use crate::repo::{Repo, RepoStorage};
 use crate::{Block, Ipfs};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -176,20 +176,20 @@ impl RawResolveLocalError {
 
 /// `ipfs.dag` interface providing wrapper around Ipfs.
 #[derive(Clone, Debug)]
-pub struct IpldDag {
-    ipfs: Option<Ipfs>,
-    repo: Repo,
+pub struct IpldDag<S: RepoStorage> {
+    ipfs: Option<Ipfs<S>>,
+    repo: Repo<S>,
 }
 
-impl From<Repo> for IpldDag {
-    fn from(repo: Repo) -> Self {
+impl<S: RepoStorage> From<Repo<S>> for IpldDag<S> {
+    fn from(repo: Repo<S>) -> Self {
         IpldDag { ipfs: None, repo }
     }
 }
 
-impl IpldDag {
+impl<S: RepoStorage> IpldDag<S> {
     /// Creates a new `IpldDag` for DAG operations.
-    pub fn new(ipfs: Ipfs) -> Self {
+    pub fn new(ipfs: Ipfs<S>) -> Self {
         let repo = ipfs.repo().clone();
         IpldDag {
             ipfs: Some(ipfs),
@@ -200,28 +200,28 @@ impl IpldDag {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub fn put_dag<S: Serialize>(&self, ipld: S) -> DagPut {
+    pub fn put_dag<Ser: Serialize>(&self, ipld: Ser) -> DagPut<S> {
         self.put().serialize(ipld)
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub fn get_dag<I: Into<IpfsPath>>(&self, path: I) -> DagGet {
+    pub fn get_dag<I: Into<IpfsPath>>(&self, path: I) -> DagGet<S> {
         self.get().path(path)
     }
 
     /// Returns the `Cid` of a newly inserted block.
     ///
     /// The block is created from the `data`, encoded with the `codec` and inserted into the repo.
-    pub fn put(&self) -> DagPut {
+    pub fn put(&self) -> DagPut<S> {
         DagPut::new(self.clone())
     }
 
     /// Resolves a `Cid`-rooted path to a document "node."
     ///
     /// Returns the resolved node as `Ipld`.
-    pub fn get(&self) -> DagGet {
+    pub fn get(&self) -> DagGet<S> {
         DagGet::new(self.clone())
     }
 
@@ -434,8 +434,8 @@ impl IpldDag {
 }
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct DagGet {
-    dag_ipld: IpldDag,
+pub struct DagGet<S: RepoStorage> {
+    dag_ipld: IpldDag<S>,
     path: Option<IpfsPath>,
     providers: Vec<PeerId>,
     local: bool,
@@ -443,8 +443,8 @@ pub struct DagGet {
     span: Option<Span>,
 }
 
-impl DagGet {
-    pub fn new(dag: IpldDag) -> Self {
+impl<S: RepoStorage> DagGet<S> {
+    pub fn new(dag: IpldDag<S>) -> Self {
         Self {
             dag_ipld: dag,
             path: None,
@@ -495,7 +495,7 @@ impl DagGet {
     }
 
     /// Deserialize to a serde-compatible object
-    pub fn deserialized<D: DeserializeOwned>(self) -> DagGetDeserialize<D> {
+    pub fn deserialized<D: DeserializeOwned>(self) -> DagGetDeserialize<S, D> {
         DagGetDeserialize {
             dag_get: self,
             _marker: PhantomData,
@@ -509,7 +509,7 @@ impl DagGet {
     }
 }
 
-impl std::future::IntoFuture for DagGet {
+impl<S: RepoStorage> std::future::IntoFuture for DagGet<S> {
     type Output = Result<Ipld, ResolveError>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -528,13 +528,14 @@ impl std::future::IntoFuture for DagGet {
 }
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct DagGetDeserialize<D> {
-    dag_get: DagGet,
+pub struct DagGetDeserialize<S: RepoStorage, D> {
+    dag_get: DagGet<S>,
     _marker: PhantomData<D>,
 }
 
-impl<D> std::future::IntoFuture for DagGetDeserialize<D>
+impl<S, D> std::future::IntoFuture for DagGetDeserialize<S, D>
 where
+    S: RepoStorage,
     D: DeserializeOwned,
 {
     type Output = Result<D, anyhow::Error>;
@@ -553,8 +554,8 @@ where
 }
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct DagPut {
-    dag_ipld: IpldDag,
+pub struct DagPut<S: RepoStorage> {
+    dag_ipld: IpldDag<S>,
     codec: BlockCodec,
     data: Box<dyn FnOnce() -> anyhow::Result<Ipld> + Send + 'static>,
     hash: Code,
@@ -563,8 +564,8 @@ pub struct DagPut {
     provide: bool,
 }
 
-impl DagPut {
-    pub fn new(dag: IpldDag) -> Self {
+impl<S: RepoStorage> DagPut<S> {
+    pub fn new(dag: IpldDag<S>) -> Self {
         Self {
             dag_ipld: dag,
             codec: BlockCodec::DagCbor,
@@ -582,7 +583,7 @@ impl DagPut {
     }
 
     /// Set a serde-compatible object
-    pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Self {
+    pub fn serialize<Ser: serde::Serialize>(mut self, data: Ser) -> Self {
         let result = to_ipld(data).map_err(anyhow::Error::from);
         self.data = Box::new(move || result);
         self
@@ -619,7 +620,7 @@ impl DagPut {
     }
 }
 
-impl std::future::IntoFuture for DagPut {
+impl<S: RepoStorage> std::future::IntoFuture for DagPut<S> {
     type Output = Result<Cid, anyhow::Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;

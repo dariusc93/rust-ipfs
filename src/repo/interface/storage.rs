@@ -1,11 +1,10 @@
 use crate::repo::{
-    BlockPut, BlockStore, DataStore, DefaultStorage, Lock, LockError, PinStore, References,
+    BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References,
     RepoStorage,
 };
 use crate::{Block, PinKind, PinMode};
 use anyhow::Error;
 use async_trait::async_trait;
-use futures::future::Either;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
@@ -36,7 +35,13 @@ impl<B: BlockStore + Clone, D: DataStore + Clone, L: Lock + Clone> Clone for Sto
     }
 }
 
-impl<B: BlockStore, D: DataStore, L: Lock> RepoStorage for Storage<B, D, L> {}
+impl<B: BlockStore, D: DataStore, L: Lock> RepoStorage for Storage<B, D, L> {
+    type BlockStore = B;
+    type DataStore = D;
+    type Lock = L;
+}
+
+impl<B: BlockStore + Unpin, D: DataStore + Unpin, L: Lock + Unpin> Unpin for Storage<B, D, L> {}
 
 #[async_trait]
 impl<B: BlockStore, D: DataStore, L: Lock> BlockStore for Storage<B, D, L> {

@@ -1,6 +1,6 @@
 //! P2P handling for IPFS nodes.
 use crate::error::Error;
-use crate::repo::Repo;
+use crate::repo::{Repo, RepoStorage};
 use crate::{IpfsOptions, TTransportFn};
 use std::convert::TryInto;
 use std::num::{NonZeroU8, NonZeroUsize};
@@ -39,7 +39,7 @@ mod transport;
 pub use addr::MultiaddrExt;
 pub use behaviour::KadResult;
 
-pub(crate) type TSwarm<C> = Swarm<behaviour::Behaviour<C>>;
+pub(crate) type TSwarm<S, C> = Swarm<behaviour::Behaviour<S, C>>;
 
 /// Abstraction of IdentifyInfo but includes PeerId
 #[derive(Clone, Debug, Eq)]
@@ -223,14 +223,15 @@ impl Default for SwarmConfig {
 #[allow(deprecated)]
 //TODO: use libp2p::SwarmBuilder
 /// Creates a new IPFS swarm.
-pub(crate) fn create_swarm<C>(
+pub(crate) fn create_swarm<S, C>(
     keypair: &Keypair,
     options: &IpfsOptions,
-    repo: &Repo,
+    repo: &Repo<S>,
     span: Span,
     (custom, custom_transport): (Option<C>, Option<TTransportFn>),
-) -> Result<TSwarm<C>, Error>
+) -> Result<TSwarm<S, C>, Error>
 where
+    S: RepoStorage,
     C: NetworkBehaviour,
     <C as NetworkBehaviour>::ToSwarm: std::fmt::Debug + Send,
 {

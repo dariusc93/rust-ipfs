@@ -11,7 +11,7 @@ use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tracing::{Instrument, Span};
 
-use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
+use crate::{dag::IpldDag, repo::{Repo, RepoStorage}, Ipfs, IpfsPath};
 
 #[derive(Debug)]
 pub enum Entry {
@@ -22,8 +22,8 @@ pub enum Entry {
 }
 
 #[must_use = "does nothing unless you `.await` or poll the stream"]
-pub struct UnixfsLs {
-    core: Option<Either<Ipfs, Repo>>,
+pub struct UnixfsLs<S: RepoStorage> {
+    core: Option<Either<Ipfs<S>, Repo<S>>>,
     span: Span,
     path: Option<IpfsPath>,
     providers: Vec<PeerId>,
@@ -32,16 +32,16 @@ pub struct UnixfsLs {
     stream: Option<BoxStream<'static, Entry>>,
 }
 
-impl UnixfsLs {
-    pub fn with_ipfs(ipfs: &Ipfs, path: impl Into<IpfsPath>) -> Self {
+impl<S: RepoStorage> UnixfsLs<S> {
+    pub fn with_ipfs(ipfs: &Ipfs<S>, path: impl Into<IpfsPath>) -> Self {
         Self::with_either(Either::Left(ipfs.clone()), path)
     }
 
-    pub fn with_repo(repo: &Repo, path: impl Into<IpfsPath>) -> Self {
+    pub fn with_repo(repo: &Repo<S>, path: impl Into<IpfsPath>) -> Self {
         Self::with_either(Either::Right(repo.clone()), path)
     }
 
-    fn with_either(core: Either<Ipfs, Repo>, path: impl Into<IpfsPath>) -> Self {
+    fn with_either(core: Either<Ipfs<S>, Repo<S>>, path: impl Into<IpfsPath>) -> Self {
         let path = path.into();
         Self {
             core: Some(core),
@@ -87,7 +87,7 @@ impl UnixfsLs {
     }
 }
 
-impl Stream for UnixfsLs {
+impl<S: RepoStorage> Stream for UnixfsLs<S> {
     type Item = Entry;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -191,7 +191,7 @@ impl Stream for UnixfsLs {
     }
 }
 
-impl std::future::IntoFuture for UnixfsLs {
+impl<S: RepoStorage + Unpin> std::future::IntoFuture for UnixfsLs<S> {
     type Output = Result<Vec<Entry>, anyhow::Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -213,7 +213,7 @@ impl std::future::IntoFuture for UnixfsLs {
     }
 }
 
-impl FusedStream for UnixfsLs {
+impl<S: RepoStorage + Unpin> FusedStream for UnixfsLs<S> {
     fn is_terminated(&self) -> bool {
         self.stream.is_none() && self.core.is_none()
     }

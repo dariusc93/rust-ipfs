@@ -9,7 +9,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 
-use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
+use crate::{p2p::MultiaddrExt, repo::RepoStorage, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
@@ -56,19 +56,19 @@ use tokio::sync::Notify;
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
-pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
-    pub swarm: TSwarm<C>,
+pub struct IpfsTask<S: RepoStorage, C: NetworkBehaviour<ToSwarm = Infallible>> {
+    pub swarm: TSwarm<S, C>,
     pub repo_events: Fuse<Receiver<RepoEvent>>,
     pub from_facade: Fuse<Receiver<IpfsEvent>>,
     pub bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
     pub listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub repo: Repo,
+    pub repo: Repo<S>,
     pub kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub bootstraps: HashSet<Multiaddr>,
-    pub swarm_event: Option<TSwarmEventFn<C>>,
+    pub swarm_event: Option<TSwarmEventFn<S, C>>,
     pub pubsub_event_stream: Vec<UnboundedSender<InnerPubsubEvent>>,
     pub timer: TaskTimer,
     pub local_external_addr: bool,
@@ -90,12 +90,12 @@ pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
     pub event_capacity: usize,
 }
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
+impl<S: RepoStorage, C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<S, C> {
     pub fn new(
-        swarm: TSwarm<C>,
+        swarm: TSwarm<S, C>,
         repo_events: Fuse<Receiver<RepoEvent>>,
         from_facade: Fuse<Receiver<IpfsEvent>>,
-        repo: &Repo,
+        repo: &Repo<S>,
         event_capacity: usize,
     ) -> Self {
         IpfsTask {
@@ -141,47 +141,47 @@ impl Default for TaskTimer {
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible>> futures::Future for IpfsTask<C> {
+impl<S: RepoStorage, C: NetworkBehaviour<ToSwarm = Infallible>> futures::Future for IpfsTask<S, C> {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            match self.swarm.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => self.handle_swarm_event(event),
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Pending => break,
-            }
-        }
-        loop {
-            match self.from_facade.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => self.handle_event(event),
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Pending => break,
-            }
-        }
-        loop {
-            match self.repo_events.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => self.handle_repo_event(event),
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Pending => break,
-            }
-        }
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        // loop {
+        //     match self.swarm.poll_next_unpin(cx) {
+        //         Poll::Ready(Some(event)) => self.handle_swarm_event(event),
+        //         Poll::Ready(None) => return Poll::Ready(()),
+        //         Poll::Pending => break,
+        //     }
+        // }
+        // loop {
+        //     match self.from_facade.poll_next_unpin(cx) {
+        //         Poll::Ready(Some(event)) => self.handle_event(event),
+        //         Poll::Ready(None) => return Poll::Ready(()),
+        //         Poll::Pending => break,
+        //     }
+        // }
+        // loop {
+        //     match self.repo_events.poll_next_unpin(cx) {
+        //         Poll::Ready(Some(event)) => self.handle_repo_event(event),
+        //         Poll::Ready(None) => return Poll::Ready(()),
+        //         Poll::Pending => break,
+        //     }
+        // }
 
-        if self.timer.event_cleanup.poll_unpin(cx).is_ready() {
-            self.pubsub_event_stream.retain(|ch| !ch.is_closed());
-            self.connection_events.retain(|ch| !ch.is_closed());
-            self.peer_connection_events.retain(|_, ch_list| {
-                ch_list.retain(|ch| !ch.is_closed());
-                !ch_list.is_empty()
-            });
-            self.timer.event_cleanup.reset(Duration::from_secs(60));
-        }
+        // if self.timer.event_cleanup.poll_unpin(cx).is_ready() {
+        //     self.pubsub_event_stream.retain(|ch| !ch.is_closed());
+        //     self.connection_events.retain(|ch| !ch.is_closed());
+        //     self.peer_connection_events.retain(|_, ch_list| {
+        //         ch_list.retain(|ch| !ch.is_closed());
+        //         !ch_list.is_empty()
+        //     });
+        //     self.timer.event_cleanup.reset(Duration::from_secs(60));
+        // }
 
         Poll::Pending
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
+impl<S: RepoStorage, C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<S, C> {
     pub async fn run(&mut self) {
         let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
 
@@ -220,7 +220,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
         }
     }
 
-    fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent<C>) {
+    fn handle_swarm_event(&mut self, swarm_event: TSwarmEvent<S, C>) {
         if let Some(handler) = self.swarm_event.as_ref() {
             handler(&mut self.swarm, &swarm_event)
         }

@@ -26,12 +26,11 @@ pub use get::UnixfsGet;
 pub use ls::{Entry, UnixfsLs};
 
 use crate::{
-    dag::{ResolveError, UnexpectedResolved},
-    Ipfs, IpfsPath,
+    dag::{ResolveError, UnexpectedResolved}, repo::RepoStorage, Ipfs, IpfsPath
 };
 
-pub struct IpfsUnixfs {
-    ipfs: Ipfs,
+pub struct IpfsUnixfs<S: RepoStorage> {
+    ipfs: Ipfs<S>,
 }
 
 pub enum AddOpt {
@@ -136,20 +135,20 @@ impl From<(String, BoxStream<'static, std::io::Result<Vec<u8>>>)> for AddOpt {
     }
 }
 
-impl IpfsUnixfs {
-    pub fn new(ipfs: Ipfs) -> Self {
+impl<S: RepoStorage> IpfsUnixfs<S> {
+    pub fn new(ipfs: Ipfs<S>) -> Self {
         Self { ipfs }
     }
 
     /// Creates a stream which will yield the bytes of an UnixFS file from the root Cid, with the
     /// optional file byte range. If the range is specified and is outside of the file, the stream
     /// will end without producing any bytes.
-    pub fn cat(&self, starting_point: impl Into<StartingPoint>) -> UnixfsCat {
+    pub fn cat(&self, starting_point: impl Into<StartingPoint>) -> UnixfsCat<S> {
         UnixfsCat::with_ipfs(&self.ipfs, starting_point)
     }
 
     /// Add a file from either a file or stream
-    pub fn add<I: Into<AddOpt>>(&self, item: I) -> UnixfsAdd {
+    pub fn add<I: Into<AddOpt>>(&self, item: I) -> UnixfsAdd<S> {
         let item = item.into();
         match item {
             #[cfg(not(target_arch = "wasm32"))]
@@ -176,12 +175,12 @@ impl IpfsUnixfs {
     /// Retreive a file and saving it to a local path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub fn get<I: Into<IpfsPath>, P: AsRef<std::path::Path>>(&self, path: I, dest: P) -> UnixfsGet {
+    pub fn get<I: Into<IpfsPath>, P: AsRef<std::path::Path>>(&self, path: I, dest: P) -> UnixfsGet<S> {
         UnixfsGet::with_ipfs(&self.ipfs, path, dest)
     }
 
     /// List directory contents
-    pub fn ls<I: Into<IpfsPath>>(&self, path: I) -> UnixfsLs {
+    pub fn ls<I: Into<IpfsPath>>(&self, path: I) -> UnixfsLs<S> {
         UnixfsLs::with_ipfs(&self.ipfs, path)
     }
 }

@@ -14,14 +14,14 @@ use rust_unixfs::walk::{ContinuedWalk, Walker};
 use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Span};
 
-use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
+use crate::{dag::IpldDag, repo::{Repo, RepoStorage}, Ipfs, IpfsPath};
 
 #[allow(unused_imports)]
 use super::{TraversalFailed, UnixfsStatus};
 
 #[must_use = "does nothing unless you `.await` or poll the stream"]
-pub struct UnixfsGet {
-    core: Option<Either<Ipfs, Repo>>,
+pub struct UnixfsGet<S: RepoStorage> {
+    core: Option<Either<Ipfs<S>, Repo<S>>>,
     dest: PathBuf,
     span: Span,
     path: Option<IpfsPath>,
@@ -31,17 +31,17 @@ pub struct UnixfsGet {
     stream: Option<BoxStream<'static, UnixfsStatus>>,
 }
 
-impl UnixfsGet {
-    pub fn with_ipfs(ipfs: &Ipfs, path: impl Into<IpfsPath>, dest: impl AsRef<Path>) -> Self {
+impl<S: RepoStorage> UnixfsGet<S> {
+    pub fn with_ipfs(ipfs: &Ipfs<S>, path: impl Into<IpfsPath>, dest: impl AsRef<Path>) -> Self {
         Self::with_either(Either::Left(ipfs.clone()), path, dest)
     }
 
-    pub fn with_repo(repo: &Repo, path: impl Into<IpfsPath>, dest: impl AsRef<Path>) -> Self {
+    pub fn with_repo(repo: &Repo<S>, path: impl Into<IpfsPath>, dest: impl AsRef<Path>) -> Self {
         Self::with_either(Either::Right(repo.clone()), path, dest)
     }
 
     fn with_either(
-        core: Either<Ipfs, Repo>,
+        core: Either<Ipfs<S>, Repo<S>>,
         path: impl Into<IpfsPath>,
         dest: impl AsRef<Path>,
     ) -> Self {
@@ -92,7 +92,7 @@ impl UnixfsGet {
     }
 }
 
-impl Stream for UnixfsGet {
+impl<S: RepoStorage> Stream for UnixfsGet<S> {
     type Item = UnixfsStatus;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -241,7 +241,7 @@ impl Stream for UnixfsGet {
     }
 }
 
-impl std::future::IntoFuture for UnixfsGet {
+impl<S: RepoStorage + Unpin> std::future::IntoFuture for UnixfsGet<S> {
     type Output = Result<(), anyhow::Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -265,7 +265,7 @@ impl std::future::IntoFuture for UnixfsGet {
     }
 }
 
-impl FusedStream for UnixfsGet {
+impl<S: RepoStorage> FusedStream for UnixfsGet<S> {
     fn is_terminated(&self) -> bool {
         self.stream.is_none() && self.core.is_none()
     }

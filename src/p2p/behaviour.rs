@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Error;
 use crate::{IntoAddPeerOpt, IpfsOptions};
 
-use crate::repo::Repo;
+use crate::repo::{Repo, RepoStorage};
 
 use ipld_core::cid::Cid;
 use libp2p::core::Multiaddr;
@@ -38,8 +38,9 @@ use std::time::Duration;
 
 /// Behaviour type.
 #[derive(NetworkBehaviour)]
-pub struct Behaviour<C>
+pub struct Behaviour<S, C>
 where
+    S: RepoStorage,
     C: NetworkBehaviour,
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
@@ -67,7 +68,7 @@ where
     // messaging
     pub identify: Toggle<Identify>,
     pub pubsub: Toggle<GossipsubStream>,
-    pub bitswap: Toggle<super::bitswap::Behaviour>,
+    pub bitswap: Toggle<super::bitswap::Behaviour<S>>,
     pub ping: Toggle<Ping>,
     #[cfg(feature = "experimental_stream")]
     pub stream: Toggle<libp2p_stream::Behaviour>,
@@ -363,15 +364,16 @@ impl Default for KadConfig {
     }
 }
 
-impl<C> Behaviour<C>
+impl<S, C> Behaviour<S, C>
 where
+    S: RepoStorage,
     C: NetworkBehaviour,
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
     pub(crate) fn new(
         keypair: &Keypair,
         options: &IpfsOptions,
-        repo: &Repo,
+        repo: &Repo<S>,
         custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let bootstrap = options.bootstrap.clone();
