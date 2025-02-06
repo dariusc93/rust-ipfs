@@ -587,7 +587,7 @@ impl Repo {
     }
 
     /// Puts a block into the block store.
-    pub fn put_block<'a>(&self, block: &'a Block) -> RepoPutBlock<'a> {
+    pub fn put_block(&self, block: &Block) -> RepoPutBlock {
         RepoPutBlock::new(self, block).broadcast_on_new_block(true)
     }
 
@@ -1113,15 +1113,16 @@ impl IntoFuture for RepoGetBlocks {
     }
 }
 
-pub struct RepoPutBlock<'a> {
+pub struct RepoPutBlock {
     repo: Repo,
-    block: &'a Block,
+    block: Option<Block>,
     span: Option<Span>,
     broadcast_on_new_block: bool,
 }
 
-impl<'a> RepoPutBlock<'a> {
-    fn new(repo: &Repo, block: &'a Block) -> Self {
+impl RepoPutBlock {
+    fn new(repo: &Repo, block: &Block) -> Self {
+        let block = Some(block.clone());
         Self {
             repo: repo.clone(),
             block,
@@ -1141,11 +1142,11 @@ impl<'a> RepoPutBlock<'a> {
     }
 }
 
-impl IntoFuture for RepoPutBlock<'_> {
+impl IntoFuture for RepoPutBlock {
     type IntoFuture = BoxFuture<'static, Self::Output>;
     type Output = Result<Cid, Error>;
-    fn into_future(self) -> Self::IntoFuture {
-        let block = self.block.clone();
+    fn into_future(mut self) -> Self::IntoFuture {
+        let block = self.block.take().expect("valid block is set");
         let span = self.span.unwrap_or(Span::current());
         let span = debug_span!(parent: &span, "put_block", cid = %block.cid());
         async move {

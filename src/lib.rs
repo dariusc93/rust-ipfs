@@ -1199,8 +1199,8 @@ impl Ipfs {
     }
 
     /// Puts a block into the ipfs repo.
-    pub async fn put_block(&self, block: &Block) -> Result<Cid, Error> {
-        self.repo.put_block(block).span(self.span.clone()).await
+    pub fn put_block(&self, block: &Block) -> RepoPutBlock {
+        self.repo.put_block(block).span(self.span.clone())
     }
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
@@ -3081,7 +3081,7 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
 }
 
 use crate::p2p::AddressBookConfig;
-use crate::repo::RepoGetBlock;
+use crate::repo::{RepoGetBlock, RepoPutBlock};
 #[doc(hidden)]
 pub use node::Node;
 
