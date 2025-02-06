@@ -1205,14 +1205,14 @@ impl Ipfs {
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
-    pub fn get_block<C: Borrow<Cid>>(&self, cid: C) -> RepoGetBlock {
+    pub fn get_block(&self, cid: impl Borrow<Cid>) -> RepoGetBlock {
         self.repo.get_block(cid).span(self.span.clone())
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
-    pub async fn remove_block<C: Borrow<Cid>>(
+    pub async fn remove_block(
         &self,
-        cid: C,
+        cid: impl Borrow<Cid>,
         recursive: bool,
     ) -> Result<Vec<Cid>, Error> {
         self.repo
@@ -1247,7 +1247,7 @@ impl Ipfs {
     /// If a recursive `insert_pin` operation is interrupted because of a crash or the crash
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
-    pub fn insert_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin {
+    pub fn insert_pin(&self, cid: impl Borrow<Cid>) -> RepoInsertPin {
         self.repo().pin(cid).span(self.span.clone())
     }
 
@@ -1257,7 +1257,7 @@ impl Ipfs {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin {
+    pub fn remove_pin(&self, cid: impl Borrow<Cid>) -> RepoRemovePin {
         self.repo().remove_pin(cid).span(self.span.clone())
     }
 
@@ -1274,7 +1274,7 @@ impl Ipfs {
     /// Works correctly only under no-crash situations. Workaround for hitting a crash is to re-pin
     /// any existing recursive pins.
     ///
-    pub async fn is_pinned<C: Borrow<Cid>>(&self, cid: C) -> Result<bool, Error> {
+    pub async fn is_pinned(&self, cid: impl Borrow<Cid>) -> Result<bool, Error> {
         let span = debug_span!(parent: &self.span, "is_pinned", cid = %cid.borrow());
         self.repo.is_pinned(cid).instrument(span).await
     }
@@ -1287,7 +1287,7 @@ impl Ipfs {
     pub async fn list_pins(
         &self,
         filter: Option<PinMode>,
-    ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>> {
+    ) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
         let span = debug_span!(parent: &self.span, "list_pins", ?filter);
         self.repo.list_pins(filter).instrument(span).await
     }
@@ -1313,14 +1313,14 @@ impl Ipfs {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub fn put_dag<S: Serialize>(&self, ipld: S) -> DagPut {
+    pub fn put_dag(&self, ipld: impl Serialize) -> DagPut {
         self.dag().put_dag(ipld).span(self.span.clone())
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub fn get_dag<I: Into<IpfsPath>>(&self, path: I) -> DagGet {
+    pub fn get_dag(&self, path: impl Into<IpfsPath>) -> DagGet {
         self.dag().get_dag(path).span(self.span.clone())
     }
 
@@ -1337,19 +1337,19 @@ impl Ipfs {
     }
 
     /// Retreive a file and saving it to a path.
-    pub fn get_unixfs<I: Into<IpfsPath>, P: AsRef<Path>>(&self, path: I, dest: P) -> UnixfsGet {
+    pub fn get_unixfs(&self, path: impl Into<IpfsPath>, dest: impl AsRef<Path>) -> UnixfsGet {
         self.unixfs().get(path, dest).span(self.span.clone())
     }
 
     /// List directory contents
-    pub fn ls_unixfs<I: Into<IpfsPath>>(&self, path: I) -> UnixfsLs {
+    pub fn ls_unixfs(&self, path: impl Into<IpfsPath>) -> UnixfsLs {
         self.unixfs().ls(path).span(self.span.clone())
     }
 
     /// Resolves a ipns path to an ipld path; currently only supports dht and dnslink resolution.
-    pub async fn resolve_ipns<B: Borrow<IpfsPath>>(
+    pub async fn resolve_ipns(
         &self,
-        path: B,
+        path: impl Borrow<IpfsPath>,
         recursive: bool,
     ) -> Result<IpfsPath, Error> {
         async move {
@@ -1372,7 +1372,7 @@ impl Ipfs {
     }
 
     /// Publish ipns record to DHT
-    pub async fn publish_ipns<B: Borrow<IpfsPath>>(&self, path: B) -> Result<IpfsPath, Error> {
+    pub async fn publish_ipns(&self, path: impl Borrow<IpfsPath>) -> Result<IpfsPath, Error> {
         async move {
             let ipns = self.ipns();
             ipns.publish(None, path, Default::default())

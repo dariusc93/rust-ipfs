@@ -200,14 +200,14 @@ impl IpldDag {
     /// Puts an ipld node into the ipfs repo using `dag-cbor` codec and Sha2_256 hash.
     ///
     /// Returns Cid version 1 for the document
-    pub fn put_dag<S: Serialize>(&self, ipld: S) -> DagPut {
+    pub fn put_dag(&self, ipld: impl Serialize) -> DagPut {
         self.put().serialize(ipld)
     }
 
     /// Gets an ipld node from the ipfs, fetching the block if necessary.
     ///
     /// See [`IpldDag::get`] for more information.
-    pub fn get_dag<I: Into<IpfsPath>>(&self, path: I) -> DagGet {
+    pub fn get_dag(&self, path: impl Into<IpfsPath>) -> DagGet {
         self.get().path(path)
     }
 
@@ -456,7 +456,7 @@ impl DagGet {
     }
 
     /// Path to object
-    pub fn path<P: Into<IpfsPath>>(mut self, path: P) -> Self {
+    pub fn path(mut self, path: impl Into<IpfsPath>) -> Self {
         let path = path.into();
         self.path = Some(path);
         self
@@ -582,7 +582,7 @@ impl DagPut {
     }
 
     /// Set a serde-compatible object
-    pub fn serialize<S: serde::Serialize>(mut self, data: S) -> Self {
+    pub fn serialize(mut self, data: impl serde::Serialize) -> Self {
         let result = to_ipld(data).map_err(anyhow::Error::from);
         self.data = Box::new(move || result);
         self
