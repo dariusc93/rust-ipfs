@@ -3117,7 +3117,7 @@ mod node {
         }
 
         /// Connects to a peer at the given address.
-        pub async fn connect<D: Into<DialOpts>>(&self, opt: D) -> Result<(), Error> {
+        pub async fn connect(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
             let opts = opt.into();
             if let Some(peer_id) = opts.get_peer_id() {
                 if self.ipfs.is_connected(peer_id).await? {

@@ -149,7 +149,7 @@ impl IpfsUnixfs {
     }
 
     /// Add a file from either a file or stream
-    pub fn add<I: Into<AddOpt>>(&self, item: I) -> UnixfsAdd {
+    pub fn add(&self, item: impl Into<AddOpt>) -> UnixfsAdd {
         let item = item.into();
         match item {
             #[cfg(not(target_arch = "wasm32"))]
@@ -176,12 +176,12 @@ impl IpfsUnixfs {
     /// Retreive a file and saving it to a local path.
     ///
     /// To create an owned version of the stream, please use `ipfs::unixfs::get` directly.
-    pub fn get<I: Into<IpfsPath>, P: AsRef<std::path::Path>>(&self, path: I, dest: P) -> UnixfsGet {
+    pub fn get(&self, path: impl Into<IpfsPath>, dest: impl AsRef<std::path::Path>) -> UnixfsGet {
         UnixfsGet::with_ipfs(&self.ipfs, path, dest)
     }
 
     /// List directory contents
-    pub fn ls<I: Into<IpfsPath>>(&self, path: I) -> UnixfsLs {
+    pub fn ls(&self, path: impl Into<IpfsPath>) -> UnixfsLs {
         UnixfsLs::with_ipfs(&self.ipfs, path)
     }
 }
