@@ -864,12 +864,12 @@ pub struct RepoGetBlock {
 }
 
 impl RepoGetBlock {
-    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+    pub fn new(repo: Repo, cid: impl Borrow<Cid>) -> Self {
         let instance = RepoGetBlocks::new(repo).block(cid);
         Self { instance }
     }
 
-    pub fn span<S: Borrow<Span>>(mut self, span: S) -> Self {
+    pub fn span(mut self, span: impl Borrow<Span>) -> Self {
         self.instance = self.instance.span(span);
         self
     }
@@ -941,11 +941,11 @@ impl RepoGetBlocks {
         self
     }
 
-    pub fn block<C: Borrow<Cid>>(self, cid: C) -> Self {
+    pub fn block(self, cid: impl Borrow<Cid>) -> Self {
         self.blocks([cid])
     }
 
-    pub fn span<S: Borrow<Span>>(mut self, span: S) -> Self {
+    pub fn span(mut self, span: impl Borrow<Span>) -> Self {
         let span = span.borrow();
         self.span = span.clone();
         self
@@ -966,7 +966,7 @@ impl RepoGetBlocks {
         self
     }
 
-    pub fn provider<C: Borrow<PeerId>>(self, peer_id: C) -> Self {
+    pub fn provider(self, peer_id: impl Borrow<PeerId>) -> Self {
         self.providers([peer_id])
     }
 

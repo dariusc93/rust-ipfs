@@ -15,13 +15,13 @@ pub struct Block {
     data: Bytes,
 }
 impl Block {
-    pub fn new<D: Into<Bytes>>(cid: Cid, data: D) -> std::io::Result<Self> {
+    pub fn new(cid: Cid, data: impl Into<Bytes>) -> std::io::Result<Self> {
         let block = Self::new_unchecked(cid, data);
         block.verify()?;
         Ok(block)
     }
 
-    pub fn new_unchecked<D: Into<Bytes>>(cid: Cid, data: D) -> Self {
+    pub fn new_unchecked(cid: Cid, data: impl Into<Bytes>) -> Self {
         let data = data.into();
         Self { cid, data }
     }
@@ -71,7 +71,7 @@ impl Block {
         Ok(ipld)
     }
 
-    pub fn references<E: Extend<Cid>>(&self, set: &mut E) -> std::io::Result<()> {
+    pub fn references(&self, set: &mut impl Extend<Cid>) -> std::io::Result<()> {
         let ipld = self.to_ipld()?;
         ipld.references(set);
         Ok(())

@@ -59,7 +59,7 @@ impl Behaviour {
             ..Default::default()
         }
     }
-    pub fn add_address<I: Into<AddPeerOpt>>(&mut self, opt: I) -> bool {
+    pub fn add_address(&mut self, opt: impl Into<AddPeerOpt>) -> bool {
         let opt = opt.into();
 
         let peer_id = opt.peer_id();

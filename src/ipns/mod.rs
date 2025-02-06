@@ -39,7 +39,7 @@ impl Ipns {
     /// Resolves a ipns path to an ipld path.
     // TODO: Implement ipns pubsub
     // TODO: Maybe implement a check to the dht store itself too?
-    pub async fn resolve<B: Borrow<IpfsPath>>(&self, path: B) -> Result<IpfsPath, IpnsError> {
+    pub async fn resolve(&self, path: impl Borrow<IpfsPath>) -> Result<IpfsPath, IpnsError> {
         let path = path.borrow();
         match path.root() {
             PathRoot::Ipld(_) => Ok(path.clone()),
@@ -136,10 +136,10 @@ impl Ipns {
         }
     }
 
-    pub async fn publish<B: Borrow<IpfsPath>>(
+    pub async fn publish(
         &self,
         key: Option<&str>,
-        path: B,
+        path: impl Borrow<IpfsPath>,
         option: IpnsOption,
     ) -> Result<IpfsPath, IpnsError> {
         use ipld_core::cid::Cid;
