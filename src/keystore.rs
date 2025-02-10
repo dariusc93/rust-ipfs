@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::repo::{DataStore, Repo};
 use anyhow::Error;
 use futures::{stream::BoxStream, StreamExt};
 use libp2p::identity::{Keypair, PublicKey};
@@ -169,6 +170,110 @@ pub trait KeyStorage: Sync + Send + 'static {
     async fn list(&self) -> Result<BoxStream<'static, Key>, Error>;
     async fn len(&self) -> Result<usize, Error> {
         let amount = self.list().await?.count().await;
+        Ok(amount)
+    }
+}
+
+const NAMESPACE: &str = "keystore";
+
+#[async_trait::async_trait]
+impl KeyStorage for Repo {
+    async fn set(&self, name: &str, key: &[u8]) -> Result<(), Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        DataStore::put(self.data_store(), namespace_key.as_bytes(), key).await
+    }
+
+    async fn get(&self, name: &str) -> Result<Key, Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        let data = DataStore::get(self.data_store(), namespace_key.as_bytes()).await?;
+        match data {
+            Some(key) => Ok(Key::from(key)),
+            None => Err(anyhow::anyhow!("Key doesnt exist")),
+        }
+    }
+
+    async fn contains(&self, name: &str) -> Result<bool, Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        DataStore::contains(self.data_store(), namespace_key.as_bytes()).await
+    }
+
+    async fn remove(&self, name: &str) -> Result<(), Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        DataStore::remove(self.data_store(), namespace_key.as_bytes()).await
+    }
+
+    async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {
+        let current_key = KeyStorage::get(self, name).await?;
+        KeyStorage::remove(self, name).await?;
+        KeyStorage::set(self, new_name, current_key.as_ref()).await
+    }
+
+    async fn list(&self) -> Result<BoxStream<'static, Key>, Error> {
+        let st = DataStore::iter(self.data_store()).await;
+        let stream = st.filter_map(|(k, v)| async move {
+            let ns = String::from_utf8_lossy(&k[..NAMESPACE.len()]);
+            match ns == NAMESPACE {
+                true => Some(Key::from(v)),
+                false => None,
+            }
+        });
+        Ok(stream.boxed())
+    }
+
+    async fn len(&self) -> Result<usize, Error> {
+        let st = KeyStorage::list(self).await?;
+        let amount = st.count().await;
+        Ok(amount)
+    }
+}
+
+#[async_trait::async_trait]
+impl<T: DataStore + 'static> KeyStorage for T {
+    async fn set(&self, name: &str, key: &[u8]) -> Result<(), Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        DataStore::put(self, namespace_key.as_bytes(), key).await
+    }
+
+    async fn get(&self, name: &str) -> Result<Key, Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        let data = DataStore::get(self, namespace_key.as_bytes()).await?;
+        match data {
+            Some(key) => Ok(Key::from(key)),
+            None => Err(anyhow::anyhow!("Key doesnt exist")),
+        }
+    }
+
+    async fn contains(&self, name: &str) -> Result<bool, Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        DataStore::contains(self, namespace_key.as_bytes()).await
+    }
+
+    async fn remove(&self, name: &str) -> Result<(), Error> {
+        let namespace_key = format!("{}/{}", NAMESPACE, name);
+        DataStore::remove(self, namespace_key.as_bytes()).await
+    }
+
+    async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {
+        let current_key = KeyStorage::get(self, name).await?;
+        KeyStorage::remove(self, name).await?;
+        KeyStorage::set(self, new_name, current_key.as_ref()).await
+    }
+
+    async fn list(&self) -> Result<BoxStream<'static, Key>, Error> {
+        let st = DataStore::iter(self).await;
+        let stream = st.filter_map(|(k, v)| async move {
+            let ns = String::from_utf8_lossy(&k[..NAMESPACE.len()]);
+            match ns == NAMESPACE {
+                true => Some(Key::from(v)),
+                false => None,
+            }
+        });
+        Ok(stream.boxed())
+    }
+
+    async fn len(&self) -> Result<usize, Error> {
+        let st = KeyStorage::list(self).await?;
+        let amount = st.count().await;
         Ok(amount)
     }
 }

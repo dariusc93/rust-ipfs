@@ -220,7 +220,7 @@ struct IpfsOptions {
     /// Address book configuration
     pub addr_config: AddressBookConfig,
 
-    pub keystore: Keystore,
+    pub keystore: Option<Keystore>,
 
     /// Connection idle
     pub connection_idle: Duration,
@@ -293,7 +293,7 @@ impl Default for IpfsOptions {
             identify_configuration: Default::default(),
             addr_config: Default::default(),
             provider: Default::default(),
-            keystore: Keystore::in_memory(),
+            keystore: Default::default(),
             connection_idle: Duration::from_secs(30),
             request_response_config: Either::Left(Default::default()),
             listening_addrs: vec![],
@@ -860,7 +860,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
     /// Set a keystore
     pub fn set_keystore(mut self, keystore: &Keystore) -> Self {
-        self.options.keystore = keystore.clone();
+        self.options.keystore = Some(keystore.clone());
         self
     }
 
@@ -982,7 +982,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone();
 
-        let keystore = options.keystore.clone();
+        let keystore = options
+            .keystore
+            .take()
+            .unwrap_or(Keystore::new(Arc::new(repo.clone())));
 
         let mut ipfs = Ipfs {
             span: facade_span,
