@@ -167,7 +167,7 @@ pub trait KeyStorage: Sync + Send + 'static {
     async fn contains(&self, name: &str) -> Result<bool, Error>;
     async fn remove(&self, name: &str) -> Result<(), Error>;
     async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error>;
-    async fn list(&self) -> Result<BoxStream<'static, Key>, Error>;
+    async fn list(&self) -> Result<BoxStream<'static, (String, Key)>, Error>;
     async fn len(&self) -> Result<usize, Error> {
         let amount = self.list().await?.count().await;
         Ok(amount)
@@ -208,12 +208,15 @@ impl KeyStorage for Repo {
         KeyStorage::set(self, new_name, current_key.as_ref()).await
     }
 
-    async fn list(&self) -> Result<BoxStream<'static, Key>, Error> {
+    async fn list(&self) -> Result<BoxStream<'static, (String, Key)>, Error> {
         let st = DataStore::iter(self.data_store()).await;
         let stream = st.filter_map(|(k, v)| async move {
             let ns = String::from_utf8_lossy(&k[..NAMESPACE.len()]);
             match ns == NAMESPACE {
-                true => Some(Key::from(v)),
+                true => {
+                    let k = String::from_utf8_lossy(&k[NAMESPACE.len() + 1..]).to_string();
+                    Some((k, Key::from(v)))
+                }
                 false => None,
             }
         });
@@ -259,12 +262,15 @@ impl<T: DataStore + 'static> KeyStorage for T {
         KeyStorage::set(self, new_name, current_key.as_ref()).await
     }
 
-    async fn list(&self) -> Result<BoxStream<'static, Key>, Error> {
+    async fn list(&self) -> Result<BoxStream<'static, (String, Key)>, Error> {
         let st = DataStore::iter(self).await;
         let stream = st.filter_map(|(k, v)| async move {
             let ns = String::from_utf8_lossy(&k[..NAMESPACE.len()]);
             match ns == NAMESPACE {
-                true => Some(Key::from(v)),
+                true => {
+                    let k = String::from_utf8_lossy(&k[NAMESPACE.len() + 1..]).to_string();
+                    Some((k, Key::from(v)))
+                }
                 false => None,
             }
         });
@@ -332,11 +338,11 @@ impl KeyStorage for MemoryKeyStorage {
         Ok(())
     }
 
-    async fn list(&self) -> Result<BoxStream<'static, Key>, Error> {
+    async fn list(&self) -> Result<BoxStream<'static, (String, Key)>, Error> {
         let inner = self.inner.lock().await.clone();
         let stream = async_stream::stream! {
-            for (_, key) in inner {
-                yield key;
+            for (k, key) in inner {
+                yield (k, key);
             }
         };
 
