@@ -166,7 +166,11 @@ pub trait KeyStorage: Sync + Send + 'static {
     async fn get(&self, name: &str) -> Result<Key, Error>;
     async fn contains(&self, name: &str) -> Result<bool, Error>;
     async fn remove(&self, name: &str) -> Result<(), Error>;
-    async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error>;
+    async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {
+        let current_key = self.get(name).await?;
+        self.remove(name).await?;
+        self.set(new_name, current_key.as_ref()).await
+    }
     async fn list(&self) -> Result<BoxStream<'static, (String, Key)>, Error>;
     async fn len(&self) -> Result<usize, Error> {
         let amount = self.list().await?.count().await;
@@ -202,12 +206,6 @@ impl KeyStorage for Repo {
         DataStore::remove(self.data_store(), namespace_key.as_bytes()).await
     }
 
-    async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {
-        let current_key = KeyStorage::get(self, name).await?;
-        KeyStorage::remove(self, name).await?;
-        KeyStorage::set(self, new_name, current_key.as_ref()).await
-    }
-
     async fn list(&self) -> Result<BoxStream<'static, (String, Key)>, Error> {
         let st = DataStore::iter(self.data_store()).await;
         let stream = st.filter_map(|(k, v)| async move {
@@ -221,12 +219,6 @@ impl KeyStorage for Repo {
             }
         });
         Ok(stream.boxed())
-    }
-
-    async fn len(&self) -> Result<usize, Error> {
-        let st = KeyStorage::list(self).await?;
-        let amount = st.count().await;
-        Ok(amount)
     }
 }
 
@@ -256,12 +248,6 @@ impl<T: DataStore + 'static> KeyStorage for T {
         DataStore::remove(self, namespace_key.as_bytes()).await
     }
 
-    async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {
-        let current_key = KeyStorage::get(self, name).await?;
-        KeyStorage::remove(self, name).await?;
-        KeyStorage::set(self, new_name, current_key.as_ref()).await
-    }
-
     async fn list(&self) -> Result<BoxStream<'static, (String, Key)>, Error> {
         let st = DataStore::iter(self).await;
         let stream = st.filter_map(|(k, v)| async move {
@@ -275,12 +261,6 @@ impl<T: DataStore + 'static> KeyStorage for T {
             }
         });
         Ok(stream.boxed())
-    }
-
-    async fn len(&self) -> Result<usize, Error> {
-        let st = KeyStorage::list(self).await?;
-        let amount = st.count().await;
-        Ok(amount)
     }
 }
 
