@@ -913,8 +913,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             ..
         } = self;
 
-        let keys = keys.unwrap_or(Keypair::generate_ed25519());
-
         let root_span = Option::take(&mut options.span)
             // not sure what would be the best practice with tracing and spans
             .unwrap_or_else(|| tracing::trace_span!(parent: &Span::current(), "ipfs"));
@@ -986,6 +984,14 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             .keystore
             .take()
             .unwrap_or(Keystore::new(Arc::new(repo.clone())));
+
+        let keys = match keys {
+            Some(keys) => keys,
+            None => match keystore.get_keypair("primary").await {
+                Ok(keypair) => keypair,
+                Err(_) => Keypair::generate_ed25519(),
+            },
+        };
 
         let mut ipfs = Ipfs {
             span: facade_span,
