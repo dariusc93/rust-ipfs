@@ -1,5 +1,6 @@
 //! `ipfs.dag` interface implementation around [`Ipfs`].
 
+use std::borrow::Borrow;
 use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
@@ -232,18 +233,7 @@ impl IpldDag {
         local_only: bool,
         timeout: Option<Duration>,
     ) -> Result<Ipld, ResolveError> {
-        let resolved_path = match &self.ipfs {
-            Some(ipfs) => ipfs
-                .resolve_ipns(&path, true)
-                .await
-                .map_err(|_| ResolveError::IpnsResolutionFailed(path))?,
-            None => {
-                if !matches!(path.root(), PathRoot::Ipld(_)) {
-                    return Err(ResolveError::IpnsResolutionFailed(path));
-                }
-                path
-            }
-        };
+        let resolved_path = resolve_path(self.ipfs.as_ref(), path).await?;
 
         let cid = match resolved_path.root().cid() {
             Some(cid) => cid,
@@ -296,18 +286,7 @@ impl IpldDag {
         local_only: bool,
         timeout: Option<Duration>,
     ) -> Result<(ResolvedNode, SlashedPath), ResolveError> {
-        let resolved_path = match &self.ipfs {
-            Some(ipfs) => ipfs
-                .resolve_ipns(&path, true)
-                .await
-                .map_err(|_| ResolveError::IpnsResolutionFailed(path))?,
-            None => {
-                if !matches!(path.root(), PathRoot::Ipld(_)) {
-                    return Err(ResolveError::IpnsResolutionFailed(path));
-                }
-                path
-            }
-        };
+        let resolved_path = resolve_path(self.ipfs.as_ref(), path).await?;
 
         let cid = match resolved_path.root().cid() {
             Some(cid) => cid,
@@ -675,6 +654,23 @@ impl std::future::IntoFuture for DagPut {
         .instrument(span)
         .boxed()
     }
+}
+
+async fn resolve_path(ipfs: Option<&Ipfs>, path: impl Borrow<IpfsPath>) -> Result<IpfsPath, ResolveError> {
+    let resolved_path = match ipfs {
+        Some(ipfs) => ipfs
+            .resolve_ipns(&path, true)
+            .await
+            .map_err(|_| ResolveError::IpnsResolutionFailed(path))?,
+        None => {
+            if !matches!(path.root(), PathRoot::Ipld(_)) {
+                return Err(ResolveError::IpnsResolutionFailed(path));
+            }
+            path
+        }
+    };
+
+    Ok(resolved_path)
 }
 
 /// `IpfsPath`'s `Cid`-based variant can be resolved to the block, projections represented by this
@@ -1061,8 +1057,7 @@ mod tests {
             let p = IpfsPath::try_from(*path).unwrap();
 
             let (resolved, matched_segments) =
-                super::resolve_local_ipld(root, example_doc.clone(), &mut p.iter().peekable())
-                    .unwrap();
+                resolve_local_ipld(root, example_doc.clone(), &mut p.iter().peekable()).unwrap();
 
             assert_eq!(matched_segments, 4);
 
@@ -1086,7 +1081,7 @@ mod tests {
         ).unwrap();
 
         let (resolved, matched_segments) =
-            super::resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap();
+            resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap();
 
         match resolved.unwrap_complete() {
             ResolvedNode::Link(_, cid) if cid == target => {}
@@ -1110,7 +1105,7 @@ mod tests {
         .unwrap();
 
         let (resolved, matched_segments) =
-            super::resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap();
+            resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap();
         assert_eq!(resolved.unwrap_complete(), ResolvedNode::Link(root, cid));
         assert_eq!(matched_segments, 5);
 
@@ -1126,7 +1121,7 @@ mod tests {
         )
         .unwrap();
 
-        let e = super::resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap_err();
+        let e = resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap_err();
         assert!(
             matches!(
                 e,
@@ -1147,7 +1142,7 @@ mod tests {
         )
         .unwrap();
 
-        let e = super::resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap_err();
+        let e = resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap_err();
         assert!(
             matches!(
                 e,
@@ -1171,7 +1166,7 @@ mod tests {
         .unwrap();
 
         // FIXME: errors, again the number of matched
-        let e = super::resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap_err();
+        let e = resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap_err();
         assert!(
             matches!(
                 e,

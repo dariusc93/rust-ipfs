@@ -213,7 +213,7 @@ impl NetworkBehaviour for GossipsubStream {
     fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        connection_id: libp2p::swarm::ConnectionId,
+        connection_id: ConnectionId,
         event: libp2p::swarm::THandlerOutEvent<Self>,
     ) {
         self.gossipsub

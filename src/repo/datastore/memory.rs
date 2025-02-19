@@ -442,11 +442,10 @@ impl PinDocument {
                 }
 
                 if !add && !self.direct {
-                    if !self.recursive.is_set() {
-                        return Err(PinUpdateError::CannotUnpinUnpinned);
-                    } else {
-                        return Err(PinUpdateError::CannotUnpinDirectOnRecursivelyPinned);
-                    }
+                    return match !self.recursive.is_set() {
+                        true => Err(PinUpdateError::CannotUnpinUnpinned),
+                        false => Err(PinUpdateError::CannotUnpinDirectOnRecursivelyPinned),
+                    };
                 }
 
                 let modified = self.direct != add;

@@ -1,4 +1,5 @@
 # 0.15.0
+- chore: cleanup of imports and duplicated code.
 - refactor: use impl Trait in function parameter instead. [PR 383](https://github.com/dariusc93/rust-ipfs/pull/383)
 - refactor: remove lifetime from RepoPutBlock and return RepoPutBlock in Ipfs::put_block. [PR 384](https://github.com/dariusc93/rust-ipfs/pull/384)
 - chore: update libp2p to 0.55.0. [PR 375](https://github.com/dariusc93/rust-ipfs/pull/375)

@@ -101,7 +101,7 @@ impl FsBlockStoreInner {
 
         let metadata = match fs::metadata(path).await {
             Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(false),
             Err(e) => return Err(e.into()),
         };
 
@@ -118,7 +118,7 @@ impl FsBlockStoreInner {
         tokio::task::spawn_blocking(move || {
             let mut file = match std::fs::File::open(path) {
                 Ok(file) => file,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
                 Err(e) => {
                     return Err(e.into());
                 }
@@ -156,7 +156,7 @@ impl FsBlockStoreInner {
             match write_through_tempfile(target, &target_path, temp_path, block.data()) {
                 Ok(()) => {
                     trace!("successfully wrote the block");
-                    Ok::<_, std::io::Error>(Ok(block.data().len()))
+                    Ok::<_, io::Error>(Ok(block.data().len()))
                 }
                 Err(e) => {
                     match std::fs::remove_file(&target_path) {

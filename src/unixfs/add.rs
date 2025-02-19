@@ -1,7 +1,4 @@
-use std::task::Poll;
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::{Path, PathBuf};
+use std::task::{Context, Poll};
 
 use crate::{repo::Repo, Block};
 use bytes::Bytes;
@@ -13,6 +10,9 @@ use futures::{
     FutureExt, Stream, StreamExt, TryFutureExt,
 };
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::io::ReaderStream;
 use tracing::{Instrument, Span};
@@ -108,10 +108,7 @@ impl UnixfsAdd {
 
 impl Stream for UnixfsAdd {
     type Item = UnixfsStatus;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.core.is_none() && self.stream.is_none() {
             return Poll::Ready(None);
         }

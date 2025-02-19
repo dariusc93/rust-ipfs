@@ -1,4 +1,3 @@
-use ipld_core::ipld;
 use rust_ipfs::{Ipfs, IpfsPath};
 
 use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
@@ -11,9 +10,9 @@ async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = UninitializedIpfs::new().start().await?;
 
     // Create a DAG
-    let cid1 = ipfs.put_dag(ipld!("block1")).await?;
-    let cid2 = ipfs.put_dag(ipld!("block2")).await?;
-    let root = ipld!([cid1, cid2]);
+    let cid1 = ipfs.put_dag("block1").await?;
+    let cid2 = ipfs.put_dag("block2").await?;
+    let root = [cid1, cid2];
     let cid = ipfs.put_dag(root).await?;
     let path = IpfsPath::from(cid);
 
