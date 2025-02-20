@@ -1,15 +1,16 @@
-use std::{
-    path::{Path, PathBuf},
-    task::Poll,
-    time::Duration,
-};
-
 use either::Either;
 use futures::stream::BoxStream;
 use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
 use libp2p::PeerId;
 #[allow(unused_imports)]
 use rust_unixfs::walk::{ContinuedWalk, Walker};
+use std::pin::Pin;
+use std::task::Context;
+use std::{
+    path::{Path, PathBuf},
+    task::Poll,
+    time::Duration,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Span};
@@ -94,10 +95,7 @@ impl UnixfsGet {
 
 impl Stream for UnixfsGet {
     type Item = UnixfsStatus;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         if self.core.is_none() && self.stream.is_none() {
             return Poll::Ready(None);
         }

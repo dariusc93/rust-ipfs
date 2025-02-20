@@ -122,8 +122,8 @@ impl NetworkBehaviour for Behaviour {
 
     fn on_connection_handler_event(
         &mut self,
-        _: libp2p::PeerId,
-        _: swarm::ConnectionId,
+        _: PeerId,
+        _: ConnectionId,
         _: swarm::THandlerOutEvent<Self>,
     ) {
     }

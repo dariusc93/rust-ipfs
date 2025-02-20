@@ -123,35 +123,26 @@ pub struct RelayConfig {
 
 impl Default for RelayConfig {
     fn default() -> Self {
+        let limiters = vec![
+            RateLimit::PerPeer {
+                limit: NonZeroU32::new(30).expect("30 > 0"),
+                interval: Duration::from_secs(60 * 2),
+            },
+            RateLimit::PerIp {
+                limit: NonZeroU32::new(60).expect("60 > 0"),
+                interval: Duration::from_secs(60),
+            },
+        ];
         Self {
             max_reservations: 128,
             max_reservations_per_peer: 4,
             reservation_duration: Duration::from_secs(60 * 60),
-            reservation_rate_limiters: vec![
-                RateLimit::PerPeer {
-                    limit: NonZeroU32::new(30).expect("30 > 0"),
-                    interval: Duration::from_secs(60 * 2),
-                },
-                RateLimit::PerIp {
-                    limit: NonZeroU32::new(60).expect("60 > 0"),
-                    interval: Duration::from_secs(60),
-                },
-            ],
-
+            reservation_rate_limiters: limiters.clone(),
             max_circuits: 16,
             max_circuits_per_peer: 4,
             max_circuit_duration: Duration::from_secs(2 * 60),
             max_circuit_bytes: 1 << 17,
-            circuit_src_rate_limiters: vec![
-                RateLimit::PerPeer {
-                    limit: NonZeroU32::new(30).expect("30 > 0"),
-                    interval: Duration::from_secs(60 * 2),
-                },
-                RateLimit::PerIp {
-                    limit: NonZeroU32::new(60).expect("60 > 0"),
-                    interval: Duration::from_secs(60),
-                },
-            ],
+            circuit_src_rate_limiters: limiters,
         }
     }
 }
@@ -270,11 +261,11 @@ fn max_duration(duration: Duration) -> Duration {
 pub enum RateLimit {
     PerPeer {
         limit: NonZeroU32,
-        interval: std::time::Duration,
+        interval: Duration,
     },
     PerIp {
         limit: NonZeroU32,
-        interval: std::time::Duration,
+        interval: Duration,
     },
 }
 
@@ -403,7 +394,8 @@ where
             Either::Right(kad) => kad,
         };
 
-        let kademlia: Toggle<Kademlia<MemoryStore>> = (protocols.kad)
+        let kademlia: Toggle<Kademlia<MemoryStore>> = protocols
+            .kad
             .then(|| Kademlia::with_config(peer_id, store, kad_config))
             .into();
 

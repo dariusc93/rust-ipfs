@@ -578,6 +578,24 @@ mod test {
         Block::new_unchecked(cid, data)
     }
 
+    async fn wait_on_connection<B: NetworkBehaviour>(
+        swarm1: &mut Swarm<B>,
+        swarm2: &mut Swarm<B>,
+        peer_id: PeerId,
+    ) {
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id: peer, .. } = event {
+                        assert_eq!(peer, peer_id);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+    }
+
     #[tokio::test]
     async fn exchange_blocks() -> anyhow::Result<()> {
         let (_, _, mut swarm1, repo) = build_swarm().await;
@@ -595,17 +613,7 @@ mod test {
 
         swarm1.dial(opt)?;
 
-        loop {
-            futures::select! {
-                event = swarm1.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        assert_eq!(peer_id, peer2);
-                        break;
-                    }
-                }
-                _ = swarm2.next() => {}
-            }
-        }
+        wait_on_connection(&mut swarm1, &mut swarm2, peer2).await;
 
         swarm2.behaviour_mut().bitswap.get(&cid, &[], None);
 
@@ -696,17 +704,7 @@ mod test {
 
         swarm1.dial(opt)?;
 
-        loop {
-            futures::select! {
-                event = swarm1.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        assert_eq!(peer_id, peer2);
-                        break;
-                    }
-                }
-                _ = swarm2.next() => {}
-            }
-        }
+        wait_on_connection(&mut swarm1, &mut swarm2, peer2).await;
 
         swarm2
             .behaviour_mut()
@@ -745,17 +743,7 @@ mod test {
 
         swarm1.dial(opt)?;
 
-        loop {
-            futures::select! {
-                event = swarm1.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        assert_eq!(peer_id, peer2);
-                        break;
-                    }
-                }
-                _ = swarm2.next() => {}
-            }
-        }
+        wait_on_connection(&mut swarm1, &mut swarm2, peer2).await;
 
         swarm2.behaviour_mut().bitswap.get(&cid, &[peer1], None);
 

@@ -186,7 +186,7 @@ impl error::Error for LockError {
 /// A trait for describing repository locking.
 ///
 /// This ensures no two IPFS nodes can be started with the same peer ID, as exclusive access to the
-/// repository is guarenteed. This is most useful when using an fs backed repo.
+/// repository is guaranteed. This is most useful when using a fs backed repo.
 pub trait Lock: Debug + Send + Sync {
     // fn new(path: PathBuf) -> Self;
     fn try_exclusive(&self) -> Result<(), LockError>;

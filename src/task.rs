@@ -183,7 +183,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> futures::Future for IpfsTask<C> 
 
 impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
     pub async fn run(&mut self) {
-        let mut event_cleanup = futures_timer::Delay::new(Duration::from_secs(60));
+        let mut event_cleanup = Delay::new(Duration::from_secs(60));
 
         loop {
             tokio::select! {

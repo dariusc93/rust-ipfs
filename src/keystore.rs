@@ -201,17 +201,18 @@ impl KeyStorage for MemoryKeyStorage {
             .cloned()
             .ok_or(anyhow::anyhow!("Key doesnt exist"))
     }
+
+    async fn contains(&self, name: &str) -> Result<bool, Error> {
+        let inner = self.inner.lock().await;
+        Ok(inner.contains_key(name))
+    }
+
     async fn remove(&self, name: &str) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
         inner
             .remove(name)
             .map(|_| ())
             .ok_or(anyhow::anyhow!("Key doesnt exist"))
-    }
-
-    async fn contains(&self, name: &str) -> Result<bool, Error> {
-        let inner = self.inner.lock().await;
-        Ok(inner.contains_key(name))
     }
 
     async fn rename(&self, name: &str, new_name: &str) -> Result<(), Error> {

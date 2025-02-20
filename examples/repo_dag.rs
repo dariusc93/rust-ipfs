@@ -1,4 +1,3 @@
-use ipld_core::ipld;
 use rust_ipfs::dag::IpldDag;
 use rust_ipfs::repo::Repo;
 use rust_ipfs::IpfsPath;
@@ -11,9 +10,9 @@ async fn main() -> anyhow::Result<()> {
     let repo = Repo::new_memory();
     let dag = IpldDag::from(repo.clone());
 
-    let cid1 = dag.put_dag(ipld!("block1")).await?;
-    let cid2 = dag.put_dag(ipld!("block2")).await?;
-    let root = ipld!([cid1, cid2]);
+    let cid1 = dag.put_dag("block1").await?;
+    let cid2 = dag.put_dag("block2").await?;
+    let root = [cid1, cid2];
     let cid = dag.put_dag(root).await?;
     let path = IpfsPath::from(cid);
 

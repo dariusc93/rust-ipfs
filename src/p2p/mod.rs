@@ -250,7 +250,7 @@ where
         None => transport::build_transport(keypair, relay_transport, transport_config)?,
     };
 
-    let swarm = libp2p::Swarm::new(
+    let swarm = Swarm::new(
         transport,
         behaviour,
         peer_id,
