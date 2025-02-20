@@ -1,6 +1,5 @@
 //! `ipfs.dag` interface implementation around [`Ipfs`].
 
-use std::borrow::Borrow;
 use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
@@ -22,6 +21,7 @@ use rust_unixfs::{
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::iter::Peekable;
@@ -656,7 +656,10 @@ impl std::future::IntoFuture for DagPut {
     }
 }
 
-async fn resolve_path(ipfs: Option<&Ipfs>, path: impl Borrow<IpfsPath>) -> Result<IpfsPath, ResolveError> {
+async fn resolve_path(
+    ipfs: Option<&Ipfs>,
+    path: impl Borrow<IpfsPath>,
+) -> Result<IpfsPath, ResolveError> {
     let path = path.borrow().clone();
     let resolved_path = match ipfs {
         Some(ipfs) => ipfs
