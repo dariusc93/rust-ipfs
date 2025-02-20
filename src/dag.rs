@@ -657,6 +657,7 @@ impl std::future::IntoFuture for DagPut {
 }
 
 async fn resolve_path(ipfs: Option<&Ipfs>, path: impl Borrow<IpfsPath>) -> Result<IpfsPath, ResolveError> {
+    let path = path.borrow().clone();
     let resolved_path = match ipfs {
         Some(ipfs) => ipfs
             .resolve_ipns(&path, true)
