@@ -144,7 +144,7 @@ mod ext_behaviour {
     }
 
     impl NetworkBehaviour for Behaviour {
-        type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
+        type ConnectionHandler = libp2p::swarm::dummy::ConnectionHandler;
         type ToSwarm = Infallible;
 
         fn handle_pending_inbound_connection(

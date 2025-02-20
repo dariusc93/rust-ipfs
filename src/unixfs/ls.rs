@@ -1,5 +1,3 @@
-use std::{task::Poll, time::Duration};
-
 use either::Either;
 use futures::{
     future::BoxFuture,
@@ -9,6 +7,9 @@ use futures::{
 use ipld_core::cid::Cid;
 use libp2p::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
+use std::pin::Pin;
+use std::task::Context;
+use std::{task::Poll, time::Duration};
 use tracing::{Instrument, Span};
 
 use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
@@ -89,10 +90,7 @@ impl UnixfsLs {
 
 impl Stream for UnixfsLs {
     type Item = Entry;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.core.is_none() && self.stream.is_none() {
             return Poll::Ready(None);
         }

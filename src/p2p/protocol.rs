@@ -8,16 +8,12 @@ use libp2p::{
     Multiaddr, PeerId, StreamProtocol,
 };
 use std::convert::Infallible;
-use std::{
-    collections::VecDeque,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
 mod handler;
 
 #[derive(Default, Debug)]
 pub struct Behaviour {
-    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     protocol: Vec<StreamProtocol>,
 }
 
@@ -89,9 +85,6 @@ impl NetworkBehaviour for Behaviour {
     fn on_swarm_event(&mut self, _: FromSwarm) {}
 
     fn poll(&mut self, _: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        if let Some(event) = self.events.pop_front() {
-            return Poll::Ready(event);
-        }
         Poll::Pending
     }
 }

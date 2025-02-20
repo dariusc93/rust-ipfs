@@ -238,15 +238,15 @@ pub(crate) fn build_transport(
     let transport = match enable_webrtc {
         true => {
             let cert = match webrtc_pem {
-                Some(pem) => libp2p_webrtc::tokio::Certificate::from_pem(&pem)
-                    .map_err(std::io::Error::other)?,
+                Some(pem) => {
+                    libp2p_webrtc::tokio::Certificate::from_pem(&pem).map_err(io::Error::other)?
+                }
                 None => {
                     // This flag is internal, but is meant to allow generating an expired pem to satify webrtc
                     let expired = true;
                     let pem = misc::generate_wrtc_cert(&keypair)?;
 
-                    libp2p_webrtc::tokio::Certificate::from_pem(&pem)
-                        .map_err(std::io::Error::other)?
+                    libp2p_webrtc::tokio::Certificate::from_pem(&pem).map_err(io::Error::other)?
                 }
             };
 

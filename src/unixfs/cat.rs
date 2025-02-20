@@ -8,7 +8,8 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
-use std::task::Poll;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use tracing::{Instrument, Span};
 
@@ -121,10 +122,7 @@ impl From<Block> for StartingPoint {
 
 impl Stream for UnixfsCat {
     type Item = Result<Bytes, TraversalFailed>;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.core.is_none() && self.stream.is_none() {
             return Poll::Ready(None);
         }

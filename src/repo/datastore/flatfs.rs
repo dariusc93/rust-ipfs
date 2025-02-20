@@ -776,20 +776,20 @@ mod test {
 
         store.init().await?;
 
-        let contains = store.contains(&key).await.unwrap();
+        let contains = store.contains(&key).await?;
         assert!(!contains);
         let get = store.get(&key).await.unwrap_or_default();
         assert_eq!(get, None);
         assert!(store.remove(&key).await.is_err());
 
-        store.put(&key, &value).await.unwrap();
-        let contains = store.contains(&key).await.unwrap();
+        store.put(&key, &value).await?;
+        let contains = store.contains(&key).await?;
         assert!(contains);
-        let get = store.get(&key).await.unwrap();
+        let get = store.get(&key).await?;
         assert_eq!(get, Some(value.to_vec()));
 
-        store.remove(&key).await.unwrap();
-        let contains = store.contains(&key).await.unwrap();
+        store.remove(&key).await?;
+        let contains = store.contains(&key).await?;
         assert!(!contains);
         let get = store.get(&key).await.unwrap_or_default();
         assert_eq!(get, None);

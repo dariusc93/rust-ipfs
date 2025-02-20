@@ -19,7 +19,7 @@ impl Handler {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum In {
     Protect,
     Unprotect,

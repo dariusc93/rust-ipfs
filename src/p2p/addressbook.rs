@@ -145,22 +145,15 @@ impl Behaviour {
 
     fn keep_peer_alive(&mut self, peer_id: &PeerId) {
         self.peer_keepalive.insert(*peer_id);
-        if let Some(conns) = self.connections.get(peer_id) {
-            self.events.extend(
-                conns
-                    .iter()
-                    .copied()
-                    .map(|connection_id| ToSwarm::NotifyHandler {
-                        peer_id: *peer_id,
-                        handler: swarm::NotifyHandler::One(connection_id),
-                        event: handler::In::Protect,
-                    }),
-            )
-        }
+        self.set_peer_protected_status(peer_id, handler::In::Protect);
     }
 
     fn dont_keep_peer_alive(&mut self, peer_id: &PeerId) {
         self.peer_keepalive.remove(peer_id);
+        self.set_peer_protected_status(peer_id, handler::In::Unprotect);
+    }
+
+    fn set_peer_protected_status(&mut self, peer_id: &PeerId, event: handler::In) {
         if let Some(conns) = self.connections.get(peer_id) {
             self.events.extend(
                 conns
@@ -169,7 +162,7 @@ impl Behaviour {
                     .map(|connection_id| ToSwarm::NotifyHandler {
                         peer_id: *peer_id,
                         handler: swarm::NotifyHandler::One(connection_id),
-                        event: handler::In::Unprotect,
+                        event,
                     }),
             )
         }
@@ -361,6 +354,17 @@ impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = handler::Handler;
     type ToSwarm = Infallible;
 
+    fn handle_established_inbound_connection(
+        &mut self,
+        _: ConnectionId,
+        peer_id: PeerId,
+        _: &Multiaddr,
+        _: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        let keepalive = self.peer_keepalive.contains(&peer_id);
+        Ok(handler::Handler::new(keepalive))
+    }
+
     fn handle_pending_outbound_connection(
         &mut self,
         _: ConnectionId,
@@ -382,17 +386,6 @@ impl NetworkBehaviour for Behaviour {
         Ok(list)
     }
 
-    fn handle_established_inbound_connection(
-        &mut self,
-        _: ConnectionId,
-        peer_id: PeerId,
-        _: &Multiaddr,
-        _: &Multiaddr,
-    ) -> Result<THandler<Self>, ConnectionDenied> {
-        let keepalive = self.peer_keepalive.contains(&peer_id);
-        Ok(handler::Handler::new(keepalive))
-    }
-
     fn handle_established_outbound_connection(
         &mut self,
         _: ConnectionId,
@@ -403,14 +396,6 @@ impl NetworkBehaviour for Behaviour {
     ) -> Result<THandler<Self>, ConnectionDenied> {
         let keepalive = self.peer_keepalive.contains(&peer_id);
         Ok(handler::Handler::new(keepalive))
-    }
-
-    fn on_connection_handler_event(
-        &mut self,
-        _: PeerId,
-        _: ConnectionId,
-        _: swarm::THandlerOutEvent<Self>,
-    ) {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
@@ -431,6 +416,14 @@ impl NetworkBehaviour for Behaviour {
             FromSwarm::ExternalAddrExpired(_) => {}
             _ => {}
         }
+    }
+
+    fn on_connection_handler_event(
+        &mut self,
+        _: PeerId,
+        _: ConnectionId,
+        _: swarm::THandlerOutEvent<Self>,
+    ) {
     }
 
     fn poll(&mut self, cx: &mut Context) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
@@ -467,7 +460,25 @@ mod test {
         Multiaddr, PeerId, Swarm, SwarmBuilder,
     };
 
-    use crate::AddPeerOpt;
+    use crate::{AddPeerOpt, NetworkBehaviour};
+
+    async fn wait_on_connection<B: NetworkBehaviour>(
+        swarm1: &mut Swarm<B>,
+        swarm2: &mut Swarm<B>,
+        peer_id: PeerId,
+    ) {
+        loop {
+            futures::select! {
+                event = swarm1.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id: peer, .. } = event {
+                        assert_eq!(peer, peer_id);
+                        break;
+                    }
+                }
+                _ = swarm2.next() => {}
+            }
+        }
+    }
 
     #[tokio::test]
     async fn dial_with_peer_id() -> anyhow::Result<()> {
@@ -480,17 +491,7 @@ mod test {
 
         swarm1.dial(peer2)?;
 
-        loop {
-            futures::select! {
-                event = swarm1.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        assert_eq!(peer_id, peer2);
-                        break;
-                    }
-                }
-                _ = swarm2.next() => {}
-            }
-        }
+        wait_on_connection(&mut swarm1, &mut swarm2, peer2).await;
         Ok(())
     }
 
@@ -503,17 +504,7 @@ mod test {
 
         swarm1.dial(peer2)?;
 
-        loop {
-            futures::select! {
-                event = swarm1.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        assert_eq!(peer_id, peer2);
-                        break;
-                    }
-                }
-                _ = swarm2.next() => {}
-            }
-        }
+        wait_on_connection(&mut swarm1, &mut swarm2, peer2).await;
 
         swarm1.disconnect_peer_id(peer2).expect("Shouldnt fail");
 
@@ -612,17 +603,7 @@ mod test {
 
         swarm1.dial(opt)?;
 
-        loop {
-            futures::select! {
-                event = swarm1.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        assert_eq!(peer_id, peer2);
-                        break;
-                    }
-                }
-                _ = swarm2.next() => {}
-            }
-        }
+        wait_on_connection(&mut swarm1, &mut swarm2, peer2).await;
 
         let addrs = swarm1
             .behaviour()
