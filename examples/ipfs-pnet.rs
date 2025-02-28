@@ -1,11 +1,5 @@
 use clap::Parser;
-use libp2p::core::upgrade::Version;
-use libp2p::noise;
-use libp2p::pnet::PnetConfig;
 use libp2p::pnet::PreSharedKey;
-use libp2p::tcp;
-use libp2p::yamux;
-use libp2p::Transport;
 use rand::Rng;
 use rust_ipfs::Ipfs;
 use rust_ipfs::Keypair;
@@ -23,6 +17,12 @@ fn generate_psk() -> PreSharedKey {
     rand::thread_rng().fill(&mut key_bytes);
     PreSharedKey::new(key_bytes)
 }
+
+/// you can provide a PSK as an argument 
+/// example: cargo run --example 8ab6e6aeb73353791b88c3c73e3d9a5111273e6d89edcbfb8be783f1e595617b
+/// 
+/// or create a random one without providing any argument
+/// example: cargo run --example ipfs-pnet
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -30,8 +30,6 @@ async fn main() -> anyhow::Result<()> {
     let keypair = Keypair::generate_ed25519();
     let local_peer_id = keypair.public().to_peer_id();
 
-    // you can provide a PSK here or create a random one
-    // example: cargo run --example 8ab6e6aeb73353791b88c3c73e3d9a5111273e6d89edcbfb8be783f1e595617b
     let opt = Opt::parse();
     let psk = {
         match opt.psk {
@@ -56,20 +54,7 @@ async fn main() -> anyhow::Result<()> {
         .set_keypair(&keypair)
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
-        .with_custom_transport(Box::new(move |key: &Keypair, _| {
-            let noise_config = noise::Config::new(key).unwrap();
-            let yamux_config = yamux::Config::default();
-
-            let base_transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true));
-            let pnet_transport =
-                base_transport.and_then(move |socket, _| PnetConfig::new(psk).handshake(socket));
-
-            Ok(pnet_transport
-                .upgrade(Version::V1Lazy)
-                .authenticate(noise_config)
-                .multiplex(yamux_config)
-                .boxed())
-        }))
+        .with_pnet(psk)
         .with_custom_behaviour(ext_behaviour::Behaviour::new(local_peer_id))
         .start()
         .await?;
