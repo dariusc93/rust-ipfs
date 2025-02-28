@@ -122,6 +122,7 @@ use libp2p::{
     StreamProtocol,
 };
 use libp2p::{request_response::InboundRequestId, swarm::dial_opts::PeerCondition};
+use libp2p::pnet::PreSharedKey;
 pub use libp2p_connection_limits::ConnectionLimits;
 use serde::Serialize;
 
@@ -873,6 +874,13 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     /// Set a transport
     pub fn with_custom_transport(mut self, transport: TTransportFn) -> Self {
         self.custom_transport = Some(transport);
+        self
+    }
+
+    /// Set pnet
+    pub fn with_pnet(mut self, psk: PreSharedKey) -> Self {
+        self.options.transport_configuration.enable_pnet = true;
+        self.options.transport_configuration.pnet_psk = Some(psk);
         self
     }
 
