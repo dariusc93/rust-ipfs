@@ -168,7 +168,7 @@ tokio = { features = ["full"], workspace = true }
 rustyline-async = { version = "0.4.5" }
 tracing-subscriber = { features = ["env-filter"], version = "0.3.19" }
 rand = { workspace = true }
-tempfile = "3.16.0"
+tempfile = "3.17.1"
 
 clap = { workspace = true }
 
