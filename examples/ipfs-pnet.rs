@@ -18,9 +18,9 @@ fn generate_psk() -> PreSharedKey {
     PreSharedKey::new(key_bytes)
 }
 
-/// you can provide a PSK as an argument 
+/// you can provide a PSK as an argument
 /// example: cargo run --example 8ab6e6aeb73353791b88c3c73e3d9a5111273e6d89edcbfb8be783f1e595617b
-/// 
+///
 /// or create a random one without providing any argument
 /// example: cargo run --example ipfs-pnet
 #[tokio::main]

@@ -112,6 +112,7 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
+use libp2p::pnet::PreSharedKey;
 use libp2p::swarm::ConnectionId;
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
@@ -122,7 +123,6 @@ use libp2p::{
     StreamProtocol,
 };
 use libp2p::{request_response::InboundRequestId, swarm::dial_opts::PeerCondition};
-use libp2p::pnet::PreSharedKey;
 pub use libp2p_connection_limits::ConnectionLimits;
 use serde::Serialize;
 
