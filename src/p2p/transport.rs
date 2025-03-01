@@ -15,6 +15,8 @@ use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::dns::{ResolverConfig, ResolverOpts};
+#[cfg(not(target_arch = "wasm32"))]
+use libp2p::pnet::{PnetConfig, PreSharedKey};
 use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::yamux::Config as YamuxConfig;
 use libp2p::{identity, noise};
@@ -42,6 +44,10 @@ pub struct TransportConfig {
     pub support_quic_draft_29: bool,
     pub enable_webrtc: bool,
     pub webrtc_pem: Option<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub enable_pnet: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub pnet_psk: Option<PreSharedKey>,
 }
 
 impl Default for TransportConfig {
@@ -66,6 +72,10 @@ impl Default for TransportConfig {
             quic_keep_alive: Some(Duration::from_millis(100)),
             dns_resolver: None,
             version: UpgradeVersion::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            enable_pnet: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            pnet_psk: None,
         }
     }
 }
@@ -138,6 +148,8 @@ pub(crate) fn build_transport(
         webrtc_pem,
         websocket_pem,
         enable_webtransport: _,
+        enable_pnet,
+        pnet_psk,
     }: TransportConfig,
 ) -> io::Result<TTransport> {
     use crate::p2p::transport::dual_transport::SelectSecurityUpgrade;
@@ -225,6 +237,13 @@ pub(crate) fn build_transport(
     let transport = match relay {
         Some(relay) => Either::Left(OrTransport::new(relay, transport)),
         None => Either::Right(transport),
+    };
+
+    let transport = match (enable_pnet, pnet_psk) {
+        (true, Some(psk)) => Either::Left(
+            transport.and_then(move |socket, _| PnetConfig::new(psk).handshake(socket)),
+        ),
+        _ => Either::Right(transport),
     };
 
     let transport = transport

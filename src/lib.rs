@@ -112,6 +112,8 @@ pub use libp2p::{
     Multiaddr, PeerId,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use libp2p::pnet::PreSharedKey;
 use libp2p::swarm::ConnectionId;
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::Boxed},
@@ -873,6 +875,14 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     /// Set a transport
     pub fn with_custom_transport(mut self, transport: TTransportFn) -> Self {
         self.custom_transport = Some(transport);
+        self
+    }
+
+    /// Set pnet
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_pnet(mut self, psk: PreSharedKey) -> Self {
+        self.options.transport_configuration.enable_pnet = true;
+        self.options.transport_configuration.pnet_psk = Some(psk);
         self
     }
 
