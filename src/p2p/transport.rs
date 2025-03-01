@@ -15,8 +15,8 @@ use libp2p::core::transport::upgrade::Version;
 use libp2p::core::transport::{Boxed, MemoryTransport, OrTransport};
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::dns::{ResolverConfig, ResolverOpts};
-use libp2p::pnet::PnetConfig;
-use libp2p::pnet::PreSharedKey;
+#[cfg(not(target_arch = "wasm32"))]
+use libp2p::pnet::{PnetConfig, PreSharedKey};
 use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::yamux::Config as YamuxConfig;
 use libp2p::{identity, noise};
@@ -45,6 +45,7 @@ pub struct TransportConfig {
     pub enable_webrtc: bool,
     pub webrtc_pem: Option<String>,
     pub enable_pnet: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     pub pnet_psk: Option<PreSharedKey>,
 }
 
@@ -70,7 +71,9 @@ impl Default for TransportConfig {
             quic_keep_alive: Some(Duration::from_millis(100)),
             dns_resolver: None,
             version: UpgradeVersion::default(),
+            #[cfg(not(target_arch = "wasm32"))]
             enable_pnet: false,
+            #[cfg(not(target_arch = "wasm32"))]
             pnet_psk: None,
         }
     }
