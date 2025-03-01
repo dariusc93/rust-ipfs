@@ -44,6 +44,7 @@ pub struct TransportConfig {
     pub support_quic_draft_29: bool,
     pub enable_webrtc: bool,
     pub webrtc_pem: Option<String>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub enable_pnet: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub pnet_psk: Option<PreSharedKey>,
