@@ -20,7 +20,7 @@ test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-anyhow = "1.0.95"
+anyhow = "1.0.96"
 async-rt = "0.1.5"
 async-stream = { version = "0.3.6" }
 async-trait = { version = "0.1.86" }
@@ -28,8 +28,8 @@ asynchronous-codec = "0.7.0"
 base64 = { version = "0.22.1" }
 bytes = "1.10.0"
 cid = "0.11.1"
-chrono = { version = "0.4.39" }
-clap = { version = "4.5.30", features = ["derive"] }
+chrono = { version = "0.4.40" }
+clap = { version = "4.5.31", features = ["derive"] }
 either = { version = "1.14.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
@@ -56,8 +56,8 @@ multihash-derive = "0.9.0"
 # TODO: Determine if we should just rely on default features
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "std", "pem"] }
 parking_lot = "0.12.3"
-pem = { version = "3.0.4" }
-pollable-map = "0.1.0"
+pem = { version = "3.0.5" }
+pollable-map = "0.1.1"
 quick-protobuf = { version = "0.8.1" }
 quick-protobuf-codec = "0.3.1"
 rand = "0.8.5"
@@ -69,9 +69,9 @@ rust-unixfs = { version = "0.5.0", path = "unixfs" }
 sec1 = { version = "0.7.3", features = ["pem", "pkcs8"] }
 send_wrapper = "0.6.0"
 serde = { version = "1.0.218" }
-serde_ipld_dagcbor = "0.6.1"
+serde_ipld_dagcbor = "0.6.2"
 serde_ipld_dagjson = "0.2.0"
-serde_json = { version = "1.0.138" }
+serde_json = { version = "1.0.139" }
 serde-wasm-bindgen = "0.6.5"
 sha2 = "0.10.8"
 simple_x509 = "=1.1.0"
@@ -139,7 +139,7 @@ zeroize.workspace = true
 futures-timer.workspace = true
 fs2.workspace = true
 hickory-resolver.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "ed25519", "secp256k1", "ecdsa", "rsa", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", "pnet" ], workspace = true }
+libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "ed25519", "secp256k1", "ecdsa", "rsa", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", "pnet"], workspace = true }
 libp2p-webrtc = { workspace = true, features = ["tokio", ], optional = true }
 rcgen.workspace = true
 rlimit.workspace = true
