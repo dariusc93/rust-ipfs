@@ -51,8 +51,7 @@ impl ConnectionHandler for Handler {
         false
     }
 
-    fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
-        let _ = event;
+    fn on_behaviour_event(&mut self, _event: Self::FromBehaviour) {
     }
 
     #[allow(clippy::wildcard_in_or_patterns)]

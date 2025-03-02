@@ -1788,7 +1788,7 @@ impl Ipfs {
                 .send(IpfsEvent::SendRequests(protocol, peers, request, tx))
                 .await?;
 
-            rx.await?.map_err(anyhow::Error::from)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1818,7 +1818,7 @@ impl Ipfs {
                 .send(IpfsEvent::SendResponse(protocol, peer_id, id, response, tx))
                 .await?;
 
-            rx.await?.map_err(anyhow::Error::from)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
