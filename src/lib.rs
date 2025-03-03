@@ -1016,7 +1016,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
                 ipfs.repo
                     .list_pins(None)
                     .await
-                    .filter_map(|result| async move { result.map(|(cid, _)| cid).ok() })
+                    .filter_map(|result| futures::future::ready(result.map(|(cid, _)| cid).ok()))
                     .collect()
                     .await
             }
