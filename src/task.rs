@@ -8,6 +8,7 @@ use futures::{
     stream::Fuse,
     FutureExt, StreamExt,
 };
+use pollable_map::stream::optional::OptionalStream;
 
 use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
@@ -58,8 +59,8 @@ use tokio::sync::Notify;
 #[allow(dead_code)]
 pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
     pub swarm: TSwarm<C>,
-    pub repo_events: Fuse<Receiver<RepoEvent>>,
-    pub from_facade: Fuse<Receiver<IpfsEvent>>,
+    pub repo_events: OptionalStream<Fuse<Receiver<RepoEvent>>>,
+    pub from_facade: OptionalStream<Fuse<Receiver<IpfsEvent>>>,
     pub bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
     pub listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
@@ -91,16 +92,10 @@ pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
 }
 
 impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
-    pub fn new(
-        swarm: TSwarm<C>,
-        repo_events: Fuse<Receiver<RepoEvent>>,
-        from_facade: Fuse<Receiver<IpfsEvent>>,
-        repo: &Repo,
-        event_capacity: usize,
-    ) -> Self {
+    pub fn new(swarm: TSwarm<C>, repo: &Repo, event_capacity: usize) -> Self {
         IpfsTask {
-            repo_events,
-            from_facade,
+            repo_events: OptionalStream::default(),
+            from_facade: OptionalStream::default(),
             swarm,
             event_capacity,
             provider_stream: HashMap::new(),
@@ -154,7 +149,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> futures::Future for IpfsTask<C> 
         }
         loop {
             match self.from_facade.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => self.handle_event(event),
+                Poll::Ready(Some(event)) => {
+                    if matches!(event, IpfsEvent::Exit) {
+                        return Poll::Ready(());
+                    }
+                    self.handle_event(event)
+                }
                 Poll::Ready(None) => return Poll::Ready(()),
                 Poll::Pending => break,
             }
