@@ -45,11 +45,10 @@ use dag::{DagGet, DagPut};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{channel, Sender, UnboundedReceiver},
+        mpsc::UnboundedReceiver,
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
     future::BoxFuture,
-    sink::SinkExt,
     stream::{BoxStream, Stream},
     FutureExt, StreamExt, TryStreamExt,
 };
@@ -85,7 +84,7 @@ pub use self::{
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
-use async_rt::AbortableJoinHandle;
+use async_rt::{AbortableJoinHandle, CommunicationTask};
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
 use std::borrow::Borrow;
@@ -338,9 +337,8 @@ pub struct Ipfs {
     key: Keypair,
     keystore: Keystore,
     identify_conf: IdentifyConfiguration,
-    to_task: Sender<IpfsEvent>,
+    to_task: CommunicationTask<IpfsEvent>,
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
-    _guard: AbortableJoinHandle<()>,
     _gc_guard: AbortableJoinHandle<()>,
 }
 
@@ -986,35 +984,18 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             }
         }
 
-        let mut _guard = AbortableJoinHandle::empty();
-        let mut _gc_guard = AbortableJoinHandle::empty();
-
-        let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone();
 
         let keystore = options.keystore.clone();
-
-        let mut ipfs = Ipfs {
-            span: facade_span,
-            repo,
-            identify_conf: id_conf,
-            key: keys.clone(),
-            keystore,
-            to_task,
-            record_key_validator,
-            _guard,
-            _gc_guard,
-        };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
         //      provider records by adding the amount of blocks to the config.
         //TODO: Add persistent layer for kad store
         let blocks = match options.provider {
             RepoProvider::None => vec![],
-            RepoProvider::All => ipfs.repo.list_blocks().await.collect::<Vec<_>>().await,
+            RepoProvider::All => repo.list_blocks().await.collect::<Vec<_>>().await,
             RepoProvider::Pinned => {
-                ipfs.repo
-                    .list_pins(None)
+                repo.list_pins(None)
                     .await
                     .filter_map(|result| futures::future::ready(result.map(|(cid, _)| cid).ok()))
                     .collect()
@@ -1047,7 +1028,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         let swarm = create_swarm(
             &keys,
             &options,
-            &ipfs.repo,
+            &repo,
             exec_span,
             (custom_behaviour, custom_transport),
         )?;
@@ -1058,7 +1039,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
         let gc_handle = gc_config.map(|config| {
             async_rt::task::spawn_abortable({
-                let repo = ipfs.repo.clone();
+                let repo = repo.clone();
                 async move {
                     let GCConfig { duration, trigger } = config;
                     let use_config_timer = duration != Duration::ZERO;
@@ -1127,13 +1108,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             })
         }).unwrap_or(AbortableJoinHandle::empty());
 
-        let mut fut = task::IpfsTask::new(
-            swarm,
-            repo_events.fuse(),
-            receiver.fuse(),
-            &ipfs.repo,
-            options.connection_event_cap,
-        );
+        let mut fut = task::IpfsTask::new(swarm, &repo, options.connection_event_cap);
         fut.swarm_event = swarm_event;
         fut.local_external_addr = local_external_addr;
 
@@ -1163,26 +1138,33 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             }
         }
 
-        let main_handle = async_rt::task::spawn_abortable({
-            async move {
+        let main_handle = async_rt::task::spawn_coroutine_with_context(
+            (repo_events, swarm_span, fut),
+            |(r_events, swarm_span, mut fut), recv: futures::channel::mpsc::Receiver<IpfsEvent>| async move {
+                fut.from_facade.replace(recv.fuse());
+                fut.repo_events.replace(r_events.fuse());
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
-
                 let fut = if as_fut {
                     fut.boxed()
                 } else {
                     fut.run().boxed()
                 };
+                fut.instrument(swarm_span).await
+            },
+        );
 
-                fut.await
-            }
-            .instrument(swarm_span)
-        });
+        let ipfs = Ipfs {
+            span: facade_span,
+            repo,
+            identify_conf: id_conf,
+            key: keys.clone(),
+            keystore,
+            to_task: main_handle,
+            record_key_validator,
+            _gc_guard: gc_handle,
+        };
 
-        unsafe {
-            ipfs._guard.replace(main_handle);
-            ipfs._gc_guard.replace(gc_handle);
-        }
         Ok(ipfs)
     }
 }
@@ -2633,7 +2615,7 @@ impl Ipfs {
     }
 
     /// Exit daemon.
-    pub async fn exit_daemon(mut self) {
+    pub async fn exit_daemon(self) {
         // FIXME: this is a stopgap measure needed while repo is part of the struct Ipfs instead of
         // the background task or stream. After that this could be handled by dropping.
         self.repo.shutdown();
@@ -2641,9 +2623,15 @@ impl Ipfs {
         // ignoring the error because it'd mean that the background task had already been dropped
         let _ = self.to_task.try_send(IpfsEvent::Exit);
 
-        // terminte task that handles GC and spawn task
+        // TODO: Determine if we want to kill the task directly or let it gracefully close after completing all events
+        // self.to_task.abort();;
+
+        // terminte task that handles GC
         self._gc_guard.abort();
-        self._guard.abort();
+
+        // yield to the runtime to allow runtime to process pending tasks
+        // TODO: Possibly remove along with async signature
+        // tokio::task::yield_now().await;
     }
 }
 
