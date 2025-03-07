@@ -2631,7 +2631,7 @@ impl Ipfs {
 
         // yield to the runtime to allow runtime to process pending tasks
         // TODO: Possibly remove along with async signature
-        tokio::task::yield_now().await;
+        // tokio::task::yield_now().await;
     }
 }
 
