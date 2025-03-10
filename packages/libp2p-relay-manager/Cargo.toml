@@ -14,7 +14,7 @@ exclude = [".gitignore"]
 
 [dependencies]
 libp2p = { workspace = true, features = ["relay"] }
-anyhow = "1.0.95"
+anyhow = "1.0.97"
 futures = "0.3.31"
 
 rand.workspace = true
