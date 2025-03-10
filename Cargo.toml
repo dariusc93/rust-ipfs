@@ -33,7 +33,7 @@ clap = { version = "4.5.31", features = ["derive"] }
 either = { version = "1.14.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
-futures-timeout = "0.1.0"
+futures-timeout = "0.1.2"
 futures-timer = "3.0.0"
 getrandom = { version = "0.2.15" }
 hickory-resolver = "0.25.0-alpha.5"
