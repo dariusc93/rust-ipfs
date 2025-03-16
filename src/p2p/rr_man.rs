@@ -7,6 +7,10 @@ use libp2p::{
     StreamProtocol,
 };
 
+// Used to manage the index of request-response protocols.
+// TODO: Implement logic to handle request-response behaviour directly
+//       based on protocol name.
+// Note: This may require some map-like behaviour to mimic StreamMap
 #[derive(Debug)]
 pub struct Behaviour {
     rr_list: IndexMap<StreamProtocol, usize>,
