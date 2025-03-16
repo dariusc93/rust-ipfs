@@ -21,6 +21,7 @@ use libp2p::swarm::{
 };
 use libp2p::{request_response, PeerId, StreamProtocol};
 use pollable_map::futures::FutureMap;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::task::{Context, Poll};
@@ -185,23 +186,34 @@ impl Behaviour {
         peer_id: PeerId,
         error: OutboundFailure,
     ) {
-        if let Some(list) = self.pending_response.get_mut(&peer_id) {
+        if let Entry::Occupied(mut entry) = self.pending_response.entry(peer_id) {
+            let list = entry.get_mut();
+
             if let Some(tx) = list.remove(&id) {
                 _ = tx.send(Err(std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     error,
                 )));
             }
+
+            if list.is_empty() {
+                entry.remove();
+            }
         }
     }
+
     fn process_inbound_failure(
         &mut self,
         id: InboundRequestId,
         peer_id: PeerId,
         _: InboundFailure,
     ) {
-        if let Some(list) = self.pending_request.get_mut(&peer_id) {
+        if let Entry::Occupied(mut entry) = self.pending_request.entry(peer_id) {
+            let list = entry.get_mut();
             list.remove(&id);
+            if list.is_empty() {
+                entry.remove();
+            }
         }
     }
 }
