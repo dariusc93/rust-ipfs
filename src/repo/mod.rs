@@ -339,47 +339,8 @@ pub trait RepoTypes: Clone + Send + Sync + 'static {
     /// Describes a datastore.
     type TDataStore: DataStore;
     type TLock: Lock;
-
-    fn blockstore(&self) -> &Self::TBlockStore;
-    fn blockstore_mut(&mut self) -> &mut Self::TBlockStore;
-    fn datastore(&self) -> &Self::TDataStore;
-    fn datastore_mut(&mut self) -> &mut Self::TDataStore;
-    fn lock(&self) -> &Self::TLock;
-    fn lock_mut(&mut self) -> &mut Self::TLock;
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct Memory;
-
-impl RepoTypes for Memory {
-    type TBlockStore = blockstore::memory::MemBlockStore;
-    type TDataStore = datastore::memory::MemDataStore;
-    type TLock = lock::MemLock;
-
-    fn blockstore(&self) -> &Self::TBlockStore {
-        unimplemented!()
-    }
-
-    fn blockstore_mut(&mut self) -> &mut Self::TBlockStore {
-        todo!()
-    }
-
-    fn datastore(&self) -> &Self::TDataStore {
-        todo!()
-    }
-
-    fn datastore_mut(&mut self) -> &mut Self::TDataStore {
-        todo!()
-    }
-
-    fn lock(&self) -> &Self::TLock {
-        todo!()
-    }
-
-    fn lock_mut(&mut self) -> &mut Self::TLock {
-        todo!()
-    }
-}
 
 /// Describes a repo.
 /// Consolidates a blockstore, a datastore and a subscription registry.

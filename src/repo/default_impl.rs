@@ -117,30 +117,6 @@ impl RepoTypes for DefaultStorage {
     type TBlockStore = DefaultStorage;
     type TDataStore = DefaultStorage;
     type TLock = DefaultStorage;
-
-    fn blockstore(&self) -> &Self::TBlockStore {
-        self
-    }
-
-    fn blockstore_mut(&mut self) -> &mut Self::TBlockStore {
-        self
-    }
-
-    fn datastore(&self) -> &Self::TDataStore {
-        self
-    }
-
-    fn datastore_mut(&mut self) -> &mut Self::TDataStore {
-        self
-    }
-
-    fn lock(&self) -> &Self::TLock {
-        self
-    }
-
-    fn lock_mut(&mut self) -> &mut Self::TLock {
-        self
-    }
 }
 
 impl Unpin for DefaultStorage {}
