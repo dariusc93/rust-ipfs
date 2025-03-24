@@ -1,5 +1,6 @@
 //! P2P handling for IPFS nodes.
 use crate::error::Error;
+use crate::repo::default_impl::DefaultStorage;
 use crate::repo::Repo;
 use crate::{IpfsOptions, TTransportFn};
 use std::convert::TryInto;
@@ -226,7 +227,7 @@ impl Default for SwarmConfig {
 pub(crate) fn create_swarm<C>(
     keypair: &Keypair,
     options: &IpfsOptions,
-    repo: &Repo,
+    repo: &Repo<DefaultStorage>,
     span: Span,
     (custom, custom_transport): (Option<C>, Option<TTransportFn>),
 ) -> Result<TSwarm<C>, Error>

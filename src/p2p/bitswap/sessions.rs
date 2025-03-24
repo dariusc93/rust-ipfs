@@ -14,7 +14,10 @@ use ipld_core::cid::Cid;
 use libp2p::PeerId;
 use std::fmt::Debug;
 
-use crate::{repo::Repo, Block};
+use crate::{
+    repo::{default_impl::DefaultStorage, Repo},
+    Block,
+};
 
 const CAP_THRESHOLD: usize = 100;
 
@@ -91,7 +94,7 @@ pub struct WantSession {
     discovery: WantDiscovery,
     received: bool,
     waker: Option<Waker>,
-    repo: Repo,
+    repo: Repo<DefaultStorage>,
     state: WantSessionState,
     timeout: Option<Duration>,
     discovery_timeout: Duration,
@@ -100,7 +103,7 @@ pub struct WantSession {
 }
 
 impl WantSession {
-    pub fn new(repo: &Repo, cid: Cid, timeout: Option<Duration>) -> Self {
+    pub fn new(repo: &Repo<DefaultStorage>, cid: Cid, timeout: Option<Duration>) -> Self {
         Self {
             cid,
             wants: Default::default(),
@@ -540,13 +543,13 @@ pub struct HaveSession {
     want: HashMap<PeerId, HaveWantState>,
     send_dont_have: HashSet<PeerId>,
     have: Option<bool>,
-    repo: Repo,
+    repo: Repo<DefaultStorage>,
     waker: Option<Waker>,
     state: HaveSessionState,
 }
 
 impl HaveSession {
-    pub fn new(repo: &Repo, cid: Cid) -> Self {
+    pub fn new(repo: &Repo<DefaultStorage>, cid: Cid) -> Self {
         let mut session = Self {
             cid,
             want: HashMap::new(),

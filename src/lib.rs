@@ -61,7 +61,8 @@ use p2p::{
     RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
-    BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
+    default_impl::DefaultStorage, BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch,
+    RepoInsertPin, RepoRemovePin,
 };
 
 use tracing::Span;
@@ -87,8 +88,8 @@ pub use self::{
 use async_rt::{AbortableJoinHandle, CommunicationTask};
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
-use std::borrow::Borrow;
 use std::convert::Infallible;
+use std::{borrow::Borrow, path::PathBuf};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
@@ -182,7 +183,11 @@ struct IpfsOptions {
     ///
     /// It is **not** recommended to set this to IPFS_PATH without first at least backing up your
     /// existing repository.
-    pub ipfs_path: StorageType,
+    pub ipfs_path: Option<PathBuf>,
+
+    /// Name of the namespace used for indexeddb
+    #[cfg(target_arch="wasm32")]
+    pub namespace: Option<String>,
 
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
@@ -285,7 +290,9 @@ pub enum RepoProvider {
 impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
-            ipfs_path: StorageType::Memory,
+            ipfs_path: None,
+            #[cfg(target_arch="wasm32")]
+            namespace: None,
             bootstrap: Default::default(),
             relay_server_config: Default::default(),
             kad_configuration: Either::Left(Default::default()),
@@ -333,7 +340,7 @@ impl fmt::Debug for IpfsOptions {
 #[allow(clippy::type_complexity)]
 pub struct Ipfs {
     span: Span,
-    repo: Repo,
+    repo: Repo<DefaultStorage>,
     key: Keypair,
     keystore: Keystore,
     identify_conf: IdentifyConfiguration,
@@ -557,7 +564,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send> {
     keys: Option<Keypair>,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
-    repo_handle: Option<Repo>,
+    repo_handle: Repo<DefaultStorage>,
     local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
@@ -583,7 +590,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             keys: None,
             options: Default::default(),
             fdlimit: None,
-            repo_handle: None,
+            repo_handle: Repo::new_memory(),
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
             local_external_addr: false,
@@ -604,10 +611,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     }
 
     /// Set storage type for the repo.
-    pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
-        self.options.ipfs_path = storage_type;
-        self
-    }
+    // pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
+    //     self.options.ipfs_path = storage_type;
+    //     self
+    // }
 
     /// Adds a listening address
     pub fn add_listening_addr(mut self, addr: Multiaddr) -> Self {
@@ -792,7 +799,15 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
-        self.options.ipfs_path = StorageType::Disk(path);
+        self.options.ipfs_path = Some(path);
+        self
+    }
+
+    /// Sets a namespace
+    #[cfg(target_arch = "wasm32")]
+    pub fn set_namespace<S: AsRef<str>>(mut self, ns: S) -> Self {
+        let ns = ns.as_ref().to_string();
+        self.options.namespace = Some(ns);
         self
     }
 
@@ -853,8 +868,8 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     }
 
     /// Set block and data repo
-    pub fn set_repo(mut self, repo: &Repo) -> Self {
-        self.repo_handle = Some(repo.clone());
+    pub fn set_repo(mut self, repo: &Repo<DefaultStorage>) -> Self {
+        self.repo_handle = Repo::clone(repo);
         self
     }
 
@@ -940,23 +955,34 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         // instruments the IpfsFuture, the background task.
         let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
 
-        let repo = match repo_handle {
-            Some(repo) => {
-                if repo.is_online() {
-                    anyhow::bail!("Repo is already initialized");
-                }
-                repo
-            }
-            None => {
-                #[cfg(not(target_arch = "wasm32"))]
-                if let StorageType::Disk(path) = &options.ipfs_path {
+        let mut repo = repo_handle;
+
+        if repo.is_online() {
+            anyhow::bail!("Repo is already initialized");
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            repo = match &options.ipfs_path {
+                Some(path) => {
                     if !path.is_dir() {
                         tokio::fs::create_dir_all(path).await?;
                     }
+                    Repo::<DefaultStorage>::new_fs(path)
                 }
-                Repo::new(&mut options.ipfs_path)
-            }
-        };
+                None => repo,
+            };
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            repo = match &options.namespace {
+                Some(ns) => {
+                    Repo::<DefaultStorage>::new_idb(Some(ns.clone()))
+                }
+                None => repo,
+            };
+        }
 
         repo.init().instrument(init_span.clone()).await?;
 
@@ -1039,7 +1065,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
         let gc_handle = gc_config.map(|config| {
             async_rt::task::spawn_abortable({
-                let repo = repo.clone();
+                let repo = Repo::clone(&repo);
                 async move {
                     let GCConfig { duration, trigger } = config;
                     let use_config_timer = duration != Duration::ZERO;
@@ -1176,7 +1202,7 @@ impl Ipfs {
     }
 
     /// Return an [`Repo`] to access the internal repo of the node
-    pub fn repo(&self) -> &Repo {
+    pub fn repo(&self) -> &Repo<DefaultStorage> {
         &self.repo
     }
 
@@ -1191,13 +1217,13 @@ impl Ipfs {
     }
 
     /// Puts a block into the ipfs repo.
-    pub fn put_block(&self, block: &Block) -> RepoPutBlock {
+    pub fn put_block(&self, block: &Block) -> RepoPutBlock<DefaultStorage> {
         self.repo.put_block(block).span(self.span.clone())
     }
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
-    pub fn get_block(&self, cid: impl Borrow<Cid>) -> RepoGetBlock {
+    pub fn get_block(&self, cid: impl Borrow<Cid>) -> RepoGetBlock<DefaultStorage> {
         self.repo.get_block(cid).span(self.span.clone())
     }
 
@@ -1239,7 +1265,7 @@ impl Ipfs {
     /// If a recursive `insert_pin` operation is interrupted because of a crash or the crash
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
-    pub fn insert_pin(&self, cid: impl Borrow<Cid>) -> RepoInsertPin {
+    pub fn insert_pin(&self, cid: impl Borrow<Cid>) -> RepoInsertPin<DefaultStorage> {
         self.repo().pin(cid).span(self.span.clone())
     }
 
@@ -1249,7 +1275,7 @@ impl Ipfs {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin(&self, cid: impl Borrow<Cid>) -> RepoRemovePin {
+    pub fn remove_pin(&self, cid: impl Borrow<Cid>) -> RepoRemovePin<DefaultStorage> {
         self.repo().remove_pin(cid).span(self.span.clone())
     }
 
@@ -2131,7 +2157,7 @@ impl Ipfs {
     }
 
     /// Fetches the block, and, if set, recursively walk the graph loading all the blocks to the blockstore.
-    pub fn fetch(&self, cid: &Cid) -> RepoFetch {
+    pub fn fetch(&self, cid: &Cid) -> RepoFetch<DefaultStorage> {
         self.repo.fetch(cid).span(self.span.clone())
     }
 
@@ -3085,6 +3111,7 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
+
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become

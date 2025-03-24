@@ -15,6 +15,7 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Span};
 
+use crate::repo::default_impl::DefaultStorage;
 use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 #[allow(unused_imports)]
@@ -22,7 +23,7 @@ use super::{TraversalFailed, UnixfsStatus};
 
 #[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsGet {
-    core: Option<Either<Ipfs, Repo>>,
+    core: Option<Either<Ipfs, Repo<DefaultStorage>>>,
     dest: PathBuf,
     span: Span,
     path: Option<IpfsPath>,
@@ -37,12 +38,16 @@ impl UnixfsGet {
         Self::with_either(Either::Left(ipfs.clone()), path, dest)
     }
 
-    pub fn with_repo(repo: &Repo, path: impl Into<IpfsPath>, dest: impl AsRef<Path>) -> Self {
+    pub fn with_repo(
+        repo: &Repo<DefaultStorage>,
+        path: impl Into<IpfsPath>,
+        dest: impl AsRef<Path>,
+    ) -> Self {
         Self::with_either(Either::Right(repo.clone()), path, dest)
     }
 
     fn with_either(
-        core: Either<Ipfs, Repo>,
+        core: Either<Ipfs, Repo<DefaultStorage>>,
         path: impl Into<IpfsPath>,
         dest: impl AsRef<Path>,
     ) -> Self {
