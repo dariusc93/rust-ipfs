@@ -9,7 +9,6 @@ use crate::repo::{BlockPut, BlockStore};
 use crate::error::Error;
 use crate::Block;
 
-
 #[async_trait]
 impl<B: BlockStore> BlockStore for Arc<B> {
     async fn init(&self) -> Result<(), Error> {

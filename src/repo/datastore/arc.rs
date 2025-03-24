@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+use crate::error::Error;
+use crate::repo::{DataStore, PinStore, References};
+use crate::{PinKind, PinMode};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
-use crate::repo::{DataStore, PinStore, References};
-use crate::error::Error;
-use crate::{PinKind, PinMode};
 
 #[async_trait]
 impl<D: DataStore> DataStore for Arc<D> {
@@ -39,12 +39,16 @@ impl<P: PinStore> PinStore for Arc<P> {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         (**self).is_pinned(block).await
     }
-    
+
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
         (**self).insert_direct_pin(target).await
     }
 
-    async fn insert_recursive_pin(&self, target: &Cid, referenced: References<'_>) -> Result<(), Error> {
+    async fn insert_recursive_pin(
+        &self,
+        target: &Cid,
+        referenced: References<'_>,
+    ) -> Result<(), Error> {
         (**self).insert_recursive_pin(target, referenced).await
     }
 
@@ -52,15 +56,26 @@ impl<P: PinStore> PinStore for Arc<P> {
         (**self).remove_direct_pin(target).await
     }
 
-    async fn remove_recursive_pin(&self, target: &Cid, referenced: References<'_>) -> Result<(), Error> {
+    async fn remove_recursive_pin(
+        &self,
+        target: &Cid,
+        referenced: References<'_>,
+    ) -> Result<(), Error> {
         (**self).remove_recursive_pin(target, referenced).await
     }
 
-    async fn list(&self, mode: Option<PinMode>) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
+    async fn list(
+        &self,
+        mode: Option<PinMode>,
+    ) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
         (**self).list(mode).await
     }
 
-    async fn query(&self, ids: Vec<Cid>, requirement: Option<PinMode>) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
+    async fn query(
+        &self,
+        ids: Vec<Cid>,
+        requirement: Option<PinMode>,
+    ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
         (**self).query(ids, requirement).await
     }
 }

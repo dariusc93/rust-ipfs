@@ -4,5 +4,5 @@ pub mod flatfs;
 pub mod idb;
 pub mod memory;
 
-pub mod either;
 pub mod arc;
+pub mod either;
