@@ -3,11 +3,9 @@ use std::sync::Arc;
 use crate::error::Error;
 use crate::repo::{DataStore, PinStore, References};
 use crate::{PinKind, PinMode};
-use async_trait::async_trait;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
-#[async_trait]
 impl<D: DataStore> DataStore for Arc<D> {
     async fn init(&self) -> Result<(), Error> {
         (**self).init().await
@@ -34,7 +32,6 @@ impl<D: DataStore> DataStore for Arc<D> {
     }
 }
 
-#[async_trait]
 impl<P: PinStore> PinStore for Arc<P> {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         (**self).is_pinned(block).await

@@ -1,7 +1,6 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
 use crate::Block;
-use async_trait::async_trait;
 use core::fmt::Debug;
 use default_impl::DefaultStorage;
 use futures::channel::mpsc::{channel, Receiver, Sender};
@@ -72,50 +71,45 @@ pub trait StoreOpt {
 }
 
 /// This API is being discussed and evolved, which will likely lead to breakage.
-#[async_trait]
 pub trait BlockStore: Debug + Send + Sync {
-    async fn init(&self) -> Result<(), Error>;
+    fn init(&self) -> impl Future<Output = Result<(), Error>> + Send;
 
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
     /// Returns whether a block is present in the blockstore.
-    async fn contains(&self, cid: &Cid) -> Result<bool, Error>;
+    fn contains(&self, cid: &Cid) -> impl Future<Output = Result<bool, Error>> + Send;
     /// Returns a block from the blockstore.
-    async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error>;
+    fn get(&self, cid: &Cid) -> impl Future<Output = Result<Option<Block>, Error>> + Send;
     /// Get the size of a single block
-    async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error>;
+    fn size(&self, cid: &[Cid]) -> impl Future<Output = Result<Option<usize>, Error>> + Send;
     /// Get a total size of the block store
-    async fn total_size(&self) -> Result<usize, Error>;
+    fn total_size(&self) -> impl Future<Output = Result<usize, Error>> + Send;
     /// Inserts a block in the blockstore.
-    async fn put(&self, block: &Block) -> Result<(Cid, BlockPut), Error>;
+    fn put(&self, block: &Block) -> impl Future<Output = Result<(Cid, BlockPut), Error>> + Send;
     /// Removes a block from the blockstore.
-    async fn remove(&self, cid: &Cid) -> Result<(), Error>;
+    fn remove(&self, cid: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
     /// Remove multiple blocks from the blockstore
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid>;
+    fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
     /// Returns a list of the blocks (Cids), in the blockstore.
-    async fn list(&self) -> BoxStream<'static, Cid>;
+    fn list(&self) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
 }
 
-#[async_trait]
 /// Generic layer of abstraction for a key-value data store.
 pub trait DataStore: PinStore + Debug + Send + Sync {
-    async fn init(&self) -> Result<(), Error>;
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
+    fn init(&self) -> impl Future<Output = Result<(), Error>> + Send;
     /// Checks if a key is present in the datastore.
-    async fn contains(&self, key: &[u8]) -> Result<bool, Error>;
+    fn contains(&self, key: &[u8]) -> impl Future<Output = Result<bool, Error>> + Send;
     /// Returns the value associated with a key from the datastore.
-    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
+    fn get(&self, key: &[u8]) -> impl Future<Output = Result<Option<Vec<u8>>, Error>> + Send;
     /// Puts the value under the key in the datastore.
-    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error>;
+    fn put(&self, key: &[u8], value: &[u8]) -> impl Future<Output = Result<(), Error>> + Send;
     /// Removes a key-value pair from the datastore.
-    async fn remove(&self, key: &[u8]) -> Result<(), Error>;
+    fn remove(&self, key: &[u8]) -> impl Future<Output = Result<(), Error>> + Send;
     /// Iterate over the k/v of the datastore
-    async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>;
+    fn iter(
+        &self,
+    ) -> impl Future<Output = futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>> + Send;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -201,43 +195,37 @@ pub trait Lock: Debug + Send + Sync {
 
 type References<'a> = BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
 
-#[async_trait]
 pub trait PinStore: Debug + Send + Sync {
-    async fn is_pinned(&self, block: &Cid) -> Result<bool, Error>;
+    fn is_pinned(&self, block: &Cid) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error>;
+    fn insert_direct_pin(&self, target: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn insert_recursive_pin(
+    fn insert_recursive_pin(
         &self,
         target: &Cid,
         referenced: References<'_>,
-    ) -> Result<(), Error>;
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn remove_direct_pin(&self, target: &Cid) -> Result<(), Error>;
+    fn remove_direct_pin(&self, target: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn remove_recursive_pin(
+    fn remove_recursive_pin(
         &self,
         target: &Cid,
         referenced: References<'_>,
-    ) -> Result<(), Error>;
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn list(
+    fn list(
         &self,
         mode: Option<PinMode>,
-    ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>>;
+    ) -> impl Future<Output = futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>>> + Send;
 
-    // here we should have resolved ids
-    // go-ipfs: doesnt start fetching the paths
-    // js-ipfs: starts fetching paths
-    // FIXME: there should probably be an additional Result<$inner, Error> here; the per pin error
-    // is serde OR cid::Error.
     /// Returns error if any of the ids isn't pinned in the required type, otherwise returns
     /// the pin details if all of the cids are pinned in one way or the another.
-    async fn query(
+    fn query(
         &self,
         ids: Vec<Cid>,
         requirement: Option<PinMode>,
-    ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error>;
+    ) -> impl Future<Output = Result<Vec<(Cid, PinKind<Cid>)>, Error>> + Send;
 }
 
 /// `PinMode` is the description of pin type for quering purposes.
@@ -340,7 +328,6 @@ pub trait RepoTypes: Clone + Send + Sync + 'static {
     type TDataStore: DataStore;
     type TLock: Lock;
 }
-
 
 /// Describes a repo.
 /// Consolidates a blockstore, a datastore and a subscription registry.

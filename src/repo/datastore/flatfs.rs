@@ -2,7 +2,6 @@
 use crate::error::Error;
 use crate::repo::paths::{filestem_to_pin_cid, pin_path};
 use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore, References};
-use async_trait::async_trait;
 use core::convert::TryFrom;
 use futures::stream::{BoxStream, TryStreamExt};
 use futures::StreamExt;
@@ -176,7 +175,7 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
 
 /// The column operations are all unimplemented pending at least downscoping of the
 /// DataStore trait itself.
-#[async_trait]
+
 impl DataStore for FsDataStore {
     async fn init(&self) -> Result<(), Error> {
         // Although `pins` directory is created when inserting a data, is it not created when there are any attempts at listing the pins (thus causing to fail)
@@ -213,7 +212,7 @@ impl DataStore for FsDataStore {
 
 // PinStore is a trait from ipfs::repo implemented on FsDataStore defined at ipfs::repo::fs or
 // parent module.
-#[async_trait]
+
 impl PinStore for FsDataStore {
     async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
         let path = pin_path(self.path.join("pins"), cid);

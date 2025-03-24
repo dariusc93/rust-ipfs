@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
@@ -9,7 +8,6 @@ use crate::repo::{BlockPut, BlockStore};
 use crate::error::Error;
 use crate::Block;
 
-#[async_trait]
 impl<B: BlockStore> BlockStore for Arc<B> {
     async fn init(&self) -> Result<(), Error> {
         (**self).init().await

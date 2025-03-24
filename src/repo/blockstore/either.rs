@@ -3,12 +3,10 @@ use crate::{
     repo::{BlockPut, BlockStore},
     Block,
 };
-use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
-#[async_trait]
 impl<L: BlockStore, R: BlockStore> BlockStore for Either<L, R> {
     async fn init(&self) -> Result<(), Error> {
         match self {

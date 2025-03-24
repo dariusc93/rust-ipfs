@@ -2,7 +2,6 @@
 use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
-use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
 use ipld_core::cid::Cid;
@@ -43,7 +42,6 @@ impl MemBlockStore {
     }
 }
 
-#[async_trait]
 impl BlockStore for MemBlockStore {
     async fn init(&self) -> Result<(), Error> {
         Ok(())

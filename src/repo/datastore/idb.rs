@@ -1,7 +1,5 @@
 use std::{collections::BTreeSet, rc::Rc, str::FromStr, sync::OnceLock};
 
-use async_trait::async_trait;
-
 use crate::{
     repo::{DataStore, PinModeRequirement, PinStore, References},
     Error, PinKind, PinMode,
@@ -44,7 +42,6 @@ impl IdbDataStore {
     }
 }
 
-#[async_trait]
 impl DataStore for IdbDataStore {
     async fn init(&self) -> Result<(), Error> {
         let factory = self.factory.clone();
@@ -232,7 +229,6 @@ impl DataStore for IdbDataStore {
 // in the transactional parts of the [`Infallible`] is used to signal there is no additional
 // custom error, not that the transaction was infallible in itself.
 
-#[async_trait]
 impl PinStore for IdbDataStore {
     async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
         let cid = cid.to_owned();

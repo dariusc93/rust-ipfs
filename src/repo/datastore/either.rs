@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
@@ -7,7 +6,6 @@ use crate::error::Error;
 use crate::repo::{DataStore, PinStore, References};
 use crate::{PinKind, PinMode};
 
-#[async_trait]
 impl<L: DataStore, R: DataStore> DataStore for Either<L, R> {
     async fn init(&self) -> Result<(), Error> {
         match self {
@@ -52,7 +50,6 @@ impl<L: DataStore, R: DataStore> DataStore for Either<L, R> {
     }
 }
 
-#[async_trait]
 impl<L: PinStore, R: PinStore> PinStore for Either<L, R> {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         match self {

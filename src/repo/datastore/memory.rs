@@ -1,6 +1,5 @@
 use crate::error::Error;
 use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore};
-use async_trait::async_trait;
 use futures::StreamExt;
 use ipld_core::cid::{self, Cid};
 use std::path::PathBuf;
@@ -105,7 +104,6 @@ impl MemDataStore {
     }
 }
 
-#[async_trait]
 impl PinStore for MemDataStore {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         let key = block.to_bytes();
@@ -312,7 +310,6 @@ impl PinStore for MemDataStore {
     }
 }
 
-#[async_trait]
 impl DataStore for MemDataStore {
     async fn init(&self) -> Result<(), Error> {
         Ok(())

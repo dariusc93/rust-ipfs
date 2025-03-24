@@ -14,7 +14,6 @@ use crate::Block;
 #[cfg(target_arch = "wasm32")]
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
@@ -121,7 +120,6 @@ impl RepoTypes for DefaultStorage {
 
 impl Unpin for DefaultStorage {}
 
-#[async_trait]
 impl BlockStore for DefaultStorage {
     async fn init(&self) -> Result<(), Error> {
         self.blockstore.init().await
@@ -160,7 +158,6 @@ impl BlockStore for DefaultStorage {
     }
 }
 
-#[async_trait]
 impl DataStore for DefaultStorage {
     async fn init(&self) -> Result<(), Error> {
         self.datastore.init().await
@@ -187,7 +184,6 @@ impl DataStore for DefaultStorage {
     }
 }
 
-#[async_trait]
 impl PinStore for DefaultStorage {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         self.datastore.is_pinned(block).await
