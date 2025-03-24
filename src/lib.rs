@@ -61,8 +61,7 @@ use p2p::{
     RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
-    default_impl::DefaultStorage, BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch,
-    RepoInsertPin, RepoRemovePin,
+    default_impl::DefaultStorage, GCConfig, GCTrigger, RepoFetch, RepoInsertPin, RepoRemovePin,
 };
 
 use tracing::Span;
@@ -127,51 +126,6 @@ use libp2p::{request_response::InboundRequestId, swarm::dial_opts::PeerCondition
 pub use libp2p_connection_limits::ConnectionLimits;
 use serde::Serialize;
 
-#[allow(dead_code)]
-#[deprecated(note = "Use `StoreageType` instead")]
-type StoragePath = StorageType;
-
-#[derive(Default, Debug)]
-pub enum StorageType {
-    #[cfg(not(target_arch = "wasm32"))]
-    Disk(std::path::PathBuf),
-    #[default]
-    Memory,
-    #[cfg(target_arch = "wasm32")]
-    IndexedDb { namespace: Option<String> },
-    Custom {
-        blockstore: Option<Box<dyn BlockStore>>,
-        datastore: Option<Box<dyn DataStore>>,
-        lock: Option<Box<dyn Lock>>,
-    },
-}
-
-impl PartialEq for StorageType {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            #[cfg(not(target_arch = "wasm32"))]
-            (StorageType::Disk(left_path), StorageType::Disk(right_path)) => {
-                left_path.eq(right_path)
-            }
-            #[cfg(target_arch = "wasm32")]
-            (
-                StorageType::IndexedDb { namespace: left },
-                StorageType::IndexedDb { namespace: right },
-            ) => left.eq(right),
-            (StorageType::Memory, StorageType::Memory) => true,
-            (StorageType::Custom { .. }, StorageType::Custom { .. }) => {
-                //Do we really care if they equal?
-                //TODO: Possibly implement PartialEq/Eq for the traits so we could make sure
-                //      that they do or dont eq each other. For now this will always be true
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-impl Eq for StorageType {}
-
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
 struct IpfsOptions {
     /// The path of the ipfs repo (blockstore and datastore).
@@ -185,9 +139,9 @@ struct IpfsOptions {
     /// existing repository.
     pub ipfs_path: Option<PathBuf>,
 
-    /// Name of the namespace used for indexeddb
-    #[cfg(target_arch="wasm32")]
-    pub namespace: Option<String>,
+    /// Enables and supply a name of the namespace used for indexeddb
+    #[cfg(target_arch = "wasm32")]
+    pub namespace: Option<Option<String>>,
 
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
@@ -291,7 +245,7 @@ impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
             ipfs_path: None,
-            #[cfg(target_arch="wasm32")]
+            #[cfg(target_arch = "wasm32")]
             namespace: None,
             bootstrap: Default::default(),
             relay_server_config: Default::default(),
@@ -805,8 +759,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
     /// Sets a namespace
     #[cfg(target_arch = "wasm32")]
-    pub fn set_namespace<S: AsRef<str>>(mut self, ns: S) -> Self {
-        let ns = ns.as_ref().to_string();
+    pub fn set_namespace(mut self, ns: Option<String>) -> Self {
         self.options.namespace = Some(ns);
         self
     }
@@ -976,10 +929,8 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
         #[cfg(target_arch = "wasm32")]
         {
-            repo = match &options.namespace {
-                Some(ns) => {
-                    Repo::<DefaultStorage>::new_idb(Some(ns.clone()))
-                }
+            repo = match options.namespace.take() {
+                Some(ns) => Repo::<DefaultStorage>::new_idb(ns),
                 None => repo,
             };
         }
