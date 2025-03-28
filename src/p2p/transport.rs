@@ -253,7 +253,7 @@ pub(crate) fn build_transport(
         .timeout(timeout)
         .boxed();
 
-    #[cfg(feature = "webrtc_transport")]
+    #[cfg(feature = "webrtc")]
     let transport = match enable_webrtc {
         true => {
             let cert = match webrtc_pem {
@@ -321,7 +321,7 @@ pub(crate) fn build_transport(
     use libp2p::websocket_websys;
     use libp2p::webtransport_websys;
 
-    #[cfg(feature = "webrtc_transport")]
+    #[cfg(feature = "webrtc")]
     use libp2p_webrtc_websys as webrtc_websys;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
@@ -367,7 +367,7 @@ pub(crate) fn build_transport(
         false => transport.boxed(),
     };
 
-    #[cfg(feature = "webrtc_transport")]
+    #[cfg(feature = "webrtc")]
     let transport = match enable_webrtc {
         true => {
             let wrtc_transport =
@@ -383,7 +383,7 @@ pub(crate) fn build_transport(
         false => transport,
     };
 
-    #[cfg(not(feature = "webrtc_transport"))]
+    #[cfg(not(feature = "webrtc"))]
     {
         _ = enable_webrtc;
     }

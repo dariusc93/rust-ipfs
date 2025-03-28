@@ -10,11 +10,16 @@ description = "IPFS node implementation"
 version = "0.15.0"
 
 [features]
-default = []
+default = ["rsa", "ed25519", "secp256k1", "ecdsa"]
 
-experimental_stream = ["dep:libp2p-stream"]
+rsa = ["libp2p/rsa", "rust-ipns/rsa"]
+ed25519 = ["libp2p/ed25519", "rust-ipns/ed25519"]
+secp256k1 = ["libp2p/secp256k1", "rust-ipns/secp256k1"]
+ecdsa = ["libp2p/ecdsa", "rust-ipns/ecdsa"]
 
-webrtc_transport = ["dep:libp2p-webrtc"]
+stream = ["dep:libp2p-stream"]
+
+webrtc = ["dep:libp2p-webrtc"]
 
 test_go_interop = []
 test_js_interop = []
@@ -139,7 +144,7 @@ zeroize.workspace = true
 futures-timer.workspace = true
 fs2.workspace = true
 hickory-resolver.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "ed25519", "secp256k1", "ecdsa", "rsa", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", "pnet"], workspace = true }
+libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", "pnet"], workspace = true }
 libp2p-webrtc = { workspace = true, features = ["tokio", ], optional = true }
 rcgen.workspace = true
 rlimit.workspace = true
@@ -152,7 +157,7 @@ tokio-util = { workspace = true, features = ["full"] }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "noise", "ping", "yamux", "dns", "ed25519", "secp256k1", "ecdsa", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }
+libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "noise", "ping", "yamux", "dns", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }
 libp2p-webrtc-websys = { workspace = true }
 send_wrapper.workspace = true
 serde-wasm-bindgen.workspace = true

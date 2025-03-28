@@ -69,7 +69,7 @@ where
     pub pubsub: Toggle<GossipsubStream>,
     pub bitswap: Toggle<super::bitswap::Behaviour>,
     pub ping: Toggle<Ping>,
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub stream: Toggle<libp2p_stream::Behaviour>,
 
     pub autonat: Toggle<autonat::Behaviour>,
@@ -498,7 +498,7 @@ where
             .then(|| libp2p::rendezvous::server::Behaviour::new(Default::default()))
             .into();
 
-        #[cfg(feature = "experimental_stream")]
+        #[cfg(feature = "stream")]
         let stream = protocols.streams.then(libp2p_stream::Behaviour::new).into();
 
         let connection_limits = options
@@ -522,7 +522,7 @@ where
             relay_client,
             relay_manager,
             block_list,
-            #[cfg(feature = "experimental_stream")]
+            #[cfg(feature = "stream")]
             stream,
             #[cfg(not(target_arch = "wasm32"))]
             upnp,
