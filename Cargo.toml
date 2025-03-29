@@ -19,7 +19,10 @@ ecdsa = ["libp2p/ecdsa", "rust-ipns/ecdsa"]
 
 stream = ["dep:libp2p-stream"]
 
-webrtc = ["dep:libp2p-webrtc"]
+x509_dep = ["dep:simple_x509", "rcgen", "pem", "p256", "rand_chacha", "hkdf", "sec1"]
+
+webrtc = ["dep:libp2p-webrtc", "x509_dep"]
+websocket = ["libp2p/websocket", "x509_dep"]
 
 test_go_interop = []
 test_js_interop = []
@@ -69,7 +72,7 @@ rand = "0.8.5"
 rand_chacha = "0.3.1"
 rcgen = { version = "0.13.2", features = ["pem", "x509-parser"] }
 rlimit = "0.10.2"
-rust-ipns = { version = "0.7.0", path = "packages/rust-ipns" }
+rust-ipns = { version = "0.7.0", path = "packages/rust-ipns", default-features = false }
 rust-unixfs = { version = "0.5.0", path = "unixfs" }
 sec1 = { version = "0.7.3", features = ["pem", "pkcs8"] }
 send_wrapper = "0.6.0"
@@ -105,7 +108,7 @@ chrono.workspace = true
 either.workspace = true
 futures-timeout.workspace = true
 futures.workspace = true
-hkdf.workspace = true
+hkdf = { workspace = true, optional = true }
 indexmap.workspace = true
 ipld-core.workspace = true
 ipld-dagpb.workspace = true
@@ -117,17 +120,17 @@ multibase.workspace = true
 multihash.workspace = true
 multihash-codetable.workspace = true
 multihash-derive.workspace = true
-p256.workspace = true
+p256 = { workspace = true, optional = true }
 parking_lot.workspace = true
-pem.workspace = true
+pem = { workspace = true, optional = true }
 pollable-map.workspace = true
 quick-protobuf-codec.workspace = true
 quick-protobuf.workspace = true
 rand.workspace = true
-rand_chacha.workspace = true
-rust-ipns = { workspace = true }
+rand_chacha = { workspace = true, optional = true }
+rust-ipns = { workspace = true, features = ["libp2p"] }
 rust-unixfs = { workspace = true }
-sec1.workspace = true
+sec1 = { workspace = true, optional = true }
 serde = { features = ["derive"], workspace = true }
 serde_ipld_dagcbor.workspace = true
 serde_ipld_dagjson.workspace = true
@@ -144,11 +147,11 @@ zeroize.workspace = true
 futures-timer.workspace = true
 fs2.workspace = true
 hickory-resolver.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", "pnet"], workspace = true }
+libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", "pnet"], workspace = true }
 libp2p-webrtc = { workspace = true, features = ["tokio", ], optional = true }
-rcgen.workspace = true
+rcgen = { workspace = true, optional = true }
 rlimit.workspace = true
-simple_x509.workspace = true
+simple_x509 = { workspace = true, optional = true }
 tokio = { features = ["full"], workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
 tokio-util = { workspace = true, features = ["full"] }

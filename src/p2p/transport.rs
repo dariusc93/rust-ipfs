@@ -1,7 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(feature = "webrtc", feature = "websocket"))]
 mod misc;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(feature = "webrtc", feature = "websocket"))]
 pub use misc::generate_cert;
 
 #[allow(unused_imports)]
@@ -158,8 +160,6 @@ pub(crate) fn build_transport(
     use libp2p::quic::Config as QuicConfig;
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
     use libp2p::tls;
-    use misc::generate_cert;
-    use rcgen::KeyPair;
 
     let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
     let tls_config = tls::Config::new(&keypair).map_err(io::Error::other)?;
@@ -182,6 +182,7 @@ pub(crate) fn build_transport(
         false => Either::Right(transport),
     };
 
+    #[cfg(feature = "websocket")]
     let transport = match enable_websocket {
         true => {
             let mut ws_transport =
@@ -190,7 +191,7 @@ pub(crate) fn build_transport(
                 let (certs, priv_key) = match websocket_pem {
                     Some((cert, kp)) => {
                         let mut certs = Vec::with_capacity(cert.len());
-                        let kp = KeyPair::from_pem(&kp).map_err(io::Error::other)?;
+                        let kp = rcgen::KeyPair::from_pem(&kp).map_err(io::Error::other)?;
                         let priv_key = libp2p::websocket::tls::PrivateKey::new(kp.serialize_der());
                         for cert in cert.iter().map(|c| c.as_bytes()) {
                             let pem = pem::parse(cert)
@@ -203,7 +204,7 @@ pub(crate) fn build_transport(
                         (certs, priv_key)
                     }
                     None => {
-                        let (cert, prv, _) = generate_cert(&keypair, b"libp2p-websocket", false)?;
+                        let (cert, prv, _) = misc::generate_cert(&keypair, b"libp2p-websocket", false)?;
 
                         let priv_key = libp2p::websocket::tls::PrivateKey::new(prv.serialize_der());
                         let self_cert =
