@@ -112,6 +112,7 @@ pub use libp2p::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "pnet")]
 use libp2p::pnet::PreSharedKey;
 use libp2p::swarm::ConnectionId;
 use libp2p::{
@@ -878,6 +879,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
     /// Set pnet
     #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "pnet")]
     pub fn with_pnet(mut self, psk: PreSharedKey) -> Self {
         self.options.transport_configuration.enable_pnet = true;
         self.options.transport_configuration.pnet_psk = Some(psk);

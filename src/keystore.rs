@@ -11,8 +11,11 @@ use zeroize::Zeroize;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KeyType {
+    #[cfg(feature = "ed25519")]
     Ed25519,
+    #[cfg(feature = "ecdsa")]
     Ecdsa,
+    #[cfg(feature = "secp256k1")]
     Secp256k1,
 }
 
@@ -97,18 +100,21 @@ impl Keystore {
 
     /// Generate a Ed25519 Keypair
     /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
+    #[cfg(feature = "ed25519")]
     pub async fn generate_ed25519(&self, name: Option<&str>) -> Result<PublicKey, Error> {
         self.generate_key(name, KeyType::Ed25519).await
     }
 
     /// Generate a Ecdsa Keypair
     /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
+    #[cfg(feature = "ecdsa")]
     pub async fn generate_ecdsa(&self, name: Option<&str>) -> Result<PublicKey, Error> {
         self.generate_key(name, KeyType::Ecdsa).await
     }
 
     /// Generate a Secp256k1 Keypair
     /// If `name` is not supplied, the [`crate::PeerId`] will be the used as the name by default
+    #[cfg(feature = "secp256k1")]
     pub async fn generate_secp256k1(&self, name: Option<&str>) -> Result<PublicKey, Error> {
         self.generate_key(name, KeyType::Secp256k1).await
     }
@@ -120,25 +126,40 @@ impl Keystore {
         name: Option<&str>,
         key_type: KeyType,
     ) -> Result<PublicKey, Error> {
-        let keypair = match key_type {
-            KeyType::Ed25519 => Keypair::generate_ed25519(),
-            KeyType::Ecdsa => Keypair::generate_ecdsa(),
-            KeyType::Secp256k1 => Keypair::generate_secp256k1(),
-        };
-        let public_key = keypair.public();
 
-        let peer_id = public_key.to_peer_id().to_string();
+        #[cfg(not(all(feature = "ed25519", feature = "ecdsa", feature = "secp256k1")))]
+        {
+            let _ = name;
+            let _ = key_type;
+            return Err(anyhow::anyhow!("No key type selected"));
+        }
 
-        let peer_id_str = peer_id.as_str();
+        #[cfg(any(feature = "ed25519", feature = "ecdsa", feature = "secp256k1"))]
+        {
+            let keypair: Keypair = match key_type {
+                #[cfg(feature = "ed25519")]
+                KeyType::Ed25519 => Keypair::generate_ed25519(),
+                #[cfg(feature = "ecdsa")]
+                KeyType::Ecdsa => Keypair::generate_ecdsa(),
+                #[cfg(feature = "secp256k1")]
+                KeyType::Secp256k1 => Keypair::generate_secp256k1(),
+            };
 
-        // We could probably wrap this in `Zeroizing` instead until `KeyStore` is refactored to accept `Key`
-        let bytes = Key::from(keypair.to_protobuf_encoding()?);
+            let public_key = keypair.public();
 
-        let name = name.unwrap_or(peer_id_str);
+            let peer_id = public_key.to_peer_id().to_string();
 
-        self.storage.set(name, bytes.as_ref()).await?;
+            let peer_id_str = peer_id.as_str();
 
-        Ok(public_key)
+            // We could probably wrap this in `Zeroizing` instead until `KeyStore` is refactored to accept `Key`
+            let bytes = Key::from(keypair.to_protobuf_encoding()?);
+
+            let name = name.unwrap_or(peer_id_str);
+
+            self.storage.set(name, bytes.as_ref()).await?;
+
+            Ok(public_key)
+        }
     }
 
     /// Get a [`Keypair`] from the [`Keystore`]
@@ -244,6 +265,7 @@ impl KeyStorage for MemoryKeyStorage {
 mod test {
     use crate::keystore::Keystore;
 
+    #[cfg(feature = "ed25519")]
     #[tokio::test]
     async fn keystore_with_peerid() -> anyhow::Result<()> {
         let keystore = Keystore::in_memory();
@@ -257,6 +279,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "ed25519")]
     #[tokio::test]
     async fn keystore_with_name() -> anyhow::Result<()> {
         let keystore = Keystore::in_memory();
@@ -268,6 +291,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "ed25519")]
     #[tokio::test]
     async fn keystore_replace_existing() -> anyhow::Result<()> {
         let keystore = Keystore::in_memory();
@@ -277,6 +301,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "ed25519")]
     #[tokio::test]
     async fn keystore_multiple_keys() -> anyhow::Result<()> {
         let keystore = Keystore::in_memory();
@@ -293,6 +318,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "ed25519")]
     #[tokio::test]
     async fn keystore_rename() -> anyhow::Result<()> {
         let keystore = Keystore::in_memory();

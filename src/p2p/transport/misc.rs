@@ -1,5 +1,5 @@
 use hkdf::Hkdf;
-use libp2p::identity::{self as identity, Keypair};
+use libp2p::identity::Keypair;
 use p256::ecdsa::signature::Signer;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -163,27 +163,41 @@ fn derive_keypair_secret(
 }
 
 fn keypair_secret(keypair: &Keypair) -> Option<[u8; 32]> {
-    match keypair.key_type() {
-        identity::KeyType::Ed25519 => {
-            let keypair = keypair.clone().try_into_ed25519().ok()?;
-            let secret = keypair.secret();
-            Some(secret.as_ref().try_into().expect("secret is 32 bytes"))
-        }
-        identity::KeyType::RSA => None,
-        identity::KeyType::Secp256k1 => {
-            let keypair = keypair.clone().try_into_secp256k1().ok()?;
-            let secret = keypair.secret();
-            Some(secret.to_bytes())
-        }
-        identity::KeyType::Ecdsa => {
-            let keypair = keypair.clone().try_into_ecdsa().ok()?;
-            Some(
-                keypair
-                    .secret()
-                    .to_bytes()
-                    .try_into()
-                    .expect("secret is 32 bytes"),
-            )
+    #[cfg(not(any(feature = "ed25519", feature = "ecdsa", feature = "secp256k1", feature = "rsa")))]
+    {
+        _ = keypair;
+        return None;
+    }
+
+    #[cfg(any(feature = "ed25519", feature = "ecdsa", feature = "secp256k1", feature = "rsa"))]
+    {
+        use libp2p::identity;
+        match keypair.key_type() {
+            #[cfg(feature = "ed25519")]
+            identity::KeyType::Ed25519 => {
+                let keypair = keypair.clone().try_into_ed25519().ok()?;
+                let secret = keypair.secret();
+                Some(secret.as_ref().try_into().expect("secret is 32 bytes"))
+            }
+            #[cfg(feature = "rsa")]
+            identity::KeyType::RSA => None,
+            #[cfg(feature = "secp256k1")]
+            identity::KeyType::Secp256k1 => {
+                let keypair = keypair.clone().try_into_secp256k1().ok()?;
+                let secret = keypair.secret();
+                Some(secret.to_bytes())
+            }
+            #[cfg(feature = "ecdsa")]
+            identity::KeyType::Ecdsa => {
+                let keypair = keypair.clone().try_into_ecdsa().ok()?;
+                Some(
+                    keypair
+                        .secret()
+                        .to_bytes()
+                        .try_into()
+                        .expect("secret is 32 bytes"),
+                )
+            },
         }
     }
 }
