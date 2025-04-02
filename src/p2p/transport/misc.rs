@@ -163,13 +163,23 @@ fn derive_keypair_secret(
 }
 
 fn keypair_secret(keypair: &Keypair) -> Option<[u8; 32]> {
-    #[cfg(not(any(feature = "ed25519", feature = "ecdsa", feature = "secp256k1", feature = "rsa")))]
+    #[cfg(not(any(
+        feature = "ed25519",
+        feature = "ecdsa",
+        feature = "secp256k1",
+        feature = "rsa"
+    )))]
     {
         _ = keypair;
         return None;
     }
 
-    #[cfg(any(feature = "ed25519", feature = "ecdsa", feature = "secp256k1", feature = "rsa"))]
+    #[cfg(any(
+        feature = "ed25519",
+        feature = "ecdsa",
+        feature = "secp256k1",
+        feature = "rsa"
+    ))]
     {
         use libp2p::identity;
         match keypair.key_type() {
@@ -197,7 +207,7 @@ fn keypair_secret(keypair: &Keypair) -> Option<[u8; 32]> {
                         .try_into()
                         .expect("secret is 32 bytes"),
                 )
-            },
+            }
         }
     }
 }

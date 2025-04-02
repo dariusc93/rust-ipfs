@@ -11,24 +11,24 @@ use either::Either;
 #[allow(unused_imports)]
 use futures::future::Either as FutureEither;
 use libp2p::core::muxing::StreamMuxerBox;
+use libp2p::core::transport::dummy::DummyTransport;
 #[allow(unused_imports)]
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
-use libp2p::core::transport::{Boxed};
+use libp2p::core::transport::Boxed;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "dns")]
 use libp2p::dns::{ResolverConfig, ResolverOpts};
+use libp2p::identity;
+#[cfg(feature = "noise")]
+use libp2p::noise;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "pnet")]
 use libp2p::pnet::{PnetConfig, PreSharedKey};
 use libp2p::relay::client::Transport as ClientTransport;
-#[cfg(feature = "noise")]
-use libp2p::noise;
-use libp2p::identity;
 use libp2p::PeerId;
 use std::io;
 use std::time::Duration;
-use libp2p::core::transport::dummy::DummyTransport;
 #[allow(unused_imports)]
 // TODO: Add features checks
 use {
@@ -178,7 +178,7 @@ pub(crate) fn build_transport(
     #[cfg(feature = "dns")]
     use libp2p::dns::tokio::Transport as TokioDnsConfig;
     #[cfg(feature = "quic")]
-    use libp2p::quic::{Config as QuicConfig, tokio::Transport as TokioQuicTransport};
+    use libp2p::quic::{tokio::Transport as TokioQuicTransport, Config as QuicConfig};
     #[cfg(feature = "tcp")]
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
     #[cfg(feature = "tls")]
@@ -212,7 +212,7 @@ pub(crate) fn build_transport(
         let yamux_config = YamuxConfig::default();
 
         let transport = match enable_memory_transport {
-            true =>  Either::Left(MemoryTransport::new()),
+            true => Either::Left(MemoryTransport::new()),
             false => Either::Right(DummyTransport::<DummyStream>::new()),
         };
 
@@ -236,7 +236,8 @@ pub(crate) fn build_transport(
                         Some((cert, kp)) => {
                             let mut certs = Vec::with_capacity(cert.len());
                             let kp = rcgen::KeyPair::from_pem(&kp).map_err(io::Error::other)?;
-                            let priv_key = libp2p::websocket::tls::PrivateKey::new(kp.serialize_der());
+                            let priv_key =
+                                libp2p::websocket::tls::PrivateKey::new(kp.serialize_der());
                             for cert in cert.iter().map(|c| c.as_bytes()) {
                                 let pem = pem::parse(cert)
                                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -248,9 +249,11 @@ pub(crate) fn build_transport(
                             (certs, priv_key)
                         }
                         None => {
-                            let (cert, prv, _) = misc::generate_cert(&keypair, b"libp2p-websocket", false)?;
+                            let (cert, prv, _) =
+                                misc::generate_cert(&keypair, b"libp2p-websocket", false)?;
 
-                            let priv_key = libp2p::websocket::tls::PrivateKey::new(prv.serialize_der());
+                            let priv_key =
+                                libp2p::websocket::tls::PrivateKey::new(prv.serialize_der());
                             let self_cert =
                                 libp2p::websocket::tls::Certificate::new(cert.der().to_vec());
 
@@ -307,7 +310,10 @@ pub(crate) fn build_transport(
     let transport = DummyTransport::<(PeerId, StreamMuxerBox)>::new().boxed();
 
     #[cfg(feature = "webrtc")]
-    fn generate_webrtc_transport(keypair: &identity::Keypair, pem: &Option<String>) -> io::Result<libp2p_webrtc::tokio::Transport> {
+    fn generate_webrtc_transport(
+        keypair: &identity::Keypair,
+        pem: &Option<String>,
+    ) -> io::Result<libp2p_webrtc::tokio::Transport> {
         let cert = match pem {
             Some(pem) => {
                 libp2p_webrtc::tokio::Certificate::from_pem(&pem).map_err(io::Error::other)?
@@ -343,7 +349,12 @@ pub(crate) fn build_transport(
     };
 
     #[cfg(feature = "quic")]
-    fn build_quic_transport(keypair: &identity::Keypair, draft_29: bool, idle_timeout: Duration, keep_alive: Option<Duration>) -> TokioQuicTransport {
+    fn build_quic_transport(
+        keypair: &identity::Keypair,
+        draft_29: bool,
+        idle_timeout: Duration,
+        keep_alive: Option<Duration>,
+    ) -> TokioQuicTransport {
         let mut quic_config = QuicConfig::new(&keypair);
         quic_config.support_draft_29 = draft_29;
         quic_config.max_idle_timeout = idle_timeout.as_millis() as _;
@@ -355,7 +366,12 @@ pub(crate) fn build_transport(
     #[cfg(feature = "quic")]
     let transport = match enable_quic {
         true => {
-            let quic_transport = build_quic_transport(&keypair, support_quic_draft_29, quic_max_idle_timeout, quic_keep_alive);
+            let quic_transport = build_quic_transport(
+                &keypair,
+                support_quic_draft_29,
+                quic_max_idle_timeout,
+                quic_keep_alive,
+            );
             OrTransport::new(quic_transport, transport)
                 .map(|either_output, _| match either_output {
                     FutureEither::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),

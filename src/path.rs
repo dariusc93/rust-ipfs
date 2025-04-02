@@ -68,11 +68,9 @@ impl FromStr for IpfsPath {
                         match result(key).ok() {
                             Some(path) => path,
                             #[cfg(feature = "dns")]
-                            None => {
-                                PathRoot::Dns(key.to_string())
-                            },
+                            None => PathRoot::Dns(key.to_string()),
                             #[cfg(not(feature = "dns"))]
-                            None => return Err(IpfsPathError::InvalidPath(key.to_owned()).into())
+                            None => return Err(IpfsPathError::InvalidPath(key.to_owned()).into()),
                         }
                     }
                 },

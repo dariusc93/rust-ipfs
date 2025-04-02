@@ -126,7 +126,6 @@ impl Keystore {
         name: Option<&str>,
         key_type: KeyType,
     ) -> Result<PublicKey, Error> {
-
         #[cfg(not(all(feature = "ed25519", feature = "ecdsa", feature = "secp256k1")))]
         {
             let _ = name;
