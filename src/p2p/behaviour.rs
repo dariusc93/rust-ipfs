@@ -15,6 +15,7 @@ use crate::repo::Repo;
 
 use ipld_core::cid::Cid;
 use libp2p::core::Multiaddr;
+#[cfg(not(target_arch = "wasm32"))]
 use libp2p::dcutr::Behaviour as Dcutr;
 use libp2p::identify::{Behaviour as Identify, Config as IdentifyConfig};
 use libp2p::identity::{Keypair, PeerId};
@@ -55,6 +56,7 @@ where
     pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
     #[cfg(not(target_arch = "wasm32"))]
     pub upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub dcutr: Toggle<Dcutr>,
 
     // discovery
@@ -457,6 +459,7 @@ where
         };
 
         // Maybe have this enable in conjunction with RelayClient?
+        #[cfg(not(target_arch = "wasm32"))]
         let dcutr = protocols.dcutr.then(|| Dcutr::new(peer_id)).into();
         let relay_config = options.relay_server_config.clone().into();
 
@@ -517,6 +520,7 @@ where
             identify,
             autonat,
             pubsub,
+            #[cfg(not(target_arch = "wasm32"))]
             dcutr,
             relay,
             relay_client,

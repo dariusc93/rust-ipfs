@@ -11,7 +11,7 @@ use either::Either;
 #[allow(unused_imports)]
 use futures::future::Either as FutureEither;
 use libp2p::core::muxing::StreamMuxerBox;
-use libp2p::core::transport::dummy::DummyTransport;
+use libp2p::core::transport::dummy::{DummyStream, DummyTransport};
 #[allow(unused_imports)]
 use libp2p::core::transport::timeout::TransportTimeout;
 use libp2p::core::transport::upgrade::Version;
@@ -20,8 +20,7 @@ use libp2p::core::transport::Boxed;
 #[cfg(feature = "dns")]
 use libp2p::dns::{ResolverConfig, ResolverOpts};
 use libp2p::identity;
-#[cfg(feature = "noise")]
-use libp2p::noise;
+
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "pnet")]
 use libp2p::pnet::{PnetConfig, PreSharedKey};
@@ -29,11 +28,9 @@ use libp2p::relay::client::Transport as ClientTransport;
 use libp2p::PeerId;
 use std::io;
 use std::time::Duration;
-#[allow(unused_imports)]
-// TODO: Add features checks
+
 use {
     libp2p::core::transport::{MemoryTransport, OrTransport},
-    libp2p::yamux::Config as YamuxConfig,
     libp2p::Transport,
 };
 
@@ -46,19 +43,31 @@ pub struct TransportConfig {
     #[cfg(feature = "dns")]
     pub dns_resolver: Option<DnsResolver>,
     pub version: UpgradeVersion,
+    #[cfg(feature = "quic")]
     pub enable_quic: bool,
+    #[cfg(feature = "quic")]
     pub quic_max_idle_timeout: Duration,
+    #[cfg(feature = "quic")]
     pub quic_keep_alive: Option<Duration>,
+    #[cfg(feature = "websocket")]
     pub enable_websocket: bool,
+    #[cfg(feature = "dns")]
     pub enable_dns: bool,
     pub enable_memory_transport: bool,
+    #[cfg(feature = "webtransport")]
     pub enable_webtransport: bool,
+    #[cfg(feature = "websocket")]
     pub websocket_pem: Option<(Vec<String>, String)>,
+    #[cfg(feature = "websocket")]
     pub enable_secure_websocket: bool,
+    #[cfg(feature = "quic")]
     pub support_quic_draft_29: bool,
+    #[cfg(feature = "webrtc")]
     pub enable_webrtc: bool,
+    #[cfg(feature = "webrtc")]
     pub webrtc_pem: Option<String>,
     #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "pnet")]
     pub enable_pnet: bool,
     #[cfg(not(target_arch = "wasm32"))]
     #[cfg(feature = "pnet")]
@@ -68,27 +77,39 @@ pub struct TransportConfig {
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "quic")]
             enable_quic: true,
+            #[cfg(feature = "websocket")]
             enable_websocket: false,
+            #[cfg(feature = "websocket")]
             websocket_pem: None,
+            #[cfg(feature = "websocket")]
             enable_secure_websocket: true,
             enable_memory_transport: false,
+            #[cfg(feature = "quic")]
             support_quic_draft_29: false,
+            #[cfg(feature = "dns")]
             enable_dns: true,
+            #[cfg(feature = "webtransport")]
             enable_webtransport: false,
+            #[cfg(feature = "webrtc")]
             enable_webrtc: false,
+            #[cfg(feature = "webrtc")]
             webrtc_pem: None,
             timeout: Duration::from_secs(10),
             //Note: This is set low due to quic transport not properly resetting connection state when reconnecting before connection timeout
             //      While in smaller settings this would be alright, we should be cautious of this setting for nodes with larger connections
             //      since this may increase cpu and network usage.
             //      see https://github.com/libp2p/rust-libp2p/issues/5097
+            #[cfg(feature = "quic")]
             quic_max_idle_timeout: Duration::from_millis(300),
+            #[cfg(feature = "quic")]
             quic_keep_alive: Some(Duration::from_millis(100)),
             #[cfg(feature = "dns")]
             dns_resolver: None,
             version: UpgradeVersion::default(),
             #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "pnet")]
             enable_pnet: false,
             #[cfg(not(target_arch = "wasm32"))]
             #[cfg(feature = "pnet")]
@@ -156,18 +177,30 @@ pub(crate) fn build_transport(
         #[cfg(feature = "dns")]
         dns_resolver,
         version,
+        #[cfg(feature = "quic")]
         enable_quic,
         enable_memory_transport,
+        #[cfg(feature = "quic")]
         support_quic_draft_29,
+        #[cfg(feature = "quic")]
         quic_max_idle_timeout,
+        #[cfg(feature = "quic")]
         quic_keep_alive,
+        #[cfg(feature = "dns")]
         enable_dns,
+        #[cfg(feature = "websocket")]
         enable_websocket,
+        #[cfg(feature = "websocket")]
         enable_secure_websocket,
+        #[cfg(feature = "webrtc")]
         enable_webrtc,
+        #[cfg(feature = "webrtc")]
         webrtc_pem,
+        #[cfg(feature = "websocket")]
         websocket_pem,
-        enable_webtransport: _,
+        #[cfg(feature = "webtransport")]
+            enable_webtransport: _,
+        #[cfg(feature = "pnet")]
         enable_pnet,
         #[cfg(feature = "pnet")]
         pnet_psk,
@@ -183,11 +216,31 @@ pub(crate) fn build_transport(
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
     #[cfg(feature = "tls")]
     use libp2p::tls;
+    #[cfg(feature = "noise")]
+    use libp2p::noise;
+
+    let transport = match enable_memory_transport {
+        true => Either::Left(MemoryTransport::new()),
+        false => Either::Right(DummyTransport::<DummyStream>::new()),
+    };
+
+    #[cfg(feature = "dns")]
+    let transport = match enable_dns {
+        true => {
+            let (cfg, opts) = dns_resolver.unwrap_or_default().into();
+            let dns_transport = TokioDnsConfig::custom(transport, cfg, opts);
+            Either::Left(dns_transport)
+        }
+        false => Either::Right(transport),
+    };
+
+    let transport = match relay {
+        Some(relay) => Either::Left(OrTransport::new(relay, transport)),
+        None => Either::Right(transport),
+    };
 
     #[cfg(any(feature = "noise", feature = "tls"))]
     let transport = {
-        use libp2p::core::transport::dummy::DummyStream;
-
         let config = {
             #[cfg(all(feature = "noise", feature = "tls"))]
             {
@@ -209,12 +262,7 @@ pub(crate) fn build_transport(
             }
         };
 
-        let yamux_config = YamuxConfig::default();
-
-        let transport = match enable_memory_transport {
-            true => Either::Left(MemoryTransport::new()),
-            false => Either::Right(DummyTransport::<DummyStream>::new()),
-        };
+        let yamux_config = libp2p::yamux::Config::default();
 
         #[cfg(feature = "tcp")]
         let (tcp_config, transport) = {
@@ -273,21 +321,6 @@ pub(crate) fn build_transport(
 
         let transport = TransportTimeout::new(transport, timeout);
 
-        #[cfg(feature = "dns")]
-        let transport = match enable_dns {
-            true => {
-                let (cfg, opts) = dns_resolver.unwrap_or_default().into();
-                let dns_transport = TokioDnsConfig::custom(transport, cfg, opts);
-                Either::Left(dns_transport)
-            }
-            false => Either::Right(transport),
-        };
-
-        let transport = match relay {
-            Some(relay) => Either::Left(OrTransport::new(relay, transport)),
-            None => Either::Right(transport),
-        };
-
         #[cfg(feature = "pnet")]
         let transport = match (enable_pnet, pnet_psk) {
             (true, Some(psk)) => Either::Left(
@@ -306,7 +339,7 @@ pub(crate) fn build_transport(
         transport
     };
 
-    #[cfg(not(any(feature = "noise", feature = "tls")))]
+    #[cfg(not(all(feature = "noise", feature = "tls")))]
     let transport = DummyTransport::<(PeerId, StreamMuxerBox)>::new().boxed();
 
     #[cfg(feature = "webrtc")]
@@ -332,7 +365,7 @@ pub(crate) fn build_transport(
         Ok(wrtc_tp)
     }
 
-    #[cfg(all(feature = "webrtc"))]
+    #[cfg(feature = "webrtc")]
     let transport = match enable_webrtc {
         true => {
             let wrtc_tp = generate_webrtc_transport(&keypair, &webrtc_pem)?;
@@ -392,24 +425,40 @@ pub(crate) fn build_transport(
     TransportConfig {
         timeout,
         version,
+        #[cfg(feature = "websocket")]
         enable_websocket,
+        #[cfg(feature = "websocket")]
         enable_secure_websocket,
+        #[cfg(feature = "webrtc")]
         enable_webrtc,
+        #[cfg(feature = "webtransport")]
         enable_webtransport,
+        enable_memory_transport,
         ..
     }: TransportConfig,
 ) -> io::Result<TTransport> {
+    #[cfg(feature = "websocket")]
     use libp2p::websocket_websys;
+    #[cfg(feature = "webtransport")]
     use libp2p::webtransport_websys;
 
     #[cfg(feature = "webrtc")]
     use libp2p_webrtc_websys as webrtc_websys;
 
-    let noise_config = noise::Config::new(&keypair).map_err(io::Error::other)?;
-    let yamux_config = YamuxConfig::default();
+    let transport = match enable_memory_transport {
+        true => Either::Left(MemoryTransport::new()),
+        false => Either::Right(DummyTransport::<DummyStream>::new()),
+    };
 
-    let transport = MemoryTransport::default();
+    let transport = match relay {
+        Some(relay) => Either::Left(OrTransport::new(relay, transport)),
+        None => Either::Right(transport),
+    };
 
+    let noise_config = libp2p::noise::Config::new(&keypair).map_err(io::Error::other)?;
+    let yamux_config = libp2p::yamux::Config::default();
+
+    #[cfg(feature = "websocket")]
     let transport = match enable_websocket | enable_secure_websocket {
         true => {
             let ws_transport = websocket_websys::Transport::default();
@@ -421,11 +470,6 @@ pub(crate) fn build_transport(
 
     let transport = TransportTimeout::new(transport, timeout);
 
-    let transport = match relay {
-        Some(relay) => Either::Left(OrTransport::new(relay, transport)),
-        None => Either::Right(transport),
-    };
-
     let transport = transport
         .upgrade(version.into())
         .authenticate(noise_config)
@@ -433,6 +477,7 @@ pub(crate) fn build_transport(
         .timeout(timeout)
         .boxed();
 
+    #[cfg(feature = "webtransport")]
     let transport = match enable_webtransport {
         true => {
             let config = webtransport_websys::Config::new(&keypair);
@@ -464,12 +509,7 @@ pub(crate) fn build_transport(
         false => transport,
     };
 
-    #[cfg(not(feature = "webrtc"))]
-    {
-        _ = enable_webrtc;
-    }
-
-    Ok(transport)
+    Ok(transport.boxed())
 }
 
 // borrow from libp2p SwarmBuilder

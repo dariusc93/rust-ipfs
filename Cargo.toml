@@ -10,7 +10,7 @@ description = "IPFS node implementation"
 version = "0.15.0"
 
 [features]
-default = ["rsa", "dns", "ed25519", "secp256k1", "ecdsa", "tls", "noise", "tcp", "quic", "pnet"]
+default = ["rsa", "dns", "ed25519", "secp256k1", "ecdsa", "tls", "noise", "tcp", "quic", "pnet", "websocket"]
 
 rsa = ["libp2p/rsa", "rust-ipns/rsa"]
 ed25519 = ["libp2p/ed25519", "rust-ipns/ed25519"]
@@ -28,8 +28,9 @@ tcp = ["libp2p/tcp"]
 quic = ["libp2p/quic"]
 pnet = ["libp2p/pnet"]
 
-webrtc = ["dep:libp2p-webrtc", "x509_dep"]
-websocket = ["libp2p/websocket", "x509_dep"]
+webrtc = ["dep:libp2p-webrtc", "dep:libp2p-webrtc-websys", "x509_dep"]
+websocket = ["libp2p/websocket", "libp2p/websocket-websys", "x509_dep"]
+webtransport = ["libp2p/webtransport-websys"]
 
 test_go_interop = []
 test_js_interop = []
@@ -167,8 +168,8 @@ tokio-util = { workspace = true, features = ["full"] }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "ping", "yamux", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }
-libp2p-webrtc-websys = { workspace = true }
+libp2p = { features = ["gossipsub", "autonat", "relay", "identify", "kad", "noise", "macros", "ping", "yamux", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen"], workspace = true }
+libp2p-webrtc-websys = { workspace = true, optional = true }
 send_wrapper.workspace = true
 serde-wasm-bindgen.workspace = true
 tokio = { default-features = false, features = ["sync", "macros"], workspace = true }
