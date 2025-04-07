@@ -39,10 +39,10 @@ test_js_interop = []
 anyhow = "1.0.97"
 async-rt = "0.1.5"
 async-stream = { version = "0.3.6" }
-async-trait = { version = "0.1.87" }
+async-trait = { version = "0.1.88" }
 asynchronous-codec = "0.7.0"
 base64 = { version = "0.22.1" }
-bytes = "1.10.0"
+bytes = "1.10.1"
 cid = "0.11.1"
 chrono = { version = "0.4.40" }
 clap = { version = "4.5.31", features = ["derive"] }
@@ -95,7 +95,7 @@ thiserror = { version = "2.0.11" }
 tracing = { version = "0.1.41" }
 tracing-futures = { features = ["futures-03"], version = "0.2.5" }
 
-tokio = { default-features = false, version = "1.43.0" }
+tokio = { default-features = false, version = "1.44.2" }
 tokio-stream = { default-features = false, version = "0.1.17" }
 tokio-util = { default-features = false, version = "0.7.13" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
