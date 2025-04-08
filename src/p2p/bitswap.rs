@@ -35,7 +35,10 @@ mod bitswap_pb {
     }
 }
 
-use crate::{repo::Repo, Block};
+use crate::{
+    repo::{default_impl::DefaultStorage, Repo},
+    Block,
+};
 
 use self::{
     message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType},
@@ -62,14 +65,14 @@ pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<ConnectionId>>,
     blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
-    store: Repo,
+    store: Repo<DefaultStorage>,
     want_session: StreamMap<Cid, WantSession>,
     have_session: StreamMap<Cid, HaveSession>,
     waker: Option<Waker>,
 }
 
 impl Behaviour {
-    pub fn new(store: &Repo) -> Self {
+    pub fn new(store: &Repo<DefaultStorage>) -> Self {
         Self {
             events: Default::default(),
             connections: Default::default(),
@@ -559,7 +562,7 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use crate::block::BlockCodec;
+    use crate::{block::BlockCodec, repo::default_impl::DefaultStorage};
     use futures::StreamExt;
     use ipld_core::cid::Cid;
     use libp2p::{
@@ -954,7 +957,7 @@ mod test {
         Ok(())
     }
 
-    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<Behaviour>, Repo) {
+    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<Behaviour>, Repo<DefaultStorage>) {
         let repo = Repo::new_memory();
 
         let mut swarm = SwarmBuilder::with_new_identity()

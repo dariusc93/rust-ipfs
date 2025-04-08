@@ -3,6 +3,7 @@
 use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
+use crate::repo::default_impl::DefaultStorage;
 use crate::repo::Repo;
 use crate::{Block, Ipfs};
 use bytes::Bytes;
@@ -179,11 +180,11 @@ impl RawResolveLocalError {
 #[derive(Clone, Debug)]
 pub struct IpldDag {
     ipfs: Option<Ipfs>,
-    repo: Repo,
+    repo: Repo<DefaultStorage>,
 }
 
-impl From<Repo> for IpldDag {
-    fn from(repo: Repo) -> Self {
+impl From<Repo<DefaultStorage>> for IpldDag {
+    fn from(repo: Repo<DefaultStorage>) -> Self {
         IpldDag { ipfs: None, repo }
     }
 }

@@ -12,7 +12,11 @@ use std::task::Context;
 use std::{task::Poll, time::Duration};
 use tracing::{Instrument, Span};
 
-use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
+use crate::{
+    dag::IpldDag,
+    repo::{default_impl::DefaultStorage, Repo},
+    Ipfs, IpfsPath,
+};
 
 #[derive(Debug)]
 pub enum Entry {
@@ -24,7 +28,7 @@ pub enum Entry {
 
 #[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsLs {
-    core: Option<Either<Ipfs, Repo>>,
+    core: Option<Either<Ipfs, Repo<DefaultStorage>>>,
     span: Span,
     path: Option<IpfsPath>,
     providers: Vec<PeerId>,
@@ -38,11 +42,11 @@ impl UnixfsLs {
         Self::with_either(Either::Left(ipfs.clone()), path)
     }
 
-    pub fn with_repo(repo: &Repo, path: impl Into<IpfsPath>) -> Self {
+    pub fn with_repo(repo: &Repo<DefaultStorage>, path: impl Into<IpfsPath>) -> Self {
         Self::with_either(Either::Right(repo.clone()), path)
     }
 
-    fn with_either(core: Either<Ipfs, Repo>, path: impl Into<IpfsPath>) -> Self {
+    fn with_either(core: Either<Ipfs, Repo<DefaultStorage>>, path: impl Into<IpfsPath>) -> Self {
         let path = path.into();
         Self {
             core: Some(core),
