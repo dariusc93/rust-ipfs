@@ -9,6 +9,7 @@ use either::Either;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
+use crate::repo::default_impl::DefaultStorage;
 use crate::{IntoAddPeerOpt, IpfsOptions};
 
 use crate::repo::Repo;
@@ -364,7 +365,7 @@ where
     pub(crate) fn new(
         keypair: &Keypair,
         options: &IpfsOptions,
-        repo: &Repo,
+        repo: &Repo<DefaultStorage>,
         custom: Option<C>,
     ) -> Result<(Self, Option<ClientTransport>), Error> {
         let bootstrap = options.bootstrap.clone();

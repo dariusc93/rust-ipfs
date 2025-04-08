@@ -2,7 +2,6 @@
 use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
-use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
 use ipld_core::cid::Cid;
@@ -16,6 +15,7 @@ use std::sync::Arc;
 /// Describes an in-memory block store.
 ///
 /// Blocks are stored as a `HashMap` of the `Cid` and `Block`.
+#[derive(Clone)]
 pub struct MemBlockStore {
     inner: Arc<RwLock<MemBlockInner>>,
 }
@@ -42,7 +42,6 @@ impl MemBlockStore {
     }
 }
 
-#[async_trait]
 impl BlockStore for MemBlockStore {
     async fn init(&self) -> Result<(), Error> {
         Ok(())

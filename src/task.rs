@@ -10,7 +10,7 @@ use futures::{
 };
 use pollable_map::stream::optional::OptionalStream;
 
-use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
+use crate::{p2p::MultiaddrExt, repo::default_impl::DefaultStorage, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
@@ -65,7 +65,7 @@ pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
     pub listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub repo: Repo,
+    pub repo: Repo<DefaultStorage>,
     pub kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub bootstraps: HashSet<Multiaddr>,
@@ -92,7 +92,7 @@ pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
 }
 
 impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
-    pub fn new(swarm: TSwarm<C>, repo: &Repo, event_capacity: usize) -> Self {
+    pub fn new(swarm: TSwarm<C>, repo: &Repo<DefaultStorage>, event_capacity: usize) -> Self {
         IpfsTask {
             repo_events: OptionalStream::default(),
             from_facade: OptionalStream::default(),
@@ -106,7 +106,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
             bitswap_cancellable: Default::default(),
             repo: repo.clone(),
             bootstraps: Default::default(),
-            swarm_event: Default::default(),
+            swarm_event: None,
             timer: Default::default(),
             relay_listener: Default::default(),
             local_external_addr: false,

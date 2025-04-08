@@ -6,6 +6,7 @@ use std::borrow::Borrow;
 #[cfg(feature = "dns")]
 use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
+use crate::repo::DataStore;
 use crate::Ipfs;
 
 #[cfg(feature = "dns")]
