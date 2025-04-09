@@ -112,6 +112,7 @@ pub use libp2p::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "pnet")]
 use libp2p::pnet::PreSharedKey;
 use libp2p::swarm::ConnectionId;
 use libp2p::{
@@ -220,7 +221,7 @@ pub(crate) struct Libp2pProtocol {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) upnp: bool,
     pub(crate) ping: bool,
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub(crate) streams: bool,
     pub(crate) request_response: bool,
 }
@@ -413,9 +414,9 @@ enum IpfsEvent {
         PeerId,
         Channel<HashMap<PeerId, Vec<Multiaddr>>>,
     ),
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     StreamControlHandle(Channel<libp2p_stream::Control>),
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     NewStream(StreamProtocol, Channel<libp2p_stream::IncomingStreams>),
     Exit,
 }
@@ -686,7 +687,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         self
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub fn with_streams(mut self) -> Self {
         self.options.protocols.streams = true;
         self
@@ -846,6 +847,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
     /// Set pnet
     #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "pnet")]
     pub fn with_pnet(mut self, psk: PreSharedKey) -> Self {
         self.options.transport_configuration.enable_pnet = true;
         self.options.transport_configuration.pnet_psk = Some(psk);
@@ -1803,7 +1805,7 @@ impl Ipfs {
         .await
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub async fn stream_control(&self) -> Result<libp2p_stream::Control, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -1819,7 +1821,7 @@ impl Ipfs {
         .await
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub async fn new_stream(
         &self,
         protocol: impl IntoStreamProtocol,
@@ -1839,7 +1841,7 @@ impl Ipfs {
         .await
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub async fn open_stream(
         &self,
         peer_id: PeerId,

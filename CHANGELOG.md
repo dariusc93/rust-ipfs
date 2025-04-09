@@ -7,6 +7,7 @@
 - chore: use async-rt in place of rt utils. [PR 362](https://github.com/dariusc93/rust-ipfs/pull/362)
 - feat: Implement configuration for connecting to IPFS Private Network. [PR 398](https://github.com/dariusc93/rust-ipfs/pull/398)
 - refactor: use CommunicationTask to handle sending message to IpfsTask. [PR 404](https://github.com/dariusc93/rust-ipfs/pull/404)
+- feat: add additional features to enable different features. [PR 417](https://github.com/dariusc93/rust-ipfs/pull/417)
 - feat: Use RepoType in Repo and impl DefaultStorage. [PR 414](https://github.com/dariusc93/rust-ipfs/pull/414)
 
 # 0.14.1

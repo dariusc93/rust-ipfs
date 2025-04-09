@@ -3,17 +3,20 @@
 use futures_timeout::TimeoutExt;
 use std::borrow::Borrow;
 
+#[cfg(feature = "dns")]
 use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
 use crate::repo::DataStore;
 use crate::Ipfs;
 
+#[cfg(feature = "dns")]
 mod dnslink;
 
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
 pub struct Ipns {
     ipfs: Ipfs,
+    #[cfg(feature = "dns")]
     resolver: DnsResolver,
 }
 
@@ -28,11 +31,13 @@ impl Ipns {
     pub fn new(ipfs: Ipfs) -> Self {
         Ipns {
             ipfs,
+            #[cfg(feature = "dns")]
             resolver: DnsResolver::default(),
         }
     }
 
     /// Set dns resolver
+    #[cfg(feature = "dns")]
     pub fn set_resolver(&mut self, resolver: DnsResolver) {
         self.resolver = resolver;
     }
@@ -128,6 +133,7 @@ impl Ipns {
                         Ok(internal_path)
                     })
             }
+            #[cfg(feature = "dns")]
             PathRoot::Dns(domain) => {
                 let path_iter = path.iter();
                 dnslink::resolve(self.resolver, domain, path_iter)

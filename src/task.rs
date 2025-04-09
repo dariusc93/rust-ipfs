@@ -920,7 +920,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
                 let info = self.swarm.behaviour().supported_protocols();
                 let _ = ret.send(info);
             }
-            #[cfg(feature = "experimental_stream")]
+            #[cfg(feature = "stream")]
             IpfsEvent::StreamControlHandle(ret) => {
                 let Some(stream) = self.swarm.behaviour_mut().stream.as_ref() else {
                     let _ = ret.send(Err(anyhow!("stream protocol is disabled")));
@@ -929,7 +929,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
 
                 let _ = ret.send(Ok(stream.new_control()));
             }
-            #[cfg(feature = "experimental_stream")]
+            #[cfg(feature = "stream")]
             IpfsEvent::NewStream(protocol, ret) => {
                 let Some(stream) = self.swarm.behaviour_mut().stream.as_ref() else {
                     let _ = ret.send(Err(anyhow!("stream protocol is disabled")));
