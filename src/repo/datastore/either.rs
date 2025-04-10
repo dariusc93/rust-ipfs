@@ -72,9 +72,7 @@ impl<L: PinStore, R: PinStore> PinStore for Either<L, R> {
     ) -> Result<(), Error> {
         match self {
             Either::Left(datastore) => datastore.insert_recursive_pin(target, referenced).await,
-            Either::Right(datastore) => {
-                datastore.insert_recursive_pin(target, referenced).await
-            }
+            Either::Right(datastore) => datastore.insert_recursive_pin(target, referenced).await,
         }
     }
 
@@ -92,9 +90,7 @@ impl<L: PinStore, R: PinStore> PinStore for Either<L, R> {
     ) -> Result<(), Error> {
         match self {
             Either::Left(datastore) => datastore.remove_recursive_pin(target, referenced).await,
-            Either::Right(datastore) => {
-                datastore.remove_recursive_pin(target, referenced).await
-            }
+            Either::Right(datastore) => datastore.remove_recursive_pin(target, referenced).await,
         }
     }
 

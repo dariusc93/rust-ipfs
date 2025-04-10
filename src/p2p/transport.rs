@@ -210,14 +210,14 @@ pub(crate) fn build_transport(
     use crate::p2p::transport::dual_transport::SelectSecurityUpgrade;
     #[cfg(feature = "dns")]
     use libp2p::dns::tokio::Transport as TokioDnsConfig;
+    #[cfg(feature = "noise")]
+    use libp2p::noise;
     #[cfg(feature = "quic")]
     use libp2p::quic::{tokio::Transport as TokioQuicTransport, Config as QuicConfig};
     #[cfg(feature = "tcp")]
     use libp2p::tcp::{tokio::Transport as TokioTcpTransport, Config as GenTcpConfig};
     #[cfg(feature = "tls")]
     use libp2p::tls;
-    #[cfg(feature = "noise")]
-    use libp2p::noise;
 
     let transport = match enable_memory_transport {
         true => Either::Left(MemoryTransport::new()),
