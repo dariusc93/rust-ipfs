@@ -2,6 +2,7 @@
 
 use crate::block::BlockCodec;
 use crate::repo::Repo;
+use crate::repo::RepoTypes;
 use async_stream::stream;
 use futures::stream::Stream;
 use ipld_core::{cid::Cid, ipld::Ipld};
@@ -107,13 +108,14 @@ impl IpldRefs {
         self
     }
 
-    pub fn refs_of_resolved<'a, MaybeOwned, Iter>(
+    pub fn refs_of_resolved<'a, S, MaybeOwned, Iter>(
         self,
         repo: MaybeOwned,
         iplds: Iter,
     ) -> impl Stream<Item = Result<Edge, IpldRefsError>> + Send + 'a
     where
-        MaybeOwned: Borrow<Repo> + Send + 'a,
+        S: RepoTypes,
+        MaybeOwned: Borrow<Repo<S>> + Send + 'a,
         Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
     {
         iplds_refs_inner(repo, iplds, self)
@@ -137,14 +139,15 @@ impl IpldRefs {
 ///
 /// Depending on how this function is called, the lifetime will be tied to the lifetime of given
 /// `&Ipfs` or `'static` when given ownership of `Ipfs`.
-pub fn iplds_refs<'a, MaybeOwned, Iter>(
+pub fn iplds_refs<'a, S, MaybeOwned, Iter>(
     repo: MaybeOwned,
     iplds: Iter,
     max_depth: Option<u64>,
     unique: bool,
 ) -> impl Stream<Item = Result<Edge, anyhow::Error>> + Send + 'a
 where
-    MaybeOwned: Borrow<Repo> + Send + 'a,
+    S: RepoTypes,
+    MaybeOwned: Borrow<Repo<S>> + Send + 'a,
     Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
 {
     use futures::stream::TryStreamExt;
@@ -165,13 +168,14 @@ where
     })
 }
 
-fn iplds_refs_inner<'a, MaybeOwned, Iter>(
+fn iplds_refs_inner<'a, S, MaybeOwned, Iter>(
     repo: MaybeOwned,
     iplds: Iter,
     opts: IpldRefs,
 ) -> impl Stream<Item = Result<Edge, IpldRefsError>> + Send + 'a
 where
-    MaybeOwned: Borrow<Repo> + Send + 'a,
+    S: RepoTypes,
+    MaybeOwned: Borrow<Repo<S>> + Send + 'a,
     Iter: IntoIterator<Item = (Cid, Ipld)>,
 {
     let mut work = VecDeque::new();

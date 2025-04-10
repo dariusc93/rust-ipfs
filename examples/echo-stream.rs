@@ -1,5 +1,5 @@
 // echo example based on libp2p-stream example
-#[cfg(feature = "experimental_stream")]
+#[cfg(feature = "stream")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use std::time::Duration;
@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(feature = "experimental_stream"))]
+#[cfg(not(feature = "stream"))]
 fn main() {
-    unimplemented!("\"experimental_stream\" not enabled")
+    unimplemented!("\"stream\" not enabled")
 }

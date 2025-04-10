@@ -8,8 +8,9 @@ use futures::{
     stream::Fuse,
     FutureExt, StreamExt,
 };
+use pollable_map::stream::optional::OptionalStream;
 
-use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
+use crate::{p2p::MultiaddrExt, repo::default_impl::DefaultStorage, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
@@ -58,13 +59,13 @@ use tokio::sync::Notify;
 #[allow(dead_code)]
 pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
     pub swarm: TSwarm<C>,
-    pub repo_events: Fuse<Receiver<RepoEvent>>,
-    pub from_facade: Fuse<Receiver<IpfsEvent>>,
+    pub repo_events: OptionalStream<Fuse<Receiver<RepoEvent>>>,
+    pub from_facade: OptionalStream<Fuse<Receiver<IpfsEvent>>>,
     pub bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
     pub listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
     pub record_stream: HashMap<QueryId, UnboundedSender<Record>>,
-    pub repo: Repo,
+    pub repo: Repo<DefaultStorage>,
     pub kad_subscriptions: HashMap<QueryId, Channel<KadResult>>,
     pub dht_peer_lookup: HashMap<PeerId, Vec<Channel<libp2p::identify::Info>>>,
     pub bootstraps: HashSet<Multiaddr>,
@@ -91,16 +92,10 @@ pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
 }
 
 impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
-    pub fn new(
-        swarm: TSwarm<C>,
-        repo_events: Fuse<Receiver<RepoEvent>>,
-        from_facade: Fuse<Receiver<IpfsEvent>>,
-        repo: &Repo,
-        event_capacity: usize,
-    ) -> Self {
+    pub fn new(swarm: TSwarm<C>, repo: &Repo<DefaultStorage>, event_capacity: usize) -> Self {
         IpfsTask {
-            repo_events,
-            from_facade,
+            repo_events: OptionalStream::default(),
+            from_facade: OptionalStream::default(),
             swarm,
             event_capacity,
             provider_stream: HashMap::new(),
@@ -111,7 +106,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
             bitswap_cancellable: Default::default(),
             repo: repo.clone(),
             bootstraps: Default::default(),
-            swarm_event: Default::default(),
+            swarm_event: None,
             timer: Default::default(),
             relay_listener: Default::default(),
             local_external_addr: false,
@@ -154,7 +149,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> futures::Future for IpfsTask<C> 
         }
         loop {
             match self.from_facade.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => self.handle_event(event),
+                Poll::Ready(Some(event)) => {
+                    if matches!(event, IpfsEvent::Exit) {
+                        return Poll::Ready(());
+                    }
+                    self.handle_event(event)
+                }
                 Poll::Ready(None) => return Poll::Ready(()),
                 Poll::Pending => break,
             }
@@ -920,7 +920,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
                 let info = self.swarm.behaviour().supported_protocols();
                 let _ = ret.send(info);
             }
-            #[cfg(feature = "experimental_stream")]
+            #[cfg(feature = "stream")]
             IpfsEvent::StreamControlHandle(ret) => {
                 let Some(stream) = self.swarm.behaviour_mut().stream.as_ref() else {
                     let _ = ret.send(Err(anyhow!("stream protocol is disabled")));
@@ -929,7 +929,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
 
                 let _ = ret.send(Ok(stream.new_control()));
             }
-            #[cfg(feature = "experimental_stream")]
+            #[cfg(feature = "stream")]
             IpfsEvent::NewStream(protocol, ret) => {
                 let Some(stream) = self.swarm.behaviour_mut().stream.as_ref() else {
                     let _ = ret.send(Err(anyhow!("stream protocol is disabled")));

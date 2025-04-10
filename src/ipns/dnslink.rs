@@ -1,4 +1,5 @@
 use crate::error::Error;
+#[cfg(feature = "dns")]
 use crate::p2p::DnsResolver;
 use crate::path::IpfsPath;
 

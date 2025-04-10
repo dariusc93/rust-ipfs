@@ -10,36 +10,52 @@ description = "IPFS node implementation"
 version = "0.15.0"
 
 [features]
-default = []
+default = ["rsa", "dns", "ed25519", "secp256k1", "ecdsa", "tls", "noise", "tcp", "quic", "pnet", "websocket"]
 
-experimental_stream = ["dep:libp2p-stream"]
+rsa = ["libp2p/rsa", "rust-ipns/rsa"]
+ed25519 = ["libp2p/ed25519", "rust-ipns/ed25519"]
+secp256k1 = ["libp2p/secp256k1", "rust-ipns/secp256k1"]
+ecdsa = ["libp2p/ecdsa", "rust-ipns/ecdsa"]
 
-webrtc_transport = ["dep:libp2p-webrtc"]
+stream = ["dep:libp2p-stream"]
+
+x509_dep = ["dep:simple_x509", "rcgen", "pem", "p256", "rand_chacha", "hkdf", "sec1"]
+
+dns = ["libp2p/dns"]
+tls = ["libp2p/tls"]
+noise = ["libp2p/noise"]
+tcp = ["libp2p/tcp"]
+quic = ["libp2p/quic"]
+pnet = ["libp2p/pnet"]
+
+webrtc = ["dep:libp2p-webrtc", "dep:libp2p-webrtc-websys", "x509_dep"]
+websocket = ["libp2p/websocket", "libp2p/websocket-websys", "x509_dep"]
+webtransport = ["libp2p/webtransport-websys"]
 
 test_go_interop = []
 test_js_interop = []
 
 [workspace.dependencies]
-anyhow = "1.0.95"
+anyhow = "1.0.97"
 async-rt = "0.1.5"
 async-stream = { version = "0.3.6" }
-async-trait = { version = "0.1.86" }
+async-trait = { version = "0.1.88" }
 asynchronous-codec = "0.7.0"
 base64 = { version = "0.22.1" }
-bytes = "1.10.0"
+bytes = "1.10.1"
 cid = "0.11.1"
-chrono = { version = "0.4.39" }
-clap = { version = "4.5.30", features = ["derive"] }
-either = { version = "1.14.0" }
+chrono = { version = "0.4.40" }
+clap = { version = "4.5.31", features = ["derive"] }
+either = { version = "1.15.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
-futures-timeout = "0.1.0"
+futures-timeout = "0.1.2"
 futures-timer = "3.0.0"
 getrandom = { version = "0.2.15" }
 hickory-resolver = "0.25.0-alpha.5"
 hkdf = "0.12.4"
 idb = "0.6.4"
-indexmap = "2.7.1"
+indexmap = "2.8.0"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.1"
 libp2p = { version = "0.55.0" }
@@ -56,22 +72,22 @@ multihash-derive = "0.9.0"
 # TODO: Determine if we should just rely on default features
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "std", "pem"] }
 parking_lot = "0.12.3"
-pem = { version = "3.0.4" }
-pollable-map = "0.1.0"
+pem = { version = "3.0.5" }
+pollable-map = "0.1.1"
 quick-protobuf = { version = "0.8.1" }
 quick-protobuf-codec = "0.3.1"
 rand = "0.8.5"
 rand_chacha = "0.9.0"
 rcgen = { version = "0.13.2", features = ["pem", "x509-parser"] }
 rlimit = "0.10.2"
-rust-ipns = { version = "0.7.0", path = "packages/rust-ipns" }
+rust-ipns = { version = "0.7.0", path = "packages/rust-ipns", default-features = false }
 rust-unixfs = { version = "0.5.0", path = "unixfs" }
 sec1 = { version = "0.7.3", features = ["pem", "pkcs8"] }
 send_wrapper = "0.6.0"
-serde = { version = "1.0.218" }
-serde_ipld_dagcbor = "0.6.1"
+serde = { version = "1.0.219" }
+serde_ipld_dagcbor = "0.6.2"
 serde_ipld_dagjson = "0.2.0"
-serde_json = { version = "1.0.138" }
+serde_json = { version = "1.0.140" }
 serde-wasm-bindgen = "0.6.5"
 sha2 = "0.10.8"
 simple_x509 = "=1.1.0"
@@ -79,7 +95,7 @@ thiserror = { version = "2.0.11" }
 tracing = { version = "0.1.41" }
 tracing-futures = { features = ["futures-03"], version = "0.2.5" }
 
-tokio = { default-features = false, version = "1.43.0" }
+tokio = { default-features = false, version = "1.44.2" }
 tokio-stream = { default-features = false, version = "0.1.17" }
 tokio-util = { default-features = false, version = "0.7.13" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
@@ -100,7 +116,7 @@ chrono.workspace = true
 either.workspace = true
 futures-timeout.workspace = true
 futures.workspace = true
-hkdf.workspace = true
+hkdf = { workspace = true, optional = true }
 indexmap.workspace = true
 ipld-core.workspace = true
 ipld-dagpb.workspace = true
@@ -112,17 +128,17 @@ multibase.workspace = true
 multihash.workspace = true
 multihash-codetable.workspace = true
 multihash-derive.workspace = true
-p256.workspace = true
+p256 = { workspace = true, optional = true }
 parking_lot.workspace = true
-pem.workspace = true
+pem = { workspace = true, optional = true }
 pollable-map.workspace = true
 quick-protobuf-codec.workspace = true
 quick-protobuf.workspace = true
 rand.workspace = true
-rand_chacha.workspace = true
-rust-ipns = { workspace = true }
+rand_chacha = { workspace = true, optional = true }
+rust-ipns = { workspace = true, features = ["libp2p"] }
 rust-unixfs = { workspace = true }
-sec1.workspace = true
+sec1 = { workspace = true, optional = true }
 serde = { features = ["derive"], workspace = true }
 serde_ipld_dagcbor.workspace = true
 serde_ipld_dagjson.workspace = true
@@ -139,11 +155,11 @@ zeroize.workspace = true
 futures-timer.workspace = true
 fs2.workspace = true
 hickory-resolver.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket", "tcp", "macros", "tokio", "noise", "tls", "ping", "yamux", "dns", "mdns", "ed25519", "secp256k1", "ecdsa", "rsa", "serde", "request-response", "json", "cbor", "rendezvous", "upnp", "quic", "pnet" ], workspace = true }
+libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "macros", "tokio", "ping", "yamux", "mdns", "serde", "request-response", "json", "cbor", "rendezvous", "upnp"], workspace = true }
 libp2p-webrtc = { workspace = true, features = ["tokio", ], optional = true }
-rcgen.workspace = true
+rcgen = { workspace = true, optional = true }
 rlimit.workspace = true
-simple_x509.workspace = true
+simple_x509 = { workspace = true, optional = true }
 tokio = { features = ["full"], workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
 tokio-util = { workspace = true, features = ["full"] }
@@ -152,8 +168,8 @@ tokio-util = { workspace = true, features = ["full"] }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "websocket-websys", "webtransport-websys", "macros", "noise", "ping", "yamux", "dns", "ed25519", "secp256k1", "ecdsa", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen", ], workspace = true }
-libp2p-webrtc-websys = { workspace = true }
+libp2p = { features = ["gossipsub", "autonat", "relay", "identify", "kad", "noise", "macros", "ping", "yamux", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen"], workspace = true }
+libp2p-webrtc-websys = { workspace = true, optional = true }
 send_wrapper.workspace = true
 serde-wasm-bindgen.workspace = true
 tokio = { default-features = false, features = ["sync", "macros"], workspace = true }

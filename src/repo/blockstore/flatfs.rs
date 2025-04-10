@@ -2,7 +2,6 @@ use crate::error::Error;
 use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
 use crate::Block;
-use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use ipld_core::cid::Cid;
@@ -16,7 +15,7 @@ use tokio_stream::wrappers::ReadDirStream;
 /// File system backed block store.
 ///
 /// For information on path mangling, please see `block_path` and `filestem_to_block_cid`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FsBlockStore {
     inner: Arc<RwLock<FsBlockStoreInner>>,
 }
@@ -34,7 +33,6 @@ impl FsBlockStore {
     }
 }
 
-#[async_trait]
 impl BlockStore for FsBlockStore {
     async fn init(&self) -> Result<(), Error> {
         let inner = &*self.inner.read().await;

@@ -45,11 +45,10 @@ use dag::{DagGet, DagPut};
 use either::Either;
 use futures::{
     channel::{
-        mpsc::{channel, Sender, UnboundedReceiver},
+        mpsc::UnboundedReceiver,
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     },
     future::BoxFuture,
-    sink::SinkExt,
     stream::{BoxStream, Stream},
     FutureExt, StreamExt, TryStreamExt,
 };
@@ -62,7 +61,7 @@ use p2p::{
     RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
-    BlockStore, DataStore, GCConfig, GCTrigger, Lock, RepoFetch, RepoInsertPin, RepoRemovePin,
+    default_impl::DefaultStorage, GCConfig, GCTrigger, RepoFetch, RepoInsertPin, RepoRemovePin,
 };
 
 use tracing::Span;
@@ -85,11 +84,11 @@ pub use self::{
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
-use async_rt::AbortableJoinHandle;
+use async_rt::{AbortableJoinHandle, CommunicationTask};
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
-use std::borrow::Borrow;
 use std::convert::Infallible;
+use std::{borrow::Borrow, path::PathBuf};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
@@ -113,6 +112,7 @@ pub use libp2p::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "pnet")]
 use libp2p::pnet::PreSharedKey;
 use libp2p::swarm::ConnectionId;
 use libp2p::{
@@ -127,51 +127,6 @@ use libp2p::{request_response::InboundRequestId, swarm::dial_opts::PeerCondition
 pub use libp2p_connection_limits::ConnectionLimits;
 use serde::Serialize;
 
-#[allow(dead_code)]
-#[deprecated(note = "Use `StoreageType` instead")]
-type StoragePath = StorageType;
-
-#[derive(Default, Debug)]
-pub enum StorageType {
-    #[cfg(not(target_arch = "wasm32"))]
-    Disk(std::path::PathBuf),
-    #[default]
-    Memory,
-    #[cfg(target_arch = "wasm32")]
-    IndexedDb { namespace: Option<String> },
-    Custom {
-        blockstore: Option<Box<dyn BlockStore>>,
-        datastore: Option<Box<dyn DataStore>>,
-        lock: Option<Box<dyn Lock>>,
-    },
-}
-
-impl PartialEq for StorageType {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            #[cfg(not(target_arch = "wasm32"))]
-            (StorageType::Disk(left_path), StorageType::Disk(right_path)) => {
-                left_path.eq(right_path)
-            }
-            #[cfg(target_arch = "wasm32")]
-            (
-                StorageType::IndexedDb { namespace: left },
-                StorageType::IndexedDb { namespace: right },
-            ) => left.eq(right),
-            (StorageType::Memory, StorageType::Memory) => true,
-            (StorageType::Custom { .. }, StorageType::Custom { .. }) => {
-                //Do we really care if they equal?
-                //TODO: Possibly implement PartialEq/Eq for the traits so we could make sure
-                //      that they do or dont eq each other. For now this will always be true
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-impl Eq for StorageType {}
-
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
 struct IpfsOptions {
     /// The path of the ipfs repo (blockstore and datastore).
@@ -183,7 +138,11 @@ struct IpfsOptions {
     ///
     /// It is **not** recommended to set this to IPFS_PATH without first at least backing up your
     /// existing repository.
-    pub ipfs_path: StorageType,
+    pub ipfs_path: Option<PathBuf>,
+
+    /// Enables and supply a name of the namespace used for indexeddb
+    #[cfg(target_arch = "wasm32")]
+    pub namespace: Option<Option<String>>,
 
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
@@ -262,7 +221,7 @@ pub(crate) struct Libp2pProtocol {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) upnp: bool,
     pub(crate) ping: bool,
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub(crate) streams: bool,
     pub(crate) request_response: bool,
 }
@@ -286,7 +245,9 @@ pub enum RepoProvider {
 impl Default for IpfsOptions {
     fn default() -> Self {
         Self {
-            ipfs_path: StorageType::Memory,
+            ipfs_path: None,
+            #[cfg(target_arch = "wasm32")]
+            namespace: None,
             bootstrap: Default::default(),
             relay_server_config: Default::default(),
             kad_configuration: Either::Left(Default::default()),
@@ -334,13 +295,12 @@ impl fmt::Debug for IpfsOptions {
 #[allow(clippy::type_complexity)]
 pub struct Ipfs {
     span: Span,
-    repo: Repo,
+    repo: Repo<DefaultStorage>,
     key: Keypair,
     keystore: Keystore,
     identify_conf: IdentifyConfiguration,
-    to_task: Sender<IpfsEvent>,
+    to_task: CommunicationTask<IpfsEvent>,
     record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
-    _guard: AbortableJoinHandle<()>,
     _gc_guard: AbortableJoinHandle<()>,
 }
 
@@ -454,9 +414,9 @@ enum IpfsEvent {
         PeerId,
         Channel<HashMap<PeerId, Vec<Multiaddr>>>,
     ),
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     StreamControlHandle(Channel<libp2p_stream::Control>),
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     NewStream(StreamProtocol, Channel<libp2p_stream::IncomingStreams>),
     Exit,
 }
@@ -559,7 +519,7 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send> {
     keys: Option<Keypair>,
     options: IpfsOptions,
     fdlimit: Option<FDLimit>,
-    repo_handle: Option<Repo>,
+    repo_handle: Repo<DefaultStorage>,
     local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
@@ -585,7 +545,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             keys: None,
             options: Default::default(),
             fdlimit: None,
-            repo_handle: None,
+            repo_handle: Repo::new_memory(),
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
             local_external_addr: false,
@@ -606,10 +566,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     }
 
     /// Set storage type for the repo.
-    pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
-        self.options.ipfs_path = storage_type;
-        self
-    }
+    // pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
+    //     self.options.ipfs_path = storage_type;
+    //     self
+    // }
 
     /// Adds a listening address
     pub fn add_listening_addr(mut self, addr: Multiaddr) -> Self {
@@ -727,7 +687,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         self
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub fn with_streams(mut self) -> Self {
         self.options.protocols.streams = true;
         self
@@ -794,7 +754,14 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
-        self.options.ipfs_path = StorageType::Disk(path);
+        self.options.ipfs_path = Some(path);
+        self
+    }
+
+    /// Sets a namespace
+    #[cfg(target_arch = "wasm32")]
+    pub fn set_namespace(mut self, ns: Option<String>) -> Self {
+        self.options.namespace = Some(ns);
         self
     }
 
@@ -855,8 +822,8 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     }
 
     /// Set block and data repo
-    pub fn set_repo(mut self, repo: &Repo) -> Self {
-        self.repo_handle = Some(repo.clone());
+    pub fn set_repo(mut self, repo: &Repo<DefaultStorage>) -> Self {
+        self.repo_handle = Repo::clone(repo);
         self
     }
 
@@ -880,6 +847,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
     /// Set pnet
     #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "pnet")]
     pub fn with_pnet(mut self, psk: PreSharedKey) -> Self {
         self.options.transport_configuration.enable_pnet = true;
         self.options.transport_configuration.pnet_psk = Some(psk);
@@ -942,23 +910,32 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         // instruments the IpfsFuture, the background task.
         let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
 
-        let repo = match repo_handle {
-            Some(repo) => {
-                if repo.is_online() {
-                    anyhow::bail!("Repo is already initialized");
-                }
-                repo
-            }
-            None => {
-                #[cfg(not(target_arch = "wasm32"))]
-                if let StorageType::Disk(path) = &options.ipfs_path {
+        let mut repo = repo_handle;
+
+        if repo.is_online() {
+            anyhow::bail!("Repo is already initialized");
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            repo = match &options.ipfs_path {
+                Some(path) => {
                     if !path.is_dir() {
                         tokio::fs::create_dir_all(path).await?;
                     }
+                    Repo::<DefaultStorage>::new_fs(path)
                 }
-                Repo::new(&mut options.ipfs_path)
-            }
-        };
+                None => repo,
+            };
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            repo = match options.namespace.take() {
+                Some(ns) => Repo::<DefaultStorage>::new_idb(ns),
+                None => repo,
+            };
+        }
 
         repo.init().instrument(init_span.clone()).await?;
 
@@ -986,37 +963,20 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             }
         }
 
-        let mut _guard = AbortableJoinHandle::empty();
-        let mut _gc_guard = AbortableJoinHandle::empty();
-
-        let (to_task, receiver) = channel::<IpfsEvent>(1);
         let id_conf = options.identify_configuration.clone();
 
         let keystore = options.keystore.clone();
-
-        let mut ipfs = Ipfs {
-            span: facade_span,
-            repo,
-            identify_conf: id_conf,
-            key: keys.clone(),
-            keystore,
-            to_task,
-            record_key_validator,
-            _guard,
-            _gc_guard,
-        };
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
         //      provider records by adding the amount of blocks to the config.
         //TODO: Add persistent layer for kad store
         let blocks = match options.provider {
             RepoProvider::None => vec![],
-            RepoProvider::All => ipfs.repo.list_blocks().await.collect::<Vec<_>>().await,
+            RepoProvider::All => repo.list_blocks().await.collect::<Vec<_>>().await,
             RepoProvider::Pinned => {
-                ipfs.repo
-                    .list_pins(None)
+                repo.list_pins(None)
                     .await
-                    .filter_map(|result| async move { result.map(|(cid, _)| cid).ok() })
+                    .filter_map(|result| futures::future::ready(result.map(|(cid, _)| cid).ok()))
                     .collect()
                     .await
             }
@@ -1047,7 +1007,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         let swarm = create_swarm(
             &keys,
             &options,
-            &ipfs.repo,
+            &repo,
             exec_span,
             (custom_behaviour, custom_transport),
         )?;
@@ -1058,7 +1018,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
         let gc_handle = gc_config.map(|config| {
             async_rt::task::spawn_abortable({
-                let repo = ipfs.repo.clone();
+                let repo = Repo::clone(&repo);
                 async move {
                     let GCConfig { duration, trigger } = config;
                     let use_config_timer = duration != Duration::ZERO;
@@ -1127,13 +1087,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             })
         }).unwrap_or(AbortableJoinHandle::empty());
 
-        let mut fut = task::IpfsTask::new(
-            swarm,
-            repo_events.fuse(),
-            receiver.fuse(),
-            &ipfs.repo,
-            options.connection_event_cap,
-        );
+        let mut fut = task::IpfsTask::new(swarm, &repo, options.connection_event_cap);
         fut.swarm_event = swarm_event;
         fut.local_external_addr = local_external_addr;
 
@@ -1163,26 +1117,33 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             }
         }
 
-        let main_handle = async_rt::task::spawn_abortable({
-            async move {
+        let main_handle = async_rt::task::spawn_coroutine_with_context(
+            (repo_events, swarm_span, fut),
+            |(r_events, swarm_span, mut fut), recv: futures::channel::mpsc::Receiver<IpfsEvent>| async move {
+                fut.from_facade.replace(recv.fuse());
+                fut.repo_events.replace(r_events.fuse());
                 //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
                 let as_fut = false;
-
                 let fut = if as_fut {
                     fut.boxed()
                 } else {
                     fut.run().boxed()
                 };
+                fut.instrument(swarm_span).await
+            },
+        );
 
-                fut.await
-            }
-            .instrument(swarm_span)
-        });
+        let ipfs = Ipfs {
+            span: facade_span,
+            repo,
+            identify_conf: id_conf,
+            key: keys.clone(),
+            keystore,
+            to_task: main_handle,
+            record_key_validator,
+            _gc_guard: gc_handle,
+        };
 
-        unsafe {
-            ipfs._guard.replace(main_handle);
-            ipfs._gc_guard.replace(gc_handle);
-        }
         Ok(ipfs)
     }
 }
@@ -1194,7 +1155,7 @@ impl Ipfs {
     }
 
     /// Return an [`Repo`] to access the internal repo of the node
-    pub fn repo(&self) -> &Repo {
+    pub fn repo(&self) -> &Repo<DefaultStorage> {
         &self.repo
     }
 
@@ -1209,13 +1170,13 @@ impl Ipfs {
     }
 
     /// Puts a block into the ipfs repo.
-    pub fn put_block(&self, block: &Block) -> RepoPutBlock {
+    pub fn put_block(&self, block: &Block) -> RepoPutBlock<DefaultStorage> {
         self.repo.put_block(block).span(self.span.clone())
     }
 
     /// Retrieves a block from the local blockstore, or starts fetching from the network or join an
     /// already started fetch.
-    pub fn get_block(&self, cid: impl Borrow<Cid>) -> RepoGetBlock {
+    pub fn get_block(&self, cid: impl Borrow<Cid>) -> RepoGetBlock<DefaultStorage> {
         self.repo.get_block(cid).span(self.span.clone())
     }
 
@@ -1257,7 +1218,7 @@ impl Ipfs {
     /// If a recursive `insert_pin` operation is interrupted because of a crash or the crash
     /// prevents from synchronizing the data store to disk, this will leave the system in an inconsistent
     /// state. The remedy is to re-pin recursive pins.
-    pub fn insert_pin(&self, cid: impl Borrow<Cid>) -> RepoInsertPin {
+    pub fn insert_pin(&self, cid: impl Borrow<Cid>) -> RepoInsertPin<DefaultStorage> {
         self.repo().pin(cid).span(self.span.clone())
     }
 
@@ -1267,7 +1228,7 @@ impl Ipfs {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin(&self, cid: impl Borrow<Cid>) -> RepoRemovePin {
+    pub fn remove_pin(&self, cid: impl Borrow<Cid>) -> RepoRemovePin<DefaultStorage> {
         self.repo().remove_pin(cid).span(self.span.clone())
     }
 
@@ -1788,7 +1749,7 @@ impl Ipfs {
                 .send(IpfsEvent::SendRequests(protocol, peers, request, tx))
                 .await?;
 
-            rx.await?.map_err(anyhow::Error::from)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1818,7 +1779,7 @@ impl Ipfs {
                 .send(IpfsEvent::SendResponse(protocol, peer_id, id, response, tx))
                 .await?;
 
-            rx.await?.map_err(anyhow::Error::from)
+            rx.await?
         }
         .instrument(self.span.clone())
         .await
@@ -1844,7 +1805,7 @@ impl Ipfs {
         .await
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub async fn stream_control(&self) -> Result<libp2p_stream::Control, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
@@ -1860,7 +1821,7 @@ impl Ipfs {
         .await
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub async fn new_stream(
         &self,
         protocol: impl IntoStreamProtocol,
@@ -1880,7 +1841,7 @@ impl Ipfs {
         .await
     }
 
-    #[cfg(feature = "experimental_stream")]
+    #[cfg(feature = "stream")]
     pub async fn open_stream(
         &self,
         peer_id: PeerId,
@@ -2149,7 +2110,7 @@ impl Ipfs {
     }
 
     /// Fetches the block, and, if set, recursively walk the graph loading all the blocks to the blockstore.
-    pub fn fetch(&self, cid: &Cid) -> RepoFetch {
+    pub fn fetch(&self, cid: &Cid) -> RepoFetch<DefaultStorage> {
         self.repo.fetch(cid).span(self.span.clone())
     }
 
@@ -2633,7 +2594,7 @@ impl Ipfs {
     }
 
     /// Exit daemon.
-    pub async fn exit_daemon(mut self) {
+    pub async fn exit_daemon(self) {
         // FIXME: this is a stopgap measure needed while repo is part of the struct Ipfs instead of
         // the background task or stream. After that this could be handled by dropping.
         self.repo.shutdown();
@@ -2641,9 +2602,15 @@ impl Ipfs {
         // ignoring the error because it'd mean that the background task had already been dropped
         let _ = self.to_task.try_send(IpfsEvent::Exit);
 
-        // terminte task that handles GC and spawn task
+        // TODO: Determine if we want to kill the task directly or let it gracefully close after completing all events
+        // self.to_task.abort();;
+
+        // terminte task that handles GC
         self._gc_guard.abort();
-        self._guard.abort();
+
+        // yield to the runtime to allow runtime to process pending tasks
+        // TODO: Possibly remove along with async signature
+        // tokio::task::yield_now().await;
     }
 }
 
@@ -3097,6 +3064,7 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
+
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
