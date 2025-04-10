@@ -4,3 +4,6 @@ pub mod memory;
 
 #[cfg(target_arch = "wasm32")]
 pub mod idb;
+
+pub mod arc;
+pub mod either;
