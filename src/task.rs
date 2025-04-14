@@ -10,7 +10,7 @@ use futures::{
 };
 use pollable_map::stream::optional::OptionalStream;
 
-use crate::{p2p::MultiaddrExt, repo::default_impl::DefaultStorage, Channel, InnerPubsubEvent};
+use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
@@ -52,6 +52,7 @@ use libp2p::{
     swarm::{ConnectionId, SwarmEvent},
 };
 use tokio::sync::Notify;
+use crate::repo::DefaultStorage;
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.

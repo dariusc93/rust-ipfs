@@ -61,7 +61,7 @@ use p2p::{
     RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
 use repo::{
-    default_impl::DefaultStorage, GCConfig, GCTrigger, RepoFetch, RepoInsertPin, RepoRemovePin,
+    DefaultStorage, GCConfig, GCTrigger, RepoFetch, RepoInsertPin, RepoRemovePin,
 };
 
 use tracing::Span;

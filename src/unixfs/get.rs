@@ -15,7 +15,7 @@ use std::{
 use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Span};
 
-use crate::repo::default_impl::DefaultStorage;
+use crate::repo::DefaultStorage;
 use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 #[allow(unused_imports)]

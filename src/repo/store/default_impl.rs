@@ -1,15 +1,15 @@
 #[cfg(not(target_arch = "wasm32"))]
-use crate::repo::blockstore::flatfs::FsBlockStore;
+use crate::repo::store::blockstore::flatfs::FsBlockStore;
 #[cfg(target_arch = "wasm32")]
-use crate::repo::blockstore::idb::IdbBlockStore;
-use crate::repo::blockstore::memory::MemBlockStore;
+use crate::repo::store::blockstore::idb::IdbBlockStore;
+use crate::repo::store::blockstore::memory::MemBlockStore;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::repo::datastore::flatfs::FsDataStore;
+use crate::repo::store::datastore::flatfs::FsDataStore;
 #[cfg(target_arch = "wasm32")]
-use crate::repo::datastore::idb::IdbDataStore;
-use crate::repo::datastore::memory::MemDataStore;
-use crate::repo::{lock, RepoTypes};
-use crate::Block;
+use crate::repo::store::datastore::idb::IdbDataStore;
+use crate::repo::store::datastore::memory::MemDataStore;
+use crate::repo::{lock, BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References, RepoTypes};
+use crate::{Block, PinKind, PinMode};
 
 #[cfg(target_arch = "wasm32")]
 use std::sync::Arc;
@@ -19,10 +19,6 @@ use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
 
 use crate::error::Error;
-
-use super::{
-    BlockPut, BlockStore, DataStore, Lock, LockError, PinKind, PinMode, PinStore, References,
-};
 
 #[derive(Debug)]
 #[cfg(not(target_arch = "wasm32"))]

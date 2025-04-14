@@ -2,7 +2,6 @@
 use crate::error::Error;
 use crate::Block;
 use core::fmt::Debug;
-use default_impl::DefaultStorage;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
@@ -30,15 +29,15 @@ use tracing::{Instrument, Span};
 #[cfg(test)]
 mod common_tests;
 
-pub(crate) mod default_impl;
 
-pub mod blockstore;
-pub mod datastore;
+pub use store::{blockstore, datastore, default_impl::DefaultStorage};
+
 pub mod lock;
 
 /// Path mangling done for pins and blocks
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod paths;
+mod store;
 
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
