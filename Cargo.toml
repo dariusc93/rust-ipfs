@@ -97,7 +97,7 @@ tracing-futures = { features = ["futures-03"], version = "0.2.5" }
 
 tokio = { default-features = false, version = "1.44.2" }
 tokio-stream = { default-features = false, version = "0.1.17" }
-tokio-util = { default-features = false, version = "0.7.13" }
+tokio-util = { default-features = false, version = "0.7.14" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
 wasm-bindgen-futures = { version = "0.4.50" }
 web-time = "1.1.0"
