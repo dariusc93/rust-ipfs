@@ -85,7 +85,7 @@ rust-unixfs = { version = "0.5.0", path = "unixfs" }
 sec1 = { version = "0.7.3", features = ["pem", "pkcs8"] }
 send_wrapper = "0.6.0"
 serde = { version = "1.0.219" }
-serde_ipld_dagcbor = "0.6.2"
+serde_ipld_dagcbor = "0.6.3"
 serde_ipld_dagjson = "0.2.0"
 serde_json = { version = "1.0.140" }
 serde-wasm-bindgen = "0.6.5"
