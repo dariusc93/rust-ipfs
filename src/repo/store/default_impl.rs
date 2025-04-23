@@ -8,7 +8,9 @@ use crate::repo::store::datastore::flatfs::FsDataStore;
 #[cfg(target_arch = "wasm32")]
 use crate::repo::store::datastore::idb::IdbDataStore;
 use crate::repo::store::datastore::memory::MemDataStore;
-use crate::repo::{lock, BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References, RepoTypes};
+use crate::repo::{
+    lock, BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References, RepoTypes,
+};
 use crate::{Block, PinKind, PinMode};
 
 #[cfg(target_arch = "wasm32")]

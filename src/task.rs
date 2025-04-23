@@ -36,6 +36,7 @@ pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
 use multibase::Base;
 
+use crate::repo::DefaultStorage;
 use libp2p::core::{ConnectedPoint, Endpoint};
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::Event as MdnsEvent;
@@ -52,7 +53,6 @@ use libp2p::{
     swarm::{ConnectionId, SwarmEvent},
 };
 use tokio::sync::Notify;
-use crate::repo::DefaultStorage;
 
 /// Background task of `Ipfs` created when calling `UninitializedIpfs::start`.
 // The receivers are Fuse'd so that we don't have to manage state on them being exhausted.

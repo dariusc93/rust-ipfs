@@ -60,9 +60,7 @@ use p2p::{
     IdentifyConfiguration, KadConfig, KadStoreConfig, MultiaddrExt, PeerInfo, PubsubConfig,
     RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
 };
-use repo::{
-    DefaultStorage, GCConfig, GCTrigger, RepoFetch, RepoInsertPin, RepoRemovePin,
-};
+use repo::{DefaultStorage, GCConfig, GCTrigger, RepoFetch, RepoInsertPin, RepoRemovePin};
 
 use tracing::Span;
 use tracing_futures::Instrument;

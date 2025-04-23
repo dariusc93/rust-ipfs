@@ -35,16 +35,13 @@ mod bitswap_pb {
     }
 }
 
-use crate::{
-    repo::{Repo},
-    Block,
-};
-use crate::repo::DefaultStorage;
 use self::{
     message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType},
     protocol::{BitswapProtocol, Message},
     sessions::{HaveSession, HaveSessionEvent, WantSession, WantSessionEvent},
 };
+use crate::repo::DefaultStorage;
+use crate::{repo::Repo, Block};
 
 const CAP_THRESHOLD: usize = 100;
 

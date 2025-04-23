@@ -1,9 +1,12 @@
 use crate::error::Error;
-use crate::{repo::{BlockPut, BlockStore}, Block, PinKind, PinMode};
+use crate::repo::{DataStore, PinStore, References};
+use crate::{
+    repo::{BlockPut, BlockStore},
+    Block, PinKind, PinMode,
+};
 use either::Either;
 use futures::stream::BoxStream;
 use ipld_core::cid::Cid;
-use crate::repo::{DataStore, PinStore, References};
 
 impl<L: BlockStore, R: BlockStore> BlockStore for Either<L, R> {
     async fn init(&self) -> Result<(), Error> {

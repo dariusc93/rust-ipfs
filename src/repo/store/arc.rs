@@ -40,7 +40,6 @@ impl<B: BlockStore> BlockStore for Arc<B> {
     }
 }
 
-
 impl<D: DataStore> DataStore for Arc<D> {
     async fn init(&self) -> Result<(), Error> {
         (**self).init().await
