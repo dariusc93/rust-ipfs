@@ -15,7 +15,7 @@ use libp2p::PeerId;
 use std::fmt::Debug;
 
 use crate::{
-    repo::{default_impl::DefaultStorage, Repo},
+    repo::{DefaultStorage, Repo},
     Block,
 };
 

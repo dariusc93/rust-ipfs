@@ -10,7 +10,7 @@ use futures::{
 };
 use pollable_map::stream::optional::OptionalStream;
 
-use crate::{p2p::MultiaddrExt, repo::default_impl::DefaultStorage, Channel, InnerPubsubEvent};
+use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
 use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
@@ -36,6 +36,7 @@ pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
 use multibase::Base;
 
+use crate::repo::DefaultStorage;
 use libp2p::core::{ConnectedPoint, Endpoint};
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::Event as MdnsEvent;

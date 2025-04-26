@@ -3,7 +3,7 @@
 use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
-use crate::repo::default_impl::DefaultStorage;
+use crate::repo::DefaultStorage;
 use crate::repo::Repo;
 use crate::{Block, Ipfs};
 use bytes::Bytes;

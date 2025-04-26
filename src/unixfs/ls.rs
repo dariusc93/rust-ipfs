@@ -14,7 +14,7 @@ use tracing::{Instrument, Span};
 
 use crate::{
     dag::IpldDag,
-    repo::{default_impl::DefaultStorage, Repo},
+    repo::{DefaultStorage, Repo},
     Ipfs, IpfsPath,
 };
 

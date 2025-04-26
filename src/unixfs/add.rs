@@ -1,7 +1,7 @@
 use std::task::{Context, Poll};
 
 use crate::{
-    repo::{default_impl::DefaultStorage, Repo},
+    repo::{DefaultStorage, Repo},
     Block,
 };
 use bytes::Bytes;

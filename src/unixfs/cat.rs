@@ -1,4 +1,4 @@
-use crate::repo::default_impl::DefaultStorage;
+use crate::repo::DefaultStorage;
 use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::try_stream;
 use bytes::Bytes;

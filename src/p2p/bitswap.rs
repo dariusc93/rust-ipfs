@@ -35,16 +35,13 @@ mod bitswap_pb {
     }
 }
 
-use crate::{
-    repo::{default_impl::DefaultStorage, Repo},
-    Block,
-};
-
 use self::{
     message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType},
     protocol::{BitswapProtocol, Message},
     sessions::{HaveSession, HaveSessionEvent, WantSession, WantSessionEvent},
 };
+use crate::repo::DefaultStorage;
+use crate::{repo::Repo, Block};
 
 const CAP_THRESHOLD: usize = 100;
 
@@ -562,7 +559,7 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use crate::{block::BlockCodec, repo::default_impl::DefaultStorage};
+    use crate::{block::BlockCodec, repo::DefaultStorage};
     use futures::StreamExt;
     use ipld_core::cid::Cid;
     use libp2p::{
