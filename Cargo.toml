@@ -85,19 +85,19 @@ rust-unixfs = { version = "0.5.0", path = "unixfs" }
 sec1 = { version = "0.7.3", features = ["pem", "pkcs8"] }
 send_wrapper = "0.6.0"
 serde = { version = "1.0.219" }
-serde_ipld_dagcbor = "0.6.2"
+serde_ipld_dagcbor = "0.6.3"
 serde_ipld_dagjson = "0.2.0"
 serde_json = { version = "1.0.140" }
 serde-wasm-bindgen = "0.6.5"
 sha2 = "0.10.8"
 simple_x509 = "=1.1.0"
-thiserror = { version = "2.0.11" }
+thiserror = { version = "2.0.12" }
 tracing = { version = "0.1.41" }
 tracing-futures = { features = ["futures-03"], version = "0.2.5" }
 
 tokio = { default-features = false, version = "1.44.2" }
 tokio-stream = { default-features = false, version = "0.1.17" }
-tokio-util = { default-features = false, version = "0.7.13" }
+tokio-util = { default-features = false, version = "0.7.14" }
 unsigned-varint = { version = "0.8.0", features = ["asynchronous_codec"] }
 wasm-bindgen-futures = { version = "0.4.50" }
 web-time = "1.1.0"
