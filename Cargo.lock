@@ -393,9 +393,9 @@ dependencies = [
 
 [[package]]
 name = "async-rt"
-version = "0.1.5"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d018649f3650c4901efcf689d7dc4934302a6723f15c675f344cd359e3ed498"
+checksum = "12f1f30365460b6aca8987aeb574f3d2c516becac01fc5869d104db6c3d00d7e"
 dependencies = [
  "futures",
  "parking_lot",
