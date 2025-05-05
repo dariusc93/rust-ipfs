@@ -25,7 +25,7 @@ sha2 = { default-features = false, version = "0.10.2" }
 
 [dev-dependencies]
 hex-literal = { default-features = false, version = "1.0.0" }
-libc = { default-features = false, version = "0.2.170" }
+libc = { default-features = false, version = "0.2.172" }
 multibase = { default-features = false, version = "0.9.1" }
 tar = { default-features = false, version = "0.4.44" }
 criterion = { default-features = false, version = "0.5.1" }
