@@ -45,7 +45,7 @@ base64 = { version = "0.22.1" }
 bytes = "1.10.1"
 cid = "0.11.1"
 chrono = { version = "0.4.40" }
-clap = { version = "4.5.31", features = ["derive"] }
+clap = { version = "4.5.37", features = ["derive"] }
 either = { version = "1.15.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
@@ -55,7 +55,7 @@ getrandom = { version = "0.2.15" }
 hickory-resolver = "0.25.0-alpha.5"
 hkdf = "0.12.4"
 idb = "0.6.4"
-indexmap = "2.8.0"
+indexmap = "2.9.0"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.1"
 libp2p = { version = "0.55.0" }
@@ -181,7 +181,7 @@ wasm-bindgen-futures.workspace = true
 hex-literal = { default-features = false, version = "1.0.0" }
 sha2 = { workspace = true }
 tokio = { features = ["full"], workspace = true }
-rustyline-async = { version = "0.4.5" }
+rustyline-async = { version = "0.4.6" }
 tracing-subscriber = { features = ["env-filter"], version = "0.3.19" }
 rand = { workspace = true }
 tempfile = "3.17.1"
