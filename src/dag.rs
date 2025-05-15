@@ -18,7 +18,8 @@ use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::{
     dagpb::{wrap_node_data, NodeData},
     dir::{Cache, ShardedLookup},
-    resolve, MaybeResolved,
+    resolve,
+    MaybeResolved,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -115,22 +116,10 @@ impl RawResolveLocalError {
     fn add_starting_point_in_path(&mut self, start: usize) {
         use RawResolveLocalError::*;
         match self {
-            ListIndexOutOfRange {
-                ref mut segment_index,
-                ..
-            }
-            | InvalidIndex {
-                ref mut segment_index,
-                ..
-            }
-            | NoLinks {
-                ref mut segment_index,
-                ..
-            }
-            | NotFound {
-                ref mut segment_index,
-                ..
-            } => {
+            ListIndexOutOfRange { segment_index, .. }
+            | InvalidIndex { segment_index, .. }
+            | NoLinks { segment_index, .. }
+            | NotFound { segment_index, .. } => {
                 // NOTE: this is the **index** compared to the number of segments matched, i.e. **count**
                 // from `resolve_local`'s Ok return value.
                 *segment_index += start;
@@ -802,7 +791,7 @@ fn resolve_local<'a>(
                 return Err(RawResolveLocalError::UnsupportedDocument(
                     *block.cid(),
                     e.into(),
-                ))
+                ));
             }
         };
         resolve_local_ipld(*block.cid(), ipld, segments)
@@ -896,7 +885,7 @@ fn resolve_local_ipld<'a>(
                         return Err(RawResolveLocalError::NotFound {
                             document,
                             segment_index: matched_count,
-                        })
+                        });
                     }
                 };
                 matched_count += 1;
@@ -919,7 +908,7 @@ fn resolve_local_ipld<'a>(
                     return Err(RawResolveLocalError::InvalidIndex {
                         document,
                         segment_index: matched_count,
-                    })
+                    });
                 }
             },
             (_, Some(_)) => {
@@ -933,7 +922,7 @@ fn resolve_local_ipld<'a>(
                 return Ok((
                     ResolvedNode::Projection(document, anything).into(),
                     matched_count,
-                ))
+                ));
             }
         };
     }
@@ -1081,9 +1070,9 @@ mod tests {
         let (root, example_doc, target) = example_doc_and_cid();
 
         let p = IpfsPath::try_from(
-            "bafyreielwgy762ox5ndmhx6kpi6go6il3gzahz3ngagb7xw3bj3aazeita/nested/even/2/or/foobar/trailer"
-            // counts:                                                    1      2   3 4
-        ).unwrap();
+            "bafyreielwgy762ox5ndmhx6kpi6go6il3gzahz3ngagb7xw3bj3aazeita/nested/even/2/or/foobar/trailer", // counts:                                                    1      2   3 4
+        )
+        .unwrap();
 
         let (resolved, matched_segments) =
             resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap();
