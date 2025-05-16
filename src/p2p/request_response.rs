@@ -1,17 +1,17 @@
 use futures::{FutureExt, StreamExt};
 mod codec;
 
-use crate::p2p::request_response::codec::Codec;
-use crate::p2p::RequestResponseConfig;
 use crate::Multiaddr;
+use crate::p2p::RequestResponseConfig;
+use crate::p2p::request_response::codec::Codec;
 use bytes::Bytes;
 use futures::channel::mpsc::Sender as MpscSender;
 use futures::channel::oneshot::Sender as OneshotSender;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use futures::{pin_mut, TryFutureExt};
-use libp2p::core::transport::PortUse;
+use futures::{TryFutureExt, pin_mut};
 use libp2p::core::Endpoint;
+use libp2p::core::transport::PortUse;
 use libp2p::request_response::{
     InboundFailure, InboundRequestId, OutboundFailure, OutboundRequestId, ResponseChannel,
 };
@@ -19,10 +19,10 @@ use libp2p::swarm::{
     ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler, THandlerInEvent,
     THandlerOutEvent, ToSwarm,
 };
-use libp2p::{request_response, PeerId, StreamProtocol};
+use libp2p::{PeerId, StreamProtocol, request_response};
 use pollable_map::futures::FutureMap;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -108,7 +108,10 @@ impl Behaviour {
         ))?;
 
         if self.rr_behaviour.send_response(ch, response).is_err() {
-            return Err(IoError::new(IoErrorKind::BrokenPipe, "unable to send response. request either timed out, connection dropped, or unexpected behaviour occurred"));
+            return Err(IoError::new(
+                IoErrorKind::BrokenPipe,
+                "unable to send response. request either timed out, connection dropped, or unexpected behaviour occurred",
+            ));
         }
 
         Ok(())

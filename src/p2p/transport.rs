@@ -329,14 +329,12 @@ pub(crate) fn build_transport(
             _ => Either::Right(transport),
         };
 
-        let transport = transport
+        transport
             .upgrade(version.into())
             .authenticate(config)
             .multiplex(yamux_config)
             .timeout(timeout)
-            .boxed();
-
-        transport
+            .boxed()
     };
 
     #[cfg(not(all(feature = "noise", feature = "tls")))]
@@ -388,12 +386,11 @@ pub(crate) fn build_transport(
         idle_timeout: Duration,
         keep_alive: Option<Duration>,
     ) -> TokioQuicTransport {
-        let mut quic_config = QuicConfig::new(&keypair);
+        let mut quic_config = QuicConfig::new(keypair);
         quic_config.support_draft_29 = draft_29;
         quic_config.max_idle_timeout = idle_timeout.as_millis() as _;
         quic_config.keep_alive_interval = keep_alive.unwrap_or(idle_timeout / 2);
-        let quic_transport = TokioQuicTransport::new(quic_config);
-        quic_transport
+        TokioQuicTransport::new(quic_config)
     }
 
     #[cfg(feature = "quic")]

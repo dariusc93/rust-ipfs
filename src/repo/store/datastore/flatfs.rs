@@ -175,7 +175,6 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
 
 /// The column operations are all unimplemented pending at least downscoping of the
 /// DataStore trait itself.
-
 impl DataStore for FsDataStore {
     async fn init(&self) -> Result<(), Error> {
         // Although `pins` directory is created when inserting a data, is it not created when there are any attempts at listing the pins (thus causing to fail)

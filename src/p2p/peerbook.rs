@@ -1,12 +1,12 @@
 use core::task::{Context, Poll};
+use libp2p::PeerId;
 use libp2p::core::{Endpoint, Multiaddr};
 use libp2p::identify::Info;
 use libp2p::swarm::derive_prelude::ConnectionEstablished;
-use libp2p::swarm::{self, dummy::ConnectionHandler as DummyConnectionHandler, NetworkBehaviour};
+use libp2p::swarm::{self, NetworkBehaviour, dummy::ConnectionHandler as DummyConnectionHandler};
 use libp2p::swarm::{
     ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, THandler, THandlerInEvent, ToSwarm,
 };
-use libp2p::PeerId;
 use std::collections::hash_map::Entry;
 use std::time::Duration;
 

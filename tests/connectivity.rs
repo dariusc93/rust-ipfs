@@ -1,5 +1,5 @@
 use futures_timeout::TimeoutExt;
-use libp2p::{multiaddr::Protocol, Multiaddr};
+use libp2p::{Multiaddr, multiaddr::Protocol};
 use rust_ipfs::Node;
 use std::time::Duration;
 

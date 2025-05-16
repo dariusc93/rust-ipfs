@@ -1,6 +1,6 @@
 use either::Either;
 use futures::stream::BoxStream;
-use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt, future::BoxFuture, stream::FusedStream};
 use libp2p::PeerId;
 #[allow(unused_imports)]
 use rust_unixfs::walk::{ContinuedWalk, Walker};
@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Span};
 
 use crate::repo::DefaultStorage;
-use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
+use crate::{Ipfs, IpfsPath, dag::IpldDag, repo::Repo};
 
 #[allow(unused_imports)]
 use super::{TraversalFailed, UnixfsStatus};

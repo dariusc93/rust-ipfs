@@ -7,7 +7,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream};
+use futures::{FutureExt, Stream, future::BoxFuture, stream::FusedStream};
 use futures_timer::Delay;
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
@@ -15,8 +15,8 @@ use libp2p::PeerId;
 use std::fmt::Debug;
 
 use crate::{
-    repo::{DefaultStorage, Repo},
     Block,
+    repo::{DefaultStorage, Repo},
 };
 
 const CAP_THRESHOLD: usize = 100;

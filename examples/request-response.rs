@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::StreamExt;
 
-use rust_ipfs::{p2p::RequestResponseConfig, UninitializedIpfsDefault as UninitializedIpfs};
+use rust_ipfs::{UninitializedIpfsDefault as UninitializedIpfs, p2p::RequestResponseConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

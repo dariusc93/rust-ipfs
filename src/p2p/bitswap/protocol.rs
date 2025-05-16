@@ -2,8 +2,8 @@ use std::io;
 use std::iter;
 
 use asynchronous_codec::{FramedRead, FramedWrite};
-use futures::{future::BoxFuture, AsyncRead, AsyncWrite, SinkExt, StreamExt};
-use libp2p::{core::UpgradeInfo, InboundUpgrade, OutboundUpgrade, StreamProtocol};
+use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, future::BoxFuture};
+use libp2p::{InboundUpgrade, OutboundUpgrade, StreamProtocol, core::UpgradeInfo};
 
 use super::{bitswap_pb, message::BitswapMessage};
 

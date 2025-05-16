@@ -5,7 +5,7 @@ use rust_ipfs::{Node, PubsubEvent};
 use std::time::Duration;
 
 mod common;
-use common::{spawn_nodes, Topology};
+use common::{Topology, spawn_nodes};
 
 #[tokio::test]
 async fn subscribe_only_once() {
@@ -370,7 +370,7 @@ async fn publish_between_two_nodes_different_topics() {
 #[tokio::test]
 #[ignore = "doesn't work yet"]
 async fn pubsub_interop() {
-    use common::interop::{api_call, ForeignNode};
+    use common::interop::{ForeignNode, api_call};
     use futures::{future, pin_mut};
 
     let rust_node = Node::new("rusty_boi").await;

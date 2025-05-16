@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::FutureExt;
-use libp2p::futures::StreamExt;
 use libp2p::Multiaddr;
+use libp2p::futures::StreamExt;
 use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{ConnectionEvents, Ipfs, Keypair, PubsubEvent, UninitializedIpfs};
 
@@ -289,12 +289,12 @@ async fn topic_discovery(ipfs: Ipfs, topic: String) -> anyhow::Result<()> {
 mod ext_behaviour {
     use libp2p::swarm::derive_prelude::PortUse;
     use libp2p::{
+        Multiaddr, PeerId,
         core::Endpoint,
         swarm::{
             ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
             THandlerOutEvent, ToSwarm,
         },
-        Multiaddr, PeerId,
     };
     use rust_ipfs::{NetworkBehaviour, Protocol};
     use rustyline_async::SharedWriter;

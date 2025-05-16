@@ -38,12 +38,12 @@ async fn main() -> anyhow::Result<()> {
 mod ext_behaviour {
     use libp2p::swarm::derive_prelude::PortUse;
     use libp2p::{
+        Multiaddr, PeerId,
         core::Endpoint,
         swarm::{
             ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
             THandlerOutEvent, ToSwarm,
         },
-        Multiaddr, PeerId,
     };
     use rust_ipfs::NetworkBehaviour;
     use std::convert::Infallible;

@@ -28,12 +28,12 @@ use libp2p::kad::{
 #[cfg(not(target_arch = "wasm32"))]
 use libp2p::mdns::tokio::Behaviour as Mdns;
 use libp2p::ping::Behaviour as Ping;
+use libp2p::relay::Behaviour as Relay;
 use libp2p::relay::client::Behaviour as RelayClient;
 use libp2p::relay::client::{self, Transport as ClientTransport};
-use libp2p::relay::Behaviour as Relay;
-use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::{autonat, StreamProtocol};
+use libp2p::swarm::behaviour::toggle::Toggle;
+use libp2p::{StreamProtocol, autonat};
 use std::fmt::Debug;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Duration;
@@ -663,7 +663,9 @@ where
                                 .into();
                         }
                         _ => {
-                            tracing::warn!("local node can only support up to 10 request-response protocols at this time.");
+                            tracing::warn!(
+                                "local node can only support up to 10 request-response protocols at this time."
+                            );
                             break;
                         }
                     }

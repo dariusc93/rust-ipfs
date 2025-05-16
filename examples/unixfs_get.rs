@@ -4,7 +4,7 @@ use clap::Parser;
 use futures::StreamExt;
 
 use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
-use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr};
+use rust_ipfs::{Ipfs, IpfsPath, Multiaddr, unixfs::UnixfsStatus};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-get")]

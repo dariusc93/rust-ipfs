@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use anyhow::Error;
 use bytes::Bytes;
 use futures::{
-    stream::{self, BoxStream},
     StreamExt,
+    stream::{self, BoxStream},
 };
 use ipld_core::cid::Cid;
 use ll::file::FileReadFailed;
@@ -26,8 +26,8 @@ pub use get::UnixfsGet;
 pub use ls::{Entry, UnixfsLs};
 
 use crate::{
-    dag::{ResolveError, UnexpectedResolved},
     Ipfs, IpfsPath,
+    dag::{ResolveError, UnexpectedResolved},
 };
 
 pub struct IpfsUnixfs {

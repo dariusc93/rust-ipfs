@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use clap::Parser;
 use libp2p::Multiaddr;
-use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::Ipfs;
+use rust_ipfs::p2p::MultiaddrExt;
 
 use rust_ipfs::Keypair;
 use rust_ipfs::UninitializedIpfs;
@@ -39,7 +39,7 @@ impl FromStr for RelaySelect {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "selection option invalid",
-                ))
+                ));
             }
         };
 
@@ -111,12 +111,12 @@ async fn main() -> anyhow::Result<()> {
 mod ext_behaviour {
     use libp2p::swarm::derive_prelude::PortUse;
     use libp2p::{
+        Multiaddr, PeerId,
         core::Endpoint,
         swarm::{
             ConnectionDenied, ConnectionId, ExternalAddrExpired, FromSwarm, ListenerClosed,
             NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
         },
-        Multiaddr, PeerId,
     };
     use rust_ipfs::{ListenerId, NetworkBehaviour};
     use std::convert::Infallible;

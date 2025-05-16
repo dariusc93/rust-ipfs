@@ -1,19 +1,19 @@
 use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
+    FutureExt, StreamExt,
     channel::{
-        mpsc::{unbounded, Receiver, UnboundedSender},
+        mpsc::{Receiver, UnboundedSender, unbounded},
         oneshot,
     },
     stream::Fuse,
-    FutureExt, StreamExt,
 };
 use pollable_map::stream::optional::OptionalStream;
 
-use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
+use crate::{Channel, InnerPubsubEvent, p2p::MultiaddrExt};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
-use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
+use crate::{IpfsEvent, TSwarmEventFn, config::BOOTSTRAP_NODES};
 use futures_timer::Delay;
 use ipld_core::cid::Cid;
 use std::convert::Infallible;
@@ -21,19 +21,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     time::Duration,
 };
 
 use crate::{
+    AddPeerOpt,
     p2p::TSwarm,
     repo::{Repo, RepoEvent},
-    AddPeerOpt,
 };
 
 pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 
-pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
+pub use libp2p::{self, Multiaddr, PeerId, core::transport::ListenerId, swarm::NetworkBehaviour};
 use multibase::Base;
 
 use crate::repo::DefaultStorage;

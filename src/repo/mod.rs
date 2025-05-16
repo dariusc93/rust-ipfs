@@ -1,8 +1,8 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
-use crate::error::Error;
 use crate::Block;
+use crate::error::Error;
 use core::fmt::Debug;
-use futures::channel::mpsc::{channel, Receiver, Sender};
+use futures::channel::mpsc::{Receiver, Sender, channel};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
@@ -17,8 +17,8 @@ use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};

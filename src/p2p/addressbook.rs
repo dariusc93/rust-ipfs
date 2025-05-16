@@ -7,13 +7,13 @@ use libp2p::core::transport::PortUse;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::{ConnectionClosed, DialError, DialFailure, NewExternalAddrOfPeer};
 use libp2p::{
+    Multiaddr, PeerId,
     core::{ConnectedPoint, Endpoint},
     multiaddr::Protocol,
     swarm::{
-        self, behaviour::ConnectionEstablished, AddressChange, ConnectionDenied, ConnectionId,
-        FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
+        self, AddressChange, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
+        THandlerInEvent, ToSwarm, behaviour::ConnectionEstablished,
     },
-    Multiaddr, PeerId,
 };
 use pollable_map::futures::FutureMap;
 use std::convert::Infallible;
@@ -21,7 +21,7 @@ use std::fmt::Debug;
 use std::task::Waker;
 use std::time::Duration;
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     task::{Context, Poll},
 };
 
@@ -456,8 +456,8 @@ mod test {
 
     use futures::{FutureExt, StreamExt};
     use libp2p::{
-        swarm::{dial_opts::DialOpts, SwarmEvent},
         Multiaddr, PeerId, Swarm, SwarmBuilder,
+        swarm::{SwarmEvent, dial_opts::DialOpts},
     };
 
     use crate::{AddPeerOpt, NetworkBehaviour};

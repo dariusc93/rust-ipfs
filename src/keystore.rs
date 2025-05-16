@@ -1,10 +1,10 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{BTreeMap, btree_map::Entry},
     sync::Arc,
 };
 
 use anyhow::Error;
-use futures::{stream::BoxStream, StreamExt};
+use futures::{StreamExt, stream::BoxStream};
 use libp2p::identity::{Keypair, PublicKey};
 use tokio::sync::Mutex;
 use zeroize::Zeroize;

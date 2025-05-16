@@ -5,7 +5,7 @@ mod protocol;
 mod sessions;
 
 use std::{
-    collections::{hash_map::Entry, BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt::Debug,
     task::{Context, Poll, Waker},
     time::Duration,
@@ -15,13 +15,13 @@ use futures::StreamExt;
 use ipld_core::cid::Cid;
 use libp2p::core::transport::PortUse;
 use libp2p::{
+    Multiaddr, PeerId,
     core::Endpoint,
     swarm::{
-        behaviour::ConnectionEstablished, dial_opts::DialOpts, ConnectionClosed, ConnectionDenied,
-        ConnectionId, DialFailure, FromSwarm, NetworkBehaviour, NotifyHandler, OneShotHandler,
-        THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
+        ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, FromSwarm, NetworkBehaviour,
+        NotifyHandler, OneShotHandler, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
+        behaviour::ConnectionEstablished, dial_opts::DialOpts,
     },
-    Multiaddr, PeerId,
 };
 use pollable_map::stream::StreamMap;
 
@@ -29,8 +29,8 @@ mod bitswap_pb {
     pub use super::pb::bitswap_pb::Message;
     pub mod message {
         use super::super::pb::bitswap_pb::mod_Message as message;
-        pub use message::mod_Wantlist as wantlist;
         pub use message::Wantlist;
+        pub use message::mod_Wantlist as wantlist;
         pub use message::{Block, BlockPresence, BlockPresenceType};
     }
 }
@@ -41,7 +41,7 @@ use self::{
     sessions::{HaveSession, HaveSessionEvent, WantSession, WantSessionEvent},
 };
 use crate::repo::DefaultStorage;
-use crate::{repo::Repo, Block};
+use crate::{Block, repo::Repo};
 
 const CAP_THRESHOLD: usize = 100;
 
@@ -487,7 +487,7 @@ impl NetworkBehaviour for Behaviour {
                         handler: NotifyHandler::Any,
                         event: BitswapMessage::default()
                             .add_response(cid, BitswapResponse::Have(false)),
-                    })
+                    });
                 }
                 HaveSessionEvent::Block { peer_id, bytes } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
@@ -495,7 +495,7 @@ impl NetworkBehaviour for Behaviour {
                         handler: NotifyHandler::Any,
                         event: BitswapMessage::default()
                             .add_response(cid, BitswapResponse::Block(bytes)),
-                    })
+                    });
                 }
                 HaveSessionEvent::Cancelled => {
                     //TODO: Maybe notify peers from this session about any cancelled request?
@@ -535,7 +535,7 @@ impl NetworkBehaviour for Behaviour {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
                 WantSessionEvent::BlockStored => {
-                    return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }))
+                    return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
                 }
                 WantSessionEvent::Dial { peer_id } => {
                     let opts = DialOpts::peer_id(peer_id).build();
@@ -563,13 +563,13 @@ mod test {
     use futures::StreamExt;
     use ipld_core::cid::Cid;
     use libp2p::{
-        core::{transport::MemoryTransport, upgrade::Version},
-        swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmEvent},
         Multiaddr, PeerId, Swarm, SwarmBuilder, Transport,
+        core::{transport::MemoryTransport, upgrade::Version},
+        swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     };
     use multihash_codetable::{Code, MultihashDigest};
 
-    use crate::{repo::Repo, Block};
+    use crate::{Block, repo::Repo};
 
     fn create_block() -> Block {
         let data = b"hello block\n".to_vec();

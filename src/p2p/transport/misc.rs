@@ -100,7 +100,7 @@ pub(crate) fn generate_wrtc_cert(keypair: &Keypair) -> io::Result<String> {
             },
             &[], // We close over the keypair so no need to pass it.
         )
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
 
     let der_bytes = certificate.x509_enc().unwrap();
 

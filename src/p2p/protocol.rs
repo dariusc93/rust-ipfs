@@ -1,11 +1,11 @@
 use libp2p::core::transport::PortUse;
 use libp2p::{
+    Multiaddr, PeerId, StreamProtocol,
     core::Endpoint,
     swarm::{
         self, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
         THandlerInEvent, ToSwarm,
     },
-    Multiaddr, PeerId, StreamProtocol,
 };
 use std::convert::Infallible;
 use std::task::{Context, Poll};

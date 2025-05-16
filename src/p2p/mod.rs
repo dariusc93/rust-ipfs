@@ -30,11 +30,11 @@ pub use self::behaviour::IdentifyConfiguration;
 
 pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
 pub use self::behaviour::{RateLimit, RelayConfig};
+#[cfg(feature = "dns")]
+pub use self::transport::DnsResolver;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(any(feature = "webrtc", feature = "websocket"))]
 pub use self::transport::generate_cert;
-#[cfg(feature = "dns")]
-pub use self::transport::DnsResolver;
 pub use self::transport::{TransportConfig, UpgradeVersion};
 pub(crate) mod gossipsub;
 mod request_response;

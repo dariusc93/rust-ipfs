@@ -3,11 +3,11 @@
 use futures_timeout::TimeoutExt;
 use std::borrow::Borrow;
 
+use crate::Ipfs;
 #[cfg(feature = "dns")]
 use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
 use crate::repo::DataStore;
-use crate::Ipfs;
 
 #[cfg(feature = "dns")]
 mod dnslink;

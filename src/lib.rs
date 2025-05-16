@@ -22,6 +22,8 @@
 // the docs better.
 //#![allow(private_intra_doc_links)]
 
+#[macro_use]
+extern crate tracing;
 pub mod block;
 pub mod config;
 pub mod dag;
@@ -36,8 +38,6 @@ mod task;
 pub mod unixfs;
 
 pub use block::Block;
-#[macro_use]
-extern crate tracing;
 
 use anyhow::{anyhow, format_err};
 use bytes::Bytes;
@@ -47,10 +47,10 @@ use futures::{
     channel::{
         mpsc::UnboundedReceiver,
         oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
-    },
-    future::BoxFuture,
-    stream::{BoxStream, Stream},
-    FutureExt, StreamExt, TryStreamExt,
+    }, future::BoxFuture, stream::{BoxStream, Stream},
+    FutureExt,
+    StreamExt,
+    TryStreamExt,
 };
 
 use indexmap::IndexSet;
@@ -97,16 +97,15 @@ use std::{
 };
 
 pub use libp2p::{
-    self,
-    core::transport::ListenerId,
-    gossipsub::{MessageId, PublishError},
+    self, core::transport::ListenerId, gossipsub::{MessageId, PublishError},
     identity::Keypair,
     identity::PublicKey,
     kad::{Quorum, RecordKey as Key},
     multiaddr::multiaddr,
     multiaddr::Protocol,
     swarm::NetworkBehaviour,
-    Multiaddr, PeerId,
+    Multiaddr,
+    PeerId,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -563,7 +562,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         ])
     }
 
-    /// Set storage type for the repo.
+    // /// Set storage type for the repo.
     // pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
     //     self.options.ipfs_path = storage_type;
     //     self
@@ -1696,9 +1695,7 @@ impl Ipfs {
         let (protocol, request) = request.into_request();
         async move {
             if request.is_empty() {
-                return Err(
-                    std::io::Error::new(std::io::ErrorKind::Other, "request is empty").into(),
-                );
+                return Err(std::io::Error::other("request is empty").into());
             }
 
             let (tx, rx) = oneshot_channel();
@@ -1728,16 +1725,10 @@ impl Ipfs {
 
         async move {
             if peers.is_empty() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "no peers were provided",
-                )
-                .into());
+                return Err(std::io::Error::other("no peers were provided").into());
             }
             if request.is_empty() {
-                return Err(
-                    std::io::Error::new(std::io::ErrorKind::Other, "request is empty").into(),
-                );
+                return Err(std::io::Error::other("request is empty").into());
             }
 
             let (tx, rx) = oneshot_channel();
@@ -1765,9 +1756,7 @@ impl Ipfs {
         let (protocol, response) = response.into_request();
         async move {
             if response.is_empty() {
-                return Err(
-                    std::io::Error::new(std::io::ErrorKind::Other, "response is empty").into(),
-                );
+                return Err(std::io::Error::other("response is empty").into());
             }
 
             let (tx, rx) = oneshot_channel();
@@ -3062,7 +3051,6 @@ pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 mod node {
-
     use super::*;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become

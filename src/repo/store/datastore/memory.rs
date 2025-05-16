@@ -195,7 +195,7 @@ impl PinStore for MemDataStore {
                 return Ok(());
             }
             Some(Ok(PinKind::IndirectFrom(cid))) => {
-                return Err(anyhow::anyhow!("pinned indirectly through {}", cid))
+                return Err(anyhow::anyhow!("pinned indirectly through {}", cid));
             }
             // same here as above with the same message
             _ => return Err(anyhow::anyhow!("not pinned or pinned indirectly")),
@@ -482,7 +482,7 @@ impl PinDocument {
                             return Err(PinUpdateError::UnexpectedNumberOfDescendants(
                                 other,
                                 descendants,
-                            ))
+                            ));
                         }
                         Recursive::Count(_) => false,
                         Recursive::Intent | Recursive::Not => {
@@ -499,7 +499,7 @@ impl PinDocument {
                             return Err(PinUpdateError::UnexpectedNumberOfDescendants(
                                 other,
                                 descendants,
-                            ))
+                            ));
                         }
                         Recursive::Count(_) | Recursive::Intent => {
                             self.recursive = Recursive::Not;

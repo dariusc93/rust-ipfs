@@ -1,10 +1,10 @@
 use libp2p::{
+    StreamProtocol,
     core::upgrade::DeniedUpgrade,
     swarm::{
-        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
-        SupportedProtocols,
+        ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, SupportedProtocols,
+        handler::ConnectionEvent,
     },
-    StreamProtocol,
 };
 use std::{
     collections::VecDeque,

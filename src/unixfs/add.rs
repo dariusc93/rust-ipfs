@@ -1,16 +1,16 @@
 use std::task::{Context, Poll};
 
 use crate::{
-    repo::{DefaultStorage, Repo},
     Block,
+    repo::{DefaultStorage, Repo},
 };
 use bytes::Bytes;
 use either::Either;
 #[allow(unused_imports)]
 use futures::{
+    FutureExt, Stream, StreamExt, TryFutureExt,
     future::BoxFuture,
     stream::{BoxStream, FusedStream},
-    FutureExt, Stream, StreamExt, TryFutureExt,
 };
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 #[cfg(not(target_arch = "wasm32"))]

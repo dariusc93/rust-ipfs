@@ -4,7 +4,7 @@ use std::task::{Context, Poll};
 use libp2p::{
     core::upgrade::DeniedUpgrade,
     swarm::{
-        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
+        ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, handler::ConnectionEvent,
     },
 };
 

@@ -3,8 +3,8 @@ use std::task::{Context, Poll};
 
 use indexmap::IndexMap;
 use libp2p::{
-    swarm::{dummy, NetworkBehaviour, THandlerInEvent, ToSwarm},
     StreamProtocol,
+    swarm::{NetworkBehaviour, THandlerInEvent, ToSwarm, dummy},
 };
 
 // Used to manage the index of request-response protocols.
