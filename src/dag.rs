@@ -79,9 +79,9 @@ pub enum ResolveError {
 #[derive(Debug, Error)]
 pub enum UnexpectedResolved {
     #[error("path resolved to unexpected type of document: {:?} or {}", .0, .1.source())]
-    UnexpectedCodec(u64, ResolvedNode),
+    UnexpectedCodec(u64, Box<ResolvedNode>),
     #[error("path did not resolve to a block on {}", .0.source())]
-    NonBlock(ResolvedNode),
+    NonBlock(Box<ResolvedNode>),
 }
 
 /// Used internally before translating to ResolveError at the top level by using the IpfsPath.
@@ -702,12 +702,12 @@ impl ResolvedNode {
         if self.source().codec() != <BlockCodec as Into<u64>>::into(BlockCodec::DagPb) {
             Err(UnexpectedResolved::UnexpectedCodec(
                 BlockCodec::DagPb.into(),
-                self,
+                Box::new(self),
             ))
         } else {
             match self {
                 ResolvedNode::Block(b) => Ok(b),
-                _ => Err(UnexpectedResolved::NonBlock(self)),
+                _ => Err(UnexpectedResolved::NonBlock(Box::new(self))),
             }
         }
     }
