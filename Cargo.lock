@@ -3831,9 +3831,9 @@ dependencies = [
 
 [[package]]
 name = "pollable-map"
-version = "0.1.3"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b506b83916af37a7b766a637345ba04deab9d45022f35f2b0c0e7832041b01ab"
+checksum = "9535f0c0e01024ffb11fb04675e1d0f4522b465e8d8a93c255da56585dceb4bf"
 dependencies = [
  "futures",
  "futures-timeout",
