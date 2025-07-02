@@ -1,5 +1,5 @@
 use crate::repo::DefaultStorage;
-use crate::{Block, Ipfs, dag::IpldDag, repo::Repo};
+use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::try_stream;
 use bytes::Bytes;
 use either::Either;
@@ -214,38 +214,71 @@ impl Stream for UnixfsCat {
                             None => return,
                         };
 
+                        // Batch size for fetching blocks
+                        const BATCH_SIZE: usize = 32;
+
                         loop {
-                            // TODO: if it was possible, it would make sense to start downloading N of these
-                            // we could just create an FuturesUnordered which would drop the value right away. that
-                            // would probably always cost many unnecessary clones, but it would be nice to "shut"
-                            // the subscriber so that it will only resolve to a value but still keep the operation
-                            // going. Not that we have any "operation" concept of the Want yet.
-                            let (next, _) = visit.pending_links();
-
-                            let borrow = &repo;
-                            let block = borrow.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await.map_err(|e| TraversalFailed::Loading(*next, e))?;
-
-                            let (bytes, next_visit) = visit.continue_walk(block.data(), &mut cache).map_err(|e| TraversalFailed::Walking(*block.cid(), e))?;
-
-                            size += bytes.len();
-
-                            if let Some(length) = length {
-                                if size > length {
-                                    let fn_err = || Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
-                                    fn_err()?;
-                                    return;
+                            // Collect pending CIDs for batch processing
+                            let mut batch_cids = Vec::new();
+                            {
+                                let (first, rest) = visit.pending_links();
+                                batch_cids.push(*first);
+                                
+                                // Collect additional CIDs up to batch size
+                                for cid in rest.take(BATCH_SIZE - 1) {
+                                    batch_cids.push(*cid);
                                 }
                             }
 
-                            if !bytes.is_empty() {
-                                yield Bytes::copy_from_slice(bytes);
-                            }
+                            // Fetch blocks in batch and process as they arrive
+                            let mut blocks_stream = repo.get_blocks(&batch_cids)
+                                .providers(&providers)
+                                .set_local(local_only)
+                                .timeout(timeout);
+                            
+                            // Process each block as it arrives from the stream
+                            let mut current_visit = Some(visit);
+                            let mut any_visit_remains = false;
+                            
+                            while let Some(result) = blocks_stream.next().await {
+                                let block = match result {
+                                    Ok(block) => block,
+                                    Err(e) => Err(TraversalFailed::Loading(batch_cids[0], e))?,
+                                };
 
-                            match next_visit {
-                                Some(v) => visit = v,
-                                None => return,
-                            }
+                                if let Some(v) = current_visit.take() {
+                                    let (bytes, next_visit) = v.continue_walk(block.data(), &mut cache)
+                                        .map_err(|e| TraversalFailed::Walking(*block.cid(), e))?;
 
+                                    size += bytes.len();
+
+                                    if let Some(length) = length {
+                                        if size > length {
+                                            let fn_err = || Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
+                                            fn_err()?;
+                                            return;
+                                        }
+                                    }
+
+                                    if !bytes.is_empty() {
+                                        yield Bytes::copy_from_slice(bytes);
+                                    }
+
+                                    if let Some(next) = next_visit {
+                                        current_visit = Some(next);
+                                        any_visit_remains = true;
+                                    } else {
+                                        // No more visits for this block, we can continue to next batch if any
+                                        any_visit_remains = false;
+                                    }
+                                }
+                            }
+                            
+                            // If no more visits, we're done
+                            match current_visit {
+                                Some(v) if any_visit_remains => visit = v,
+                                _ => return,
+                            }
                         }
                     }.boxed();
 
@@ -270,8 +303,8 @@ impl std::future::IntoFuture for UnixfsCat {
             }
             Ok(data.into())
         }
-        .instrument(span)
-        .boxed()
+            .instrument(span)
+            .boxed()
     }
 }
 
