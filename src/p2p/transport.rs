@@ -60,8 +60,6 @@ pub struct TransportConfig {
     pub websocket_pem: Option<(Vec<String>, String)>,
     #[cfg(feature = "websocket")]
     pub enable_secure_websocket: bool,
-    #[cfg(feature = "quic")]
-    pub support_quic_draft_29: bool,
     #[cfg(feature = "webrtc")]
     pub enable_webrtc: bool,
     #[cfg(feature = "webrtc")]
@@ -86,8 +84,6 @@ impl Default for TransportConfig {
             #[cfg(feature = "websocket")]
             enable_secure_websocket: true,
             enable_memory_transport: false,
-            #[cfg(feature = "quic")]
-            support_quic_draft_29: false,
             #[cfg(feature = "dns")]
             enable_dns: true,
             #[cfg(feature = "webtransport")]
@@ -180,8 +176,6 @@ pub(crate) fn build_transport(
         #[cfg(feature = "quic")]
         enable_quic,
         enable_memory_transport,
-        #[cfg(feature = "quic")]
-        support_quic_draft_29,
         #[cfg(feature = "quic")]
         quic_max_idle_timeout,
         #[cfg(feature = "quic")]
@@ -278,7 +272,7 @@ pub(crate) fn build_transport(
                 let tcp_config = GenTcpConfig::default().nodelay(true);
 
                 let mut ws_transport =
-                    libp2p::websocket::WsConfig::new(TokioTcpTransport::new(tcp_config));
+                    libp2p::websocket::Config::new(TokioTcpTransport::new(tcp_config));
                 if enable_secure_websocket {
                     let (certs, priv_key) = match websocket_pem {
                         Some((cert, kp)) => {
@@ -382,12 +376,10 @@ pub(crate) fn build_transport(
     #[cfg(feature = "quic")]
     fn build_quic_transport(
         keypair: &identity::Keypair,
-        draft_29: bool,
         idle_timeout: Duration,
         keep_alive: Option<Duration>,
     ) -> TokioQuicTransport {
         let mut quic_config = QuicConfig::new(keypair);
-        quic_config.support_draft_29 = draft_29;
         quic_config.max_idle_timeout = idle_timeout.as_millis() as _;
         quic_config.keep_alive_interval = keep_alive.unwrap_or(idle_timeout / 2);
         TokioQuicTransport::new(quic_config)
@@ -396,12 +388,8 @@ pub(crate) fn build_transport(
     #[cfg(feature = "quic")]
     let transport = match enable_quic {
         true => {
-            let quic_transport = build_quic_transport(
-                &keypair,
-                support_quic_draft_29,
-                quic_max_idle_timeout,
-                quic_keep_alive,
-            );
+            let quic_transport =
+                build_quic_transport(&keypair, quic_max_idle_timeout, quic_keep_alive);
             OrTransport::new(quic_transport, transport)
                 .map(|either_output, _| match either_output {
                     FutureEither::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
