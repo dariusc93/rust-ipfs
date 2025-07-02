@@ -1,19 +1,19 @@
 use anyhow::{anyhow, format_err};
 use either::Either;
 use futures::{
-    FutureExt, StreamExt,
     channel::{
-        mpsc::{Receiver, UnboundedSender, unbounded},
+        mpsc::{unbounded, Receiver, UnboundedSender},
         oneshot,
     },
     stream::Fuse,
+    FutureExt, StreamExt,
 };
-use pollable_map::stream::optional::OptionalStream;
+use pollable_map::optional::Optional;
 
-use crate::{Channel, InnerPubsubEvent, p2p::MultiaddrExt};
+use crate::{p2p::MultiaddrExt, Channel, InnerPubsubEvent};
 use crate::{ConnectionEvents, PeerConnectionEvents, TSwarmEvent};
 
-use crate::{IpfsEvent, TSwarmEventFn, config::BOOTSTRAP_NODES};
+use crate::{config::BOOTSTRAP_NODES, IpfsEvent, TSwarmEventFn};
 use futures_timer::Delay;
 use ipld_core::cid::Cid;
 use std::convert::Infallible;
@@ -21,19 +21,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap, HashSet},
     time::Duration,
 };
 
 use crate::{
-    AddPeerOpt,
     p2p::TSwarm,
     repo::{Repo, RepoEvent},
+    AddPeerOpt,
 };
 
 pub use crate::{p2p::BehaviourEvent, p2p::KadResult};
 
-pub use libp2p::{self, Multiaddr, PeerId, core::transport::ListenerId, swarm::NetworkBehaviour};
+pub use libp2p::{self, core::transport::ListenerId, swarm::NetworkBehaviour, Multiaddr, PeerId};
 use multibase::Base;
 
 use crate::repo::DefaultStorage;
@@ -60,8 +60,8 @@ use tokio::sync::Notify;
 #[allow(dead_code)]
 pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
     pub swarm: TSwarm<C>,
-    pub repo_events: OptionalStream<Fuse<Receiver<RepoEvent>>>,
-    pub from_facade: OptionalStream<Fuse<Receiver<IpfsEvent>>>,
+    pub repo_events: Optional<Fuse<Receiver<RepoEvent>>>,
+    pub from_facade: Optional<Fuse<Receiver<IpfsEvent>>>,
     pub bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
     pub listening_addresses: HashMap<ListenerId, Vec<Multiaddr>>,
     pub provider_stream: HashMap<QueryId, UnboundedSender<PeerId>>,
@@ -95,8 +95,8 @@ pub struct IpfsTask<C: NetworkBehaviour<ToSwarm = Infallible>> {
 impl<C: NetworkBehaviour<ToSwarm = Infallible>> IpfsTask<C> {
     pub fn new(swarm: TSwarm<C>, repo: &Repo<DefaultStorage>, event_capacity: usize) -> Self {
         IpfsTask {
-            repo_events: OptionalStream::default(),
-            from_facade: OptionalStream::default(),
+            repo_events: Optional::default(),
+            from_facade: Optional::default(),
             swarm,
             event_capacity,
             provider_stream: HashMap::new(),
