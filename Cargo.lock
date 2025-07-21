@@ -1447,9 +1447,9 @@ checksum = "f90f7dce0722e95104fcb095585910c0977252f286e354b5e3bd38902cd99988"
 
 [[package]]
 name = "futures-timeout"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f277b8e786cb6dec12f9c2a15d9f02d89e0ce57451fe541943e81a875f7f4d4"
+checksum = "fc766541fbac66e9c9b53a92623c38e9a22768a4bd6a0c49a0b564b0126474e2"
 dependencies = [
  "futures",
  "futures-timer",
