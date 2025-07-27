@@ -55,10 +55,10 @@ impl<'a> MessageWrite for IpnsEntry<'a> {
         0
         + if self.value == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.value).len()) }
         + if self.signatureV1 == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.signatureV1).len()) }
-        + if self.validityType == ipns_pb::mod_IpnsEntry::ValidityType::EOL { 0 } else { 1 + sizeof_varint(*(&self.validityType) as u64) }
+        + 1 + sizeof_varint(*(&self.validityType) as u64)
         + if self.validity == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.validity).len()) }
-        + if self.sequence == 0u64 { 0 } else { 1 + sizeof_varint(*(&self.sequence) as u64) }
-        + if self.ttl == 0u64 { 0 } else { 1 + sizeof_varint(*(&self.ttl) as u64) }
+        + 1 + sizeof_varint(*(&self.sequence) as u64)
+        + 1 + sizeof_varint(*(&self.ttl) as u64)
         + if self.pubKey == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.pubKey).len()) }
         + if self.signatureV2 == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.signatureV2).len()) }
         + if self.data == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.data).len()) }
@@ -67,10 +67,10 @@ impl<'a> MessageWrite for IpnsEntry<'a> {
     fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {
         if self.value != Cow::Borrowed(b"") { w.write_with_tag(10, |w| w.write_bytes(&**&self.value))?; }
         if self.signatureV1 != Cow::Borrowed(b"") { w.write_with_tag(18, |w| w.write_bytes(&**&self.signatureV1))?; }
-        if self.validityType != ipns_pb::mod_IpnsEntry::ValidityType::EOL { w.write_with_tag(24, |w| w.write_enum(*&self.validityType as i32))?; }
+        w.write_with_tag(24, |w| w.write_enum(*&self.validityType as i32))?;
         if self.validity != Cow::Borrowed(b"") { w.write_with_tag(34, |w| w.write_bytes(&**&self.validity))?; }
-        if self.sequence != 0u64 { w.write_with_tag(40, |w| w.write_uint64(*&self.sequence))?; }
-        if self.ttl != 0u64 { w.write_with_tag(48, |w| w.write_uint64(*&self.ttl))?; }
+        w.write_with_tag(40, |w| w.write_uint64(*&self.sequence))?;
+        w.write_with_tag(48, |w| w.write_uint64(*&self.ttl))?;
         if self.pubKey != Cow::Borrowed(b"") { w.write_with_tag(58, |w| w.write_bytes(&**&self.pubKey))?; }
         if self.signatureV2 != Cow::Borrowed(b"") { w.write_with_tag(66, |w| w.write_bytes(&**&self.signatureV2))?; }
         if self.data != Cow::Borrowed(b"") { w.write_with_tag(74, |w| w.write_bytes(&**&self.data))?; }
