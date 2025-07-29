@@ -1,4 +1,3 @@
-use std::ops::Add;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Duration;
@@ -13,20 +12,11 @@ use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize, Serializer};
+use std::ops::Add;
 
 mod generate;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    derive_more::Display,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, derive_more::Display)]
 #[repr(i32)]
 pub enum ValidityType {
     EOL = 0,
@@ -147,6 +137,14 @@ impl<'a> From<&'a Record> for generate::ipns_pb::IpnsEntry<'a> {
     }
 }
 
+pub trait DataImpl {
+    fn value(&self) -> &[u8];
+    fn validity_type(&self) -> ValidityType;
+    fn validity(&self) -> &[u8];
+    fn sequence(&self) -> u64;
+    fn ttl(&self) -> u64;
+}
+
 // Fields of the Bytes type are used here instead of Vec<u8> to ensure that
 // these fields are (de)serialized into "byte string" CBOR values instead of simple arrays.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +165,7 @@ pub struct Data {
     pub ttl: u64,
 }
 
+// TODO: Use DataImpl trait in the future
 impl Data {
     pub fn value(&self) -> &[u8] {
         &self.value
@@ -189,6 +188,57 @@ impl Data {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DataRef<'a> {
+    #[serde(rename = "Value", borrow)]
+    value: &'a [u8],
+
+    #[serde(rename = "ValidityType")]
+    validity_type: ValidityType,
+
+    #[serde(rename = "Validity", borrow)]
+    validity: &'a [u8],
+
+    #[serde(rename = "Sequence")]
+    sequence: u64,
+
+    #[serde(rename = "TTL")]
+    ttl: u64,
+}
+
+impl DataRef<'_> {
+    pub fn to_owned(&self) -> Data {
+        Data {
+            value: Bytes::from(self.value.to_vec()),
+            validity: Bytes::from(self.validity.to_vec()),
+            validity_type: self.validity_type,
+            sequence: self.sequence,
+            ttl: self.ttl,
+        }
+    }
+}
+impl DataImpl for DataRef<'_> {
+    fn value(&self) -> &[u8] {
+        self.value
+    }
+
+    fn validity_type(&self) -> ValidityType {
+        self.validity_type
+    }
+
+    fn validity(&self) -> &[u8] {
+        self.validity
+    }
+
+    fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    fn ttl(&self) -> u64 {
+        self.ttl
+    }
+}
+
 impl Record {
     #[cfg(feature = "libp2p")]
     pub fn new(
@@ -198,12 +248,13 @@ impl Record {
         seq: u64,
         ttl: u64,
     ) -> std::io::Result<Self> {
-        let value = value.as_ref().to_vec();
+        let value = value.as_ref();
 
         let validity = Utc::now()
             .add(duration)
-            .to_rfc3339_opts(SecondsFormat::Nanos, true)
-            .into_bytes();
+            .to_rfc3339_opts(SecondsFormat::Nanos, true);
+
+        let validity = validity.as_bytes();
 
         let validity_type = ValidityType::EOL;
 
@@ -221,10 +272,10 @@ impl Record {
             .sign(&signature_v1_construct)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        let document = Data {
-            value: Bytes::from(value.clone()),
+        let document = DataRef {
+            value,
             validity_type,
-            validity: Bytes::from(validity.clone()),
+            validity,
             sequence: seq,
             ttl,
         };
@@ -252,9 +303,9 @@ impl Record {
 
         Ok(Record {
             data,
-            value,
+            value: value.to_vec(),
             validity_type,
-            validity,
+            validity: validity.to_vec(),
             sequence: seq,
             ttl,
             public_key,
@@ -319,7 +370,11 @@ impl Record {
     }
 
     pub fn data(&self) -> std::io::Result<Data> {
-        let data: Data = serde_ipld_dagcbor::from_slice(&self.data)
+        self.data_ref().map(|d| d.to_owned())
+    }
+
+    pub fn data_ref(&self) -> std::io::Result<DataRef<'_>> {
+        let data: DataRef<'_> = serde_ipld_dagcbor::from_slice(&self.data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         if data.value != self.value
