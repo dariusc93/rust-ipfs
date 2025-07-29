@@ -1,5 +1,5 @@
 use std::ops::Add;
-
+use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::FixedOffset;
@@ -12,7 +12,7 @@ use libp2p_identity::PublicKey;
 use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 mod generate;
 
@@ -25,8 +25,6 @@ mod generate;
     Hash,
     PartialOrd,
     Ord,
-    Serialize,
-    Deserialize,
     derive_more::Display,
 )]
 #[repr(i32)]
@@ -34,11 +32,41 @@ pub enum ValidityType {
     EOL = 0,
 }
 
+impl Serialize for ValidityType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i32(*self as i32)
+    }
+}
+
+impl<'de> Deserialize<'de> for ValidityType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let i = i32::deserialize(deserializer)?;
+        ValidityType::try_from(i).map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<i32> for ValidityType {
+    type Error = std::io::Error;
+    fn try_from(i: i32) -> Result<Self, Self::Error> {
+        match i {
+            0 => Ok(ValidityType::EOL),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid validity type",
+            )),
+        }
+    }
+}
+
 impl From<ValidityType> for i32 {
     fn from(ty: ValidityType) -> Self {
-        match ty {
-            ValidityType::EOL => 0,
-        }
+        ty as i32
     }
 }
 
@@ -119,16 +147,18 @@ impl<'a> From<&'a Record> for generate::ipns_pb::IpnsEntry<'a> {
     }
 }
 
+// Fields of the Bytes type are used here instead of Vec<u8> to ensure that
+// these fields are (de)serialized into "byte string" CBOR values instead of simple arrays.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Data {
-    #[serde(rename = "Valid")]
-    pub value: Vec<u8>,
+    #[serde(rename = "Value")]
+    pub value: Bytes,
 
     #[serde(rename = "ValidityType")]
     pub validity_type: ValidityType,
 
     #[serde(rename = "Validity")]
-    pub validity: Vec<u8>,
+    pub validity: Bytes,
 
     #[serde(rename = "Sequence")]
     pub sequence: u64,
@@ -172,7 +202,7 @@ impl Record {
 
         let validity = Utc::now()
             .add(duration)
-            .to_rfc3339_opts(SecondsFormat::Nanos, false)
+            .to_rfc3339_opts(SecondsFormat::Nanos, true)
             .into_bytes();
 
         let validity_type = ValidityType::EOL;
@@ -192,14 +222,14 @@ impl Record {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         let document = Data {
-            value: value.clone(),
+            value: Bytes::from(value.clone()),
             validity_type,
-            validity: validity.clone(),
+            validity: Bytes::from(validity.clone()),
             sequence: seq,
             ttl,
         };
 
-        let data = cbor4ii::serde::to_vec(Vec::new(), &document)
+        let data = serde_ipld_dagcbor::to_vec(&document)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         let mut signature_v2_construct = vec![
@@ -289,7 +319,7 @@ impl Record {
     }
 
     pub fn data(&self) -> std::io::Result<Data> {
-        let data: Data = cbor4ii::serde::from_slice(&self.data)
+        let data: Data = serde_ipld_dagcbor::from_slice(&self.data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         if data.value != self.value
