@@ -1,4 +1,3 @@
-use std::ops::Add;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Duration;
@@ -13,20 +12,15 @@ use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize, Serializer};
+use std::ops::Add;
 
 mod generate;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    derive_more::Display,
-)]
+const SIGNATURE_V2_BASE: &[u8] = &[
+    0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x3a,
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, derive_more::Display)]
 #[repr(i32)]
 pub enum ValidityType {
     EOL = 0,
@@ -232,12 +226,11 @@ impl Record {
         let data = serde_ipld_dagcbor::to_vec(&document)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        let mut signature_v2_construct = vec![
-            0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65,
-            0x3a,
-        ];
-
-        signature_v2_construct.extend(data.iter());
+        let signature_v2_construct = SIGNATURE_V2_BASE
+            .iter()
+            .chain(data.iter())
+            .copied()
+            .collect::<Vec<_>>();
 
         let signature_v2 = keypair
             .sign(&signature_v2_construct)
@@ -380,12 +373,11 @@ impl Record {
             ));
         }
 
-        let mut signature_v2 = vec![
-            0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65,
-            0x3a,
-        ];
-
-        signature_v2.extend(self.data.iter());
+        let signature_v2 = SIGNATURE_V2_BASE
+            .iter()
+            .chain(self.data.iter())
+            .copied()
+            .collect::<Vec<_>>();
 
         self.data()?;
 
