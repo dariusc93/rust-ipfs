@@ -1,4 +1,3 @@
-use std::ops::Add;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Duration;
@@ -13,20 +12,11 @@ use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize, Serializer};
+use std::ops::Add;
 
 mod generate;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    derive_more::Display,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, derive_more::Display)]
 #[repr(i32)]
 pub enum ValidityType {
     EOL = 0,
@@ -74,27 +64,6 @@ impl From<generate::ipns_pb::mod_IpnsEntry::ValidityType> for ValidityType {
     fn from(v_ty: generate::ipns_pb::mod_IpnsEntry::ValidityType) -> Self {
         match v_ty {
             generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL => ValidityType::EOL,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(i32)]
-pub enum KeyType {
-    RSA = 0,
-    Ed25519 = 1,
-    Secp256k1 = 2,
-    ECDSA = 3,
-}
-
-#[cfg(feature = "libp2p")]
-impl From<libp2p_identity::KeyType> for KeyType {
-    fn from(ty: libp2p_identity::KeyType) -> Self {
-        match ty {
-            libp2p_identity::KeyType::Ed25519 => KeyType::Ed25519,
-            libp2p_identity::KeyType::RSA => KeyType::RSA,
-            libp2p_identity::KeyType::Secp256k1 => KeyType::Secp256k1,
-            libp2p_identity::KeyType::Ecdsa => KeyType::ECDSA,
         }
     }
 }
@@ -243,8 +212,8 @@ impl Record {
             .sign(&signature_v2_construct)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        let public_key = match keypair.key_type().into() {
-            KeyType::RSA => keypair
+        let public_key = match keypair.key_type() {
+            libp2p_identity::KeyType::RSA => keypair
                 .to_protobuf_encoding()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
             _ => vec![],
@@ -373,7 +342,7 @@ impl Record {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         //TODO: Implement support for RSA
-        if matches!(pk.key_type().into(), KeyType::RSA) {
+        if matches!(pk.key_type(), libp2p_identity::KeyType::RSA) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "RSA Keys are not supported at this time",
