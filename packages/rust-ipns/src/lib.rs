@@ -137,14 +137,6 @@ impl<'a> From<&'a Record> for generate::ipns_pb::IpnsEntry<'a> {
     }
 }
 
-pub trait DataImpl {
-    fn value(&self) -> &[u8];
-    fn validity_type(&self) -> ValidityType;
-    fn validity(&self) -> &[u8];
-    fn sequence(&self) -> u64;
-    fn ttl(&self) -> u64;
-}
-
 // Fields of the Bytes type are used here instead of Vec<u8> to ensure that
 // these fields are (de)serialized into "byte string" CBOR values instead of simple arrays.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,25 +208,24 @@ impl DataRef<'_> {
             ttl: self.ttl,
         }
     }
-}
-impl DataImpl for DataRef<'_> {
-    fn value(&self) -> &[u8] {
+
+    pub fn value(&self) -> &[u8] {
         self.value
     }
 
-    fn validity_type(&self) -> ValidityType {
+    pub fn validity_type(&self) -> ValidityType {
         self.validity_type
     }
 
-    fn validity(&self) -> &[u8] {
+    pub fn validity(&self) -> &[u8] {
         self.validity
     }
 
-    fn sequence(&self) -> u64 {
+    pub fn sequence(&self) -> u64 {
         self.sequence
     }
 
-    fn ttl(&self) -> u64 {
+    pub fn ttl(&self) -> u64 {
         self.ttl
     }
 }
