@@ -1,4 +1,3 @@
-use std::ops::Add;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Duration;
@@ -13,23 +12,20 @@ use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize, Serializer};
+use std::ops::Add;
 
 mod generate;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    derive_more::Display,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(i32)]
 pub enum ValidityType {
     EOL = 0,
+}
+
+impl std::fmt::Display for ValidityType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EOL")
+    }
 }
 
 impl Serialize for ValidityType {

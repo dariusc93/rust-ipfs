@@ -22,7 +22,6 @@ multihash.workspace = true
 chrono.workspace = true
 
 libp2p-identity = { version = "0.2.10", optional = true, features = ["peerid", "rand"] }
-derive_more = { version = "2.0.1", features = ["full"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["js"] }
