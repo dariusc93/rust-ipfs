@@ -1,3 +1,7 @@
+# 0.7.1
+
+- chore: move signature v2 to a const variable. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
+
 # 0.7.0
 
 - chore: update to libp2p 0.55.0. [PR 375](https://github.com/dariusc93/rust-ipfs/pull/375)
