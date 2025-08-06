@@ -4,26 +4,35 @@ use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     let node_a = UninitializedIpfs::new()
         .with_default()
-        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .enable_memory_transport()
         .start()
         .await?;
+
+    node_a.add_listening_address("/memory/0".parse()?).await?;
+
     let node_b = UninitializedIpfs::new()
         .with_default()
-        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .enable_memory_transport()
         .start()
         .await?;
+
+    node_b.add_listening_address("/memory/0".parse()?).await?;
+
+    // tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
 
     let peer_id = node_a.keypair().public().to_peer_id();
     let peer_id_b = node_b.keypair().public().to_peer_id();
 
-    println!("Our Node (A): {peer_id}");
-    println!("Their Node (B): {peer_id_b}");
-
     let addrs = node_a.listening_addresses().await?;
 
     node_b.add_peer((peer_id, addrs)).await?;
+
+    println!("Our Node (A): {peer_id}");
+    println!("Their Node (B): {peer_id_b}");
 
     let block_a = ipld!({
         "name": "alice",
@@ -31,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let cid = node_a.put_dag(&block_a).await?;
+
+    println!("Block A CID: {cid}");
 
     let block_b = node_b.get_dag(cid).await?;
 

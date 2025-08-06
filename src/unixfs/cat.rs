@@ -6,7 +6,7 @@ use either::Either;
 use futures::future::BoxFuture;
 use futures::stream::{BoxStream, FusedStream, Stream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
-use libp2p::PeerId;
+use connexa::prelude::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
 use std::pin::Pin;

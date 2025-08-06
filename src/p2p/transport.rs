@@ -24,8 +24,7 @@ use libp2p::identity;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "pnet")]
 use libp2p::pnet::{PnetConfig, PreSharedKey};
-use libp2p::relay::client::Transport as ClientTransport;
-use libp2p::PeerId;
+
 use std::io;
 use std::time::Duration;
 

@@ -1,11 +1,7 @@
-use libp2p::{
-    StreamProtocol,
-    core::upgrade::DeniedUpgrade,
-    swarm::{
-        ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, SupportedProtocols,
-        handler::ConnectionEvent,
-    },
-};
+
+use connexa::prelude::{StreamProtocol, transport::upgrade::DeniedUpgrade, swarm::{ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, SupportedProtocols,
+        handler::ConnectionEvent}};
+
 use std::{
     collections::VecDeque,
     task::{Context, Poll},

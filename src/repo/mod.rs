@@ -1,15 +1,15 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
-use crate::Block;
 use crate::error::Error;
+use crate::Block;
+use connexa::prelude::identity::PeerId;
 use core::fmt::Debug;
-use futures::channel::mpsc::{Receiver, Sender, channel};
+use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
-use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
@@ -17,8 +17,8 @@ use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};

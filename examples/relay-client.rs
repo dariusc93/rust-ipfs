@@ -1,9 +1,8 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use libp2p::Multiaddr;
-use rust_ipfs::Ipfs;
 use rust_ipfs::p2p::MultiaddrExt;
+use rust_ipfs::{Ipfs, Multiaddr};
 
 use rust_ipfs::Keypair;
 use rust_ipfs::UninitializedIpfs;
@@ -62,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         .with_ping(Default::default())
         .set_keypair(&keypair)
         .set_default_listener()
+        .enable_tcp()
         .with_relay(true)
         .with_custom_behaviour(ext_behaviour::Behaviour::new(local_peer_id))
         .fd_limit(rust_ipfs::FDLimit::Max)
@@ -109,16 +109,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 mod ext_behaviour {
-    use libp2p::swarm::derive_prelude::PortUse;
-    use libp2p::{
-        Multiaddr, PeerId,
-        core::Endpoint,
-        swarm::{
-            ConnectionDenied, ConnectionId, ExternalAddrExpired, FromSwarm, ListenerClosed,
-            NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
-        },
+    use connexa::dummy::DummyHandler;
+    use connexa::prelude::swarm::derive_prelude::PortUse;
+    use connexa::prelude::swarm::{
+        ConnectionDenied, ExternalAddrExpired, FromSwarm, ListenerClosed, NewListenAddr, THandler,
+        THandlerInEvent, THandlerOutEvent, ToSwarm,
     };
-    use rust_ipfs::{ListenerId, NetworkBehaviour};
+    use connexa::prelude::transport::Endpoint;
+    use rust_ipfs::{ConnectionId, ListenerId, Multiaddr, NetworkBehaviour, PeerId};
     use std::convert::Infallible;
     use std::{
         collections::{HashMap, HashSet},
@@ -144,7 +142,7 @@ mod ext_behaviour {
     }
 
     impl NetworkBehaviour for Behaviour {
-        type ConnectionHandler = libp2p::swarm::dummy::ConnectionHandler;
+        type ConnectionHandler = DummyHandler;
         type ToSwarm = Infallible;
 
         fn handle_pending_inbound_connection(
@@ -173,7 +171,7 @@ mod ext_behaviour {
             _: &Multiaddr,
             _: &Multiaddr,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn handle_established_outbound_connection(
@@ -184,7 +182,7 @@ mod ext_behaviour {
             _: Endpoint,
             _: PortUse,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn on_connection_handler_event(

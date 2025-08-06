@@ -5,7 +5,7 @@ use futures::{
     stream::{BoxStream, FusedStream},
 };
 use ipld_core::cid::Cid;
-use libp2p::PeerId;
+use connexa::prelude::PeerId;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use std::pin::Pin;
 use std::task::Context;

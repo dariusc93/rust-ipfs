@@ -2,14 +2,14 @@
 #[cfg(feature = "stream")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use rust_ipfs::{Multiaddr, PeerId, StreamProtocol};
     use std::time::Duration;
 
     use clap::Parser;
     use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
-    use libp2p::{Multiaddr, PeerId, StreamProtocol};
     use rand::RngCore;
     use rust_ipfs::{
-        Ipfs, Keypair, UninitializedIpfsDefault as UninitializedIpfs, p2p::MultiaddrExt,
+        p2p::MultiaddrExt, Ipfs, Keypair, UninitializedIpfsDefault as UninitializedIpfs,
     };
 
     #[derive(Debug, Parser)]
@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize the repo and start a daemon
     let ipfs = UninitializedIpfs::new()
         .set_keypair(&keypair)
+        .enable_tcp()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
         .with_streams()
         .start()
@@ -84,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    async fn echo(mut stream: rust_ipfs::libp2p::Stream) -> std::io::Result<usize> {
+    async fn echo(mut stream: connexa::prelude::Stream) -> std::io::Result<usize> {
         let mut total = 0;
 
         let mut buf = [0u8; 100];
@@ -100,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    async fn send(mut stream: rust_ipfs::libp2p::Stream) -> std::io::Result<()> {
+    async fn send(mut stream: connexa::prelude::Stream) -> std::io::Result<()> {
         let num_bytes = rand::random::<usize>() % 1000;
 
         let mut bytes = vec![0; num_bytes];

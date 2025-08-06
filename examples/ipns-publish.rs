@@ -4,7 +4,7 @@ async fn main() -> anyhow::Result<()> {
     use rust_ipfs::Ipfs;
     use rust_ipfs::IpfsPath;
     use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
-    tracing_subscriber::fmt::init();
+    // tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
 
     ipfs.default_bootstrap().await?;
 
-    ipfs.bootstrap().await?;
+    // ipfs.bootstrap().await?;
 
     let block_a = ipld!({
         "name": "alice",

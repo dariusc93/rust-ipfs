@@ -8,6 +8,8 @@ use tokio::io::AsyncWriteExt;
 async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = UninitializedIpfs::new()
         .with_default()
+        .enable_tcp()
+        .enable_dns()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .start()
         .await?;

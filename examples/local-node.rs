@@ -13,6 +13,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = UninitializedIpfs::new()
         .with_default()
+        .enable_tcp()
         .set_keypair(&keypair)
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
@@ -36,16 +37,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 mod ext_behaviour {
-    use libp2p::swarm::derive_prelude::PortUse;
-    use libp2p::{
-        Multiaddr, PeerId,
-        core::Endpoint,
-        swarm::{
-            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
-            THandlerOutEvent, ToSwarm,
-        },
+    use connexa::dummy::DummyHandler;
+    use connexa::prelude::swarm::derive_prelude::PortUse;
+    use connexa::prelude::swarm::{
+        ConnectionDenied, FromSwarm, NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent,
+        ToSwarm,
     };
-    use rust_ipfs::NetworkBehaviour;
+    use connexa::prelude::transport::Endpoint;
+    use rust_ipfs::{ConnectionId, Multiaddr, NetworkBehaviour, PeerId};
     use std::convert::Infallible;
     use std::{
         collections::HashSet,
@@ -67,7 +66,7 @@ mod ext_behaviour {
     }
 
     impl NetworkBehaviour for Behaviour {
-        type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
+        type ConnectionHandler = DummyHandler;
         type ToSwarm = Infallible;
 
         fn handle_pending_inbound_connection(
@@ -96,7 +95,7 @@ mod ext_behaviour {
             _: &Multiaddr,
             _: &Multiaddr,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn handle_established_outbound_connection(
@@ -107,7 +106,7 @@ mod ext_behaviour {
             _: Endpoint,
             _: PortUse,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn on_connection_handler_event(

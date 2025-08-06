@@ -26,6 +26,7 @@
 extern crate tracing;
 pub mod block;
 pub mod config;
+mod context;
 pub mod dag;
 pub mod error;
 pub mod ipns;
@@ -34,32 +35,24 @@ pub mod p2p;
 pub mod path;
 pub mod refs;
 pub mod repo;
-mod task;
 pub mod unixfs;
 
 pub use block::Block;
 
-use anyhow::{anyhow, format_err};
+use anyhow::anyhow;
 use bytes::Bytes;
 use dag::{DagGet, DagPut};
 use either::Either;
 use futures::{
-    channel::{
-        mpsc::UnboundedReceiver,
-        oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
-    }, future::BoxFuture, stream::{BoxStream, Stream},
-    FutureExt,
-    StreamExt,
-    TryStreamExt,
+    channel::oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
+    future::BoxFuture,
+    stream::BoxStream,
+    StreamExt, TryStreamExt,
 };
 
-use indexmap::IndexSet;
 use keystore::Keystore;
 
-use p2p::{
-    IdentifyConfiguration, KadConfig, KadStoreConfig, MultiaddrExt, PeerInfo, PubsubConfig,
-    RelayConfig, RequestResponseConfig, SwarmConfig, TransportConfig,
-};
+use p2p::{IdentifyConfiguration, MultiaddrExt, PeerInfo, PubsubConfig, RelayConfig};
 use repo::{DefaultStorage, GCConfig, GCTrigger, RepoFetch, RepoInsertPin, RepoRemovePin};
 
 use tracing::Span;
@@ -68,11 +61,10 @@ use tracing_futures::Instrument;
 use unixfs::UnixfsGet;
 use unixfs::{AddOpt, IpfsUnixfs, UnixfsAdd, UnixfsCat, UnixfsLs};
 
-pub use self::p2p::gossipsub::SubscriptionStream;
 use self::{
     dag::IpldDag,
     ipns::Ipns,
-    p2p::{create_swarm, TSwarm},
+    p2p::{create_create_behaviour, TSwarm},
     repo::Repo,
 };
 pub use self::{
@@ -82,10 +74,41 @@ pub use self::{
     path::IpfsPath,
     repo::{PinKind, PinMode},
 };
-use async_rt::{AbortableJoinHandle, CommunicationTask};
+use async_rt::AbortableJoinHandle;
+use connexa::builder::{ConnexaBuilder, FileDescLimit};
+use connexa::handle::Connexa;
+pub use connexa::prelude::dht::{Mode, Quorum, Record, RecordKey, ToRecordKey};
+pub use connexa::prelude::request_response::{
+    InboundRequestId, IntoRequest, OptionalStreamProtocol,
+};
+pub use connexa::prelude::swarm::derive_prelude::{ConnectionId, ListenerId};
+pub use connexa::prelude::swarm::dial_opts::{DialOpts, PeerCondition};
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "pnet")]
+use connexa::prelude::transport::pnet::PreSharedKey;
+pub use connexa::prelude::{
+    connection_limits::ConnectionLimits,
+    gossipsub, identify, ping,
+    swarm::{self, NetworkBehaviour},
+    GossipsubMessage, Stream,
+};
+pub use connexa::prelude::{
+    identity::Keypair, ConnectionEvent, Multiaddr, PeerId, Protocol, StreamProtocol,
+};
+pub use connexa::{behaviour::request_response::RequestResponseConfig, dummy};
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
+
+use connexa::prelude::gossipsub::IntoGossipsubTopic;
+use connexa::prelude::rendezvous::IntoNamespace;
+#[cfg(feature = "stream")]
+use connexa::prelude::stream::IntoStreamProtocol;
+use connexa::prelude::transport::dns::DnsResolver;
+pub use connexa::prelude::transport::ConnectedPoint;
+use futures::stream::FuturesUnordered;
+use serde::Serialize;
 use std::convert::Infallible;
+use std::task::Poll;
 use std::{borrow::Borrow, path::PathBuf};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -95,34 +118,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
-pub use libp2p::{
-    self, core::transport::ListenerId, gossipsub::{MessageId, PublishError},
-    identity::Keypair,
-    identity::PublicKey,
-    kad::{Quorum, RecordKey as Key},
-    multiaddr::multiaddr,
-    multiaddr::Protocol,
-    swarm::NetworkBehaviour,
-    Multiaddr,
-    PeerId,
-};
-
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(feature = "pnet")]
-use libp2p::pnet::PreSharedKey;
-use libp2p::swarm::ConnectionId;
-use libp2p::{
-    core::{muxing::StreamMuxerBox, transport::Boxed},
-    kad::{store::MemoryStoreConfig, Mode, Record},
-    ping::Config as PingConfig,
-    rendezvous::Namespace,
-    swarm::dial_opts::DialOpts,
-    StreamProtocol,
-};
-use libp2p::{request_response::InboundRequestId, swarm::dial_opts::PeerCondition};
-pub use libp2p_connection_limits::ConnectionLimits;
-use serde::Serialize;
 
 /// Ipfs node options used to configure the node to be created with [`UninitializedIpfs`].
 struct IpfsOptions {
@@ -144,44 +139,17 @@ struct IpfsOptions {
     /// Nodes used as bootstrap peers.
     pub bootstrap: Vec<Multiaddr>,
 
-    /// Relay server config
-    pub relay_server_config: RelayConfig,
-
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
-    /// Transport configuration
-    pub transport_configuration: crate::p2p::TransportConfig,
-
-    /// Swarm configuration
-    pub swarm_configuration: crate::p2p::SwarmConfig,
-
-    /// Identify configuration
-    pub identify_configuration: crate::p2p::IdentifyConfiguration,
-
-    /// Pubsub configuration
-    pub pubsub_config: crate::p2p::PubsubConfig,
-
-    /// Request Response configuration
-    pub request_response_config: Either<RequestResponseConfig, Vec<RequestResponseConfig>>,
-
-    /// Kad configuration
-    pub kad_configuration: Either<KadConfig, libp2p::kad::Config>,
-
-    /// Kad Store Config
-    /// Note: Only supports MemoryStoreConfig at this time
-    pub kad_store_config: KadStoreConfig,
-
-    /// Ping Configuration
-    pub ping_configuration: PingConfig,
-
+    // /// Transport configuration
+    // pub transport_configuration: crate::p2p::TransportConfig,
+    // /// Request Response configuration
+    // pub request_response_config: Either<RequestResponseConfig, Vec<RequestResponseConfig>>,
     /// Address book configuration
     pub addr_config: AddressBookConfig,
 
     pub keystore: Keystore,
-
-    /// Connection idle
-    pub connection_idle: Duration,
 
     /// Repo Provider option
     pub provider: RepoProvider,
@@ -193,8 +161,6 @@ struct IpfsOptions {
     /// default is useful when running multiple nodes.
     pub span: Option<Span>,
 
-    pub connection_limits: Option<ConnectionLimits>,
-
     /// Channel capacity for emitting connection events over.
     pub connection_event_cap: usize,
 
@@ -203,24 +169,7 @@ struct IpfsOptions {
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct Libp2pProtocol {
-    pub(crate) pubsub: bool,
-    pub(crate) kad: bool,
     pub(crate) bitswap: bool,
-    pub(crate) relay_client: bool,
-    pub(crate) relay_server: bool,
-    pub(crate) dcutr: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) mdns: bool,
-    pub(crate) identify: bool,
-    pub(crate) autonat: bool,
-    pub(crate) rendezvous_client: bool,
-    pub(crate) rendezvous_server: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) upnp: bool,
-    pub(crate) ping: bool,
-    #[cfg(feature = "stream")]
-    pub(crate) streams: bool,
-    pub(crate) request_response: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -246,24 +195,13 @@ impl Default for IpfsOptions {
             #[cfg(target_arch = "wasm32")]
             namespace: None,
             bootstrap: Default::default(),
-            relay_server_config: Default::default(),
-            kad_configuration: Either::Left(Default::default()),
-            kad_store_config: Default::default(),
-            ping_configuration: Default::default(),
-            identify_configuration: Default::default(),
             addr_config: Default::default(),
             provider: Default::default(),
             keystore: Keystore::in_memory(),
-            connection_idle: Duration::from_secs(30),
-            request_response_config: Either::Left(Default::default()),
             listening_addrs: vec![],
-            transport_configuration: TransportConfig::default(),
-            pubsub_config: PubsubConfig::default(),
-            swarm_configuration: SwarmConfig::default(),
             connection_event_cap: 256,
             span: None,
             protocols: Default::default(),
-            connection_limits: None,
         }
     }
 }
@@ -293,11 +231,10 @@ impl fmt::Debug for IpfsOptions {
 pub struct Ipfs {
     span: Span,
     repo: Repo<DefaultStorage>,
-    key: Keypair,
+    connexa: Connexa<IpfsEvent>,
     keystore: Keystore,
-    identify_conf: IdentifyConfiguration,
-    to_task: CommunicationTask<IpfsEvent>,
-    record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
+    record_key_validator:
+        HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
     _gc_guard: AbortableJoinHandle<()>,
 }
 
@@ -314,108 +251,27 @@ type ReceiverChannel<T> = oneshot::Receiver<Result<T, Error>>;
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 enum IpfsEvent {
-    /// Connect
-    Connect(DialOpts, Channel<ConnectionId>),
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
-    /// Addresses
-    Addresses(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
-    /// Local addresses
-    Listeners(Channel<Vec<Multiaddr>>),
-    /// Local addresses
-    ExternalAddresses(Channel<Vec<Multiaddr>>),
-    /// Connected peers
-    Connected(Channel<Vec<PeerId>>),
-    /// Is Connected
-    IsConnected(PeerId, Channel<bool>),
-    /// Disconnect
-    Disconnect(PeerId, Channel<()>),
-    /// Ban Peer
-    Ban(PeerId, Channel<()>),
-    /// Unban peer
-    Unban(PeerId, Channel<()>),
-    PubsubSubscribe(String, Channel<Option<SubscriptionStream>>),
-    PubsubUnsubscribe(String, Channel<Result<bool, Error>>),
-    PubsubPublish(String, Bytes, Channel<Result<MessageId, PublishError>>),
-    PubsubPeers(Option<String>, Channel<Vec<PeerId>>),
     GetBitswapPeers(Channel<BoxFuture<'static, Vec<PeerId>>>),
     WantList(Option<PeerId>, Channel<BoxFuture<'static, Vec<Cid>>>),
-    PubsubSubscribed(Channel<Vec<String>>),
-    AddListeningAddress(Multiaddr, Channel<Multiaddr>),
-    RemoveListeningAddress(Multiaddr, Channel<()>),
-    AddExternalAddress(Multiaddr, Channel<()>),
-    RemoveExternalAddress(Multiaddr, Channel<()>),
+
     ConnectionEvents(Channel<futures::channel::mpsc::Receiver<ConnectionEvents>>),
-    PeerConnectionEvents(
-        PeerId,
-        Channel<futures::channel::mpsc::Receiver<PeerConnectionEvents>>,
-    ),
-    Bootstrap(Channel<ReceiverChannel<KadResult>>),
+    FindPeerIdentity(PeerId, Channel<ReceiverChannel<identify::Info>>),
     AddPeer(AddPeerOpt, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
-    GetClosestPeers(PeerId, Channel<ReceiverChannel<KadResult>>),
-    FindPeerIdentity(PeerId, Channel<ReceiverChannel<libp2p::identify::Info>>),
-    FindPeer(
-        PeerId,
-        bool,
-        Channel<Either<Vec<Multiaddr>, ReceiverChannel<KadResult>>>,
-    ),
-    GetProviders(Key, Channel<Option<BoxStream<'static, PeerId>>>),
-    Provide(Key, Channel<ReceiverChannel<KadResult>>),
-    DhtMode(DhtMode, Channel<()>),
-    DhtGet(Key, Channel<BoxStream<'static, Record>>),
-    DhtPut(Key, Vec<u8>, Quorum, Channel<ReceiverChannel<KadResult>>),
     GetBootstrappers(OneshotSender<Vec<Multiaddr>>),
     AddBootstrapper(Multiaddr, Channel<Multiaddr>),
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(Channel<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
-    RequestStream(
-        Option<StreamProtocol>,
-        Channel<BoxStream<'static, (PeerId, InboundRequestId, Bytes)>>,
-    ),
-    SendRequest(
-        Option<StreamProtocol>,
-        PeerId,
-        Bytes,
-        Channel<BoxFuture<'static, std::io::Result<Bytes>>>,
-    ),
-    SendRequests(
-        Option<StreamProtocol>,
-        IndexSet<PeerId>,
-        Bytes,
-        Channel<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>>,
-    ),
-    SendResponse(
-        Option<StreamProtocol>,
-        PeerId,
-        InboundRequestId,
-        Bytes,
-        Channel<()>,
-    ),
+
     AddRelay(PeerId, Multiaddr, Channel<()>),
     RemoveRelay(PeerId, Multiaddr, Channel<()>),
     EnableRelay(Option<PeerId>, Channel<()>),
     DisableRelay(PeerId, Channel<()>),
     ListRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
     ListActiveRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
-    //event streams
-    PubsubEventStream(OneshotSender<UnboundedReceiver<InnerPubsubEvent>>),
-
-    RegisterRendezvousNamespace(Namespace, PeerId, Option<u64>, Channel<()>),
-    UnregisterRendezvousNamespace(Namespace, PeerId, Channel<()>),
-    RendezvousNamespaceDiscovery(
-        Option<Namespace>,
-        bool,
-        Option<u64>,
-        PeerId,
-        Channel<HashMap<PeerId, Vec<Multiaddr>>>,
-    ),
-    #[cfg(feature = "stream")]
-    StreamControlHandle(Channel<libp2p_stream::Control>),
-    #[cfg(feature = "stream")]
-    NewStream(StreamProtocol, Channel<libp2p_stream::IncomingStreams>),
-    Exit,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -450,26 +306,8 @@ pub enum PubsubEvent {
     },
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum InnerPubsubEvent {
-    /// Subscription event to a given topic
-    Subscribe { topic: String, peer_id: PeerId },
-
-    /// Unsubscribing event to a given topic
-    Unsubscribe { topic: String, peer_id: PeerId },
-}
-
-type TSwarmEvent<C> = <TSwarm<C> as Stream>::Item;
+type TSwarmEvent<C> = <TSwarm<C> as futures::Stream>::Item;
 type TSwarmEventFn<C> = Arc<dyn Fn(&mut TSwarm<C>, &TSwarmEvent<C>) + Sync + Send>;
-type TTransportFn = Box<
-    dyn Fn(
-            &Keypair,
-            Option<libp2p::relay::client::Transport>,
-        ) -> std::io::Result<Boxed<(PeerId, StreamMuxerBox)>>
-        + Sync
-        + Send
-        + 'static,
->;
 
 #[derive(Debug, Copy, Clone)]
 pub enum FDLimit {
@@ -512,45 +350,51 @@ pub enum ConnectionEvents {
 
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
-pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send> {
+pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
+    init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent>,
     keys: Option<Keypair>,
     options: IpfsOptions,
-    fdlimit: Option<FDLimit>,
     repo_handle: Repo<DefaultStorage>,
     local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
-    // record_validators: HashMap<String, Arc<dyn Fn(&str, &Record) -> bool + Sync + Send>>,
-    record_key_validator: HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>>,
-    custom_behaviour: Option<C>,
-    custom_transport: Option<TTransportFn>,
+    record_key_validator:
+        HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
     gc_config: Option<GCConfig>,
+    custom_behaviour: Option<C>,
     gc_repo_duration: Option<Duration>,
 }
 
-pub type UninitializedIpfsDefault = UninitializedIpfs<libp2p::swarm::dummy::Behaviour>;
+pub type UninitializedIpfsDefault = UninitializedIpfs<dummy::Behaviour>;
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> Default for UninitializedIpfs<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Default
+    for UninitializedIpfs<C>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> UninitializedIpfs<C> {
     /// New uninitualized instance
     pub fn new() -> Self {
+        let keypair = Keypair::generate_ed25519();
+        Self::with_keypair(&keypair)
+    }
+
+    pub fn with_keypair(keypair: &Keypair) -> Self {
         UninitializedIpfs {
+            init: ConnexaBuilder::with_existing_identity(keypair)
+                .expect("Failed to create keypair"),
             keys: None,
             options: Default::default(),
-            fdlimit: None,
             repo_handle: Repo::new_memory(),
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
             local_external_addr: false,
             swarm_event: None,
-            custom_behaviour: None,
-            custom_transport: None,
             gc_config: None,
             gc_repo_duration: None,
+            custom_behaviour: None,
         }
     }
 
@@ -577,8 +421,11 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     }
 
     /// Set a connection limit
-    pub fn set_connection_limits(mut self, connection_limits: ConnectionLimits) -> Self {
-        self.options.connection_limits.replace(connection_limits);
+    pub fn set_connection_limits<F>(mut self, f: F) -> Self
+    where
+        F: Fn(ConnectionLimits) -> ConnectionLimits + Send + Sync + 'static,
+    {
+        self.init = self.init.with_connection_limits_with_config(f);
         self
     }
 
@@ -613,21 +460,15 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         self.with_identify(Default::default())
             .with_autonat()
             .with_bitswap()
-            .with_kademlia(Either::Left(Default::default()), Default::default())
+            .with_kademlia()
             .with_ping(Default::default())
             .with_pubsub(Default::default())
     }
 
     /// Enables kademlia
-    pub fn with_kademlia(
-        mut self,
-        config: impl Into<Either<KadConfig, libp2p::kad::Config>>,
-        store: KadStoreConfig,
-    ) -> Self {
-        let config = config.into();
-        self.options.protocols.kad = true;
-        self.options.kad_configuration = config;
-        self.options.kad_store_config = store;
+    // TODO
+    pub fn with_kademlia(mut self) -> Self {
+        self.init = self.init.with_kademlia();
         self
     }
 
@@ -640,60 +481,85 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     /// Enable mdns
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_mdns(mut self) -> Self {
-        self.options.protocols.mdns = true;
+        self.init = self.init.with_mdns();
         self
     }
 
     /// Enable relay client
     pub fn with_relay(mut self, with_dcutr: bool) -> Self {
-        self.options.protocols.relay_client = true;
-        self.options.protocols.dcutr = with_dcutr;
+        self.init = self.init.with_relay();
+        if with_dcutr {
+            self.init = self.init.with_dcutr();
+        }
         self
     }
 
     /// Enable relay server
     pub fn with_relay_server(mut self, config: RelayConfig) -> Self {
-        self.options.protocols.relay_server = true;
-        self.options.relay_server_config = config;
+        self.init = self
+            .init
+            .with_relay_server_with_config(move |_| config.into());
         self
     }
 
     /// Enable port mapping (AKA UPnP)
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_upnp(mut self) -> Self {
-        self.options.protocols.upnp = true;
+        self.init = self.init.with_upnp();
         self
     }
 
     /// Enables rendezvous server
     pub fn with_rendezvous_server(mut self) -> Self {
-        self.options.protocols.rendezvous_server = true;
+        self.init = self.init.with_rendezvous_server();
         self
     }
 
     /// Enables rendezvous client
     pub fn with_rendezvous_client(mut self) -> Self {
-        self.options.protocols.rendezvous_client = true;
+        self.init = self.init.with_rendezvous_client();
         self
     }
 
     /// Enables identify
-    pub fn with_identify(mut self, config: crate::p2p::IdentifyConfiguration) -> Self {
-        self.options.protocols.identify = true;
-        self.options.identify_configuration = config;
+    pub fn with_identify(mut self, config: IdentifyConfiguration) -> Self {
+        self.init = self
+            .init
+            .with_identify_with_config(config.protocol_version, move |cfg| {
+                cfg.with_agent_version(config.agent_version)
+                    .with_interval(config.interval)
+                    .with_push_listen_addr_updates(config.push_update)
+                    .with_cache_size(config.cache)
+            });
         self
     }
 
     #[cfg(feature = "stream")]
     pub fn with_streams(mut self) -> Self {
-        self.options.protocols.streams = true;
+        self.init = self.init.with_streams();
         self
     }
 
     /// Enables pubsub
     pub fn with_pubsub(mut self, config: PubsubConfig) -> Self {
-        self.options.protocols.pubsub = true;
-        self.options.pubsub_config = config;
+        self.init = self
+            .init
+            .with_gossipsub_with_config(move |keypair, mut builder| {
+                if let Some(protocol) = config.custom_protocol_id {
+                    builder.protocol_id(protocol, gossipsub::Version::V1_1);
+                }
+
+                builder.max_transmit_size(config.max_transmit_size);
+
+                if config.floodsub_compat {
+                    builder.support_floodsub();
+                }
+
+                builder.validation_mode(config.validate.into());
+                let auth =
+                    connexa::prelude::gossipsub::MessageAuthenticity::Signed(keypair.clone());
+                (builder, auth)
+            });
         self
     }
 
@@ -701,36 +567,27 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     /// Note: At this time, this option will only support up to 10 request-response behaviours.
     ///       with any additional being ignored. Additionally, any duplicated protocols that are
     ///       provided will be ignored.
-    pub fn with_request_response(mut self, mut config: Vec<RequestResponseConfig>) -> Self {
-        debug_assert!(config.len() < 10);
-        self.options.protocols.request_response = true;
-        let cfg = match config.is_empty() {
-            true => Either::Left(Default::default()),
-            false if config.len() == 1 => Either::Left(config.remove(0)),
-            false => Either::Right(config),
-        };
-
-        self.options.request_response_config = cfg;
+    pub fn with_request_response(mut self, config: Vec<RequestResponseConfig>) -> Self {
+        self.init = self.init.with_request_response(config);
 
         self
     }
 
     /// Enables autonat
     pub fn with_autonat(mut self) -> Self {
-        self.options.protocols.autonat = true;
+        self.init = self.init.with_autonat_v1();
         self
     }
 
     /// Enables ping
-    pub fn with_ping(mut self, config: PingConfig) -> Self {
-        self.options.protocols.ping = true;
-        self.options.ping_configuration = config;
+    pub fn with_ping(mut self, config: ping::Config) -> Self {
+        self.init = self.init.with_ping_with_config(move |_| config);
         self
     }
 
     /// Set a custom behaviour
     pub fn with_custom_behaviour(mut self, behaviour: C) -> Self {
-        self.custom_behaviour = Some(behaviour);
+        self.custom_behaviour.replace(behaviour);
         self
     }
 
@@ -762,21 +619,20 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Set transport configuration
-    pub fn set_transport_configuration(mut self, config: crate::p2p::TransportConfig) -> Self {
-        self.options.transport_configuration = config;
-        self
-    }
-
     /// Set timeout for idle connections
     pub fn set_idle_connection_timeout(mut self, duration: u64) -> Self {
-        self.options.connection_idle = Duration::from_secs(duration);
+        self.init = self.init.set_swarm_config(move |swarm| {
+            swarm.with_idle_connection_timeout(Duration::from_secs(duration))
+        });
         self
     }
 
     /// Set swarm configuration
-    pub fn set_swarm_configuration(mut self, config: crate::p2p::SwarmConfig) -> Self {
-        self.options.swarm_configuration = config;
+    pub fn set_swarm_configuration<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(swarm::Config) -> swarm::Config + Send + Sync + 'static,
+    {
+        self.init = self.init.set_swarm_config(f);
         self
     }
 
@@ -794,7 +650,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     pub fn set_record_prefix_validator(
         mut self,
         key: &str,
-        callback: Arc<dyn Fn(&str) -> anyhow::Result<Key> + Sync + Send>,
+        callback: Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>,
     ) -> Self {
         self.record_key_validator.insert(key.to_string(), callback);
         self
@@ -836,24 +692,145 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
         self
     }
 
-    /// Set a transport
-    pub fn with_custom_transport(mut self, transport: TTransportFn) -> Self {
-        self.custom_transport = Some(transport);
+    /// Enables quic transport
+    #[cfg(feature = "quic")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_quic(mut self) -> Self {
+        self.init = self.init.enable_quic();
         self
     }
 
-    /// Set pnet
+    /// Enables quic transport with custom configuration
+    #[cfg(feature = "quic")]
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_quic_with_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(
+                connexa::prelude::transport::quic::Config,
+            ) -> connexa::prelude::transport::quic::Config
+            + 'static,
+    {
+        self.init = self.init.enable_quic_with_config(f);
+        self
+    }
+
+    /// Enables tcp transport
+    #[cfg(feature = "tcp")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_tcp(mut self) -> Self {
+        self.init = self.init.enable_tcp();
+        self
+    }
+
+    /// Enables tcp transport with custom configuration
+    #[cfg(feature = "tcp")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_tcp_with_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(
+                connexa::prelude::transport::tcp::Config,
+            ) -> connexa::prelude::transport::tcp::Config
+            + 'static,
+    {
+        self.init = self.init.enable_tcp_with_config(f);
+        self
+    }
+
+    // /// Enables pnet transport
     #[cfg(feature = "pnet")]
-    pub fn with_pnet(mut self, psk: PreSharedKey) -> Self {
-        self.options.transport_configuration.enable_pnet = true;
-        self.options.transport_configuration.pnet_psk = Some(psk);
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_pnet(mut self, psk: PreSharedKey) -> Self {
+        self.init = self.init.enable_pnet(psk);
+        self
+    }
+
+    /// Enables websocket transport
+    #[cfg(feature = "websocket")]
+    pub fn enable_websocket(mut self) -> Self {
+        self.init = self.init.enable_websocket();
+        self
+    }
+
+    /// Enables secure websocket transport
+    #[cfg(feature = "websocket")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_secure_websocket(mut self) -> Self {
+        self.init = self.init.enable_secure_websocket();
+        self
+    }
+
+    /// Enables secure websocket transport
+    #[cfg(feature = "websocket")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_secure_websocket_with_pem(mut self, keypair: String, certs: Vec<String>) -> Self {
+        self.init = self.init.enable_secure_websocket_with_pem(keypair, certs);
+        self
+    }
+
+    /// Enables secure websocket transport
+    #[cfg(feature = "websocket")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_secure_websocket_with_config<F>(mut self, f: F) -> std::io::Result<Self>
+    where
+        F: FnOnce(&Keypair) -> std::io::Result<(Vec<String>, String)>,
+    {
+        self.init = self.init.enable_secure_websocket_with_config(f)?;
+        Ok(self)
+    }
+
+    /// Enables DNS
+    #[cfg(feature = "dns")]
+    pub fn enable_dns(self) -> Self {
+        self.enable_dns_with_resolver(DnsResolver::default())
+    }
+
+    /// Enables DNS with a specific resolver
+    #[cfg(feature = "dns")]
+    pub fn enable_dns_with_resolver(mut self, resolver: DnsResolver) -> Self {
+        self.init = self.init.enable_dns_with_resolver(resolver);
+        self
+    }
+
+    /// Enables WebRTC transport
+    #[cfg(feature = "webrtc")]
+    pub fn enable_webrtc(mut self) -> Self {
+        self.init = self.init.enable_webrtc();
+        self
+    }
+
+    /// Enables WebRTC transport, allowing one to generate a certificate using the provided keypair in the closure.
+    #[cfg(feature = "webrtc")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_webrtc_with_config<F>(mut self, f: F) -> std::io::Result<Self>
+    where
+        F: FnOnce(&Keypair) -> std::io::Result<String>,
+    {
+        self.init = self.init.enable_webrtc_with_config(f)?;
+        Ok(self)
+    }
+
+    /// Enable WebRTC transport with a provided pre-generated pem.
+    #[cfg(feature = "webrtc")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_webrtc_with_pem(self, pem: impl Into<String>) -> Self {
+        let pem = pem.into();
+        self.enable_webrtc_with_config(move |_| Ok(pem))
+            .expect("pem is provided; should not fail")
+    }
+
+    /// Enables memory transport
+    pub fn enable_memory_transport(mut self) -> Self {
+        self.init = self.init.enable_memory_transport();
         self
     }
 
     /// Set file desc limit
     pub fn fd_limit(mut self, limit: FDLimit) -> Self {
-        self.fdlimit = Some(limit);
+        let limit = match limit {
+            FDLimit::Max => FileDescLimit::Max,
+            FDLimit::Custom(n) => FileDescLimit::Custom(n),
+        };
+        self.init = self.init.set_file_descriptor_limit(limit);
         self
     }
 
@@ -875,20 +852,14 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
     /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync.
     pub async fn start(self) -> Result<Ipfs, Error> {
         let UninitializedIpfs {
-            keys,
-            fdlimit,
             mut options,
-            swarm_event,
-            custom_behaviour,
-            custom_transport,
             record_key_validator,
-            local_external_addr,
             repo_handle,
             gc_config,
+            init,
+            custom_behaviour,
             ..
         } = self;
-
-        let keys = keys.unwrap_or(Keypair::generate_ed25519());
 
         let root_span = Option::take(&mut options.span)
             // not sure what would be the best practice with tracing and spans
@@ -902,10 +873,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
         // stored in the executor given to libp2p, used to spawn at least the connections,
         // instrumenting each of those.
-        let exec_span = tracing::trace_span!(parent: &root_span, "exec");
-
-        // instruments the IpfsFuture, the background task.
-        let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
+        // let exec_span = tracing::trace_span!(parent: &root_span, "exec");
+        //
+        // // instruments the IpfsFuture, the background task.
+        // let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
 
         let mut repo = repo_handle;
 
@@ -938,30 +909,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
 
         let repo_events = repo.initialize_channel();
 
-        if let Some(limit) = fdlimit {
-            #[cfg(unix)]
-            {
-                let (_, hard) = rlimit::Resource::NOFILE.get()?;
-                let limit = match limit {
-                    FDLimit::Max => hard,
-                    FDLimit::Custom(limit) => limit,
-                };
-
-                let target = std::cmp::min(hard, limit);
-                rlimit::Resource::NOFILE.set(target, hard)?;
-                let (soft, _) = rlimit::Resource::NOFILE.get()?;
-                if soft < 2048 {
-                    error!("Limit is too low: {soft}");
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                warn!("Cannot set {limit:?}. Can only set a fd limit on unix systems. Ignoring...")
-            }
-        }
-
-        let id_conf = options.identify_configuration.clone();
-
         let keystore = options.keystore.clone();
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
@@ -984,34 +931,9 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             }
         };
 
-        let count = blocks.len();
+        let _count = blocks.len();
 
-        let store_config = &mut options.kad_store_config;
-
-        match store_config.memory.as_mut() {
-            Some(memory_config) => {
-                memory_config.max_provided_keys += count;
-            }
-            None => {
-                store_config.memory = Some(MemoryStoreConfig {
-                    //Provide a buffer to the max amount of provided keys
-                    max_provided_keys: (50 * 1024) + count,
-                    ..Default::default()
-                })
-            }
-        }
-
-        let swarm = create_swarm(
-            &keys,
-            &options,
-            &repo,
-            exec_span,
-            (custom_behaviour, custom_transport),
-        )?;
-
-        let IpfsOptions {
-            listening_addrs, ..
-        } = options;
+        let listening_addrs = options.listening_addrs.clone();
 
         let gc_handle = gc_config.map(|config| {
             async_rt::task::spawn_abortable({
@@ -1084,59 +1006,60 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send> UninitializedIpfs<C> {
             })
         }).unwrap_or(AbortableJoinHandle::empty());
 
-        let mut fut = task::IpfsTask::new(swarm, &repo, options.connection_event_cap);
-        fut.swarm_event = swarm_event;
-        fut.local_external_addr = local_external_addr;
+        let mut context = context::IpfsContext::new(&repo, options.connection_event_cap);
+        context.repo_events.replace(repo_events);
 
-        for addr in listening_addrs.into_iter() {
-            match fut.swarm.listen_on(addr) {
-                Ok(id) => {
-                    let (tx, _rx) = oneshot_channel();
-                    fut.pending_add_listener.insert(id, tx);
+        let connexa = init
+            .with_custom_behaviour_with_context((options, repo.clone()), |keys, (options, repo)| {
+                create_create_behaviour(keys, &options, &repo, custom_behaviour)
+            })
+            .set_context(context)
+            // .set_custom_event_callback(|swarm, context, event| {
+            //     context.handle_swarm_event(swarm, event)
+            // })
+            .set_custom_task_callback(|swarm, context, event| context.handle_event(swarm, event))
+            .set_pollable_callback(|cx, swarm, context| {
+                let custom = swarm
+                    .behaviour_mut()
+                    .custom
+                    .as_mut()
+                    .expect("behaviour enabled");
+                while let Poll::Ready(Some(event)) = context.repo_events.poll_next_unpin(cx) {
+                    context.handle_repo_event(custom, event);
                 }
-                _ => continue,
-            };
-        }
+                Poll::Pending
+            })
+            .build()?;
 
-        for block in blocks {
-            if let Some(kad) = fut.swarm.behaviour_mut().kademlia.as_mut() {
-                let key = Key::from(block.hash().to_bytes());
-                match kad.start_providing(key) {
-                    Ok(id) => {
-                        let (tx, _rx) = oneshot_channel();
-                        fut.kad_subscriptions.insert(id, tx);
-                    }
-                    Err(e) => match e {
-                        libp2p::kad::store::Error::MaxProvidedKeys => break,
-                        _ => unreachable!(),
-                    },
-                };
+        FuturesUnordered::from_iter(listening_addrs.into_iter().map({
+            let connexa = connexa.clone();
+            move |addr| {
+                let connexa = connexa.clone();
+                async move { connexa.swarm().listen_on(addr).await }
             }
-        }
+        }))
+        .collect::<Vec<_>>()
+        .await;
 
-        let main_handle = async_rt::task::spawn_coroutine_with_context(
-            (repo_events, swarm_span, fut),
-            |(r_events, swarm_span, mut fut), recv: futures::channel::mpsc::Receiver<IpfsEvent>| async move {
-                fut.from_facade.replace(recv.fuse());
-                fut.repo_events.replace(r_events.fuse());
-                //Note: For now this is not configurable as its meant for internal testing purposes but may change in the future
-                let as_fut = false;
-                let fut = if as_fut {
-                    fut.boxed()
-                } else {
-                    fut.run().boxed()
-                };
-                fut.instrument(swarm_span).await
-            },
-        );
+        // spawn a task to handle providing blocks in the background
+        async_rt::task::dispatch({
+            let connexa = connexa.clone();
+            async move {
+                futures::stream::iter(blocks)
+                    .then(|block| {
+                        let connexa = connexa.clone();
+                        async move { connexa.dht().provide(block).await }
+                    })
+                    .collect::<Vec<_>>()
+                    .await;
+            }
+        });
 
         let ipfs = Ipfs {
             span: facade_span,
             repo,
-            identify_conf: id_conf,
-            key: keys.clone(),
             keystore,
-            to_task: main_handle,
+            connexa,
             record_key_validator,
             _gc_guard: gc_handle,
         };
@@ -1353,97 +1276,62 @@ impl Ipfs {
 
     /// Connects to the peer
     pub async fn connect(&self, target: impl Into<DialOpts>) -> Result<ConnectionId, Error> {
-        async move {
-            let target = target.into();
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Connect(target, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .dial(target)
+            .await
+            .map_err(anyhow::Error::from)
     }
 
     /// Returns known peer addresses
     pub async fn addrs(&self) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task.clone().send(IpfsEvent::Addresses(tx)).await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        // self.connexa.swarm().
+        unreachable!()
     }
 
     /// Checks whether there is an established connection to a peer.
     pub async fn is_connected(&self, peer_id: PeerId) -> Result<bool, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::IsConnected(peer_id, tx))
-                .await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .is_connected(peer_id)
+            .await
+            .map_err(anyhow::Error::from)
     }
 
     /// Returns the connected peers
     pub async fn connected(&self) -> Result<Vec<PeerId>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task.clone().send(IpfsEvent::Connected(tx)).await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .connected_peers()
+            .await
+            .map_err(anyhow::Error::from)
     }
 
     /// Disconnects a given peer.
     pub async fn disconnect(&self, target: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Disconnect(target, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .disconnect(Either::Left(target))
+            .await
+            .map_err(anyhow::Error::from)
     }
 
     /// Bans a peer.
     pub async fn ban_peer(&self, target: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Ban(target, tx))
-                .await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .blacklist()
+            .add(target)
+            .await
+            .map_err(anyhow::Error::from)
     }
 
     /// Unbans a peer.
     pub async fn unban_peer(&self, target: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Unban(target, tx))
-                .await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .blacklist()
+            .remove(target)
+            .await
+            .map_err(Into::into)
     }
 
     /// Returns the peer identity information. If no peer id is supplied the local node identity is used.
@@ -1453,9 +1341,8 @@ impl Ipfs {
                 Some(peer_id) => {
                     let (tx, rx) = oneshot_channel();
 
-                    self.to_task
-                        .clone()
-                        .send(IpfsEvent::FindPeerIdentity(peer_id, tx))
+                    self.connexa
+                        .send_custom_event(IpfsEvent::FindPeerIdentity(peer_id, tx))
                         .await?;
 
                     rx.await??.await?.map(PeerInfo::from)
@@ -1477,7 +1364,9 @@ impl Ipfs {
                     let mut addresses = Vec::from_iter(addresses);
 
                     let (tx, rx) = oneshot_channel();
-                    self.to_task.clone().send(IpfsEvent::Protocol(tx)).await?;
+                    self.connexa
+                        .send_custom_event(IpfsEvent::Protocol(tx))
+                        .await?;
 
                     let protocols = rx
                         .await?
@@ -1485,7 +1374,7 @@ impl Ipfs {
                         .filter_map(|s| StreamProtocol::try_from_owned(s.clone()).ok())
                         .collect();
 
-                    let public_key = self.key.public();
+                    let public_key = self.keypair().public();
                     let peer_id = public_key.to_peer_id();
 
                     for addr in &mut addresses {
@@ -1497,8 +1386,8 @@ impl Ipfs {
                     let info = PeerInfo {
                         peer_id,
                         public_key,
-                        protocol_version: self.identify_conf.protocol_version.clone(),
-                        agent_version: self.identify_conf.agent_version.clone(),
+                        protocol_version: String::new(), // TODO
+                        agent_version: String::new(),    // TODO
                         listen_addrs: addresses,
                         protocols,
                         observed_addr: None,
@@ -1512,154 +1401,68 @@ impl Ipfs {
         .await
     }
 
-    /// Subscribes to a given topic. Can be done at most once without unsubscribing in the between.
-    /// The subscription can be unsubscribed by dropping the stream or calling
-    /// [`Ipfs::pubsub_unsubscribe`].
-    pub async fn pubsub_subscribe(
-        &self,
-        topic: impl Into<String>,
-    ) -> Result<SubscriptionStream, Error> {
-        async move {
-            let topic = topic.into();
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PubsubSubscribe(topic.clone(), tx))
-                .await?;
-
-            rx.await??
-                .ok_or_else(|| format_err!("already subscribed to {:?}", topic))
-        }
-        .instrument(self.span.clone())
-        .await
+    /// Subscribes to a given topic. Can unsubscribe by calling [`Ipfs::pubsub_unsubscribe`].
+    pub async fn pubsub_subscribe(&self, topic: impl IntoGossipsubTopic) -> Result<(), Error> {
+        self.connexa
+            .gossipsub()
+            .subscribe(topic)
+            .await
+            .map_err(anyhow::Error::from)
     }
 
-    /// Stream that returns [`PubsubEvent`] for a given topic. if a topic is not supplied, it will provide all events emitted for any topic.
-    pub async fn pubsub_events(
+    /// Creates a stream to listen on events of a given topic
+    pub async fn pubsub_listener(
         &self,
-        topic: impl Into<Option<String>>,
-    ) -> Result<BoxStream<'static, PubsubEvent>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
+        topic: impl IntoGossipsubTopic,
+    ) -> Result<BoxStream<'static, connexa::prelude::GossipsubEvent>, Error> {
+        let st = self
+            .connexa
+            .gossipsub()
+            .listener(topic)
+            .await
+            .map_err(anyhow::Error::from)?;
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PubsubEventStream(tx))
-                .await?;
-
-            let receiver = rx.await?;
-
-            let defined_topic = topic.into();
-
-            let stream = receiver.filter_map(move |event| {
-                let defined_topic = defined_topic.clone();
-                async move {
-                    let ev = match event {
-                        InnerPubsubEvent::Subscribe { topic, peer_id } => {
-                            let topic = match defined_topic {
-                                Some(defined_topic) if defined_topic.eq(&topic) => None,
-                                Some(defined_topic) if defined_topic.ne(&topic) => return None,
-                                Some(_) => return None,
-                                None => Some(topic),
-                            };
-                            PubsubEvent::Subscribe { peer_id, topic }
-                        }
-                        InnerPubsubEvent::Unsubscribe { topic, peer_id } => {
-                            let topic = match defined_topic {
-                                Some(defined_topic) if defined_topic.eq(&topic) => None,
-                                Some(defined_topic) if defined_topic.ne(&topic) => return None,
-                                Some(_) => return None,
-                                None => Some(topic),
-                            };
-                            PubsubEvent::Unsubscribe { peer_id, topic }
-                        }
-                    };
-
-                    Some(ev)
-                }
-            });
-
-            Ok(stream.boxed())
-        }
-        .instrument(self.span.clone())
-        .await
+        Ok(st)
     }
 
     /// Publishes to the topic which may have been subscribed to earlier
     pub async fn pubsub_publish(
         &self,
-        topic: impl Into<String>,
+        topic: impl IntoGossipsubTopic,
         data: impl Into<Bytes>,
-    ) -> Result<MessageId, Error> {
-        async move {
-            let topic = topic.into();
-            let data = data.into();
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PubsubPublish(topic, data, tx))
-                .await?;
-            rx.await??.map_err(anyhow::Error::from)
-        }
-        .instrument(self.span.clone())
-        .await
+    ) -> Result<(), Error> {
+        self.connexa
+            .gossipsub()
+            .publish(topic, data)
+            .await
+            .map_err(Into::into)
     }
 
     /// Forcibly unsubscribes a previously made [`SubscriptionStream`], which could also be
     /// unsubscribed by dropping the stream.
     ///
     /// Returns true if unsubscription was successful
-    pub async fn pubsub_unsubscribe(&self, topic: impl Into<String>) -> Result<bool, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PubsubUnsubscribe(topic.into(), tx))
-                .await?;
-
-            rx.await??
-        }
-        .instrument(self.span.clone())
-        .await
+    pub async fn pubsub_unsubscribe(&self, topic: impl IntoGossipsubTopic) -> Result<(), Error> {
+        self.connexa
+            .gossipsub()
+            .unsubscribe(topic)
+            .await
+            .map_err(Into::into)
     }
 
-    /// Returns all known pubsub peers with the optional topic filter
-    pub async fn pubsub_peers(
-        &self,
-        topic: impl Into<Option<String>>,
-    ) -> Result<Vec<PeerId>, Error> {
-        async move {
-            let topic = topic.into();
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PubsubPeers(topic, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    /// Returns all known pubsub peers within a given topic
+    pub async fn pubsub_peers(&self, topic: impl IntoGossipsubTopic) -> Result<Vec<PeerId>, Error> {
+        self.connexa
+            .gossipsub()
+            .peers(topic)
+            .await
+            .map_err(Into::into)
     }
 
     /// Returns all currently subscribed topics
     pub async fn pubsub_subscribed(&self) -> Result<Vec<String>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PubsubSubscribed(tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        // self.connexa.gossipsub().
+        unimplemented!()
     }
 
     /// Subscribe to a stream of request. If a protocol is not supplied,
@@ -1669,19 +1472,11 @@ impl Ipfs {
         &self,
         protocol: impl Into<OptionalStreamProtocol>,
     ) -> Result<BoxStream<'static, (PeerId, InboundRequestId, Bytes)>, Error> {
-        let protocol = protocol.into().into_inner();
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RequestStream(protocol, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .request_response()
+            .listen_for_requests(protocol)
+            .await
+            .map_err(Into::into)
     }
 
     /// Sends a request to a specific peer.
@@ -1692,24 +1487,11 @@ impl Ipfs {
         peer_id: PeerId,
         request: impl IntoRequest,
     ) -> Result<Bytes, Error> {
-        let (protocol, request) = request.into_request();
-        async move {
-            if request.is_empty() {
-                return Err(std::io::Error::other("request is empty").into());
-            }
-
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::SendRequest(protocol, peer_id, request, tx))
-                .await?;
-
-            let fut = rx.await??;
-            fut.await.map_err(anyhow::Error::from)
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .request_response()
+            .send_request(peer_id, request)
+            .await
+            .map_err(Into::into)
     }
 
     /// Sends a request to a list of peers.
@@ -1720,28 +1502,11 @@ impl Ipfs {
         peers: impl IntoIterator<Item = PeerId>,
         request: impl IntoRequest,
     ) -> Result<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>, Error> {
-        let peers = IndexSet::from_iter(peers);
-        let (protocol, request) = request.into_request();
-
-        async move {
-            if peers.is_empty() {
-                return Err(std::io::Error::other("no peers were provided").into());
-            }
-            if request.is_empty() {
-                return Err(std::io::Error::other("request is empty").into());
-            }
-
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::SendRequests(protocol, peers, request, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .request_response()
+            .send_requests(peers, request)
+            .await
+            .map_err(Into::into)
     }
 
     /// Sends a request to a specific peer.
@@ -1753,23 +1518,11 @@ impl Ipfs {
         id: InboundRequestId,
         response: impl IntoRequest,
     ) -> Result<(), Error> {
-        let (protocol, response) = response.into_request();
-        async move {
-            if response.is_empty() {
-                return Err(std::io::Error::other("response is empty").into());
-            }
-
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::SendResponse(protocol, peer_id, id, response, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .request_response()
+            .send_response(peer_id, id, response)
+            .await
+            .map_err(Into::into)
     }
 
     /// Returns the known wantlist for the local node when the `peer` is `None` or the wantlist of the given `peer`
@@ -1781,9 +1534,8 @@ impl Ipfs {
             let peer = peer.into();
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::WantList(peer, tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::WantList(peer, tx))
                 .await?;
 
             Ok(rx.await??.await)
@@ -1793,39 +1545,25 @@ impl Ipfs {
     }
 
     #[cfg(feature = "stream")]
-    pub async fn stream_control(&self) -> Result<libp2p_stream::Control, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::StreamControlHandle(tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    pub async fn stream_control(&self) -> Result<connexa::prelude::stream::Control, Error> {
+        self.connexa
+            .stream()
+            .control_handle()
+            .await
+            .map_err(Into::into)
     }
 
     #[cfg(feature = "stream")]
     pub async fn new_stream(
         &self,
         protocol: impl IntoStreamProtocol,
-    ) -> Result<libp2p_stream::IncomingStreams, Error> {
-        let protocol: StreamProtocol = protocol.into_protocol()?;
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::NewStream(protocol, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    ) -> Result<connexa::prelude::stream::IncomingStreams, Error> {
+        let protocol = protocol.into_protocol()?;
+        self.connexa
+            .stream()
+            .new_stream(protocol)
+            .await
+            .map_err(Into::into)
     }
 
     #[cfg(feature = "stream")]
@@ -1833,18 +1571,12 @@ impl Ipfs {
         &self,
         peer_id: PeerId,
         protocol: impl IntoStreamProtocol,
-    ) -> Result<libp2p::Stream, Error> {
-        let protocol: StreamProtocol = protocol.into_protocol()?;
-        async move {
-            let mut control = self.stream_control().await?;
-            let stream = control
-                .open_stream(peer_id, protocol)
-                .await
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            Ok(stream)
-        }
-        .instrument(self.span.clone())
-        .await
+    ) -> Result<connexa::prelude::Stream, Error> {
+        self.connexa
+            .stream()
+            .open_stream(peer_id, protocol)
+            .await
+            .map_err(Into::into)
     }
 
     /// Returns a list of local blocks
@@ -1859,108 +1591,78 @@ impl Ipfs {
 
     /// Returns local listening addresses
     pub async fn listening_addresses(&self) -> Result<Vec<Multiaddr>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task.clone().send(IpfsEvent::Listeners(tx)).await?;
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .listening_addresses()
+            .await
+            .map_err(Into::into)
     }
 
     /// Returns external addresses
     pub async fn external_addresses(&self) -> Result<Vec<Multiaddr>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::ExternalAddresses(tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .external_addresses()
+            .await
+            .map_err(Into::into)
     }
 
     /// Add a given multiaddr as a listening address. Will fail if the address is unsupported, or
     /// if it is already being listened on. Currently will invoke `Swarm::listen_on` internally,
     /// returning the first `Multiaddr` that is being listened on.
-    pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<Multiaddr, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
+    pub async fn add_listening_address(&self, addr: Multiaddr) -> Result<ListenerId, Error> {
+        self.connexa
+            .swarm()
+            .listen_on(addr)
+            .await
+            .map_err(Into::into)
+    }
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::AddListeningAddress(addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    pub async fn get_listening_address(&self, id: ListenerId) -> Result<Vec<Multiaddr>, Error> {
+        self.connexa
+            .swarm()
+            .get_listening_addresses(id)
+            .await
+            .map_err(Into::into)
     }
 
     /// Stop listening on a previously added listening address. Fails if the address is not being
     /// listened to.
     ///
     /// The removal of all listening addresses added through unspecified addresses is not supported.
-    pub async fn remove_listening_address(&self, addr: Multiaddr) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RemoveListeningAddress(addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    pub async fn remove_listening_address(&self, id: ListenerId) -> Result<(), Error> {
+        self.connexa
+            .swarm()
+            .remove_listener(id)
+            .await
+            .map_err(Into::into)
     }
 
     /// Add a given multiaddr as a external address to indenticate how our node can be reached.
     /// Note: We will not perform checks
     pub async fn add_external_address(&self, addr: Multiaddr) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::AddExternalAddress(addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .add_external_address(addr)
+            .await
+            .map_err(Into::into)
     }
 
     /// Removes a previously added external address.
     pub async fn remove_external_address(&self, addr: Multiaddr) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RemoveExternalAddress(addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .swarm()
+            .remove_external_address(addr)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnectionEvents>, Error> {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::ConnectionEvents(tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::ConnectionEvents(tx))
                 .await?;
 
             let rx = rx.await??;
@@ -1972,21 +1674,32 @@ impl Ipfs {
 
     pub async fn peer_connection_events(
         &self,
-        peer_id: PeerId,
+        target: PeerId,
     ) -> Result<BoxStream<'static, PeerConnectionEvents>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
+        let mut st = self.connexa.swarm().listener().await?;
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::PeerConnectionEvents(peer_id, tx))
-                .await?;
+        let st = async_stream::stream! {
+            while let Some(event) = st.next().await {
+                yield match event {
+                    ConnectionEvent::ConnectionEstablished { peer_id, connection_id, endpoint, .. } if peer_id == target => {
+                        match endpoint {
+                            ConnectedPoint::Listener { send_back_addr, .. } => {
+                                PeerConnectionEvents::IncomingConnection { connection_id, addr: send_back_addr }
+                            }
+                            ConnectedPoint::Dialer { address, ..  } => {
+                                PeerConnectionEvents::OutgoingConnection { connection_id, addr: address }
+                            }
+                        }
+                    },
+                    ConnectionEvent::ConnectionClosed { peer_id, connection_id, .. } if peer_id == target => {
+                        PeerConnectionEvents::ClosedConnection { connection_id }
+                    }
+                    _ => continue,
+                }
+            }
+        };
 
-            let rx = rx.await??;
-            Ok(rx.boxed())
-        }
-        .instrument(self.span.clone())
-        .await
+        Ok(st.boxed())
     }
 
     /// Obtain the addresses associated with the given `PeerId`; they are first searched for locally
@@ -1994,63 +1707,34 @@ impl Ipfs {
     /// when it's finished, the newly added DHT records are checked for the existence of the desired
     /// `peer_id` and if it's there, the list of its known addresses is returned.
     pub async fn find_peer(&self, peer_id: PeerId) -> Result<Vec<Multiaddr>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::FindPeer(peer_id, false, tx))
-                .await?;
-
-            match rx.await?? {
-                Either::Left(addrs) if !addrs.is_empty() => Ok(addrs),
-                Either::Left(_) => unreachable!(),
-                Either::Right(future) => {
-                    future.await??;
-
-                    let (tx, rx) = oneshot_channel();
-
-                    self.to_task
-                        .clone()
-                        .send(IpfsEvent::FindPeer(peer_id, true, tx))
-                        .await?;
-
-                    match rx.await?? {
-                        Either::Left(addrs) if !addrs.is_empty() => Ok(addrs),
-                        _ => Err(anyhow!("couldn't find peer {}", peer_id)),
-                    }
-                }
-            }
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .dht()
+            .find_peer(peer_id)
+            .await
+            .map_err(Into::into)
+            .map(|list| list.into_iter().map(|info| info.addrs).flatten().collect())
     }
 
     /// Performs a DHT lookup for providers of a value to the given key.
     ///
     /// Returns a list of peers found providing the Cid.
-    pub async fn get_providers(&self, cid: Cid) -> Result<BoxStream<'static, PeerId>, Error> {
-        let key = cid.hash().to_bytes();
-        self.dht_get_providers(key).await
+    pub async fn get_providers(
+        &self,
+        cid: Cid,
+    ) -> Result<BoxStream<'static, std::io::Result<HashSet<PeerId>>>, Error> {
+        self.dht_get_providers(cid).await
     }
 
     /// Performs a DHT lookup for providers of a value to the given key.
     pub async fn dht_get_providers(
         &self,
-        key: impl Into<Key>,
-    ) -> Result<BoxStream<'static, PeerId>, Error> {
-        let key = key.into();
-        async move {
-            let (tx, rx) = oneshot_channel();
-            self.to_task
-                .clone()
-                .send(IpfsEvent::GetProviders(key, tx))
-                .await?;
-
-            rx.await??.ok_or_else(|| anyhow!("Provider already exist"))
-        }
-        .instrument(self.span.clone())
-        .await
+        key: impl ToRecordKey,
+    ) -> Result<BoxStream<'static, std::io::Result<HashSet<PeerId>>>, Error> {
+        self.connexa
+            .dht()
+            .get_providers(key)
+            .await
+            .map_err(Into::into)
     }
 
     /// Establishes the node as a provider of a block with the given Cid: it publishes a provider
@@ -2073,27 +1757,8 @@ impl Ipfs {
     /// record with the given key and the node's PeerId to the peers closest to the key. The
     /// publication of provider records is periodically repeated as per the interval specified in
     /// `libp2p`'s  `KademliaConfig`.
-    pub async fn dht_provide(&self, key: impl Into<Key>) -> Result<(), Error> {
-        let key = key.into();
-        let kad_result = async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::Provide(key, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await?
-        .await;
-
-        match kad_result? {
-            Ok(KadResult::Complete) => Ok(()),
-            Ok(_) => unreachable!(),
-            Err(e) => Err(anyhow!(e)),
-        }
+    pub async fn dht_provide(&self, key: impl ToRecordKey) -> Result<(), Error> {
+        self.connexa.dht().provide(key).await.map_err(Into::into)
     }
 
     /// Fetches the block, and, if set, recursively walk the graph loading all the blocks to the blockstore.
@@ -2105,75 +1770,37 @@ impl Ipfs {
     /// node must have at least one known peer in its routing table in order for the query
     /// to return any values.
     pub async fn get_closest_peers(&self, peer_id: PeerId) -> Result<Vec<PeerId>, Error> {
-        let kad_result = async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::GetClosestPeers(peer_id, tx))
-                .await?;
-
-            Ok(rx.await??).map_err(|e: String| anyhow!(e))
-        }
-        .instrument(self.span.clone())
-        .await?
-        .await;
-
-        match kad_result? {
-            Ok(KadResult::Peers(closest)) => Ok(closest),
-            Ok(_) => unreachable!(),
-            Err(e) => Err(anyhow!(e)),
-        }
+        self.connexa
+            .dht()
+            .find_peer(peer_id)
+            .await
+            .map_err(Into::into)
+            .map(|list| list.into_iter().map(|info| info.peer_id).collect())
     }
 
     /// Change the DHT mode
     pub async fn dht_mode(&self, mode: DhtMode) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::DhtMode(mode, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        let mode = match mode {
+            DhtMode::Client => Some(Mode::Client),
+            DhtMode::Server => Some(Mode::Server),
+            DhtMode::Auto => None,
+        };
+        self.connexa.dht().set_mode(mode).await.map_err(Into::into)
     }
 
     /// Attempts to look a key up in the DHT and returns the values found in the records
     /// containing that key.
-    pub async fn dht_get<T: AsRef<[u8]>>(
+    pub async fn dht_get(
         &self,
-        key: T,
+        key: impl ToRecordKey,
     ) -> Result<BoxStream<'static, Record>, Error> {
-        async move {
-            let key = key.as_ref();
+        let st = self.connexa.dht().get(key).await?;
+        let st = st
+            .filter_map(|result| async move { result.ok() })
+            .map(|record| record.record)
+            .boxed();
 
-            let key_str = String::from_utf8_lossy(key);
-
-            let key = if let Ok((prefix, _)) = split_dht_key(&key_str) {
-                if let Some(key_fn) = self.record_key_validator.get(prefix) {
-                    key_fn(&key_str)?
-                } else {
-                    Key::from(key.to_vec())
-                }
-            } else {
-                Key::from(key.to_vec())
-            };
-
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::DhtGet(key, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        Ok(st)
     }
 
     /// Stores the given key + value record locally and replicates it in the DHT. It doesn't
@@ -2182,42 +1809,28 @@ impl Ipfs {
     pub async fn dht_put(
         &self,
         key: impl AsRef<[u8]>,
-        value: impl Into<Vec<u8>>,
+        value: impl Into<Bytes>,
         quorum: Quorum,
     ) -> Result<(), Error> {
-        let kad_result = async move {
-            let key = key.as_ref();
+        let key = key.as_ref();
 
-            let key_str = String::from_utf8_lossy(key);
+        let key_str = String::from_utf8_lossy(key);
 
-            let key = if let Ok((prefix, _)) = split_dht_key(&key_str) {
-                if let Some(key_fn) = self.record_key_validator.get(prefix) {
-                    key_fn(&key_str)?
-                } else {
-                    Key::from(key.to_vec())
-                }
+        let key = if let Ok((prefix, _)) = split_dht_key(&key_str) {
+            if let Some(key_fn) = self.record_key_validator.get(prefix) {
+                key_fn(&key_str)?
             } else {
-                Key::from(key.to_vec())
-            };
+                RecordKey::from(key.to_vec())
+            }
+        } else {
+            RecordKey::from(key.to_vec())
+        };
 
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::DhtPut(key, value.into(), quorum, tx))
-                .await?;
-
-            Ok(rx.await?).map_err(|e: String| anyhow!(e))
-        }
-        .instrument(self.span.clone())
-        .await??
-        .await;
-
-        match kad_result? {
-            Ok(KadResult::Complete) => Ok(()),
-            Ok(_) => unreachable!(),
-            Err(e) => Err(anyhow!(e)),
-        }
+        self.connexa
+            .dht()
+            .put(key, value, quorum)
+            .await
+            .map_err(Into::into)
     }
 
     /// Add relay address
@@ -2225,9 +1838,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::AddRelay(peer_id, addr, tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::AddRelay(peer_id, addr, tx))
                 .await?;
 
             rx.await?
@@ -2241,9 +1853,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RemoveRelay(peer_id, addr, tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::RemoveRelay(peer_id, addr, tx))
                 .await?;
 
             rx.await?
@@ -2259,12 +1870,15 @@ impl Ipfs {
 
             match active {
                 true => {
-                    self.to_task
-                        .clone()
-                        .send(IpfsEvent::ListActiveRelays(tx))
+                    self.connexa
+                        .send_custom_event(IpfsEvent::ListActiveRelays(tx))
                         .await?
                 }
-                false => self.to_task.clone().send(IpfsEvent::ListRelays(tx)).await?,
+                false => {
+                    self.connexa
+                        .send_custom_event(IpfsEvent::ListRelays(tx))
+                        .await?
+                }
             };
 
             rx.await?
@@ -2287,9 +1901,8 @@ impl Ipfs {
             let peer_id = peer_id.into();
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::EnableRelay(peer_id, tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::EnableRelay(peer_id, tx))
                 .await?;
 
             rx.await?
@@ -2303,9 +1916,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::DisableRelay(peer_id, tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::DisableRelay(peer_id, tx))
                 .await?;
 
             rx.await?
@@ -2316,78 +1928,41 @@ impl Ipfs {
 
     pub async fn rendezvous_register_namespace(
         &self,
-        namespace: impl Into<String>,
+        namespace: impl IntoNamespace,
         ttl: impl Into<Option<u64>>,
         peer_id: PeerId,
     ) -> Result<(), Error> {
-        async move {
-            let namespace = Namespace::new(namespace.into())?;
-            let ttl = ttl.into();
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RegisterRendezvousNamespace(
-                    namespace, peer_id, ttl, tx,
-                ))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .rendezvous()
+            .register(peer_id, namespace, ttl.into())
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn rendezvous_unregister_namespace(
         &self,
-        namespace: impl Into<String>,
+        namespace: impl IntoNamespace,
         peer_id: PeerId,
     ) -> Result<(), Error> {
-        async move {
-            let namespace = Namespace::new(namespace.into())?;
-
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::UnregisterRendezvousNamespace(
-                    namespace, peer_id, tx,
-                ))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .rendezvous()
+            .unregister(peer_id, namespace)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn rendezvous_namespace_discovery(
         &self,
-        namespace: impl Into<String>,
+        namespace: impl IntoNamespace,
         ttl: impl Into<Option<u64>>,
         peer_id: PeerId,
     ) -> Result<HashMap<PeerId, Vec<Multiaddr>>, Error> {
-        async move {
-            let namespace = Namespace::new(namespace.into())?;
-            let ttl = ttl.into();
-
-            let (tx, rx) = oneshot_channel();
-
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RendezvousNamespaceDiscovery(
-                    Some(namespace),
-                    false,
-                    ttl,
-                    peer_id,
-                    tx,
-                ))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .rendezvous()
+            .discovery(peer_id, namespace, ttl.into(), None)
+            .await
+            .map(|(_, list)| HashMap::from_iter(list))
+            .map_err(anyhow::Error::from)
     }
 
     /// Walk the given Iplds' links up to `max_depth` (or indefinitely for `None`). Will return
@@ -2399,7 +1974,7 @@ impl Ipfs {
         iplds: Iter,
         max_depth: Option<u64>,
         unique: bool,
-    ) -> impl Stream<Item = Result<refs::Edge, anyhow::Error>> + Send + 'a
+    ) -> impl futures::Stream<Item = Result<refs::Edge, anyhow::Error>> + Send + 'a
     where
         Iter: IntoIterator<Item = (Cid, Ipld)> + Send + 'a,
     {
@@ -2411,9 +1986,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::GetBootstrappers(tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::GetBootstrappers(tx))
                 .await?;
 
             Ok(rx.await?)
@@ -2429,9 +2003,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::AddBootstrapper(addr, tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::AddBootstrapper(addr, tx))
                 .await?;
 
             rx.await?
@@ -2447,9 +2020,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::RemoveBootstrapper(addr, tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::RemoveBootstrapper(addr, tx))
                 .await?;
 
             rx.await?
@@ -2463,9 +2035,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::ClearBootstrappers(tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::ClearBootstrappers(tx))
                 .await?;
 
             rx.await?
@@ -2480,9 +2051,8 @@ impl Ipfs {
         async move {
             let (tx, rx) = oneshot_channel();
 
-            self.to_task
-                .clone()
-                .send(IpfsEvent::DefaultBootstrap(tx))
+            self.connexa
+                .send_custom_event(IpfsEvent::DefaultBootstrap(tx))
                 .await?;
 
             rx.await?
@@ -2497,18 +2067,7 @@ impl Ipfs {
     /// ran with random keys so that the buckets farther from the closest neighbor also
     /// get refreshed.
     pub async fn bootstrap(&self) -> Result<(), Error> {
-        let (tx, rx) = oneshot_channel();
-
-        self.to_task.clone().send(IpfsEvent::Bootstrap(tx)).await?;
-        let fut = rx.await??;
-
-        async_rt::task::dispatch(async move {
-            if let Err(e) = fut.await.map_err(|e| anyhow!(e)) {
-                tracing::error!(error = %e, "failed to bootstrap");
-            }
-        });
-
-        Ok(())
+        self.connexa.dht().bootstrap().await.map_err(Into::into)
     }
 
     /// Add address of a peer to the address book
@@ -2520,13 +2079,11 @@ impl Ipfs {
 
         let (tx, rx) = oneshot::channel();
 
-        self.to_task
-            .clone()
-            .send(IpfsEvent::AddPeer(opt, tx))
+        self.connexa
+            .send_custom_event(IpfsEvent::AddPeer(opt, tx))
             .await?;
 
         rx.await??;
-
         Ok(())
     }
 
@@ -2534,9 +2091,8 @@ impl Ipfs {
     pub async fn remove_peer(&self, peer_id: PeerId) -> Result<bool, Error> {
         let (tx, rx) = oneshot::channel();
 
-        self.to_task
-            .clone()
-            .send(IpfsEvent::RemovePeer(peer_id, None, tx))
+        self.connexa
+            .send_custom_event(IpfsEvent::RemovePeer(peer_id, None, tx))
             .await?;
 
         rx.await.map_err(anyhow::Error::from)?
@@ -2550,21 +2106,19 @@ impl Ipfs {
     ) -> Result<bool, Error> {
         let (tx, rx) = oneshot::channel();
 
-        self.to_task
-            .clone()
-            .send(IpfsEvent::RemovePeer(peer_id, Some(addr), tx))
+        self.connexa
+            .send_custom_event(IpfsEvent::RemovePeer(peer_id, Some(addr), tx))
             .await?;
 
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    /// Returns the Bitswap peers for the a `Node`.
+    /// Returns the Bitswap peers for the `Node`.
     pub async fn get_bitswap_peers(&self) -> Result<Vec<PeerId>, Error> {
         let (tx, rx) = oneshot_channel();
 
-        self.to_task
-            .clone()
-            .send(IpfsEvent::GetBitswapPeers(tx))
+        self.connexa
+            .send_custom_event(IpfsEvent::GetBitswapPeers(tx))
             .await?;
 
         Ok(rx.await??.await)
@@ -2572,7 +2126,7 @@ impl Ipfs {
 
     /// Returns the keypair to the node
     pub fn keypair(&self) -> &Keypair {
-        &self.key
+        self.connexa.keypair()
     }
 
     /// Returns the keystore
@@ -2587,249 +2141,10 @@ impl Ipfs {
         self.repo.shutdown();
 
         // ignoring the error because it'd mean that the background task had already been dropped
-        let _ = self.to_task.try_send(IpfsEvent::Exit);
-
-        // TODO: Determine if we want to kill the task directly or let it gracefully close after completing all events
-        // self.to_task.abort();;
+        self.connexa.shutdown();
 
         // terminte task that handles GC
         self._gc_guard.abort();
-
-        // yield to the runtime to allow runtime to process pending tasks
-        // TODO: Possibly remove along with async signature
-        // tokio::task::yield_now().await;
-    }
-}
-
-pub trait IntoStreamProtocol {
-    fn into_protocol(self) -> std::io::Result<StreamProtocol>;
-}
-
-impl IntoStreamProtocol for StreamProtocol {
-    fn into_protocol(self) -> std::io::Result<StreamProtocol> {
-        Ok(self)
-    }
-}
-
-impl IntoStreamProtocol for String {
-    fn into_protocol(self) -> std::io::Result<StreamProtocol> {
-        StreamProtocol::try_from_owned(self).map_err(std::io::Error::other)
-    }
-}
-
-impl IntoStreamProtocol for &'static str {
-    fn into_protocol(self) -> std::io::Result<StreamProtocol> {
-        Ok(StreamProtocol::new(self))
-    }
-}
-
-pub struct OptionalStreamProtocol(pub(crate) Option<StreamProtocol>);
-
-impl OptionalStreamProtocol {
-    pub(crate) fn into_inner(self) -> Option<StreamProtocol> {
-        self.0
-    }
-}
-
-impl From<()> for OptionalStreamProtocol {
-    fn from(_: ()) -> Self {
-        Self(None)
-    }
-}
-
-impl From<StreamProtocol> for OptionalStreamProtocol {
-    fn from(protocol: StreamProtocol) -> Self {
-        Self(Some(protocol))
-    }
-}
-
-impl From<String> for OptionalStreamProtocol {
-    fn from(protocol: String) -> Self {
-        let protocol = StreamProtocol::try_from_owned(protocol).ok();
-        Self(protocol)
-    }
-}
-
-impl From<&'static str> for OptionalStreamProtocol {
-    fn from(protocol: &'static str) -> Self {
-        let protocol = StreamProtocol::new(protocol);
-        Self(Some(protocol))
-    }
-}
-
-// TODO: Move into a macro
-pub trait IntoRequest {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes);
-}
-
-impl IntoRequest for Bytes {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        (None, self)
-    }
-}
-
-impl<const N: usize> IntoRequest for [u8; N] {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request(Bytes::copy_from_slice(&self))
-    }
-}
-
-impl<const N: usize> IntoRequest for &[u8; N] {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request(Bytes::copy_from_slice(self))
-    }
-}
-
-impl IntoRequest for Vec<u8> {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request(Bytes::from(self))
-    }
-}
-
-impl IntoRequest for &[u8] {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request(Bytes::copy_from_slice(self))
-    }
-}
-
-impl IntoRequest for String {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request(Bytes::from(self.into_bytes()))
-    }
-}
-
-impl IntoRequest for &'static str {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request(self.to_string())
-    }
-}
-
-impl IntoRequest for (StreamProtocol, Bytes) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        (Some(self.0), self.1)
-    }
-}
-
-impl<const N: usize> IntoRequest for (StreamProtocol, [u8; N]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(&self.1)))
-    }
-}
-
-impl<const N: usize> IntoRequest for (StreamProtocol, &[u8; N]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
-    }
-}
-
-impl IntoRequest for (StreamProtocol, Vec<u8>) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::from(self.1)))
-    }
-}
-
-impl IntoRequest for (StreamProtocol, &[u8]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
-    }
-}
-
-impl IntoRequest for (StreamProtocol, String) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::from(self.1.into_bytes())))
-    }
-}
-
-impl IntoRequest for (StreamProtocol, &'static str) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, self.1.to_string()))
-    }
-}
-
-impl IntoRequest for (String, Bytes) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        (
-            Some(StreamProtocol::try_from_owned(self.0).expect("valid protocol")),
-            self.1,
-        )
-    }
-}
-
-impl<const N: usize> IntoRequest for (String, [u8; N]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(&self.1)))
-    }
-}
-
-impl<const N: usize> IntoRequest for (String, &[u8; N]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
-    }
-}
-
-impl IntoRequest for (String, Vec<u8>) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::from(self.1)))
-    }
-}
-
-impl IntoRequest for (String, &[u8]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
-    }
-}
-
-impl IntoRequest for (String, String) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::from(self.1.into_bytes())))
-    }
-}
-
-impl IntoRequest for (String, &'static str) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, self.1.to_string()))
-    }
-}
-
-impl IntoRequest for (&'static str, Bytes) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        (Some(StreamProtocol::new(self.0)), self.1)
-    }
-}
-
-impl<const N: usize> IntoRequest for (&'static str, [u8; N]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(&self.1)))
-    }
-}
-
-impl<const N: usize> IntoRequest for (&'static str, &[u8; N]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
-    }
-}
-
-impl IntoRequest for (&'static str, Vec<u8>) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::from(self.1)))
-    }
-}
-
-impl IntoRequest for (&'static str, &[u8]) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::copy_from_slice(self.1)))
-    }
-}
-
-impl IntoRequest for (&'static str, String) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, Bytes::from(self.1.into_bytes())))
-    }
-}
-
-impl IntoRequest for (&'static str, &'static str) {
-    fn into_request(self) -> (Option<StreamProtocol>, Bytes) {
-        IntoRequest::into_request((self.0, self.1.to_string()))
     }
 }
 
@@ -3003,7 +2318,7 @@ pub(crate) fn split_dht_key(key: &str) -> anyhow::Result<(&str, &str)> {
 }
 
 #[inline]
-pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
+pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<RecordKey> {
     let default_ipns_prefix = b"/ipns/";
 
     let mut key = key.as_ref().trim().to_string();
@@ -3026,10 +2341,10 @@ pub(crate) fn ipns_to_dht_key<B: AsRef<str>>(key: B) -> anyhow::Result<Key> {
 }
 
 #[inline]
-pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
+pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<RecordKey>>(
     (prefix, func): (&str, F),
     key: B,
-) -> anyhow::Result<Key> {
+) -> anyhow::Result<RecordKey> {
     let key = key.as_ref().trim();
 
     let (key, val) = split_dht_key(key)?;
@@ -3044,6 +2359,7 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<Key>>(
     anyhow::bail!("Invalid prefix")
 }
 
+use crate::context::IpfsContext;
 use crate::p2p::AddressBookConfig;
 use crate::repo::{RepoGetBlock, RepoPutBlock};
 #[doc(hidden)]
@@ -3097,11 +2413,8 @@ mod node {
             // given span
             let mut uninit = UninitializedIpfsDefault::new()
                 .with_default()
-                .with_request_response(Default::default())
-                .set_transport_configuration(TransportConfig {
-                    enable_memory_transport: true,
-                    ..Default::default()
-                });
+                .enable_memory_transport()
+                .with_request_response(Default::default());
 
             if let Some(span) = span {
                 uninit = uninit.set_span(span);

@@ -4,7 +4,7 @@ use clap::Parser;
 use futures::StreamExt;
 
 use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
-use rust_ipfs::{Ipfs, IpfsPath, Multiaddr, unixfs::UnixfsStatus};
+use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr};
 
 #[derive(Debug, Parser)]
 #[clap(name = "unixfs-get")]
@@ -25,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
 
     let ipfs: Ipfs = UninitializedIpfs::new()
         .with_default()
+        .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
         .start()

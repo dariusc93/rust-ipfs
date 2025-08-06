@@ -1,7 +1,7 @@
 use either::Either;
 use futures::stream::BoxStream;
 use futures::{FutureExt, Stream, StreamExt, future::BoxFuture, stream::FusedStream};
-use libp2p::PeerId;
+use connexa::prelude::PeerId;
 #[allow(unused_imports)]
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use std::pin::Pin;

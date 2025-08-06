@@ -8,7 +8,7 @@ pub const BOOTSTRAP_NODES: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use libp2p::Multiaddr;
+    use connexa::prelude::Multiaddr;
 
     #[test]
     fn bootstrap_nodes_are_multiaddr_with_peerid() {

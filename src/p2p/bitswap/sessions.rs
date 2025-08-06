@@ -11,7 +11,7 @@ use futures::{FutureExt, Stream, future::BoxFuture, stream::FusedStream};
 use futures_timer::Delay;
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
-use libp2p::PeerId;
+use connexa::prelude::PeerId;
 use std::fmt::Debug;
 
 use crate::{

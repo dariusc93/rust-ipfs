@@ -1,7 +1,8 @@
 use bytes::Bytes;
+use connexa::behaviour::request_response::RequestResponseConfig;
 use futures::StreamExt;
 
-use rust_ipfs::{UninitializedIpfsDefault as UninitializedIpfs, p2p::RequestResponseConfig};
+use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -10,6 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let node_a = UninitializedIpfs::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
+        .enable_tcp()
         .with_request_response(vec![RequestResponseConfig {
             protocol: "/ping/0".into(),
             ..Default::default()

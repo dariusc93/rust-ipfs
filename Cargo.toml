@@ -10,27 +10,43 @@ description = "IPFS node implementation"
 version = "0.15.0"
 
 [features]
-default = ["rsa", "dns", "ed25519", "secp256k1", "ecdsa", "tls", "noise", "tcp", "quic", "pnet", "websocket"]
+default = ["full"]
+full = ["stream", "identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "connexa/keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "upnp", "mdns", "rsa", "dns", "ed25519", "secp256k1", "ecdsa", "tls", "noise", "tcp", "quic", "pnet", "websocket", "yamux"]
+#
+rsa = ["connexa/rsa", "rust-ipns/rsa"]
+ed25519 = ["connexa/ed25519", "rust-ipns/ed25519"]
+secp256k1 = ["connexa/secp256k1", "rust-ipns/secp256k1"]
+ecdsa = ["connexa/ecdsa", "rust-ipns/ecdsa"]
+#
+identify = ["connexa/identify"]
+gossipsub = ["connexa/gossipsub"]
+floodsub = ["connexa/floodsub"]
+autonat = ["connexa/autonat"]
+relay = ["connexa/relay"]
+dcutr = ["connexa/dcutr"]
+kad = ["connexa/kad"]
+ping = ["connexa/ping"]
+request-response = ["connexa/request-response"]
+request-response-misc = ["connexa/request-response-misc"]
+rendezvous = ["connexa/rendezvous"]
+upnp = ["connexa/upnp"]
+stream = ["connexa/stream"]
+mdns = ["connexa/mdns"]
+#
+#x509_dep = ["dep:simple_x509", "rcgen", "pem", "p256", "rand_chacha", "hkdf", "sec1"]
+#
+dns = ["connexa/dns"]
+tls = ["connexa/tls"]
+noise = ["connexa/noise"]
+tcp = ["connexa/tcp"]
+quic = ["connexa/quic"]
+pnet = ["connexa/pnet"]
 
-rsa = ["libp2p/rsa", "rust-ipns/rsa"]
-ed25519 = ["libp2p/ed25519", "rust-ipns/ed25519"]
-secp256k1 = ["libp2p/secp256k1", "rust-ipns/secp256k1"]
-ecdsa = ["libp2p/ecdsa", "rust-ipns/ecdsa"]
-
-stream = ["dep:libp2p-stream"]
-
-x509_dep = ["dep:simple_x509", "rcgen", "pem", "p256", "rand_chacha", "hkdf", "sec1"]
-
-dns = ["libp2p/dns"]
-tls = ["libp2p/tls"]
-noise = ["libp2p/noise"]
-tcp = ["libp2p/tcp"]
-quic = ["libp2p/quic"]
-pnet = ["libp2p/pnet"]
-
-webrtc = ["dep:libp2p-webrtc", "dep:libp2p-webrtc-websys", "x509_dep"]
-websocket = ["libp2p/websocket", "libp2p/websocket-websys", "x509_dep"]
-webtransport = ["libp2p/webtransport-websys"]
+yamux = ["connexa/yamux"]
+#
+webrtc = ["connexa/webrtc"]
+websocket = ["connexa/websocket"]
+webtransport = ["connexa/webtransport"]
 
 test_go_interop = []
 test_js_interop = []
@@ -46,25 +62,20 @@ bytes = "1.10.1"
 cid = "0.11.1"
 chrono = { version = "0.4.40" }
 clap = { version = "4.5.40", features = ["derive"] }
+connexa = { path = "../connexa" }
 either = { version = "1.15.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
 futures-timeout = "0.1.2"
 futures-timer = "3.0.0"
 getrandom = { version = "0.2.15" }
-hickory-resolver = "0.25.0-alpha.5"
+hickory-resolver = "0.25.2"
 hkdf = "0.12.4"
 idb = "0.6.4"
 indexmap = "2.10.0"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.1"
-libp2p = { version = "0.56.0" }
-libp2p-allow-block-list = "0.6.0"
-libp2p-connection-limits = "0.6.0"
 libp2p-relay-manager = { version = "0.4.0", path = "packages/libp2p-relay-manager" }
-libp2p-stream = { version = "0.4.0-alpha" }
-libp2p-webrtc = { version = "=0.9.0-alpha.1", features = ["pem"] }
-libp2p-webrtc-websys = "0.4.0"
 multibase = "0.9.1"
 multihash = "0.19.3"
 multihash-codetable = { version = "0.1.4" }
@@ -113,6 +124,7 @@ asynchronous-codec.workspace = true
 base64 = { workspace = true }
 bytes = { workspace = true }
 chrono.workspace = true
+connexa = { workspace = true, features = ["cid"] }
 either.workspace = true
 futures-timeout.workspace = true
 futures.workspace = true
@@ -120,10 +132,7 @@ hkdf = { workspace = true, optional = true }
 indexmap.workspace = true
 ipld-core.workspace = true
 ipld-dagpb.workspace = true
-libp2p-allow-block-list.workspace = true
-libp2p-connection-limits.workspace = true
 libp2p-relay-manager = { workspace = true }
-libp2p-stream = { workspace = true, optional = true }
 multibase.workspace = true
 multihash.workspace = true
 multihash-codetable.workspace = true
@@ -155,8 +164,6 @@ zeroize.workspace = true
 futures-timer.workspace = true
 fs2.workspace = true
 hickory-resolver.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "dcutr", "identify", "kad", "macros", "tokio", "ping", "yamux", "mdns", "serde", "request-response", "json", "cbor", "rendezvous", "upnp"], workspace = true }
-libp2p-webrtc = { workspace = true, features = ["tokio", ], optional = true }
 rcgen = { workspace = true, optional = true }
 rlimit.workspace = true
 simple_x509 = { workspace = true, optional = true }
@@ -168,8 +175,6 @@ tokio-util = { workspace = true, features = ["full"] }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 getrandom = { workspace = true, features = ["js"] }
 idb.workspace = true
-libp2p = { features = ["gossipsub", "autonat", "relay", "identify", "kad", "noise", "macros", "ping", "yamux", "serde", "request-response", "json", "cbor", "rendezvous", "wasm-bindgen"], workspace = true }
-libp2p-webrtc-websys = { workspace = true, optional = true }
 send_wrapper.workspace = true
 serde-wasm-bindgen.workspace = true
 tokio = { default-features = false, features = ["sync", "macros"], workspace = true }
