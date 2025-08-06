@@ -55,7 +55,7 @@ async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<Foreig
         let addr = next_addr.with(Protocol::P2p(next_id));
         nodes[i].dht_mode(DhtMode::Server).await.unwrap();
         nodes[i].add_bootstrap(addr).await.unwrap();
-        nodes[i].bootstrap().awaitunwrap();
+        nodes[i].bootstrap().await.unwrap();
     }
 
     // make sure that the nodes are not actively connected to each other

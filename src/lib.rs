@@ -2413,6 +2413,7 @@ mod node {
             // given span
             let mut uninit = UninitializedIpfsDefault::new()
                 .with_default()
+                .enable_tcp()
                 .enable_memory_transport()
                 .with_request_response(Default::default());
 

@@ -262,6 +262,7 @@ impl KeyStorage for MemoryKeyStorage {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     #[cfg(feature = "ed25519")]
     #[tokio::test]
     async fn keystore_with_peerid() -> anyhow::Result<()> {
