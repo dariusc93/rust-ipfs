@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use connexa::prelude::gossipsub::{IdentTopic, IntoGossipsubTopic, TopicHash};
 use connexa::prelude::GossipsubEvent;
 use futures::future::pending;
@@ -65,7 +64,6 @@ async fn resubscribe_after_unsubscribe() {
 // }
 
 #[tokio::test]
-#[ignore = "doesn't work yet"]
 async fn publish_between_two_nodes_single_topic() {
     use futures::stream::StreamExt;
 
@@ -74,14 +72,16 @@ async fn publish_between_two_nodes_single_topic() {
     let topic = "shared".to_owned();
 
     let mut a_msgs = nodes[0]
-        .pubsub_subscribe(topic.clone())
+        .pubsub_subscribe(&topic)
         .and_then(|_| nodes[0].pubsub_listener(&topic))
         .await
+        .map(|st| PubsubStream::new(&topic, st))
         .unwrap();
     let mut b_msgs = nodes[1]
-        .pubsub_subscribe(topic.clone())
+        .pubsub_subscribe(&topic)
         .and_then(|_| nodes[1].pubsub_listener(&topic))
         .await
+        .map(|st| PubsubStream::new(&topic, st))
         .unwrap();
 
     // need to wait to see both sides so that the messages will get through
@@ -113,21 +113,31 @@ async fn publish_between_two_nodes_single_topic() {
     );
 
     nodes[0]
-        .pubsub_publish(topic.clone(), b"foobar".to_vec())
+        .pubsub_publish(&topic, b"foobar".to_vec())
         .await
         .unwrap();
     nodes[1]
-        .pubsub_publish(topic.clone(), b"barfoo".to_vec())
+        .pubsub_publish(&topic, b"barfoo".to_vec())
         .await
         .unwrap();
 
     let expected = [
-        (Some(nodes[0].id), b"foobar", nodes[1].id),
-        (Some(nodes[1].id), b"barfoo", nodes[0].id),
+        (
+            IdentTopic::new(topic.clone()),
+            Some(nodes[0].id),
+            b"foobar",
+            nodes[1].id,
+        ),
+        (
+            IdentTopic::new(topic.clone()),
+            Some(nodes[1].id),
+            b"barfoo",
+            nodes[0].id,
+        ),
     ]
     .iter()
     .cloned()
-    .map(|(sender, data, witness)| (sender, Bytes::from(data.to_vec()), witness))
+    .map(|(topic, sender, data, witness)| (topic.hash(), sender, data.to_vec(), witness))
     .collect::<Vec<_>>();
 
     let mut actual = Vec::new();
@@ -138,14 +148,7 @@ async fn publish_between_two_nodes_single_topic() {
     ] {
         let received = st
             .take(1)
-            .filter_map(|ev| async move {
-                if let GossipsubEvent::Message { message } = ev {
-                    Some(message)
-                } else {
-                    None
-                }
-            })
-            .map(|msg| (msg.source, msg.data, *own_peer_id))
+            .map(|msg| (msg.topic, msg.source, msg.data, *own_peer_id))
             .collect::<Vec<_>>()
             .timeout(Duration::from_secs(2))
             .await
@@ -166,6 +169,8 @@ async fn publish_between_two_nodes_single_topic() {
     );
 
     drop(b_msgs);
+
+    nodes[1].pubsub_unsubscribe(&topic).await.unwrap();
 
     let mut disappeared = false;
     for _ in 0..100usize {
