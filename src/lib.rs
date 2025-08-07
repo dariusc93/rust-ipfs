@@ -75,7 +75,7 @@ pub use self::{
     repo::{PinKind, PinMode},
 };
 use async_rt::AbortableJoinHandle;
-use connexa::builder::{ConnexaBuilder, FileDescLimit};
+use connexa::builder::{ConnexaBuilder, FileDescLimit, IntoKeypair};
 use connexa::handle::Connexa;
 pub use connexa::prelude::dht::{Mode, Quorum, Record, RecordKey, ToRecordKey};
 pub use connexa::prelude::request_response::{
@@ -359,13 +359,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
     /// New uninitualized instance
     pub fn new() -> Self {
         let keypair = Keypair::generate_ed25519();
-        Self::with_keypair(&keypair)
+        Self::with_keypair(&keypair).expect("keypair is valid")
     }
 
-    pub fn with_keypair(keypair: &Keypair) -> Self {
-        UninitializedIpfs {
-            init: ConnexaBuilder::with_existing_identity(keypair)
-                .expect("Failed to create keypair"),
+    pub fn with_keypair(keypair: impl IntoKeypair) -> std::io::Result<Self> {
+        Ok(UninitializedIpfs {
+            init: ConnexaBuilder::with_existing_identity(keypair)?,
             keys: None,
             options: Default::default(),
             repo_handle: Repo::new_memory(),
@@ -376,7 +375,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
             gc_config: None,
             gc_repo_duration: None,
             custom_behaviour: None,
-        }
+        })
     }
 
     /// Set default listening unspecified ipv4 and ipv6 addresseses for tcp and udp/quic
