@@ -336,7 +336,6 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send + 
     keys: Option<Keypair>,
     options: IpfsOptions,
     repo_handle: Repo<DefaultStorage>,
-    local_external_addr: bool,
     swarm_event: Option<TSwarmEventFn<C>>,
     record_key_validator:
         HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
@@ -370,7 +369,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
             repo_handle: Repo::new_memory(),
             // record_validators: Default::default(),
             record_key_validator: Default::default(),
-            local_external_addr: false,
             swarm_event: None,
             gc_config: None,
             gc_repo_duration: None,
@@ -665,12 +663,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
     /// Set a keystore
     pub fn set_keystore(mut self, keystore: &Keystore) -> Self {
         self.options.keystore = keystore.clone();
-        self
-    }
-
-    /// Automatically add any listened address as an external address
-    pub fn listen_as_external_addr(mut self) -> Self {
-        self.local_external_addr = true;
         self
     }
 
