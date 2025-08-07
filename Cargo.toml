@@ -12,15 +12,14 @@ version = "0.15.0"
 [features]
 default = ["full"]
 full = ["stream", "identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "connexa/keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "upnp", "mdns", "rsa", "dns", "ed25519", "secp256k1", "ecdsa", "tls", "noise", "tcp", "quic", "pnet", "websocket", "yamux"]
-#
+
 rsa = ["connexa/rsa", "rust-ipns/rsa"]
 ed25519 = ["connexa/ed25519", "rust-ipns/ed25519"]
 secp256k1 = ["connexa/secp256k1", "rust-ipns/secp256k1"]
 ecdsa = ["connexa/ecdsa", "rust-ipns/ecdsa"]
-#
+
 identify = ["connexa/identify"]
 gossipsub = ["connexa/gossipsub"]
-floodsub = ["connexa/floodsub"]
 autonat = ["connexa/autonat"]
 relay = ["connexa/relay"]
 dcutr = ["connexa/dcutr"]
@@ -32,9 +31,7 @@ rendezvous = ["connexa/rendezvous"]
 upnp = ["connexa/upnp"]
 stream = ["connexa/stream"]
 mdns = ["connexa/mdns"]
-#
-#x509_dep = ["dep:simple_x509", "rcgen", "pem", "p256", "rand_chacha", "hkdf", "sec1"]
-#
+
 dns = ["connexa/dns"]
 tls = ["connexa/tls"]
 noise = ["connexa/noise"]
@@ -43,7 +40,7 @@ quic = ["connexa/quic"]
 pnet = ["connexa/pnet"]
 
 yamux = ["connexa/yamux"]
-#
+
 webrtc = ["connexa/webrtc"]
 websocket = ["connexa/websocket"]
 webtransport = ["connexa/webtransport"]

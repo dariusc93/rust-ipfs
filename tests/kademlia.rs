@@ -1,4 +1,4 @@
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{pin_mut, StreamExt};
 use ipld_core::cid::Cid;
 use multihash_codetable::{Code, MultihashDigest};
 use rust_ipfs::{p2p::MultiaddrExt, Block, Multiaddr, Node, Protocol, Quorum};

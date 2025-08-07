@@ -100,9 +100,11 @@ use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
 
 use connexa::prelude::gossipsub::IntoGossipsubTopic;
+use connexa::prelude::identify::Event;
 use connexa::prelude::rendezvous::IntoNamespace;
 #[cfg(feature = "stream")]
 use connexa::prelude::stream::IntoStreamProtocol;
+use connexa::prelude::swarm::SwarmEvent;
 use connexa::prelude::transport::dns::DnsResolver;
 pub use connexa::prelude::transport::ConnectedPoint;
 use futures::stream::FuturesUnordered;
@@ -256,7 +258,6 @@ enum IpfsEvent {
     GetBitswapPeers(Channel<BoxFuture<'static, Vec<PeerId>>>),
     WantList(Option<PeerId>, Channel<BoxFuture<'static, Vec<Cid>>>),
 
-    ConnectionEvents(Channel<futures::channel::mpsc::Receiver<ConnectionEvents>>),
     FindPeerIdentity(PeerId, Channel<ReceiverChannel<identify::Info>>),
     AddPeer(AddPeerOpt, Channel<()>),
     RemovePeer(PeerId, Option<Multiaddr>, Channel<bool>),
@@ -326,24 +327,6 @@ pub enum PeerConnectionEvents {
         addr: Multiaddr,
     },
     ClosedConnection {
-        connection_id: ConnectionId,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub enum ConnectionEvents {
-    IncomingConnection {
-        peer_id: PeerId,
-        connection_id: ConnectionId,
-        addr: Multiaddr,
-    },
-    OutgoingConnection {
-        peer_id: PeerId,
-        connection_id: ConnectionId,
-        addr: Multiaddr,
-    },
-    ClosedConnection {
-        peer_id: PeerId,
         connection_id: ConnectionId,
     },
 }
@@ -466,7 +449,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
     }
 
     /// Enables kademlia
-    // TODO
     pub fn with_kademlia(mut self) -> Self {
         self.init = self.init.with_kademlia();
         self
@@ -1006,7 +988,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
             })
         }).unwrap_or(AbortableJoinHandle::empty());
 
-        let mut context = context::IpfsContext::new(&repo, options.connection_event_cap);
+        let mut context = context::IpfsContext::new(&repo);
         context.repo_events.replace(repo_events);
 
         let connexa = init
@@ -1014,10 +996,26 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
                 create_create_behaviour(keys, &options, &repo, custom_behaviour)
             })
             .set_context(context)
-            // .set_custom_event_callback(|swarm, context, event| {
-            //     context.handle_swarm_event(swarm, event)
-            // })
             .set_custom_task_callback(|swarm, context, event| context.handle_event(swarm, event))
+            .set_swarm_event_callback(|_, event, context| {
+                if let SwarmEvent::Behaviour(connexa::behaviour::BehaviourEvent::Identify(event)) =
+                    event
+                {
+                    match event {
+                        Event::Received { info, .. } => {
+                            let peer_id = info.public_key.to_peer_id();
+                            if let Some(chs) = context.find_peer_identify.remove(&peer_id) {
+                                for ch in chs {
+                                    let _ = ch.send(Ok(info.clone()));
+                                }
+                            }
+                        }
+                        Event::Sent { .. } => {}
+                        Event::Pushed { .. } => {}
+                        Event::Error { .. } => {}
+                    }
+                }
+            })
             .set_pollable_callback(|cx, swarm, context| {
                 let custom = swarm
                     .behaviour_mut()
@@ -1657,19 +1655,8 @@ impl Ipfs {
             .map_err(Into::into)
     }
 
-    pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnectionEvents>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::ConnectionEvents(tx))
-                .await?;
-
-            let rx = rx.await??;
-            Ok(rx.boxed())
-        }
-        .instrument(self.span.clone())
-        .await
+    pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnectionEvent>, Error> {
+        self.connexa.swarm().listener().await.map_err(Into::into)
     }
 
     pub async fn peer_connection_events(

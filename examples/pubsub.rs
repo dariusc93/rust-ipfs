@@ -1,9 +1,9 @@
 use clap::Parser;
 use futures::{FutureExt, StreamExt};
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{ConnectionEvents, Ipfs, Keypair, Multiaddr, UninitializedIpfs};
+use rust_ipfs::{Ipfs, Keypair, Multiaddr, UninitializedIpfs};
 
-use connexa::prelude::GossipsubEvent;
+use connexa::prelude::{ConnectionEvent, GossipsubEvent};
 use pollable_map::stream::StreamMap;
 use rustyline_async::Readline;
 use std::time::Duration;
@@ -136,13 +136,10 @@ async fn main() -> anyhow::Result<()> {
             }
             Some(conn_ev) = st.next() => {
                 match conn_ev {
-                    ConnectionEvents::IncomingConnection{ peer_id, .. } => {
+                    ConnectionEvent::ConnectionEstablished { peer_id, .. } => {
                         writeln!(stdout, "> {peer_id} connected")?;
                     }
-                    ConnectionEvents::OutgoingConnection{ peer_id, .. } => {
-                        writeln!(stdout, "> {peer_id} connected")?;
-                    }
-                    ConnectionEvents::ClosedConnection{ peer_id, .. } => {
+                    ConnectionEvent::ConnectionClosed{ peer_id, .. } => {
                         writeln!(stdout, "> {peer_id} disconnected")?;
                     }
                 }
