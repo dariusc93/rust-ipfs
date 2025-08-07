@@ -28,8 +28,6 @@ tcp = ["connexa/tcp"]
 quic = ["connexa/quic"]
 pnet = ["connexa/pnet"]
 
-yamux = ["connexa/yamux"]
-
 webrtc = ["connexa/webrtc"]
 websocket = ["connexa/websocket"]
 webtransport = ["connexa/webtransport"]
