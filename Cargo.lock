@@ -751,6 +751,7 @@ dependencies = [
 [[package]]
 name = "connexa"
 version = "0.2.1"
+source = "git+https://github.com/dariusc93/connexa#2dc146a5437a8888a13858baa152a9415551c8a1"
 dependencies = [
  "async-rt",
  "async-trait",
