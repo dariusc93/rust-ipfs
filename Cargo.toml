@@ -11,26 +11,15 @@ version = "0.15.0"
 
 [features]
 default = ["full"]
-full = ["stream", "identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "connexa/keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "upnp", "mdns", "rsa", "dns", "ed25519", "secp256k1", "ecdsa", "tls", "noise", "tcp", "quic", "pnet", "websocket", "yamux"]
+full = ["stream", "dns", "tls", "noise", "tcp", "quic", "rsa", "ed25519", "secp256k1", "ecdsa", "websocket", "upnp"]
 
 rsa = ["connexa/rsa", "rust-ipns/rsa"]
 ed25519 = ["connexa/ed25519", "rust-ipns/ed25519"]
 secp256k1 = ["connexa/secp256k1", "rust-ipns/secp256k1"]
 ecdsa = ["connexa/ecdsa", "rust-ipns/ecdsa"]
 
-identify = ["connexa/identify"]
-gossipsub = ["connexa/gossipsub"]
-autonat = ["connexa/autonat"]
-relay = ["connexa/relay"]
-dcutr = ["connexa/dcutr"]
-kad = ["connexa/kad"]
-ping = ["connexa/ping"]
-request-response = ["connexa/request-response"]
-request-response-misc = ["connexa/request-response-misc"]
-rendezvous = ["connexa/rendezvous"]
-upnp = ["connexa/upnp"]
 stream = ["connexa/stream"]
-mdns = ["connexa/mdns"]
+upnp = ["connexa/upnp"]
 
 dns = ["connexa/dns"]
 tls = ["connexa/tls"]
@@ -59,7 +48,7 @@ bytes = "1.10.1"
 cid = "0.11.1"
 chrono = { version = "0.4.40" }
 clap = { version = "4.5.40", features = ["derive"] }
-connexa = { git = "https://github.com/dariusc93/connexa" }
+connexa = { git = "https://github.com/dariusc93/connexa", features = ["identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "mdns"] }
 either = { version = "1.15.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }

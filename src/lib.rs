@@ -105,7 +105,6 @@ use connexa::prelude::rendezvous::IntoNamespace;
 #[cfg(feature = "stream")]
 use connexa::prelude::stream::IntoStreamProtocol;
 use connexa::prelude::swarm::SwarmEvent;
-use connexa::prelude::transport::dns::DnsResolver;
 pub use connexa::prelude::transport::ConnectedPoint;
 use futures::stream::FuturesUnordered;
 use serde::Serialize;
@@ -765,12 +764,15 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
     /// Enables DNS
     #[cfg(feature = "dns")]
     pub fn enable_dns(self) -> Self {
-        self.enable_dns_with_resolver(DnsResolver::default())
+        self.enable_dns_with_resolver(connexa::prelude::transport::dns::DnsResolver::default())
     }
 
     /// Enables DNS with a specific resolver
     #[cfg(feature = "dns")]
-    pub fn enable_dns_with_resolver(mut self, resolver: DnsResolver) -> Self {
+    pub fn enable_dns_with_resolver(
+        mut self,
+        resolver: connexa::prelude::transport::dns::DnsResolver,
+    ) -> Self {
         self.init = self.init.enable_dns_with_resolver(resolver);
         self
     }
@@ -2353,10 +2355,12 @@ use crate::p2p::AddressBookConfig;
 use crate::repo::{RepoGetBlock, RepoPutBlock};
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
+#[cfg(test)]
 pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
 mod node {
     use super::*;
 
