@@ -2344,14 +2344,12 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<RecordKey>
 use crate::context::IpfsContext;
 use crate::p2p::AddressBookConfig;
 use crate::repo::{RepoGetBlock, RepoPutBlock};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "full", not(target_arch = "wasm32")))]
 #[doc(hidden)]
-#[cfg(test)]
 pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(test)]
+#[cfg(all(feature = "full", not(target_arch = "wasm32")))]
 mod node {
     use super::*;
 
