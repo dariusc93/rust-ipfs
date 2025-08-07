@@ -2,8 +2,6 @@
 use crate::repo::DefaultStorage;
 use crate::repo::Repo;
 use crate::IpfsOptions;
-use std::convert::TryInto;
-use std::num::{NonZeroU8, NonZeroUsize};
 
 pub use behaviour::Behaviour;
 pub use behaviour::IdentifyConfiguration;
@@ -150,27 +148,6 @@ impl Default for PubsubConfig {
     }
 }
 
-#[derive(Clone)]
-pub struct SwarmConfig {
-    pub dial_concurrency_factor: NonZeroU8,
-    pub notify_handler_buffer_size: NonZeroUsize,
-    pub connection_event_buffer_size: usize,
-    pub max_inbound_stream: usize,
-}
-
-impl Default for SwarmConfig {
-    fn default() -> Self {
-        Self {
-            dial_concurrency_factor: 8.try_into().expect("8 > 0"),
-            notify_handler_buffer_size: 32.try_into().expect("256 > 0"),
-            connection_event_buffer_size: 7,
-            max_inbound_stream: 10_000,
-        }
-    }
-}
-
-#[allow(clippy::type_complexity)]
-#[allow(deprecated)]
 /// Construct new behaviour
 pub(crate) fn create_create_behaviour<C>(
     keypair: &Keypair,
