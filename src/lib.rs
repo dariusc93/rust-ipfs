@@ -115,7 +115,6 @@ use std::{borrow::Borrow, path::PathBuf};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
-    ops::{Deref, DerefMut},
     path::Path,
     sync::Arc,
     time::Duration,
@@ -471,7 +470,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
     pub fn with_relay(mut self, with_dcutr: bool) -> Self {
         self.init = self.init.with_relay();
         if with_dcutr {
-            self.init = self.init.with_dcutr();
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.init = self.init.with_dcutr();
+            }
         }
         self
     }
@@ -2349,10 +2351,12 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<RecordKey>
 use crate::context::IpfsContext;
 use crate::p2p::AddressBookConfig;
 use crate::repo::{RepoGetBlock, RepoPutBlock};
+#[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
 pub use node::Node;
 
 /// Node module provides an easy to use interface used in `tests/`.
+#[cfg(not(target_arch = "wasm32"))]
 mod node {
     use super::*;
 
@@ -2467,7 +2471,7 @@ mod node {
         }
     }
 
-    impl Deref for Node {
+    impl std::ops::Deref for Node {
         type Target = Ipfs;
 
         fn deref(&self) -> &Self::Target {
@@ -2475,7 +2479,7 @@ mod node {
         }
     }
 
-    impl DerefMut for Node {
+    impl std::ops::DerefMut for Node {
         fn deref_mut(&mut self) -> &mut <Self as Deref>::Target {
             &mut self.ipfs
         }
