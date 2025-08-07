@@ -21,6 +21,7 @@ fn generate_psk() -> PreSharedKey {
 ///
 /// or create a random one without providing any argument
 /// example: cargo run --example ipfs-pnet
+#[cfg(feature = "pnet")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -169,4 +170,9 @@ mod ext_behaviour {
             Poll::Pending
         }
     }
+}
+
+#[cfg(not(feature = "pnet"))]
+fn main() {
+    panic!("This example requires the `pnet` feature");
 }

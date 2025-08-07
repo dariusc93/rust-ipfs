@@ -170,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 }
                             };
-                            let Err(e) = ipfs.pubsub_subscribe(&topic).await else {
+                            let Err(_e) = ipfs.pubsub_subscribe(&topic).await else {
                                 writeln!(stdout, "> already subscribed to topic")?;
                                 continue;
                             };

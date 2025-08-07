@@ -19,7 +19,6 @@ async fn main() -> anyhow::Result<()> {
         .with_rendezvous_client()
         .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
-        .listen_as_external_addr()
         .start()
         .await?;
 
