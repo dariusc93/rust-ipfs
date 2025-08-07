@@ -2480,7 +2480,7 @@ mod node {
     }
 
     impl std::ops::DerefMut for Node {
-        fn deref_mut(&mut self) -> &mut <Self as Deref>::Target {
+        fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.ipfs
         }
     }
