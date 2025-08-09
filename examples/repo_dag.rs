@@ -1,6 +1,6 @@
-use rust_ipfs::IpfsPath;
 use rust_ipfs::dag::IpldDag;
 use rust_ipfs::repo::Repo;
+use rust_ipfs::IpfsPath;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

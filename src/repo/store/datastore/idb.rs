@@ -1,10 +1,10 @@
 use std::{collections::BTreeSet, rc::Rc, str::FromStr, sync::OnceLock};
 
 use crate::{
-    Error, PinKind, PinMode,
     repo::{DataStore, PinModeRequirement, PinStore, References},
+    Error, PinKind, PinMode,
 };
-use futures::{SinkExt, StreamExt, TryStreamExt, channel::oneshot, stream::BoxStream};
+use futures::{channel::oneshot, stream::BoxStream, SinkExt, StreamExt, TryStreamExt};
 use idb::{
     Database, DatabaseEvent, Factory, ObjectStore, ObjectStoreParams, Transaction, TransactionMode,
 };

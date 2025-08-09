@@ -1,6 +1,11 @@
-
-use connexa::prelude::{StreamProtocol, transport::upgrade::DeniedUpgrade, swarm::{ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, SupportedProtocols,
-        handler::ConnectionEvent}};
+use connexa::prelude::{
+    swarm::{
+        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
+        SupportedProtocols,
+    },
+    transport::upgrade::DeniedUpgrade,
+    StreamProtocol,
+};
 
 use std::{
     collections::VecDeque,

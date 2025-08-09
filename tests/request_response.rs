@@ -2,7 +2,7 @@ mod common;
 use std::time::Duration;
 
 use bytes::Bytes;
-use common::{Topology, spawn_nodes};
+use common::{spawn_nodes, Topology};
 use futures::StreamExt;
 use futures_timeout::TimeoutExt;
 

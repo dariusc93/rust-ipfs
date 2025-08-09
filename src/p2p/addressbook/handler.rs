@@ -1,12 +1,10 @@
 use std::convert::Infallible;
 use std::task::{Context, Poll};
 
-use connexa::prelude::transport::{
-    upgrade::DeniedUpgrade
-};
+use connexa::prelude::transport::upgrade::DeniedUpgrade;
 
 use connexa::prelude::swarm::{
-    ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, handler::ConnectionEvent,
+    handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
 };
 
 #[derive(Default, Debug)]

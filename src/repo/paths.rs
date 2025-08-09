@@ -77,8 +77,8 @@ fn shard(path: &mut PathBuf, key: &str) {
 #[cfg(test)]
 mod tests {
 
-    use super::Cid;
     use super::shard;
+    use super::Cid;
     use std::convert::TryFrom;
     use std::path::{Path, PathBuf};
 

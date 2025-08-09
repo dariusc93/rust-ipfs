@@ -1,11 +1,11 @@
-
-
 use connexa::prelude::{
     swarm::{
-        self, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm
-    }, transport::{transport::PortUse, Endpoint}, Multiaddr, PeerId, StreamProtocol,
+        self, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
+        THandlerInEvent, ToSwarm,
+    },
+    transport::{transport::PortUse, Endpoint},
+    Multiaddr, PeerId, StreamProtocol,
 };
-
 
 use std::convert::Infallible;
 use std::task::{Context, Poll};
