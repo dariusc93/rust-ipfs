@@ -65,6 +65,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
         Self::with_keypair(&keypair).expect("keypair is valid")
     }
 
+    /// New instance with an existing keypair
     pub fn with_keypair(keypair: impl IntoKeypair) -> std::io::Result<Self> {
         Ok(UninitializedIpfs {
             init: ConnexaBuilder::with_existing_identity(keypair)?,
