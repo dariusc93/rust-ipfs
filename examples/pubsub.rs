@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::{FutureExt, StreamExt};
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{builder::UninitializedIpfs, Ipfs, Keypair, Multiaddr};
+use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair, Multiaddr};
 
 use connexa::prelude::{ConnectionEvent, GossipsubEvent};
 use pollable_map::stream::StreamMap;
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
 
     // Initialize the repo and start a daemon
-    let mut uninitialized = UninitializedIpfs::new()
+    let mut uninitialized = IpfsBuilder::new()
         .with_custom_behaviour(ext_behaviour::Behaviour::new(peer_id, stdout.clone()))
         .set_keypair(&keypair)
         .with_default()

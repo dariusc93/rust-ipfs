@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use futures::StreamExt;
 
-use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath, Multiaddr};
 
 #[derive(Debug, Parser)]
@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
         .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)

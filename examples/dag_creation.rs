@@ -1,13 +1,13 @@
 use rust_ipfs::{Ipfs, IpfsPath};
 
-use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new().start().await?;
+    let ipfs: Ipfs = IpfsBuilder::new().start().await?;
 
     // Create a DAG
     let cid1 = ipfs.put_dag("block1").await?;

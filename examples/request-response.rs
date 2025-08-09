@@ -2,13 +2,13 @@ use bytes::Bytes;
 use connexa::behaviour::request_response::RequestResponseConfig;
 use futures::StreamExt;
 
-use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let node_a = UninitializedIpfs::new()
+    let node_a = IpfsBuilder::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
         .enable_tcp()
@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
 
-    let node_b = UninitializedIpfs::new()
+    let node_b = IpfsBuilder::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
         .with_request_response(vec![RequestResponseConfig {

@@ -1,13 +1,13 @@
 use rust_ipfs::Ipfs;
 
-use rust_ipfs::builder::UninitializedIpfs;
+use rust_ipfs::builder::IpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_custom_behaviour(ext_behaviour::Behaviour)
         .with_default()
         .enable_tcp()

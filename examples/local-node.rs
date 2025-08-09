@@ -1,6 +1,6 @@
 use rust_ipfs::Ipfs;
 
-use rust_ipfs::builder::UninitializedIpfs;
+use rust_ipfs::builder::IpfsBuilder;
 use rust_ipfs::Keypair;
 
 #[tokio::main]
@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let local_peer_id = keypair.public().to_peer_id();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
         .enable_tcp()
         .set_keypair(&keypair)

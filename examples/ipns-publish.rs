@@ -1,13 +1,13 @@
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use ipld_core::ipld;
-    use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
+    use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
     use rust_ipfs::Ipfs;
     use rust_ipfs::IpfsPath;
     // tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()

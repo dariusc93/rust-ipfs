@@ -35,7 +35,7 @@ use tracing_futures::Instrument;
 
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
-pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
+pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
     init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore>,
     keys: Option<Keypair>,
     options: IpfsOptions,
@@ -48,17 +48,21 @@ pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send + 
     gc_repo_duration: Option<Duration>,
 }
 
-pub type UninitializedIpfsDefault = UninitializedIpfs<dummy::Behaviour>;
+pub type DefaultIpfsBuilder = IpfsBuilder<dummy::Behaviour>;
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Default
-    for UninitializedIpfs<C>
-{
+#[deprecated(note = "Use IpfsBuilder instead")]
+pub type UninitializedIpfs<T> = IpfsBuilder<T>;
+
+#[deprecated(note = "Use DefaultIpfsBuilder instead")]
+pub type UninitializedIpfsDefault = DefaultIpfsBuilder;
+
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Default for IpfsBuilder<C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> UninitializedIpfs<C> {
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuilder<C> {
     /// New uninitualized instance
     pub fn new() -> Self {
         let keypair = Keypair::generate_ed25519();
@@ -67,7 +71,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
 
     /// New instance with an existing keypair
     pub fn with_keypair(keypair: impl IntoKeypair) -> std::io::Result<Self> {
-        Ok(UninitializedIpfs {
+        Ok(Self {
             init: ConnexaBuilder::with_existing_identity(keypair)?,
             keys: None,
             options: Default::default(),
@@ -88,12 +92,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
             "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
         ])
     }
-
-    // /// Set storage type for the repo.
-    // pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
-    //     self.options.ipfs_path = storage_type;
-    //     self
-    // }
 
     /// Adds a listening address
     pub fn add_listening_addr(mut self, addr: Multiaddr) -> Self {
@@ -533,7 +531,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Uninitia
 
     /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync.
     pub async fn start(self) -> Result<Ipfs, Error> {
-        let UninitializedIpfs {
+        let IpfsBuilder {
             mut options,
             record_key_validator,
             repo_handle,

@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     use std::str::FromStr;
 
     use clap::Parser;
-    use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
+    use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
     use rust_ipfs::Ipfs;
     use rust_ipfs::IpfsPath;
 
@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
         .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)

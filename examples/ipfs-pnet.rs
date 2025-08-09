@@ -1,7 +1,7 @@
 use clap::Parser;
 use connexa::prelude::transport::pnet::PreSharedKey;
 use rand::Rng;
-use rust_ipfs::{builder::UninitializedIpfs, Ipfs, Keypair};
+use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair};
 use std::str::FromStr;
 
 #[derive(Debug, Parser)]
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     println!("PSK: {:?}", psk);
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
         .set_keypair(&keypair)
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)

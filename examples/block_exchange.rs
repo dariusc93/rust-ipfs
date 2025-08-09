@@ -1,12 +1,12 @@
 use ipld_core::ipld;
 
-use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let node_a = UninitializedIpfs::new()
+    let node_a = IpfsBuilder::new()
         .with_default()
         .enable_memory_transport()
         .start()
@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
 
     node_a.add_listening_address("/memory/0".parse()?).await?;
 
-    let node_b = UninitializedIpfs::new()
+    let node_b = IpfsBuilder::new()
         .with_default()
         .enable_memory_transport()
         .start()

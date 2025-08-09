@@ -1610,7 +1610,7 @@ pub use node::Node;
 #[cfg(all(feature = "full", not(target_arch = "wasm32")))]
 mod node {
     use super::*;
-    use crate::builder::UninitializedIpfsDefault;
+    use crate::builder::DefaultIpfsBuilder;
 
     /// Node encapsulates everything to setup a testing instance so that multi-node tests become
     /// easier.
@@ -1654,7 +1654,7 @@ mod node {
         pub async fn with_options(span: Option<Span>, addr: Option<Vec<Multiaddr>>) -> Self {
             // for future: assume UninitializedIpfs handles instrumenting any futures with the
             // given span
-            let mut uninit = UninitializedIpfsDefault::new()
+            let mut uninit = DefaultIpfsBuilder::new()
                 .with_default()
                 .enable_tcp()
                 .enable_memory_transport()

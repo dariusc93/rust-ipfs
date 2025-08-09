@@ -1,5 +1,5 @@
 use connexa::prelude::swarm::SwarmEvent;
-use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 use rust_ipfs::Ipfs;
 use std::time::Duration;
 
@@ -7,7 +7,7 @@ use std::time::Duration;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .set_default_listener()
         .enable_tcp()
         .swarm_events(|_, event| {
