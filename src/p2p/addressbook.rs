@@ -4,11 +4,14 @@ use crate::AddPeerOpt;
 use futures::StreamExt;
 use futures_timer::Delay;
 
-
 use connexa::prelude::{
     swarm::{
-        self, behaviour::ConnectionEstablished, dial_opts::DialOpts, AddressChange, ConnectionClosed, ConnectionDenied, ConnectionId, DialError, DialFailure, FromSwarm, NetworkBehaviour, NewExternalAddrOfPeer, THandler, THandlerInEvent, ToSwarm
-    }, transport::{transport::PortUse, ConnectedPoint, Endpoint}, Multiaddr, PeerId, Protocol
+        self, behaviour::ConnectionEstablished, dial_opts::DialOpts, AddressChange,
+        ConnectionClosed, ConnectionDenied, ConnectionId, DialError, DialFailure, FromSwarm,
+        NetworkBehaviour, NewExternalAddrOfPeer, THandler, THandlerInEvent, ToSwarm,
+    },
+    transport::{transport::PortUse, ConnectedPoint, Endpoint},
+    Multiaddr, PeerId, Protocol,
 };
 
 use pollable_map::futures::FutureMap;
@@ -17,7 +20,7 @@ use std::fmt::Debug;
 use std::task::Waker;
 use std::time::Duration;
 use std::{
-    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     task::{Context, Poll},
 };
 
@@ -59,14 +62,13 @@ impl Behaviour {
         let opt = opt.into();
 
         let peer_id = opt.peer_id();
-        let addresses = opt.addresses();
+        let addresses = opt.addresses().to_vec();
 
         if !addresses.is_empty() {
-            let addrs = self.peer_addresses.entry(*peer_id).or_default();
-
-            for addr in addresses {
-                addrs.insert(addr.clone());
-            }
+            self.peer_addresses
+                .entry(*peer_id)
+                .or_default()
+                .extend(addresses);
 
             if let Some(opts) = opt.to_dial_opts() {
                 self.events.push_back(ToSwarm::Dial { opts });
@@ -450,7 +452,10 @@ fn address_from_connection_point(connection_point: &ConnectedPoint) -> Multiaddr
 mod test {
     use std::time::Duration;
 
-    use connexa::prelude::{swarm::{dial_opts::DialOpts, Swarm, SwarmBuilder, SwarmEvent}, Multiaddr, PeerId};
+    use connexa::prelude::{
+        swarm::{dial_opts::DialOpts, Swarm, SwarmBuilder, SwarmEvent},
+        Multiaddr, PeerId,
+    };
     use futures::{FutureExt, StreamExt};
 
     use crate::{AddPeerOpt, NetworkBehaviour};
@@ -612,7 +617,7 @@ mod test {
     async fn build_swarm(
         store_on_connection: bool,
     ) -> (PeerId, Multiaddr, Swarm<super::Behaviour>) {
-        use connexa::prelude::transport::{tcp, noise, yamux};
+        use connexa::prelude::transport::{noise, tcp, yamux};
 
         let mut swarm = SwarmBuilder::with_new_identity()
             .with_tokio()
