@@ -856,7 +856,7 @@ impl<S: RepoTypes> Repo<S> {
     /// Hold a guard to prevent GC from running until this guard has dropped
     /// Note: Until this guard drops, the GC task, if enabled, would not perform any cleanup.
     ///       If the GC task is running, this guard will await until GC finishes
-    pub async fn gc_guard(&self) -> GCGuard {
+    pub async fn gc_guard(&self) -> GCGuard<'_> {
         let _g = self.inner.gclock.read().await;
         GCGuard { _g }
     }

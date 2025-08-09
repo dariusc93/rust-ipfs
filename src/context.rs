@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use crate::repo::DefaultStorage;
 
+use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use connexa::behaviour::Behaviour as ConnexaBehaviour;
 use connexa::prelude::identify::Info;
 use connexa::prelude::swarm::{NetworkBehaviour, Swarm};
@@ -63,7 +64,7 @@ impl IpfsContext {
 impl IpfsContext {
     fn custom_behaviour<'a, N: NetworkBehaviour>(
         &self,
-        swarm: &'a mut Swarm<ConnexaBehaviour<p2p::Behaviour<N>>>,
+        swarm: &'a mut Swarm<ConnexaBehaviour<p2p::Behaviour<N>, MemoryStore>>,
     ) -> &'a mut p2p::Behaviour<N>
     where
         N::ToSwarm: Debug,
@@ -77,7 +78,7 @@ impl IpfsContext {
 
     pub(crate) fn handle_event<N: NetworkBehaviour>(
         &mut self,
-        swarm: &mut Swarm<ConnexaBehaviour<p2p::Behaviour<N>>>,
+        swarm: &mut Swarm<ConnexaBehaviour<p2p::Behaviour<N>, MemoryStore>>,
         event: IpfsEvent,
     ) where
         N::ToSwarm: Debug,

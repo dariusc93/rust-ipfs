@@ -9,10 +9,10 @@
 #![cfg_attr(rustfmt, rustfmt_skip)]
 
 
-use std::borrow::Cow;
-use quick_protobuf::{MessageInfo, MessageRead, MessageWrite, BytesReader, Writer, WriterBackend, Result};
-use quick_protobuf::sizeofs::*;
 use super::*;
+use quick_protobuf::sizeofs::*;
+use quick_protobuf::{BytesReader, MessageInfo, MessageRead, MessageWrite, Result, Writer, WriterBackend};
+use std::borrow::Cow;
 
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Debug, Default, PartialEq, Clone)]
@@ -112,6 +112,7 @@ impl<'a> From<&'a str> for ValidityType {
 
 }
 
+#[allow(dead_code)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct IpnsSignatureV2Checker<'a> {

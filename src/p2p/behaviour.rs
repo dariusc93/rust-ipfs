@@ -42,19 +42,6 @@ where
     pub protocol: protocol::Behaviour,
 }
 
-// unsafe impl<C> Send for Behaviour<C>
-// where
-//     C: NetworkBehaviour + Send + std::marker::Sync,
-//     C::ToSwarm: Send + Sync + Debug,
-// {
-// }
-// unsafe impl<C> Sync for Behaviour<C>
-// where
-//     C: NetworkBehaviour + Sync + std::marker::Send,
-//     C::ToSwarm: Send + Sync + Debug,
-// {
-// }
-
 /// Represents the result of a Kademlia query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KadResult {

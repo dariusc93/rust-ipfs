@@ -1,4 +1,6 @@
 //! P2P handling for IPFS nodes.
+
+use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use crate::repo::DefaultStorage;
 use crate::repo::Repo;
 use crate::IpfsOptions;
@@ -29,7 +31,7 @@ pub use self::behaviour::BehaviourEvent;
 pub use addr::MultiaddrExt;
 pub use behaviour::KadResult;
 
-pub(crate) type TSwarm<C> = Swarm<connexa::behaviour::Behaviour<behaviour::Behaviour<C>>>;
+pub(crate) type TSwarm<C> = Swarm<connexa::behaviour::Behaviour<behaviour::Behaviour<C>, MemoryStore>>;
 
 /// Abstraction of IdentifyInfo but includes PeerId
 #[derive(Clone, Debug, Eq)]

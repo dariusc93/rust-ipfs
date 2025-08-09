@@ -101,6 +101,7 @@ use ipld_core::ipld::Ipld;
 
 use connexa::prelude::gossipsub::IntoGossipsubTopic;
 use connexa::prelude::identify::Event;
+use connexa::prelude::peer_store::store::memory::MemoryStore;
 use connexa::prelude::rendezvous::IntoNamespace;
 #[cfg(feature = "stream")]
 use connexa::prelude::stream::IntoStreamProtocol;
@@ -332,7 +333,7 @@ pub enum PeerConnectionEvents {
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
 pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
-    init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent>,
+    init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore>,
     keys: Option<Keypair>,
     options: IpfsOptions,
     repo_handle: Repo<DefaultStorage>,
