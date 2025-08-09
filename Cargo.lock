@@ -750,9 +750,9 @@ dependencies = [
 
 [[package]]
 name = "connexa"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f576cd6cc5fcdc4c2f9d1c1939dfb357c1eaccc89cca0444f9c0db67a7b8f0d3"
+checksum = "8d46b2d4bb9cb81be25fa3d6613695a1f4808f46f15cd7ccd1ea6ee7b77dfe9e"
 dependencies = [
  "async-rt",
  "async-trait",
@@ -4304,9 +4304,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.21"
+version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
+checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "rustyline-async"

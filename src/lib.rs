@@ -43,7 +43,6 @@ pub use block::Block;
 use anyhow::anyhow;
 use bytes::Bytes;
 use dag::{DagGet, DagPut};
-use either::Either;
 use futures::{
     channel::oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     future::BoxFuture,
@@ -563,7 +562,7 @@ impl Ipfs {
     pub async fn disconnect(&self, target: PeerId) -> Result<(), Error> {
         self.connexa
             .swarm()
-            .disconnect(Either::Left(target))
+            .disconnect(target)
             .await
             .map_err(anyhow::Error::from)
     }
