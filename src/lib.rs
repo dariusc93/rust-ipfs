@@ -1381,10 +1381,9 @@ impl Ipfs {
         // the background task or stream. After that this could be handled by dropping.
         self.repo.shutdown();
 
-        // ignoring the error because it'd mean that the background task had already been dropped
         self.connexa.shutdown();
 
-        // terminte task that handles GC
+        // terminate task that handles GC
         self._gc_guard.abort();
     }
 }
