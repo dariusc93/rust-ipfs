@@ -99,6 +99,14 @@ impl IpfsContext {
 
                 let _ = ret.send(result);
             }
+            IpfsEvent::Addresses(ret) => {
+                let custom_behaviour = self.custom_behaviour(swarm);
+                let addrs = custom_behaviour
+                    .peerbook
+                    .connected_peers_addrs()
+                    .collect::<Vec<_>>();
+                let _ = ret.send(Ok(addrs));
+            }
             IpfsEvent::RemovePeer(peer_id, addr, ret) => {
                 let custom_behaviour = self.custom_behaviour(swarm);
                 let result = match addr {

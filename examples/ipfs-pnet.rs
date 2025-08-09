@@ -1,7 +1,7 @@
 use clap::Parser;
 use connexa::prelude::transport::pnet::PreSharedKey;
 use rand::Rng;
-use rust_ipfs::{Ipfs, Keypair, UninitializedIpfs};
+use rust_ipfs::{builder::UninitializedIpfs, Ipfs, Keypair};
 use std::str::FromStr;
 
 #[derive(Debug, Parser)]

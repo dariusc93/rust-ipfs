@@ -1,6 +1,6 @@
 use clap::Parser;
+use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
 use rust_ipfs::{Ipfs, Multiaddr};
 
 #[derive(Debug, Parser)]

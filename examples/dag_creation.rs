@@ -1,6 +1,6 @@
 use rust_ipfs::{Ipfs, IpfsPath};
 
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

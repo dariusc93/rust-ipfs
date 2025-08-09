@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use futures::StreamExt;
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::UninitializedIpfsDefault as UninitializedIpfs;
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs};
 
 #[derive(Debug, Parser)]

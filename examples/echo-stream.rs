@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
     use rand::RngCore;
     use rust_ipfs::{
-        p2p::MultiaddrExt, Ipfs, Keypair, UninitializedIpfsDefault as UninitializedIpfs,
+        builder::UninitializedIpfsDefault as UninitializedIpfs, p2p::MultiaddrExt, Ipfs, Keypair,
     };
 
     #[derive(Debug, Parser)]

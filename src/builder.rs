@@ -1,0 +1,766 @@
+use crate::context::IpfsContext;
+use crate::keystore::Keystore;
+use crate::p2p::{
+    create_create_behaviour, AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig,
+    TSwarm,
+};
+use crate::repo::{DefaultStorage, GCConfig, GCTrigger, Repo};
+use crate::{
+    context, ipns_to_dht_key, p2p, to_dht_key, ConnectionLimits, FDLimit, Ipfs, IpfsEvent,
+    IpfsOptions, Keypair, Multiaddr, NetworkBehaviour, RecordKey, RepoProvider, TSwarmEvent,
+    TSwarmEventFn,
+};
+use anyhow::Error;
+use async_rt::AbortableJoinHandle;
+use connexa::behaviour::peer_store::store::memory::MemoryStore;
+use connexa::behaviour::request_response::RequestResponseConfig;
+use connexa::builder::{ConnexaBuilder, FileDescLimit, IntoKeypair};
+use connexa::dummy;
+use connexa::prelude::identify::Event;
+use connexa::prelude::swarm::SwarmEvent;
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "pnet")]
+use connexa::prelude::transport::pnet::PreSharedKey;
+use connexa::prelude::{gossipsub, ping, swarm};
+use futures::stream::FuturesUnordered;
+use futures::{StreamExt, TryStreamExt};
+use std::collections::{BTreeSet, HashMap};
+use std::convert::Infallible;
+use std::path::Path;
+use std::sync::Arc;
+use std::task::Poll;
+use std::time::Duration;
+use tracing::Span;
+use tracing_futures::Instrument;
+
+/// Configured Ipfs which can only be started.
+#[allow(clippy::type_complexity)]
+pub struct UninitializedIpfs<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
+    init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore>,
+    keys: Option<Keypair>,
+    options: IpfsOptions,
+    repo_handle: Repo<DefaultStorage>,
+    swarm_event: Option<TSwarmEventFn<C>>,
+    record_key_validator:
+        HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
+    gc_config: Option<GCConfig>,
+    custom_behaviour: Option<C>,
+    gc_repo_duration: Option<Duration>,
+}
+
+pub type UninitializedIpfsDefault = UninitializedIpfs<dummy::Behaviour>;
+
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Default
+    for UninitializedIpfs<C>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> UninitializedIpfs<C> {
+    /// New uninitualized instance
+    pub fn new() -> Self {
+        let keypair = Keypair::generate_ed25519();
+        Self::with_keypair(&keypair).expect("keypair is valid")
+    }
+
+    pub fn with_keypair(keypair: impl IntoKeypair) -> std::io::Result<Self> {
+        Ok(UninitializedIpfs {
+            init: ConnexaBuilder::with_existing_identity(keypair)?,
+            keys: None,
+            options: Default::default(),
+            repo_handle: Repo::new_memory(),
+            // record_validators: Default::default(),
+            record_key_validator: Default::default(),
+            swarm_event: None,
+            gc_config: None,
+            gc_repo_duration: None,
+            custom_behaviour: None,
+        })
+    }
+
+    /// Set default listening unspecified ipv4 and ipv6 addresseses for tcp and udp/quic
+    pub fn set_default_listener(self) -> Self {
+        self.add_listening_addrs(vec![
+            "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
+            "/ip4/0.0.0.0/udp/0/quic-v1".parse().unwrap(),
+        ])
+    }
+
+    // /// Set storage type for the repo.
+    // pub fn set_storage_type(mut self, storage_type: StorageType) -> Self {
+    //     self.options.ipfs_path = storage_type;
+    //     self
+    // }
+
+    /// Adds a listening address
+    pub fn add_listening_addr(mut self, addr: Multiaddr) -> Self {
+        if !self.options.listening_addrs.contains(&addr) {
+            self.options.listening_addrs.push(addr)
+        }
+        self
+    }
+
+    /// Set a connection limit
+    pub fn set_connection_limits<F>(mut self, f: F) -> Self
+    where
+        F: Fn(ConnectionLimits) -> ConnectionLimits + Send + Sync + 'static,
+    {
+        self.init = self.init.with_connection_limits_with_config(f);
+        self
+    }
+
+    /// Set connection event capacity
+    pub fn set_connection_event_capacity(mut self, cap: usize) -> Self {
+        self.options.connection_event_cap = cap;
+        self
+    }
+
+    /// Adds a listening addresses
+    pub fn add_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
+        self.options.listening_addrs.extend(addrs);
+        self
+    }
+
+    /// Set a list of listening addresses
+    pub fn set_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
+        self.options.listening_addrs = addrs;
+        self
+    }
+
+    /// Adds a bootstrap node
+    pub fn add_bootstrap(mut self, addr: Multiaddr) -> Self {
+        if !self.options.bootstrap.contains(&addr) {
+            self.options.bootstrap.push(addr)
+        }
+        self
+    }
+
+    /// Load default behaviour for basic functionality
+    pub fn with_default(self) -> Self {
+        self.with_identify(Default::default())
+            .with_autonat()
+            .with_bitswap()
+            .with_kademlia()
+            .with_ping(Default::default())
+            .with_pubsub(Default::default())
+    }
+
+    /// Enables kademlia
+    pub fn with_kademlia(mut self) -> Self {
+        self.init = self.init.with_kademlia();
+        self
+    }
+
+    /// Enables bitswap
+    pub fn with_bitswap(mut self) -> Self {
+        self.options.protocols.bitswap = true;
+        self
+    }
+
+    /// Enable mdns
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_mdns(mut self) -> Self {
+        self.init = self.init.with_mdns();
+        self
+    }
+
+    /// Enable relay client
+    pub fn with_relay(mut self, with_dcutr: bool) -> Self {
+        self.init = self.init.with_relay();
+        if with_dcutr {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.init = self.init.with_dcutr();
+            }
+        }
+        self
+    }
+
+    /// Enable relay server
+    pub fn with_relay_server(mut self, config: RelayConfig) -> Self {
+        self.init = self
+            .init
+            .with_relay_server_with_config(move |_| config.into());
+        self
+    }
+
+    /// Enable port mapping (AKA UPnP)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_upnp(mut self) -> Self {
+        self.init = self.init.with_upnp();
+        self
+    }
+
+    /// Enables rendezvous server
+    pub fn with_rendezvous_server(mut self) -> Self {
+        self.init = self.init.with_rendezvous_server();
+        self
+    }
+
+    /// Enables rendezvous client
+    pub fn with_rendezvous_client(mut self) -> Self {
+        self.init = self.init.with_rendezvous_client();
+        self
+    }
+
+    /// Enables identify
+    pub fn with_identify(mut self, config: IdentifyConfiguration) -> Self {
+        self.init = self
+            .init
+            .with_identify_with_config(config.protocol_version, move |cfg| {
+                cfg.with_agent_version(config.agent_version)
+                    .with_interval(config.interval)
+                    .with_push_listen_addr_updates(config.push_update)
+                    .with_cache_size(config.cache)
+            });
+        self
+    }
+
+    #[cfg(feature = "stream")]
+    pub fn with_streams(mut self) -> Self {
+        self.init = self.init.with_streams();
+        self
+    }
+
+    /// Enables pubsub
+    pub fn with_pubsub(mut self, config: PubsubConfig) -> Self {
+        self.init = self
+            .init
+            .with_gossipsub_with_config(move |keypair, mut builder| {
+                if let Some(protocol) = config.custom_protocol_id {
+                    builder.protocol_id(protocol, gossipsub::Version::V1_1);
+                }
+
+                builder.max_transmit_size(config.max_transmit_size);
+
+                if config.floodsub_compat {
+                    builder.support_floodsub();
+                }
+
+                builder.validation_mode(config.validate.into());
+                let auth =
+                    connexa::prelude::gossipsub::MessageAuthenticity::Signed(keypair.clone());
+                (builder, auth)
+            });
+        self
+    }
+
+    /// Enables request response.
+    /// Note: At this time, this option will only support up to 10 request-response behaviours.
+    ///       with any additional being ignored. Additionally, any duplicated protocols that are
+    ///       provided will be ignored.
+    pub fn with_request_response(mut self, config: Vec<RequestResponseConfig>) -> Self {
+        self.init = self.init.with_request_response(config);
+
+        self
+    }
+
+    /// Enables autonat
+    pub fn with_autonat(mut self) -> Self {
+        self.init = self.init.with_autonat_v1();
+        self
+    }
+
+    /// Enables ping
+    pub fn with_ping(mut self, config: ping::Config) -> Self {
+        self.init = self.init.with_ping_with_config(move |_| config);
+        self
+    }
+
+    /// Set a custom behaviour
+    pub fn with_custom_behaviour(mut self, behaviour: C) -> Self {
+        self.custom_behaviour.replace(behaviour);
+        self
+    }
+
+    /// Enables automatic garbage collection
+    pub fn with_gc(mut self, config: GCConfig) -> Self {
+        self.gc_config = Some(config);
+        self
+    }
+
+    /// Set a duration for which blocks are not removed due to the garbage collector
+    /// Defaults: 2 mins
+    pub fn set_temp_pin_duration(mut self, duration: Duration) -> Self {
+        self.gc_repo_duration = Some(duration);
+        self
+    }
+
+    /// Sets a path
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
+        let path = path.as_ref().to_path_buf();
+        self.options.ipfs_path = Some(path);
+        self
+    }
+
+    /// Sets a namespace
+    #[cfg(target_arch = "wasm32")]
+    pub fn set_namespace(mut self, ns: Option<String>) -> Self {
+        self.options.namespace = Some(ns);
+        self
+    }
+
+    /// Set timeout for idle connections
+    pub fn set_idle_connection_timeout(mut self, duration: u64) -> Self {
+        self.init = self.init.set_swarm_config(move |swarm| {
+            swarm.with_idle_connection_timeout(Duration::from_secs(duration))
+        });
+        self
+    }
+
+    /// Set swarm configuration
+    pub fn set_swarm_configuration<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(swarm::Config) -> swarm::Config + Send + Sync + 'static,
+    {
+        self.init = self.init.set_swarm_config(f);
+        self
+    }
+
+    /// Set default record validator for IPFS
+    /// Note: This will override any keys set for `ipns` prefix
+    pub fn default_record_key_validator(mut self) -> Self {
+        self.record_key_validator.insert(
+            "ipns".into(),
+            Arc::new(|key| to_dht_key(("ipns", |key| ipns_to_dht_key(key)), key)),
+        );
+        self
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn set_record_prefix_validator(
+        mut self,
+        key: &str,
+        callback: Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>,
+    ) -> Self {
+        self.record_key_validator.insert(key.to_string(), callback);
+        self
+    }
+
+    /// Set address book configuration
+    pub fn set_addrbook_configuration(mut self, config: AddressBookConfig) -> Self {
+        self.options.addr_config = config;
+        self
+    }
+
+    /// Set RepoProvider option to provide blocks automatically
+    pub fn set_provider(mut self, opt: RepoProvider) -> Self {
+        self.options.provider = opt;
+        self
+    }
+
+    /// Set keypair
+    pub fn set_keypair(mut self, keypair: &Keypair) -> Self {
+        self.keys = Some(keypair.clone());
+        self
+    }
+
+    /// Set block and data repo
+    pub fn set_repo(mut self, repo: &Repo<DefaultStorage>) -> Self {
+        self.repo_handle = Repo::clone(repo);
+        self
+    }
+
+    /// Set a keystore
+    pub fn set_keystore(mut self, keystore: &Keystore) -> Self {
+        self.options.keystore = keystore.clone();
+        self
+    }
+
+    /// Enables quic transport
+    #[cfg(feature = "quic")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_quic(mut self) -> Self {
+        self.init = self.init.enable_quic();
+        self
+    }
+
+    /// Enables quic transport with custom configuration
+    #[cfg(feature = "quic")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_quic_with_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(
+                connexa::prelude::transport::quic::Config,
+            ) -> connexa::prelude::transport::quic::Config
+            + 'static,
+    {
+        self.init = self.init.enable_quic_with_config(f);
+        self
+    }
+
+    /// Enables tcp transport
+    #[cfg(feature = "tcp")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_tcp(mut self) -> Self {
+        self.init = self.init.enable_tcp();
+        self
+    }
+
+    /// Enables tcp transport with custom configuration
+    #[cfg(feature = "tcp")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_tcp_with_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(
+                connexa::prelude::transport::tcp::Config,
+            ) -> connexa::prelude::transport::tcp::Config
+            + 'static,
+    {
+        self.init = self.init.enable_tcp_with_config(f);
+        self
+    }
+
+    // /// Enables pnet transport
+    #[cfg(feature = "pnet")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_pnet(mut self, psk: PreSharedKey) -> Self {
+        self.init = self.init.enable_pnet(psk);
+        self
+    }
+
+    /// Enables websocket transport
+    #[cfg(feature = "websocket")]
+    pub fn enable_websocket(mut self) -> Self {
+        self.init = self.init.enable_websocket();
+        self
+    }
+
+    /// Enables secure websocket transport
+    #[cfg(feature = "websocket")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_secure_websocket(mut self) -> Self {
+        self.init = self.init.enable_secure_websocket();
+        self
+    }
+
+    /// Enables secure websocket transport
+    #[cfg(feature = "websocket")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_secure_websocket_with_pem(mut self, keypair: String, certs: Vec<String>) -> Self {
+        self.init = self.init.enable_secure_websocket_with_pem(keypair, certs);
+        self
+    }
+
+    /// Enables secure websocket transport
+    #[cfg(feature = "websocket")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_secure_websocket_with_config<F>(mut self, f: F) -> std::io::Result<Self>
+    where
+        F: FnOnce(&Keypair) -> std::io::Result<(Vec<String>, String)>,
+    {
+        self.init = self.init.enable_secure_websocket_with_config(f)?;
+        Ok(self)
+    }
+
+    /// Enables DNS
+    #[cfg(feature = "dns")]
+    pub fn enable_dns(self) -> Self {
+        self.enable_dns_with_resolver(connexa::prelude::transport::dns::DnsResolver::default())
+    }
+
+    /// Enables DNS with a specific resolver
+    #[cfg(feature = "dns")]
+    pub fn enable_dns_with_resolver(
+        mut self,
+        resolver: connexa::prelude::transport::dns::DnsResolver,
+    ) -> Self {
+        self.init = self.init.enable_dns_with_resolver(resolver);
+        self
+    }
+
+    /// Enables WebRTC transport
+    #[cfg(feature = "webrtc")]
+    pub fn enable_webrtc(mut self) -> Self {
+        self.init = self.init.enable_webrtc();
+        self
+    }
+
+    /// Enables WebRTC transport, allowing one to generate a certificate using the provided keypair in the closure.
+    #[cfg(feature = "webrtc")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_webrtc_with_config<F>(mut self, f: F) -> std::io::Result<Self>
+    where
+        F: FnOnce(&Keypair) -> std::io::Result<String>,
+    {
+        self.init = self.init.enable_webrtc_with_config(f)?;
+        Ok(self)
+    }
+
+    /// Enable WebRTC transport with a provided pre-generated pem.
+    #[cfg(feature = "webrtc")]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_webrtc_with_pem(self, pem: impl Into<String>) -> Self {
+        let pem = pem.into();
+        self.enable_webrtc_with_config(move |_| Ok(pem))
+            .expect("pem is provided; should not fail")
+    }
+
+    /// Enables memory transport
+    pub fn enable_memory_transport(mut self) -> Self {
+        self.init = self.init.enable_memory_transport();
+        self
+    }
+
+    /// Set file desc limit
+    pub fn fd_limit(mut self, limit: FDLimit) -> Self {
+        let limit = match limit {
+            FDLimit::Max => FileDescLimit::Max,
+            FDLimit::Custom(n) => FileDescLimit::Custom(n),
+        };
+        self.init = self.init.set_file_descriptor_limit(limit);
+        self
+    }
+
+    /// Set tracing span
+    pub fn set_span(mut self, span: Span) -> Self {
+        self.options.span = Some(span);
+        self
+    }
+
+    /// Handle libp2p swarm events
+    pub fn swarm_events<F>(mut self, func: F) -> Self
+    where
+        F: Fn(&mut TSwarm<C>, &TSwarmEvent<C>) + Sync + Send + 'static,
+    {
+        self.swarm_event = Some(Arc::new(func));
+        self
+    }
+
+    /// Initialize the ipfs node. The returned `Ipfs` value is cloneable, send and sync.
+    pub async fn start(self) -> Result<Ipfs, Error> {
+        let UninitializedIpfs {
+            mut options,
+            record_key_validator,
+            repo_handle,
+            gc_config,
+            init,
+            custom_behaviour,
+            ..
+        } = self;
+
+        let root_span = Option::take(&mut options.span)
+            // not sure what would be the best practice with tracing and spans
+            .unwrap_or_else(|| tracing::trace_span!(parent: &Span::current(), "ipfs"));
+
+        // the "current" span which is not entered but the awaited futures are instrumented with it
+        let init_span = tracing::trace_span!(parent: &root_span, "init");
+
+        // stored in the Ipfs, instrumenting every method call
+        let facade_span = tracing::trace_span!("facade");
+
+        // stored in the executor given to libp2p, used to spawn at least the connections,
+        // instrumenting each of those.
+        // let exec_span = tracing::trace_span!(parent: &root_span, "exec");
+        //
+        // // instruments the IpfsFuture, the background task.
+        // let swarm_span = tracing::trace_span!(parent: &root_span, "swarm");
+
+        let mut repo = repo_handle;
+
+        if repo.is_online() {
+            anyhow::bail!("Repo is already initialized");
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            repo = match &options.ipfs_path {
+                Some(path) => {
+                    if !path.is_dir() {
+                        tokio::fs::create_dir_all(path).await?;
+                    }
+                    Repo::<DefaultStorage>::new_fs(path)
+                }
+                None => repo,
+            };
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            repo = match options.namespace.take() {
+                Some(ns) => Repo::<DefaultStorage>::new_idb(ns),
+                None => repo,
+            };
+        }
+
+        repo.init().instrument(init_span.clone()).await?;
+
+        let repo_events = repo.initialize_channel();
+
+        let keystore = options.keystore.clone();
+
+        //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
+        //      provider records by adding the amount of blocks to the config.
+        //TODO: Add persistent layer for kad store
+        let blocks = match options.provider {
+            RepoProvider::None => vec![],
+            RepoProvider::All => repo.list_blocks().await.collect::<Vec<_>>().await,
+            RepoProvider::Pinned => {
+                repo.list_pins(None)
+                    .await
+                    .filter_map(|result| futures::future::ready(result.map(|(cid, _)| cid).ok()))
+                    .collect()
+                    .await
+            }
+            RepoProvider::Roots => {
+                //TODO: Scan blockstore for root unixfs blocks
+                warn!("RepoProvider::Roots is not implemented... ignoring...");
+                vec![]
+            }
+        };
+
+        let _count = blocks.len();
+
+        let listening_addrs = options.listening_addrs.clone();
+
+        let gc_handle = gc_config.map(|config| {
+            async_rt::task::spawn_abortable({
+                let repo = Repo::clone(&repo);
+                async move {
+                    let GCConfig { duration, trigger } = config;
+                    let use_config_timer = duration != Duration::ZERO;
+                    if trigger == GCTrigger::None && !use_config_timer {
+                        tracing::warn!("GC does not have a set timer or a trigger. Disabling GC");
+                        return;
+                    }
+
+                    let time = match use_config_timer {
+                        true => duration,
+                        false => Duration::from_secs(60 * 60),
+                    };
+
+                    let mut interval = futures_timer::Delay::new(time);
+
+                    loop {
+                        tokio::select! {
+                            _ = &mut interval => {
+                                let _g = repo.inner.gclock.write().await;
+                                tracing::debug!("preparing gc operation");
+                                let pinned = repo
+                                    .list_pins(None)
+                                    .await
+                                    .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
+                                    .try_collect::<BTreeSet<_>>()
+                                    .await
+                                    .unwrap_or_default();
+                                let pinned = Vec::from_iter(pinned);
+                                let total_size = repo.get_total_size().await.unwrap_or_default();
+                                let pinned_size = repo
+                                    .get_blocks_size(&pinned)
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .unwrap_or_default();
+
+                                let unpinned_blocks = total_size - pinned_size;
+
+                                tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
+
+                                let cleanup = match trigger {
+                                    GCTrigger::At { size } => {
+                                        total_size > 0 && unpinned_blocks >= size
+                                    }
+                                    GCTrigger::AtStorage => {
+                                        unpinned_blocks > 0
+                                            && unpinned_blocks >= repo.max_storage_size()
+                                    }
+                                    GCTrigger::None => unpinned_blocks > 0,
+                                };
+
+                                tracing::debug!(will_run = %cleanup);
+
+                                if cleanup {
+                                    tracing::debug!("running cleanup of unpinned blocks");
+                                    let blocks = repo.cleanup().await.unwrap();
+                                    tracing::debug!(removed_blocks = blocks.len(), "blocks removed");
+                                    tracing::debug!("cleanup finished");
+                                }
+
+                                interval.reset(time);
+                            }
+                        }
+                    }
+                }
+            })
+        }).unwrap_or(AbortableJoinHandle::empty());
+
+        let mut context = context::IpfsContext::new(&repo);
+        context.repo_events.replace(repo_events);
+
+        let connexa = init
+            .with_custom_behaviour_with_context((options, repo.clone()), |keys, (options, repo)| {
+                create_create_behaviour(keys, &options, &repo, custom_behaviour)
+            })
+            .set_context(context)
+            .set_custom_task_callback(|swarm, context, event| context.handle_event(swarm, event))
+            .set_swarm_event_callback(|_, event, context| {
+                if let SwarmEvent::Behaviour(connexa::behaviour::BehaviourEvent::Identify(event)) =
+                    event
+                {
+                    match event {
+                        Event::Received { info, .. } => {
+                            let peer_id = info.public_key.to_peer_id();
+                            if let Some(chs) = context.find_peer_identify.remove(&peer_id) {
+                                for ch in chs {
+                                    let _ = ch.send(Ok(info.clone()));
+                                }
+                            }
+                        }
+                        Event::Sent { .. } => {}
+                        Event::Pushed { .. } => {}
+                        Event::Error { .. } => {}
+                    }
+                }
+            })
+            .set_pollable_callback(|cx, swarm, context| {
+                let custom = swarm
+                    .behaviour_mut()
+                    .custom
+                    .as_mut()
+                    .expect("behaviour enabled");
+                while let Poll::Ready(Some(event)) = context.repo_events.poll_next_unpin(cx) {
+                    context.handle_repo_event(custom, event);
+                }
+                Poll::Pending
+            })
+            .build()?;
+
+        FuturesUnordered::from_iter(listening_addrs.into_iter().map({
+            let connexa = connexa.clone();
+            move |addr| {
+                let connexa = connexa.clone();
+                async move { connexa.swarm().listen_on(addr).await }
+            }
+        }))
+        .collect::<Vec<_>>()
+        .await;
+
+        // spawn a task to handle providing blocks in the background
+        async_rt::task::dispatch({
+            let connexa = connexa.clone();
+            async move {
+                futures::stream::iter(blocks)
+                    .then(|block| {
+                        let connexa = connexa.clone();
+                        async move { connexa.dht().provide(block).await }
+                    })
+                    .collect::<Vec<_>>()
+                    .await;
+            }
+        });
+
+        let ipfs = Ipfs {
+            span: facade_span,
+            repo,
+            keystore,
+            connexa,
+            record_key_validator,
+            _gc_guard: gc_handle,
+        };
+
+        Ok(ipfs)
+    }
+}
