@@ -48,9 +48,8 @@ async fn main() -> anyhow::Result<()> {
     println!("PSK: {:?}", psk);
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = IpfsBuilder::new()
+    let ipfs: Ipfs = IpfsBuilder::with_keypair(&keypair)?
         .with_default()
-        .set_keypair(&keypair)
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
         .enable_pnet(psk)

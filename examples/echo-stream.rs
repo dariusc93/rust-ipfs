@@ -25,8 +25,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("peer id: {}", keypair.public().to_peer_id());
     // Initialize the repo and start a daemon
-    let ipfs = IpfsBuilder::new()
-        .set_keypair(&keypair)
+    let ipfs = IpfsBuilder::with_keypair(&keypair)?
         .enable_tcp()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
         .with_streams()

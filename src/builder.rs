@@ -37,7 +37,6 @@ use tracing_futures::Instrument;
 #[allow(clippy::type_complexity)]
 pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
     init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore>,
-    keys: Option<Keypair>,
     options: IpfsOptions,
     repo_handle: Repo<DefaultStorage>,
     swarm_event: Option<TSwarmEventFn<C>>,
@@ -73,7 +72,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     pub fn with_keypair(keypair: impl IntoKeypair) -> std::io::Result<Self> {
         Ok(Self {
             init: ConnexaBuilder::with_existing_identity(keypair)?,
-            keys: None,
             options: Default::default(),
             repo_handle: Repo::new_memory(),
             // record_validators: Default::default(),
@@ -85,7 +83,8 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         })
     }
 
-    /// Set default listening unspecified ipv4 and ipv6 addresseses for tcp and udp/quic
+    /// Set default listening unspecified ipv4 and ipv6 addresses for tcp and quic
+    /// Note that this still requires for the transports to be enabled to be usable
     pub fn set_default_listener(self) -> Self {
         self.add_listening_addrs(vec![
             "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
@@ -348,12 +347,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     /// Set RepoProvider option to provide blocks automatically
     pub fn set_provider(mut self, opt: RepoProvider) -> Self {
         self.options.provider = opt;
-        self
-    }
-
-    /// Set keypair
-    pub fn set_keypair(mut self, keypair: &Keypair) -> Self {
-        self.keys = Some(keypair.clone());
         self
     }
 

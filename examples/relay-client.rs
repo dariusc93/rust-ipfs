@@ -56,10 +56,9 @@ async fn main() -> anyhow::Result<()> {
     let local_peer_id = keypair.public().to_peer_id();
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = IpfsBuilder::new()
+    let ipfs: Ipfs = IpfsBuilder::with_keypair(&keypair)?
         .with_identify(Default::default())
         .with_ping(Default::default())
-        .set_keypair(&keypair)
         .set_default_listener()
         .enable_tcp()
         .with_relay(true)
