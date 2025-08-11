@@ -109,12 +109,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         self
     }
 
-    /// Set connection event capacity
-    pub fn set_connection_event_capacity(mut self, cap: usize) -> Self {
-        self.options.connection_event_cap = cap;
-        self
-    }
-
     /// Adds a listening addresses
     pub fn add_listening_addrs(mut self, addrs: Vec<Multiaddr>) -> Self {
         self.options.listening_addrs.extend(addrs);

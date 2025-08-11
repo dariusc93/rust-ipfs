@@ -128,10 +128,6 @@ struct IpfsOptions {
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
-    // /// Transport configuration
-    // pub transport_configuration: crate::p2p::TransportConfig,
-    // /// Request Response configuration
-    // pub request_response_config: Either<RequestResponseConfig, Vec<RequestResponseConfig>>,
     /// Address book configuration
     pub addr_config: AddressBookConfig,
 
@@ -146,9 +142,6 @@ struct IpfsOptions {
     /// with this span or spans referring to this as their parent. Setting this other than `None`
     /// default is useful when running multiple nodes.
     pub span: Option<Span>,
-
-    /// Channel capacity for emitting connection events over.
-    pub connection_event_cap: usize,
 
     pub(crate) protocols: Libp2pProtocol,
 }
@@ -185,7 +178,6 @@ impl Default for IpfsOptions {
             provider: Default::default(),
             keystore: Keystore::in_memory(),
             listening_addrs: vec![],
-            connection_event_cap: 256,
             span: None,
             protocols: Default::default(),
         }

@@ -1074,7 +1074,7 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                                 }
                             }
                             .map_err(move |e| {
-                                // Although we request would eventually be cancelled if timeout or cancelled, we can still signal to swarm
+                                // Although the request would eventually be canceled if timeout or canceled, we can still signal to swarm
                                 // about the block being unwanted for future changes.
                                 _ = events.try_send(RepoEvent::UnwantBlock(cid));
                                 e
