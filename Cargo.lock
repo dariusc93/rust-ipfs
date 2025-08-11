@@ -750,9 +750,9 @@ dependencies = [
 
 [[package]]
 name = "connexa"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d46b2d4bb9cb81be25fa3d6613695a1f4808f46f15cd7ccd1ea6ee7b77dfe9e"
+checksum = "0d5ddd0c7b4a631e11c34ddba351c4e07028a688d8f93c7efd65b5cf37005578"
 dependencies = [
  "async-rt",
  "async-trait",
