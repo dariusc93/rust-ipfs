@@ -573,11 +573,6 @@ mod test {
     };
     use futures::StreamExt;
     use ipld_core::cid::Cid;
-    // use libp2p::{
-    //     Multiaddr, PeerId, Swarm, SwarmBuilder, Transport,
-    //     core::{transport::MemoryTransport, upgrade::Version},
-    //     swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
-    // };
     use multihash_codetable::{Code, MultihashDigest};
 
     use crate::{repo::Repo, Block};
@@ -589,9 +584,9 @@ mod test {
         Block::new_unchecked(cid, data)
     }
 
-    async fn wait_on_connection<B: NetworkBehaviour>(
-        swarm1: &mut Swarm<B>,
-        swarm2: &mut Swarm<B>,
+    async fn wait_on_connection(
+        swarm1: &mut Swarm<Behaviour>,
+        swarm2: &mut Swarm<Behaviour>,
         peer_id: PeerId,
     ) {
         loop {
