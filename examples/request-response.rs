@@ -22,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
     let node_b = IpfsBuilder::new()
         .with_default()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
+        .enable_tcp()
         .with_request_response(vec![RequestResponseConfig {
             protocol: "/ping/0".into(),
             ..Default::default()
