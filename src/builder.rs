@@ -525,6 +525,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             gc_config,
             init,
             custom_behaviour,
+            swarm_event,
             ..
         } = self;
 
@@ -682,7 +683,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             })
             .set_context(context)
             .set_custom_task_callback(|swarm, context, event| context.handle_event(swarm, event))
-            .set_swarm_event_callback(|_, event, context| {
+            .set_swarm_event_callback(move |swarm, event, context| {
+                if let Some(callback) = swarm_event.as_ref() {
+                    callback(swarm, event);
+                }
                 if let SwarmEvent::Behaviour(connexa::behaviour::BehaviourEvent::Identify(event)) =
                     event
                 {
