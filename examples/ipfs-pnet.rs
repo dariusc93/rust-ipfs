@@ -1,21 +1,3 @@
-use clap::Parser;
-use connexa::prelude::transport::pnet::PreSharedKey;
-use rand::Rng;
-use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair};
-use std::str::FromStr;
-
-#[derive(Debug, Parser)]
-#[clap(name = "ipfs-pnet")]
-struct Opt {
-    #[clap(required = false)]
-    psk: Option<String>,
-}
-fn generate_psk() -> PreSharedKey {
-    let mut key_bytes = [0u8; 32];
-    rand::thread_rng().fill(&mut key_bytes);
-    PreSharedKey::new(key_bytes)
-}
-
 /// you can provide a PSK as an argument
 /// example: cargo run --example 8ab6e6aeb73353791b88c3c73e3d9a5111273e6d89edcbfb8be783f1e595617b
 ///
@@ -24,6 +6,24 @@ fn generate_psk() -> PreSharedKey {
 #[cfg(feature = "pnet")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use clap::Parser;
+    use connexa::prelude::transport::pnet::PreSharedKey;
+    use rand::Rng;
+    use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair};
+    use std::str::FromStr;
+
+    #[derive(Debug, Parser)]
+    #[clap(name = "ipfs-pnet")]
+    struct Opt {
+        #[clap(required = false)]
+        psk: Option<String>,
+    }
+    fn generate_psk() -> PreSharedKey {
+        let mut key_bytes = [0u8; 32];
+        rand::thread_rng().fill(&mut key_bytes);
+        PreSharedKey::new(key_bytes)
+    }
+
     tracing_subscriber::fmt::init();
 
     let keypair = Keypair::generate_ed25519();
@@ -66,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "pnet")]
 mod ext_behaviour {
     use connexa::dummy::DummyHandler;
     use connexa::prelude::swarm::derive_prelude::PortUse;
