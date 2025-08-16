@@ -239,7 +239,10 @@ where
             .then(|| super::bitswap::Behaviour::new(repo))
             .into();
 
-        let relay_manager = None.into();
+        let relay_manager = protocols
+            .relay
+            .then(|| libp2p_relay_manager::Behaviour::default())
+            .into();
 
         let peerbook = peerbook::Behaviour::default();
 

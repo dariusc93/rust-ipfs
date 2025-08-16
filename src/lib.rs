@@ -149,6 +149,7 @@ struct IpfsOptions {
 #[derive(Default, Clone, Copy)]
 pub(crate) struct Libp2pProtocol {
     pub(crate) bitswap: bool,
+    pub(crate) relay: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

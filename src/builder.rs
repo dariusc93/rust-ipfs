@@ -160,6 +160,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
 
     /// Enable relay client
     pub fn with_relay(mut self, with_dcutr: bool) -> Self {
+        self.options.protocols.relay = true;
         self.init = self.init.with_relay();
         if with_dcutr {
             #[cfg(not(target_arch = "wasm32"))]
