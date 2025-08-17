@@ -47,7 +47,7 @@ where
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
 
             let message = BitswapMessage::from_proto(message).map_err(|e| {
-                tracing::error!(error = %e, "unable to parse message");
+                tracing::error!(error = %e, "unable to parse bitswap message");
                 e
             })?;
 
