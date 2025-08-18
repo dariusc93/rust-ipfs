@@ -51,7 +51,12 @@ async fn main() -> anyhow::Result<()> {
     let mut uninitialized = IpfsBuilder::with_keypair(&keypair)?
         .with_custom_behaviour({
             let stdout = stdout.clone();
-            move |_| Ok(ext_behaviour::Behaviour::new(peer_id, stdout))
+            |keypair| {
+                Ok(ext_behaviour::Behaviour::new(
+                    keypair.public().to_peer_id(),
+                    stdout,
+                ))
+            }
         })
         .with_default()
         .enable_tcp()
