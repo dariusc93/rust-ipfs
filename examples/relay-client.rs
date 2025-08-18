@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         .set_default_listener()
         .enable_tcp()
         .with_relay(true)
-        .with_custom_behaviour(ext_behaviour::Behaviour::new(local_peer_id))
+        .with_custom_behaviour(move |_| Ok(ext_behaviour::Behaviour::new(local_peer_id)))
         .fd_limit(rust_ipfs::FDLimit::Max)
         .start()
         .await?;

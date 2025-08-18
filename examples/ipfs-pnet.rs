@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
         .enable_pnet(psk)
-        .with_custom_behaviour(ext_behaviour::Behaviour::new(local_peer_id))
+        .with_custom_behaviour(move |_| Ok(ext_behaviour::Behaviour::new(local_peer_id)))
         .start()
         .await?;
 

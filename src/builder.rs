@@ -43,7 +43,7 @@ pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync +
     record_key_validator:
         HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
     gc_config: Option<GCConfig>,
-    custom_behaviour: Option<C>,
+    custom_behaviour: Option<Box<dyn FnOnce(&Keypair) -> std::io::Result<C>>>,
     gc_repo_duration: Option<Duration>,
 }
 
@@ -263,8 +263,11 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     }
 
     /// Set a custom behaviour
-    pub fn with_custom_behaviour(mut self, behaviour: C) -> Self {
-        self.custom_behaviour.replace(behaviour);
+    pub fn with_custom_behaviour<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&Keypair) -> std::io::Result<C> + 'static,
+    {
+        self.custom_behaviour.replace(Box::new(f));
         self
     }
 
@@ -600,6 +603,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             }
         };
 
+        // TODO: use to calculate store records limits when it is implemented in connexa
         let _count = blocks.len();
 
         let listening_addrs = options.listening_addrs.clone();
@@ -679,9 +683,21 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         context.repo_events.replace(repo_events);
 
         let connexa = init
-            .with_custom_behaviour_with_context((options, repo.clone()), |keys, (options, repo)| {
-                create_create_behaviour(keys, &options, &repo, custom_behaviour)
-            })
+            .with_custom_behaviour_with_context(
+                (options, repo.clone()),
+                |keys, (options, repo)| {
+                    let custom_behaviour = match custom_behaviour {
+                        Some(custom_behaviour) => Some(custom_behaviour(keys)?),
+                        None => None,
+                    };
+                    Ok(create_create_behaviour(
+                        keys,
+                        &options,
+                        &repo,
+                        custom_behaviour,
+                    ))
+                },
+            )?
             .set_context(context)
             .set_custom_task_callback(|swarm, context, event| context.handle_event(swarm, event))
             .set_swarm_event_callback(move |swarm, event, context| {
@@ -730,6 +746,9 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         .await;
 
         // spawn a task to handle providing blocks in the background
+        // note that until connexa supports customizing the memory store configuration (or providing a store directly to kad)
+        // that this will fail once it hits its default limits.
+        // TODO: Determine if we should process the blocks before returning `Ipfs`
         async_rt::task::dispatch({
             let connexa = connexa.clone();
             async move {
