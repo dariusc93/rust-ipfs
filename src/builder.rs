@@ -41,7 +41,7 @@ pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync +
     repo_handle: Repo<DefaultStorage>,
     swarm_event: Option<TSwarmEventFn<C>>,
     record_key_validator:
-        HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
+        HashMap<String, Box<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
     gc_config: Option<GCConfig>,
     custom_behaviour: Option<Box<dyn FnOnce(&Keypair) -> std::io::Result<C>>>,
     gc_repo_duration: Option<Duration>,
@@ -321,18 +321,18 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     pub fn default_record_key_validator(mut self) -> Self {
         self.record_key_validator.insert(
             "ipns".into(),
-            Arc::new(|key| to_dht_key(("ipns", |key| ipns_to_dht_key(key)), key)),
+            Box::new(|key| to_dht_key(("ipns", |key| ipns_to_dht_key(key)), key)),
         );
         self
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn set_record_prefix_validator(
-        mut self,
-        key: &str,
-        callback: Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>,
-    ) -> Self {
-        self.record_key_validator.insert(key.to_string(), callback);
+    pub fn set_record_prefix_validator<F>(mut self, key: &str, callback: F) -> Self
+    where
+        F: Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send + 'static,
+    {
+        self.record_key_validator
+            .insert(key.to_string(), Box::new(callback));
         self
     }
 
@@ -767,7 +767,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             repo,
             keystore,
             connexa,
-            record_key_validator,
+            record_key_validator: Arc::new(record_key_validator),
             _gc_guard: gc_handle,
         };
 

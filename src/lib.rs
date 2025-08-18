@@ -213,7 +213,7 @@ pub struct Ipfs {
     connexa: Connexa<IpfsEvent>,
     keystore: Keystore,
     record_key_validator:
-        HashMap<String, Arc<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>,
+        Arc<HashMap<String, Box<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>>,
     _gc_guard: AbortableJoinHandle<()>,
 }
 
