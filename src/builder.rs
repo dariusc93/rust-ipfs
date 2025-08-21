@@ -326,7 +326,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         self
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn set_record_prefix_validator<F>(mut self, key: &str, callback: F) -> Self
     where
         F: Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send + 'static,
@@ -752,13 +751,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         async_rt::task::dispatch({
             let connexa = connexa.clone();
             async move {
-                futures::stream::iter(blocks)
-                    .then(|block| {
-                        let connexa = connexa.clone();
-                        async move { connexa.dht().provide(block).await }
-                    })
-                    .collect::<Vec<_>>()
-                    .await;
+                let _ = FuturesUnordered::from_iter(blocks.into_iter().map(|cid| {
+                    let connexa = connexa.clone();
+                    async move { connexa.dht().provide(cid).await }
+                }))
+                .try_collect::<Vec<_>>()
+                .await;
             }
         });
 
