@@ -732,33 +732,26 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 }
                 Poll::Pending
             })
+            .set_preload(|_, swarm, ctx| {
+                for addr in listening_addrs {
+                    if let Err(e) = swarm.listen_on(addr.clone()) {
+                        tracing::error!(%addr, %e, "failed to listen on address");
+                    }
+                }
+
+                for block in blocks {
+                    if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+                        let key = RecordKey::from(block.hash().to_bytes());
+                        if let Err(e) = kad.start_providing(key) {
+                            match e {
+                                connexa::prelude::dht::store::Error::MaxProvidedKeys => break,
+                                _ => unreachable!(),
+                            }
+                        }
+                    }
+                }
+            })
             .build()?;
-
-        FuturesUnordered::from_iter(listening_addrs.into_iter().map({
-            let connexa = connexa.clone();
-            move |addr| {
-                let connexa = connexa.clone();
-                async move { connexa.swarm().listen_on(addr).await }
-            }
-        }))
-        .collect::<Vec<_>>()
-        .await;
-
-        // spawn a task to handle providing blocks in the background
-        // note that until connexa supports customizing the memory store configuration (or providing a store directly to kad)
-        // that this will fail once it hits its default limits.
-        // TODO: Determine if we should process the blocks before returning `Ipfs`
-        async_rt::task::dispatch({
-            let connexa = connexa.clone();
-            async move {
-                let _ = FuturesUnordered::from_iter(blocks.into_iter().map(|cid| {
-                    let connexa = connexa.clone();
-                    async move { connexa.dht().provide(cid).await }
-                }))
-                .try_collect::<Vec<_>>()
-                .await;
-            }
-        });
 
         let ipfs = Ipfs {
             span: facade_span,
