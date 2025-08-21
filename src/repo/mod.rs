@@ -329,7 +329,6 @@ pub trait RepoTypes: Clone + Send + Sync + 'static {
 
 /// Describes a repo.
 /// Consolidates a blockstore, a datastore and a subscription registry.
-#[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
 pub struct Repo<S: RepoTypes> {
     pub(crate) inner: Arc<RepoInner<S>>,
