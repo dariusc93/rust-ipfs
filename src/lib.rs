@@ -164,7 +164,7 @@ pub enum RepoProvider {
     /// Provide pinned blocks
     Pinned,
 
-    /// Provide root blocks only
+    /// Provide root blocks only (Currently NO-OP)
     Roots,
 }
 
