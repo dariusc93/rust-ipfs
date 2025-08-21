@@ -22,7 +22,6 @@ use connexa::prelude::swarm::SwarmEvent;
 #[cfg(feature = "pnet")]
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
-use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
 use std::collections::{BTreeSet, HashMap};
 use std::convert::Infallible;
@@ -732,7 +731,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 }
                 Poll::Pending
             })
-            .set_preload(|_, swarm, ctx| {
+            .set_preload(|_, swarm, _| {
                 for addr in listening_addrs {
                     if let Err(e) = swarm.listen_on(addr.clone()) {
                         tracing::error!(%addr, %e, "failed to listen on address");
