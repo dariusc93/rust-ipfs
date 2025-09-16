@@ -1,8 +1,7 @@
 use futures::{pin_mut, StreamExt};
 use ipld_core::cid::Cid;
-use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
 use multihash_codetable::{Code, MultihashDigest};
-use rust_ipfs::{p2p::MultiaddrExt, Block, Node};
+use rust_ipfs::{p2p::MultiaddrExt, Block, Multiaddr, Node, Protocol, Quorum};
 
 use std::time::Duration;
 
@@ -148,12 +147,11 @@ async fn dht_popular_content_discovery() {
         .parse()
         .unwrap();
 
-    assert!(
-        peer.get_block(cid)
-            .timeout(Duration::from_secs(10))
-            .await
-            .is_ok()
-    );
+    assert!(peer
+        .get_block(cid)
+        .timeout(Duration::from_secs(10))
+        .await
+        .is_ok());
 }
 
 /// Check if Ipfs::{get_providers, provide} does its job.
@@ -177,14 +175,15 @@ async fn dht_providing() {
     // and the first node should be able to learn that the last one provides it
     let providers = nodes[0].get_providers(cid).await.unwrap().boxed();
 
-    assert!(
-        providers
-            .take(1)
-            .collect::<Vec<_>>()
-            .await
-            .iter()
-            .any(|x| *x == nodes[last_index].id)
-    );
+    assert!(providers
+        .take(1)
+        .filter_map(|result| async move { result.ok() })
+        .map(futures::stream::iter)
+        .flatten()
+        .collect::<Vec<_>>()
+        .await
+        .iter()
+        .any(|x| *x == nodes[last_index].id));
 }
 
 /// Check if Ipfs::{get, put} does its job.
@@ -208,13 +207,11 @@ async fn dht_get_put() {
     pin_mut!(records);
 
     // assert_eq!(nodes[0].dht_get(key, quorum).await.unwrap(), vec![value]);
-    assert!(
-        records
-            .by_ref()
-            .take(1)
-            .collect::<Vec<_>>()
-            .await
-            .iter()
-            .any(|x| x.value == value)
-    );
+    assert!(records
+        .by_ref()
+        .take(1)
+        .collect::<Vec<_>>()
+        .await
+        .iter()
+        .any(|x| x.value == value));
 }

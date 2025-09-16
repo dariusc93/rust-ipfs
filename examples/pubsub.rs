@@ -1,10 +1,9 @@
 use clap::Parser;
-use futures::FutureExt;
-use libp2p::Multiaddr;
-use libp2p::futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{ConnectionEvents, Ipfs, Keypair, PubsubEvent, UninitializedIpfs};
+use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair, Multiaddr};
 
+use connexa::prelude::{ConnectionEvent, GossipsubEvent};
 use pollable_map::stream::StreamMap;
 use rustyline_async::Readline;
 use std::time::Duration;
@@ -49,10 +48,18 @@ async fn main() -> anyhow::Result<()> {
     let (mut rl, mut stdout) = Readline::new(format!("{peer_id} >"))?;
 
     // Initialize the repo and start a daemon
-    let mut uninitialized = UninitializedIpfs::new()
-        .with_custom_behaviour(ext_behaviour::Behaviour::new(peer_id, stdout.clone()))
-        .set_keypair(&keypair)
+    let mut uninitialized = IpfsBuilder::with_keypair(&keypair)?
+        .with_custom_behaviour({
+            let stdout = stdout.clone();
+            |keypair| {
+                Ok(ext_behaviour::Behaviour::new(
+                    keypair.public().to_peer_id(),
+                    stdout,
+                ))
+            }
+        })
         .with_default()
+        .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?);
 
     if opt.use_mdns {
@@ -97,13 +104,10 @@ async fn main() -> anyhow::Result<()> {
 
     let mut st = ipfs.connection_events().await?;
 
-    let mut main_events = StreamMap::new();
-
     let mut listener_st = StreamMap::new();
 
-    let mut main_event_st = ipfs.pubsub_events(None).await?;
-
-    let stream = ipfs.pubsub_subscribe(topic.clone()).await?;
+    ipfs.pubsub_subscribe(topic.clone()).await?;
+    let stream = ipfs.pubsub_listener(&topic).await?;
 
     listener_st.insert(topic.clone(), stream);
 
@@ -128,34 +132,23 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         tokio::select! {
-            Some((topic, msg)) = listener_st.next() => {
-                writeln!(stdout, "> {topic}: {}: {}", msg.source.expect("Message should contain a source peer_id"), String::from_utf8_lossy(&msg.data))?;
+            Some((topic, ev)) = listener_st.next() => {
+                match ev {
+                    GossipsubEvent::Subscribed { peer_id } => writeln!(stdout, "{} subscribed to {}", peer_id, topic)?,
+                    GossipsubEvent::Unsubscribed { peer_id } => writeln!(stdout, "{} unsubscribed from {}", peer_id, topic)?,
+                    GossipsubEvent::Message { message } => {
+                        writeln!(stdout, "> {topic}: {}: {}", message.source.expect("Message should contain a source peer_id"), String::from_utf8_lossy(&message.data))?;
+                    },
+                }
             }
             Some(conn_ev) = st.next() => {
                 match conn_ev {
-                    ConnectionEvents::IncomingConnection{ peer_id, .. } => {
+                    ConnectionEvent::ConnectionEstablished { peer_id, .. } => {
                         writeln!(stdout, "> {peer_id} connected")?;
                     }
-                    ConnectionEvents::OutgoingConnection{ peer_id, .. } => {
-                        writeln!(stdout, "> {peer_id} connected")?;
-                    }
-                    ConnectionEvents::ClosedConnection{ peer_id, .. } => {
+                    ConnectionEvent::ConnectionClosed{ peer_id, .. } => {
                         writeln!(stdout, "> {peer_id} disconnected")?;
                     }
-                }
-            }
-            Some(event) = main_event_st.next() => {
-                match event {
-                    PubsubEvent::Subscribe { peer_id, topic: Some(topic) } => writeln!(stdout, "{} subscribed to {}", peer_id, topic)?,
-                    PubsubEvent::Unsubscribe { peer_id, topic: Some(topic) } => writeln!(stdout, "{} unsubscribed from {}", peer_id, topic)?,
-                    _ => unreachable!(),
-                }
-            }
-            Some((topic, event)) = main_events.next() => {
-                match event {
-                    PubsubEvent::Subscribe { peer_id, topic: None } => writeln!(stdout, "{} subscribed to {}", peer_id, topic)?,
-                    PubsubEvent::Unsubscribe { peer_id, topic: None } => writeln!(stdout, "{} unsubscribed from {}", peer_id, topic)?,
-                    _ => unreachable!()
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -184,14 +177,15 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 }
                             };
-                            let event_st = ipfs.pubsub_events(topic.clone()).await?;
-                            let Ok(st) = ipfs.pubsub_subscribe(topic.clone()).await else {
+                            let Err(_e) = ipfs.pubsub_subscribe(&topic).await else {
                                 writeln!(stdout, "> already subscribed to topic")?;
                                 continue;
                             };
 
-                            listener_st.insert(topic.clone(), st);
-                            main_events.insert(topic.clone(), event_st);
+                            let event_st = ipfs.pubsub_listener(&topic).await?;
+
+
+                            listener_st.insert(topic.clone(), event_st);
                             writeln!(stdout, "> subscribed to {}", topic)?;
                             *main_topic.lock().await = topic;
                             continue;
@@ -203,15 +197,14 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             listener_st.remove(&topic);
-                            main_events.remove(&topic);
 
-                            if !ipfs.pubsub_unsubscribe(&topic).await.unwrap_or_default() {
+                            if ipfs.pubsub_unsubscribe(&topic).await.is_err() {
                                 writeln!(stdout, "> unable to unsubscribe from {}", topic)?;
                                 continue;
                             }
 
                             writeln!(stdout, "> unsubscribe from {}", topic)?;
-                            if let Some(some_topic) = main_events.keys().next() {
+                            if let Some(some_topic) = listener_st.keys().next() {
                                 *main_topic.lock().await = some_topic.clone();
                                 writeln!(stdout, "> setting current topic to {}", some_topic)?;
                             }
@@ -287,16 +280,14 @@ async fn topic_discovery(ipfs: Ipfs, topic: String) -> anyhow::Result<()> {
 }
 
 mod ext_behaviour {
-    use libp2p::swarm::derive_prelude::PortUse;
-    use libp2p::{
-        Multiaddr, PeerId,
-        core::Endpoint,
-        swarm::{
-            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
-            THandlerOutEvent, ToSwarm,
-        },
+    use connexa::dummy::DummyHandler;
+    use connexa::prelude::swarm::derive_prelude::PortUse;
+    use connexa::prelude::swarm::{
+        ConnectionDenied, FromSwarm, NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent,
+        ToSwarm,
     };
-    use rust_ipfs::{NetworkBehaviour, Protocol};
+    use connexa::prelude::transport::Endpoint;
+    use rust_ipfs::{ConnectionId, Multiaddr, NetworkBehaviour, PeerId, Protocol};
     use rustyline_async::SharedWriter;
     use std::convert::Infallible;
     use std::{
@@ -323,7 +314,7 @@ mod ext_behaviour {
     }
 
     impl NetworkBehaviour for Behaviour {
-        type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
+        type ConnectionHandler = DummyHandler;
         type ToSwarm = Infallible;
 
         fn handle_pending_inbound_connection(
@@ -352,7 +343,7 @@ mod ext_behaviour {
             _: &Multiaddr,
             _: &Multiaddr,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn handle_established_outbound_connection(
@@ -363,7 +354,7 @@ mod ext_behaviour {
             _: Endpoint,
             _: PortUse,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn on_connection_handler_event(

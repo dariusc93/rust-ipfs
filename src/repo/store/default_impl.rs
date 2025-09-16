@@ -9,7 +9,7 @@ use crate::repo::store::datastore::flatfs::FsDataStore;
 use crate::repo::store::datastore::idb::IdbDataStore;
 use crate::repo::store::datastore::memory::MemDataStore;
 use crate::repo::{
-    BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References, RepoTypes, lock,
+    lock, BlockPut, BlockStore, DataStore, Lock, LockError, PinStore, References, RepoTypes,
 };
 use crate::{Block, PinKind, PinMode};
 

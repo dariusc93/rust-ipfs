@@ -1,12 +1,12 @@
 use crate::repo::DefaultStorage;
-use crate::{Block, Ipfs, dag::IpldDag, repo::Repo};
+use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::try_stream;
 use bytes::Bytes;
+use connexa::prelude::PeerId;
 use either::Either;
 use futures::future::BoxFuture;
 use futures::stream::{BoxStream, FusedStream, Stream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
-use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
 use std::pin::Pin;

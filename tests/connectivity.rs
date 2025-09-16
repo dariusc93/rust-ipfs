@@ -1,6 +1,6 @@
 use futures_timeout::TimeoutExt;
-use libp2p::{Multiaddr, multiaddr::Protocol};
 use rust_ipfs::Node;
+use rust_ipfs::{Multiaddr, Protocol};
 use std::time::Duration;
 
 #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]

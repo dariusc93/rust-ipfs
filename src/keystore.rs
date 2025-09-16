@@ -1,11 +1,11 @@
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{btree_map::Entry, BTreeMap},
     sync::Arc,
 };
 
 use anyhow::Error;
-use futures::{StreamExt, stream::BoxStream};
-use libp2p::identity::{Keypair, PublicKey};
+use connexa::prelude::identity::{Keypair, PublicKey};
+use futures::{stream::BoxStream, StreamExt};
 use tokio::sync::Mutex;
 use zeroize::Zeroize;
 
@@ -262,8 +262,7 @@ impl KeyStorage for MemoryKeyStorage {
 
 #[cfg(test)]
 mod test {
-    use crate::keystore::Keystore;
-
+    use super::*;
     #[cfg(feature = "ed25519")]
     #[tokio::test]
     async fn keystore_with_peerid() -> anyhow::Result<()> {

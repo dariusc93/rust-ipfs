@@ -1,7 +1,7 @@
 use crate::error::Error;
-#[cfg(feature = "dns")]
-use crate::p2p::DnsResolver;
 use crate::path::IpfsPath;
+#[cfg(feature = "dns")]
+use connexa::prelude::transport::dns::DnsResolver;
 
 use tracing_futures::Instrument;
 
@@ -105,25 +105,22 @@ pub async fn resolve<'a>(
 #[cfg(test)]
 mod tests {
     use super::resolve;
+    use connexa::prelude::transport::dns::DnsResolver;
 
     #[tokio::test]
     async fn resolve_ipfs_io() {
         tracing_subscriber::fmt::init();
-        let res = resolve(
-            crate::p2p::DnsResolver::Cloudflare,
-            "ipfs.io",
-            std::iter::empty(),
-        )
-        .await
-        .unwrap()
-        .to_string();
+        let res = resolve(DnsResolver::Cloudflare, "ipfs.io", std::iter::empty())
+            .await
+            .unwrap()
+            .to_string();
         assert_eq!(res, "/ipns/website.ipfs.io");
     }
 
     #[tokio::test]
     async fn resolve_website_ipfs_io() {
         let res = resolve(
-            crate::p2p::DnsResolver::Cloudflare,
+            DnsResolver::Cloudflare,
             "website.ipfs.io",
             std::iter::empty(),
         )

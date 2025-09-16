@@ -1,30 +1,29 @@
-use clap::Parser;
-use libp2p::pnet::PreSharedKey;
-use rand::Rng;
-use rust_ipfs::Ipfs;
-use rust_ipfs::Keypair;
-use rust_ipfs::UninitializedIpfs;
-use std::str::FromStr;
-
-#[derive(Debug, Parser)]
-#[clap(name = "ipfs-pnet")]
-struct Opt {
-    #[clap(required = false)]
-    psk: Option<String>,
-}
-fn generate_psk() -> PreSharedKey {
-    let mut key_bytes = [0u8; 32];
-    rand::thread_rng().fill(&mut key_bytes);
-    PreSharedKey::new(key_bytes)
-}
-
 /// you can provide a PSK as an argument
 /// example: cargo run --example 8ab6e6aeb73353791b88c3c73e3d9a5111273e6d89edcbfb8be783f1e595617b
 ///
 /// or create a random one without providing any argument
 /// example: cargo run --example ipfs-pnet
+#[cfg(feature = "pnet")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use clap::Parser;
+    use connexa::prelude::transport::pnet::PreSharedKey;
+    use rand::Rng;
+    use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair};
+    use std::str::FromStr;
+
+    #[derive(Debug, Parser)]
+    #[clap(name = "ipfs-pnet")]
+    struct Opt {
+        #[clap(required = false)]
+        psk: Option<String>,
+    }
+    fn generate_psk() -> PreSharedKey {
+        let mut key_bytes = [0u8; 32];
+        rand::thread_rng().fill(&mut key_bytes);
+        PreSharedKey::new(key_bytes)
+    }
+
     tracing_subscriber::fmt::init();
 
     let keypair = Keypair::generate_ed25519();
@@ -49,13 +48,12 @@ async fn main() -> anyhow::Result<()> {
     println!("PSK: {:?}", psk);
 
     // Initialize the repo and start a daemon
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::with_keypair(&keypair)?
         .with_default()
-        .set_keypair(&keypair)
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
-        .with_pnet(psk)
-        .with_custom_behaviour(ext_behaviour::Behaviour::new(local_peer_id))
+        .enable_pnet(psk)
+        .with_custom_behaviour(move |_| Ok(ext_behaviour::Behaviour::new(local_peer_id)))
         .start()
         .await?;
 
@@ -68,17 +66,17 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "pnet")]
 mod ext_behaviour {
-    use libp2p::swarm::derive_prelude::PortUse;
-    use libp2p::{
-        Multiaddr, PeerId,
-        core::Endpoint,
-        swarm::{
-            ConnectionDenied, ConnectionId, FromSwarm, NewListenAddr, THandler, THandlerInEvent,
-            THandlerOutEvent, ToSwarm,
-        },
+    use connexa::dummy::DummyHandler;
+    use connexa::prelude::swarm::derive_prelude::PortUse;
+    use connexa::prelude::swarm::{
+        ConnectionDenied, FromSwarm, NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent,
+        ToSwarm,
     };
-    use rust_ipfs::NetworkBehaviour;
+    use connexa::prelude::transport::Endpoint;
+
+    use rust_ipfs::{ConnectionId, Multiaddr, NetworkBehaviour, PeerId};
     use std::convert::Infallible;
     use std::{
         collections::HashSet,
@@ -100,7 +98,7 @@ mod ext_behaviour {
     }
 
     impl NetworkBehaviour for Behaviour {
-        type ConnectionHandler = rust_ipfs::libp2p::swarm::dummy::ConnectionHandler;
+        type ConnectionHandler = DummyHandler;
         type ToSwarm = Infallible;
 
         fn handle_pending_inbound_connection(
@@ -129,7 +127,7 @@ mod ext_behaviour {
             _: &Multiaddr,
             _: &Multiaddr,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn handle_established_outbound_connection(
@@ -140,7 +138,7 @@ mod ext_behaviour {
             _: Endpoint,
             _: PortUse,
         ) -> Result<THandler<Self>, ConnectionDenied> {
-            Ok(rust_ipfs::libp2p::swarm::dummy::ConnectionHandler)
+            Ok(DummyHandler)
         }
 
         fn on_connection_handler_event(
@@ -172,4 +170,9 @@ mod ext_behaviour {
             Poll::Pending
         }
     }
+}
+
+#[cfg(not(feature = "pnet"))]
+fn main() {
+    panic!("This example requires the `pnet` feature");
 }

@@ -4,7 +4,7 @@ use rust_ipfs::Block;
 use std::time::Duration;
 
 mod common;
-use common::{Topology, spawn_nodes};
+use common::{spawn_nodes, Topology};
 use rust_ipfs::block::BlockCodec;
 
 fn create_block() -> Block {

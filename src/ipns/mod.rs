@@ -3,14 +3,15 @@
 use futures_timeout::TimeoutExt;
 use std::borrow::Borrow;
 
-use crate::Ipfs;
-#[cfg(feature = "dns")]
-use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
 use crate::repo::DataStore;
+use crate::Ipfs;
 
 #[cfg(feature = "dns")]
 mod dnslink;
+
+#[cfg(feature = "dns")]
+use connexa::prelude::transport::dns::DnsResolver;
 
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
@@ -53,9 +54,9 @@ impl Ipns {
                 use std::str::FromStr;
                 use std::time::Duration;
 
+                use connexa::prelude::PeerId;
                 use futures::StreamExt;
                 use ipld_core::cid::Cid;
-                use libp2p::PeerId;
                 use multihash::Multihash;
 
                 let mut path_iter = path.iter();
@@ -149,8 +150,8 @@ impl Ipns {
         path: impl Borrow<IpfsPath>,
         option: IpnsOption,
     ) -> Result<IpfsPath, IpnsError> {
+        use connexa::prelude::dht::Quorum;
         use ipld_core::cid::Cid;
-        use libp2p::kad::Quorum;
         use multihash::Multihash;
         use std::str::FromStr;
 

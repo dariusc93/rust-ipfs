@@ -4,9 +4,9 @@ use crate::block::BlockCodec;
 use crate::repo::Repo;
 use crate::repo::RepoTypes;
 use async_stream::stream;
+use connexa::prelude::identity::PeerId;
 use futures::stream::Stream;
 use ipld_core::{cid::Cid, ipld::Ipld};
-use libp2p::PeerId;
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -371,7 +371,7 @@ fn dagpb_links(ipld: Ipld) -> Vec<(Option<String>, Cid)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Edge, ipld_links, iplds_refs};
+    use super::{ipld_links, iplds_refs, Edge};
     use crate::{Block, Node};
     use futures::stream::TryStreamExt;
     use hex_literal::hex;

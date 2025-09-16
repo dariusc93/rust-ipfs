@@ -7,16 +7,16 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{FutureExt, Stream, future::BoxFuture, stream::FusedStream};
+use connexa::prelude::PeerId;
+use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream};
 use futures_timer::Delay;
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
-use libp2p::PeerId;
 use std::fmt::Debug;
 
 use crate::{
-    Block,
     repo::{DefaultStorage, Repo},
+    Block,
 };
 
 const CAP_THRESHOLD: usize = 100;

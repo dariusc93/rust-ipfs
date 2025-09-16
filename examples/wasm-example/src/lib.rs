@@ -1,5 +1,5 @@
 use ipld_core::ipld;
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 use rust_ipfs::{Multiaddr, Protocol};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
@@ -10,14 +10,14 @@ pub async fn run() -> Result<(), JsError> {
     let body = Body::from_current_window()?;
     body.append_p("Ipfs block exchange test")?;
 
-    let node_a = UninitializedIpfs::new()
+    let node_a = IpfsBuilder::new()
         .with_default()
         .add_listening_addr(Multiaddr::empty().with(Protocol::Memory(0)))
         .start()
         .await
         .unwrap();
 
-    let node_b = UninitializedIpfs::new()
+    let node_b = IpfsBuilder::new()
         .with_default()
         .add_listening_addr(Multiaddr::empty().with(Protocol::Memory(0)))
         .start()
