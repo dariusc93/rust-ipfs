@@ -1,4 +1,4 @@
-use libp2p::{Multiaddr, PeerId, multiaddr::Protocol};
+use connexa::prelude::{Multiaddr, PeerId, Protocol};
 
 pub trait MultiaddrExt {
     /// Peer id

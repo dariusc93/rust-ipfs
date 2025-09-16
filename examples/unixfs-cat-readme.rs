@@ -1,13 +1,15 @@
 use std::str::FromStr;
 
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
+        .enable_tcp()
+        .enable_dns()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .start()
         .await?;

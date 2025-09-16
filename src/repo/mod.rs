@@ -1,15 +1,15 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
-use crate::Block;
 use crate::error::Error;
+use crate::Block;
+use connexa::prelude::identity::PeerId;
 use core::fmt::Debug;
-use futures::channel::mpsc::{Receiver, Sender, channel};
+use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
-use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
@@ -17,8 +17,8 @@ use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};
@@ -329,7 +329,6 @@ pub trait RepoTypes: Clone + Send + Sync + 'static {
 
 /// Describes a repo.
 /// Consolidates a blockstore, a datastore and a subscription registry.
-#[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
 pub struct Repo<S: RepoTypes> {
     pub(crate) inner: Arc<RepoInner<S>>,
@@ -856,7 +855,7 @@ impl<S: RepoTypes> Repo<S> {
     /// Hold a guard to prevent GC from running until this guard has dropped
     /// Note: Until this guard drops, the GC task, if enabled, would not perform any cleanup.
     ///       If the GC task is running, this guard will await until GC finishes
-    pub async fn gc_guard(&self) -> GCGuard {
+    pub async fn gc_guard(&self) -> GCGuard<'_> {
         let _g = self.inner.gclock.read().await;
         GCGuard { _g }
     }
@@ -1074,7 +1073,7 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                                 }
                             }
                             .map_err(move |e| {
-                                // Although we request would eventually be cancelled if timeout or cancelled, we can still signal to swarm
+                                // Although the request would eventually be canceled if timeout or canceled, we can still signal to swarm
                                 // about the block being unwanted for future changes.
                                 _ = events.try_send(RepoEvent::UnwantBlock(cid));
                                 e

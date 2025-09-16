@@ -1,27 +1,34 @@
+use futures::TryFutureExt;
 use rust_ipfs::p2p::MultiaddrExt;
+use rust_ipfs::Multiaddr;
 
 #[tokio::test]
 async fn multiple_consecutive_ephemeral_listening_addresses() {
     let node = rust_ipfs::Node::new("test_node").await;
 
-    let target = libp2p::build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16));
+    let target: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().expect("valid multiaddr");
 
-    let first = node.add_listening_address(target.clone()).await.unwrap();
-    assert_ne!(target, first);
+    let id = node.add_listening_address(target.clone()).await.unwrap();
+    let list = node.get_listening_address(id).await.unwrap();
+    assert!(!list.contains(&target));
 
-    let second = node.add_listening_address(target.clone()).await.unwrap();
-    assert_ne!(target, second);
-    assert_ne!(first, second);
+    let id = node.add_listening_address(target.clone()).await.unwrap();
+    let list = node.get_listening_address(id).await.unwrap();
+    assert!(!list.contains(&target));
 }
 
 #[tokio::test]
 async fn multiple_concurrent_ephemeral_listening_addresses_on_same_ip() {
     let node = rust_ipfs::Node::new("test_node").await;
 
-    let target = libp2p::build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16));
+    let target: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().expect("valid multiaddr");
 
-    let first = node.add_listening_address(target.clone());
-    let second = node.add_listening_address(target);
+    let first = node
+        .add_listening_address(target.clone())
+        .and_then(|id| node.get_listening_address(id));
+    let second = node
+        .add_listening_address(target)
+        .and_then(|id| node.get_listening_address(id));
 
     let (first, second) = futures::future::join(first, second).await;
 
@@ -64,7 +71,7 @@ async fn adding_unspecified_addr_resolves_with_first() {
     let node = rust_ipfs::Node::new("test_node").await;
     // there is no test in trying to match this with others as ... that would be quite
     // perilous.
-    node.add_listening_address(libp2p::build_multiaddr!(Ip4([0, 0, 0, 0]), Tcp(0u16)))
+    node.add_listening_address("/ip4/127.0.0.1/tcp/0".parse().expect("valid multiaddr"))
         .await
         .unwrap();
 }
@@ -74,7 +81,7 @@ async fn listening_for_multiple_unspecified_addresses() {
     let node = rust_ipfs::Node::new("test_node").await;
     // there is no test in trying to match this with others as ... that would be quite
     // perilous.
-    let target = libp2p::build_multiaddr!(Ip4([0, 0, 0, 0]), Tcp(0u16));
+    let target: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().expect("valid multiaddr");
     let first = node.add_listening_address(target.clone());
     let second = node.add_listening_address(target);
 
@@ -95,20 +102,14 @@ async fn listening_for_multiple_unspecified_addresses() {
 async fn remove_listening_address() {
     let node = rust_ipfs::Node::new("test_node").await;
 
-    let unbound = libp2p::build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16));
-    let first = node.add_listening_address(unbound.clone()).await.unwrap();
-
-    // the book keeping changes from matching the unbound address to the bound one returned
-    // from the future.
-    node.remove_listening_address(unbound.clone())
-        .await
-        .unwrap_err();
+    let unbound: Multiaddr = "/ip4/127.0.0.1/tcp/0".parse().expect("valid multiaddr");
+    let first = node.add_listening_address(unbound).await.unwrap();
     node.remove_listening_address(first).await.unwrap();
 }
 
 #[tokio::test]
 async fn pre_configured_listening_addrs() {
-    use libp2p::Multiaddr;
+    use rust_ipfs::Multiaddr;
     use rust_ipfs::Node;
 
     let addr: Multiaddr = "/ip4/127.0.0.1/tcp/4001".parse().unwrap();

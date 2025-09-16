@@ -1,8 +1,8 @@
 use crate::error::Error;
 use crate::repo::{DataStore, PinStore, References};
 use crate::{
-    Block, PinKind, PinMode,
     repo::{BlockPut, BlockStore},
+    Block, PinKind, PinMode,
 };
 use either::Either;
 use futures::stream::BoxStream;

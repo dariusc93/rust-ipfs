@@ -1,5 +1,5 @@
 #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
-pub use common::{ForeignNode, api_call};
+pub use common::{api_call, ForeignNode};
 
 #[cfg(all(not(feature = "test_go_interop"), not(feature = "test_js_interop")))]
 #[allow(dead_code)]
@@ -7,7 +7,7 @@ pub struct ForeignNode;
 
 #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
 pub mod common {
-    use libp2p::{Multiaddr, PeerId, core::PublicKey};
+    use libp2p::{core::PublicKey, Multiaddr, PeerId};
     use rand::prelude::*;
     use serde::Deserialize;
     use std::{

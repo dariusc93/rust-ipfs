@@ -8,13 +8,13 @@
 #![cfg_attr(rustfmt, rustfmt_skip)]
 
 use super::*;
-use quick_protobuf::sizeofs::*;
-use quick_protobuf::{BytesReader, MessageRead, MessageWrite, Result, Writer, WriterBackend};
 use alloc::borrow::Cow;
 use core::convert::TryFrom;
-use std::io::Write;
 use core::ops::Deref;
 use core::ops::DerefMut;
+use quick_protobuf::sizeofs::*;
+use quick_protobuf::{BytesReader, MessageRead, MessageWrite, Result, Writer, WriterBackend};
+use std::io::Write;
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct Data<'a> {
@@ -195,6 +195,8 @@ impl MessageWrite for UnixTime {
         Ok(())
     }
 }
+
+#[allow(dead_code)]
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct Metadata<'a> {
     pub MimeType: Option<Cow<'a, str>>,

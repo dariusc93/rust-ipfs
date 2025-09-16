@@ -1,9 +1,9 @@
 use ipld_core::cid::Cid;
 
 mod common;
-use common::{Topology, spawn_nodes};
-use rust_ipfs::Block;
+use common::{spawn_nodes, Topology};
 use rust_ipfs::block::BlockCodec;
+use rust_ipfs::Block;
 
 // this test is designed to trigger unfavorable conditions for the bitswap
 // protocol by putting blocks in every second node and attempting to get

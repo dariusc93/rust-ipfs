@@ -1,5 +1,5 @@
+use futures::future::{pending, select, Either, FutureExt};
 use futures::future::{AbortHandle, Abortable};
-use futures::future::{Either, FutureExt, pending, select};
 use ipld_core::cid::Cid;
 use rust_ipfs::Node;
 use tokio::{

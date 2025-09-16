@@ -1,7 +1,7 @@
+use connexa::prelude::PeerId;
 use either::Either;
 use futures::stream::BoxStream;
-use futures::{FutureExt, Stream, StreamExt, future::BoxFuture, stream::FusedStream};
-use libp2p::PeerId;
+use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
 #[allow(unused_imports)]
 use rust_unixfs::walk::{ContinuedWalk, Walker};
 use std::pin::Pin;
@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Span};
 
 use crate::repo::DefaultStorage;
-use crate::{Ipfs, IpfsPath, dag::IpldDag, repo::Repo};
+use crate::{dag::IpldDag, repo::Repo, Ipfs, IpfsPath};
 
 #[allow(unused_imports)]
 use super::{TraversalFailed, UnixfsStatus};
