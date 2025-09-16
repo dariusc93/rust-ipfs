@@ -1,45 +1,38 @@
 //! P2P handling for IPFS nodes.
-use crate::error::Error;
-use crate::repo::Repo;
-use crate::{IpfsOptions, TTransportFn};
-use std::convert::TryInto;
-use std::num::{NonZeroU8, NonZeroUsize};
-use std::time::Duration;
 
-use libp2p::gossipsub::ValidationMode;
-use libp2p::identify::Info as IdentifyInfo;
-use libp2p::identity::{Keypair, PublicKey};
-use libp2p::request_response::ProtocolSupport;
-use libp2p::swarm::NetworkBehaviour;
-use libp2p::{Multiaddr, PeerId};
-use libp2p::{StreamProtocol, Swarm};
-use tracing::Span;
+use crate::repo::DefaultStorage;
+use crate::repo::Repo;
+use crate::IpfsOptions;
+use connexa::behaviour::peer_store::store::memory::MemoryStore;
+
+pub use behaviour::Behaviour;
+pub use behaviour::IdentifyConfiguration;
+pub use behaviour::{RateLimit, RelayConfig};
+use connexa::prelude::gossipsub::ValidationMode;
+use connexa::prelude::identify::Info as IdentifyInfo;
+use connexa::prelude::identity::Keypair;
+use connexa::prelude::identity::PublicKey;
+use connexa::prelude::swarm::NetworkBehaviour;
+use connexa::prelude::swarm::Swarm;
+use connexa::prelude::Multiaddr;
+use connexa::prelude::PeerId;
+use connexa::prelude::StreamProtocol;
 
 pub(crate) mod addr;
 pub(crate) mod addressbook;
 pub mod bitswap;
 pub(crate) mod peerbook;
 pub mod protocol;
-pub(crate) mod rr_man;
 
 mod behaviour;
 pub use self::addressbook::Config as AddressBookConfig;
 pub use self::behaviour::BehaviourEvent;
-pub use self::behaviour::IdentifyConfiguration;
-
-pub use self::behaviour::{KadConfig, KadInserts, KadStoreConfig};
-pub use self::behaviour::{RateLimit, RelayConfig};
-#[cfg(not(target_arch = "wasm32"))]
-pub use self::transport::generate_cert;
-pub use self::transport::{DnsResolver, TransportConfig, UpgradeVersion};
-pub(crate) mod gossipsub;
-mod request_response;
-mod transport;
 
 pub use addr::MultiaddrExt;
 pub use behaviour::KadResult;
 
-pub(crate) type TSwarm<C> = Swarm<behaviour::Behaviour<C>>;
+pub(crate) type TSwarm<C> =
+    Swarm<connexa::behaviour::Behaviour<behaviour::Behaviour<C>, MemoryStore>>;
 
 /// Abstraction of IdentifyInfo but includes PeerId
 #[derive(Clone, Debug, Eq)]
@@ -90,6 +83,7 @@ impl From<IdentifyInfo> for PeerInfo {
             listen_addrs,
             protocols,
             observed_addr,
+            ..
         } = info;
         let peer_id = public_key.to_peer_id();
         let observed_addr = Some(observed_addr);
@@ -157,124 +151,17 @@ impl Default for PubsubConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RequestResponseConfig {
-    pub protocol: String,
-    pub timeout: Option<Duration>,
-    pub max_request_size: usize,
-    pub max_response_size: usize,
-    pub concurrent_streams: Option<usize>,
-    pub channel_buffer: usize,
-    pub protocol_direction: RequestResponseDirection,
-}
-
-#[derive(Debug, Clone, Default)]
-pub enum RequestResponseDirection {
-    In,
-    Out,
-    #[default]
-    Both,
-}
-
-impl From<RequestResponseDirection> for ProtocolSupport {
-    fn from(direction: RequestResponseDirection) -> Self {
-        match direction {
-            RequestResponseDirection::In => ProtocolSupport::Inbound,
-            RequestResponseDirection::Out => ProtocolSupport::Outbound,
-            RequestResponseDirection::Both => ProtocolSupport::Full,
-        }
-    }
-}
-
-impl Default for RequestResponseConfig {
-    fn default() -> Self {
-        Self {
-            protocol: "/ipfs/request-response".into(),
-            timeout: None,
-            max_request_size: 512 * 1024,
-            max_response_size: 2 * 1024 * 1024,
-            concurrent_streams: None,
-            channel_buffer: 128,
-            protocol_direction: RequestResponseDirection::default(),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct SwarmConfig {
-    pub dial_concurrency_factor: NonZeroU8,
-    pub notify_handler_buffer_size: NonZeroUsize,
-    pub connection_event_buffer_size: usize,
-    pub max_inbound_stream: usize,
-}
-
-impl Default for SwarmConfig {
-    fn default() -> Self {
-        Self {
-            dial_concurrency_factor: 8.try_into().expect("8 > 0"),
-            notify_handler_buffer_size: 32.try_into().expect("256 > 0"),
-            connection_event_buffer_size: 7,
-            max_inbound_stream: 10_000,
-        }
-    }
-}
-
-#[allow(clippy::type_complexity)]
-#[allow(deprecated)]
-//TODO: use libp2p::SwarmBuilder
-/// Creates a new IPFS swarm.
-pub(crate) fn create_swarm<C>(
+/// Construct new behaviour
+pub(crate) fn create_create_behaviour<C>(
     keypair: &Keypair,
     options: &IpfsOptions,
-    repo: &Repo,
-    span: Span,
-    (custom, custom_transport): (Option<C>, Option<TTransportFn>),
-) -> Result<TSwarm<C>, Error>
+    repo: &Repo<DefaultStorage>,
+    custom: Option<C>,
+) -> behaviour::Behaviour<C>
 where
     C: NetworkBehaviour,
-    <C as NetworkBehaviour>::ToSwarm: std::fmt::Debug + Send,
+    C: Send + Sync + 'static,
+    <C as NetworkBehaviour>::ToSwarm: std::fmt::Debug + Send + Sync + 'static,
 {
-    let keypair = keypair.clone();
-    let peer_id = keypair.public().to_peer_id();
-
-    let swarm_config = options.swarm_configuration.clone();
-    let transport_config = options.transport_configuration.clone();
-
-    let idle = options.connection_idle;
-
-    let (behaviour, relay_transport) = behaviour::Behaviour::new(&keypair, options, repo, custom)?;
-
-    // Set up an encrypted TCP transport over the Yamux. If relay transport is supplied, that will be apart
-    let transport = match custom_transport {
-        Some(transport) => transport(&keypair, relay_transport)?,
-        None => transport::build_transport(keypair, relay_transport, transport_config)?,
-    };
-
-    let swarm = Swarm::new(
-        transport,
-        behaviour,
-        peer_id,
-        libp2p::swarm::Config::with_executor(SpannedExecutor { span })
-            .with_notify_handler_buffer_size(swarm_config.notify_handler_buffer_size)
-            .with_per_connection_event_buffer_size(swarm_config.connection_event_buffer_size)
-            .with_dial_concurrency_factor(swarm_config.dial_concurrency_factor)
-            .with_max_negotiating_inbound_streams(swarm_config.max_inbound_stream)
-            .with_idle_connection_timeout(idle),
-    );
-
-    Ok(swarm)
-}
-
-struct SpannedExecutor {
-    span: Span,
-}
-
-impl libp2p::swarm::Executor for SpannedExecutor {
-    fn exec(
-        &self,
-        future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static + Send>>,
-    ) {
-        use tracing_futures::Instrument;
-        async_rt::task::dispatch(future.instrument(self.span.clone()));
-    }
+    behaviour::Behaviour::new(&keypair, options, repo, custom)
 }

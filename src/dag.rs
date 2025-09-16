@@ -3,16 +3,17 @@
 use crate::block::BlockCodec;
 use crate::error::Error;
 use crate::path::{IpfsPath, PathRoot, SlashedPath};
+use crate::repo::DefaultStorage;
 use crate::repo::Repo;
 use crate::{Block, Ipfs};
 use bytes::Bytes;
+use connexa::prelude::PeerId;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use ipld_core::cid::{Cid, Version};
 use ipld_core::codec::Codec;
 use ipld_core::ipld::Ipld;
 use ipld_core::serde::{from_ipld, to_ipld};
-use libp2p::PeerId;
 use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::{
     dagpb::{wrap_node_data, NodeData},
@@ -77,9 +78,9 @@ pub enum ResolveError {
 #[derive(Debug, Error)]
 pub enum UnexpectedResolved {
     #[error("path resolved to unexpected type of document: {:?} or {}", .0, .1.source())]
-    UnexpectedCodec(u64, ResolvedNode),
+    UnexpectedCodec(u64, Box<ResolvedNode>),
     #[error("path did not resolve to a block on {}", .0.source())]
-    NonBlock(ResolvedNode),
+    NonBlock(Box<ResolvedNode>),
 }
 
 /// Used internally before translating to ResolveError at the top level by using the IpfsPath.
@@ -114,22 +115,10 @@ impl RawResolveLocalError {
     fn add_starting_point_in_path(&mut self, start: usize) {
         use RawResolveLocalError::*;
         match self {
-            ListIndexOutOfRange {
-                ref mut segment_index,
-                ..
-            }
-            | InvalidIndex {
-                ref mut segment_index,
-                ..
-            }
-            | NoLinks {
-                ref mut segment_index,
-                ..
-            }
-            | NotFound {
-                ref mut segment_index,
-                ..
-            } => {
+            ListIndexOutOfRange { segment_index, .. }
+            | InvalidIndex { segment_index, .. }
+            | NoLinks { segment_index, .. }
+            | NotFound { segment_index, .. } => {
                 // NOTE: this is the **index** compared to the number of segments matched, i.e. **count**
                 // from `resolve_local`'s Ok return value.
                 *segment_index += start;
@@ -179,11 +168,11 @@ impl RawResolveLocalError {
 #[derive(Clone, Debug)]
 pub struct IpldDag {
     ipfs: Option<Ipfs>,
-    repo: Repo,
+    repo: Repo<DefaultStorage>,
 }
 
-impl From<Repo> for IpldDag {
-    fn from(repo: Repo) -> Self {
+impl From<Repo<DefaultStorage>> for IpldDag {
+    fn from(repo: Repo<DefaultStorage>) -> Self {
         IpldDag { ipfs: None, repo }
     }
 }
@@ -712,12 +701,12 @@ impl ResolvedNode {
         if self.source().codec() != <BlockCodec as Into<u64>>::into(BlockCodec::DagPb) {
             Err(UnexpectedResolved::UnexpectedCodec(
                 BlockCodec::DagPb.into(),
-                self,
+                Box::new(self),
             ))
         } else {
             match self {
                 ResolvedNode::Block(b) => Ok(b),
-                _ => Err(UnexpectedResolved::NonBlock(self)),
+                _ => Err(UnexpectedResolved::NonBlock(Box::new(self))),
             }
         }
     }
@@ -801,7 +790,7 @@ fn resolve_local<'a>(
                 return Err(RawResolveLocalError::UnsupportedDocument(
                     *block.cid(),
                     e.into(),
-                ))
+                ));
             }
         };
         resolve_local_ipld(*block.cid(), ipld, segments)
@@ -895,7 +884,7 @@ fn resolve_local_ipld<'a>(
                         return Err(RawResolveLocalError::NotFound {
                             document,
                             segment_index: matched_count,
-                        })
+                        });
                     }
                 };
                 matched_count += 1;
@@ -918,7 +907,7 @@ fn resolve_local_ipld<'a>(
                     return Err(RawResolveLocalError::InvalidIndex {
                         document,
                         segment_index: matched_count,
-                    })
+                    });
                 }
             },
             (_, Some(_)) => {
@@ -932,7 +921,7 @@ fn resolve_local_ipld<'a>(
                 return Ok((
                     ResolvedNode::Projection(document, anything).into(),
                     matched_count,
-                ))
+                ));
             }
         };
     }
@@ -1080,9 +1069,9 @@ mod tests {
         let (root, example_doc, target) = example_doc_and_cid();
 
         let p = IpfsPath::try_from(
-            "bafyreielwgy762ox5ndmhx6kpi6go6il3gzahz3ngagb7xw3bj3aazeita/nested/even/2/or/foobar/trailer"
-            // counts:                                                    1      2   3 4
-        ).unwrap();
+            "bafyreielwgy762ox5ndmhx6kpi6go6il3gzahz3ngagb7xw3bj3aazeita/nested/even/2/or/foobar/trailer", // counts:                                                    1      2   3 4
+        )
+        .unwrap();
 
         let (resolved, matched_segments) =
             resolve_local_ipld(root, example_doc, &mut p.iter().peekable()).unwrap();

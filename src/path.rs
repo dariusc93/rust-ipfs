@@ -1,9 +1,9 @@
 //! [`IpfsPath`] related functionality for content addressed paths with links.
 
 use crate::error::{Error, TryError};
+use connexa::prelude::identity::PeerId;
 use core::convert::{TryFrom, TryInto};
 use ipld_core::cid::Cid;
-use libp2p::PeerId;
 use std::fmt;
 use std::str::FromStr;
 
@@ -67,7 +67,10 @@ impl FromStr for IpfsPath {
 
                         match result(key).ok() {
                             Some(path) => path,
+                            #[cfg(feature = "dns")]
                             None => PathRoot::Dns(key.to_string()),
+                            #[cfg(not(feature = "dns"))]
+                            None => return Err(IpfsPathError::InvalidPath(key.to_owned()).into()),
                         }
                     }
                 },
@@ -256,6 +259,7 @@ pub enum PathRoot {
     /// IPNS record based path which can point to different [`Cid`] based paths at different times.
     Ipns(PeerId),
     /// DNSLINK based path which can point to different [`Cid`] based paths at different times.
+    #[cfg(feature = "dns")]
     Dns(String),
 }
 
@@ -266,6 +270,7 @@ impl fmt::Debug for PathRoot {
         match self {
             Ipld(cid) => write!(fmt, "{cid}"),
             Ipns(pid) => write!(fmt, "{pid}"),
+            #[cfg(feature = "dns")]
             Dns(name) => write!(fmt, "{name:?}"),
         }
     }
@@ -286,6 +291,7 @@ impl fmt::Display for PathRoot {
         let (prefix, key) = match self {
             PathRoot::Ipld(cid) => ("/ipfs/", cid.to_string()),
             PathRoot::Ipns(peer_id) => ("/ipns/", peer_id.to_base58()),
+            #[cfg(feature = "dns")]
             PathRoot::Dns(domain) => ("/ipns/", domain.to_owned()),
         };
         write!(fmt, "{prefix}{key}")

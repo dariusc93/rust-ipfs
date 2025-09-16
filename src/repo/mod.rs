@@ -1,7 +1,7 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
 use crate::error::Error;
-use crate::{Block, StorageType};
-use async_trait::async_trait;
+use crate::Block;
+use connexa::prelude::identity::PeerId;
 use core::fmt::Debug;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
@@ -10,7 +10,6 @@ use futures::stream::{self, BoxStream, FuturesOrdered};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
-use libp2p::identity::PeerId;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap};
@@ -30,13 +29,14 @@ use tracing::{Instrument, Span};
 #[cfg(test)]
 mod common_tests;
 
-pub mod blockstore;
-pub mod datastore;
+pub use store::{blockstore, datastore, default_impl::DefaultStorage};
+
 pub mod lock;
 
 /// Path mangling done for pins and blocks
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod paths;
+mod store;
 
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
@@ -64,51 +64,50 @@ pub enum BlockRmError {
     NotFound(Cid),
 }
 
-/// This API is being discussed and evolved, which will likely lead to breakage.
-#[async_trait]
-pub trait BlockStore: Debug + Send + Sync {
-    async fn init(&self) -> Result<(), Error>;
-
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
-    /// Returns whether a block is present in the blockstore.
-    async fn contains(&self, cid: &Cid) -> Result<bool, Error>;
-    /// Returns a block from the blockstore.
-    async fn get(&self, cid: &Cid) -> Result<Option<Block>, Error>;
-    /// Get the size of a single block
-    async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error>;
-    /// Get a total size of the block store
-    async fn total_size(&self) -> Result<usize, Error>;
-    /// Inserts a block in the blockstore.
-    async fn put(&self, block: &Block) -> Result<(Cid, BlockPut), Error>;
-    /// Removes a block from the blockstore.
-    async fn remove(&self, cid: &Cid) -> Result<(), Error>;
-    /// Remove multiple blocks from the blockstore
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid>;
-    /// Returns a list of the blocks (Cids), in the blockstore.
-    async fn list(&self) -> BoxStream<'static, Cid>;
+pub trait StoreOpt {
+    fn into_opt(self) -> Self;
 }
 
-#[async_trait]
+/// This API is being discussed and evolved, which will likely lead to breakage.
+pub trait BlockStore: Debug + Send + Sync {
+    fn init(&self) -> impl Future<Output = Result<(), Error>> + Send;
+
+    /// Returns whether a block is present in the blockstore.
+    fn contains(&self, cid: &Cid) -> impl Future<Output = Result<bool, Error>> + Send;
+    /// Returns a block from the blockstore.
+    fn get(&self, cid: &Cid) -> impl Future<Output = Result<Option<Block>, Error>> + Send;
+    /// Get the size of a single block
+    fn size(&self, cid: &[Cid]) -> impl Future<Output = Result<Option<usize>, Error>> + Send;
+    /// Get a total size of the block store
+    fn total_size(&self) -> impl Future<Output = Result<usize, Error>> + Send;
+    /// Inserts a block in the blockstore.
+    fn put(&self, block: &Block) -> impl Future<Output = Result<(Cid, BlockPut), Error>> + Send;
+    /// Removes a block from the blockstore.
+    fn remove(&self, cid: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Remove multiple blocks from the blockstore
+    fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
+    /// Returns a list of the blocks (Cids), in the blockstore.
+    fn list(&self) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
+}
+
 /// Generic layer of abstraction for a key-value data store.
 pub trait DataStore: PinStore + Debug + Send + Sync {
-    async fn init(&self) -> Result<(), Error>;
-    #[deprecated]
-    async fn open(&self) -> Result<(), Error> {
-        Ok(())
-    }
+    fn init(&self) -> impl Future<Output = Result<(), Error>> + Send;
     /// Checks if a key is present in the datastore.
-    async fn contains(&self, key: &[u8]) -> Result<bool, Error>;
+    fn contains(&self, key: &[u8]) -> impl Future<Output = Result<bool, Error>> + Send;
     /// Returns the value associated with a key from the datastore.
-    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
+    fn get(&self, key: &[u8]) -> impl Future<Output = Result<Option<Vec<u8>>, Error>> + Send;
     /// Puts the value under the key in the datastore.
-    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error>;
+    fn put(&self, key: &[u8], value: &[u8]) -> impl Future<Output = Result<(), Error>> + Send;
     /// Removes a key-value pair from the datastore.
-    async fn remove(&self, key: &[u8]) -> Result<(), Error>;
+    fn remove(&self, key: &[u8]) -> impl Future<Output = Result<(), Error>> + Send;
     /// Iterate over the k/v of the datastore
-    async fn iter(&self) -> futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>;
+    fn iter(
+        &self,
+    ) -> impl Future<Output = futures::stream::BoxStream<'static, (Vec<u8>, Vec<u8>)>> + Send;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -194,43 +193,37 @@ pub trait Lock: Debug + Send + Sync {
 
 type References<'a> = BoxStream<'a, Result<Cid, crate::refs::IpldRefsError>>;
 
-#[async_trait]
 pub trait PinStore: Debug + Send + Sync {
-    async fn is_pinned(&self, block: &Cid) -> Result<bool, Error>;
+    fn is_pinned(&self, block: &Cid) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error>;
+    fn insert_direct_pin(&self, target: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn insert_recursive_pin(
+    fn insert_recursive_pin(
         &self,
         target: &Cid,
         referenced: References<'_>,
-    ) -> Result<(), Error>;
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn remove_direct_pin(&self, target: &Cid) -> Result<(), Error>;
+    fn remove_direct_pin(&self, target: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn remove_recursive_pin(
+    fn remove_recursive_pin(
         &self,
         target: &Cid,
         referenced: References<'_>,
-    ) -> Result<(), Error>;
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn list(
+    fn list(
         &self,
         mode: Option<PinMode>,
-    ) -> futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>>;
+    ) -> impl Future<Output = futures::stream::BoxStream<'static, Result<(Cid, PinMode), Error>>> + Send;
 
-    // here we should have resolved ids
-    // go-ipfs: doesnt start fetching the paths
-    // js-ipfs: starts fetching paths
-    // FIXME: there should probably be an additional Result<$inner, Error> here; the per pin error
-    // is serde OR cid::Error.
     /// Returns error if any of the ids isn't pinned in the required type, otherwise returns
     /// the pin details if all of the cids are pinned in one way or the another.
-    async fn query(
+    fn query(
         &self,
         ids: Vec<Cid>,
         requirement: Option<PinMode>,
-    ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error>;
+    ) -> impl Future<Output = Result<Vec<(Cid, PinKind<Cid>)>, Error>> + Send;
 }
 
 /// `PinMode` is the description of pin type for quering purposes.
@@ -322,24 +315,35 @@ impl<C: Borrow<Cid>> PinKind<C> {
 
 type SubscriptionsMap = HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>;
 
+/// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
+pub trait StorageTypes: RepoTypes {}
+impl<T: RepoTypes> StorageTypes for T {}
+
+pub trait RepoTypes: Clone + Send + Sync + 'static {
+    /// Describes a blockstore.
+    type TBlockStore: BlockStore;
+    /// Describes a datastore.
+    type TDataStore: DataStore;
+    type TLock: Lock;
+}
+
 /// Describes a repo.
 /// Consolidates a blockstore, a datastore and a subscription registry.
-#[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
-pub struct Repo {
-    pub(crate) inner: Arc<RepoInner>,
+pub struct Repo<S: RepoTypes> {
+    pub(crate) inner: Arc<RepoInner<S>>,
 }
 
 #[derive(Debug)]
-pub(crate) struct RepoInner {
+pub(crate) struct RepoInner<S: RepoTypes> {
     online: AtomicBool,
     initialized: AtomicBool,
     max_storage_size: AtomicUsize,
-    block_store: Box<dyn BlockStore>,
-    data_store: Box<dyn DataStore>,
+    block_store: S::TBlockStore,
+    data_store: S::TDataStore,
     events: RwLock<Option<Sender<RepoEvent>>>,
     pub(crate) subscriptions: Mutex<SubscriptionsMap>,
-    lockfile: Box<dyn Lock>,
+    lockfile: S::TLock,
     pub(crate) gclock: tokio::sync::RwLock<()>,
 }
 
@@ -361,31 +365,64 @@ pub enum RepoEvent {
     RemovedBlock(Cid),
 }
 
-impl Repo {
-    pub fn new(repo_type: &mut StorageType) -> Self {
-        match repo_type {
-            StorageType::Memory => Repo::new_memory(),
-            #[cfg(not(target_arch = "wasm32"))]
-            StorageType::Disk(path) => Repo::new_fs(path),
-            #[cfg(target_arch = "wasm32")]
-            StorageType::IndexedDb { namespace } => Repo::new_idb(namespace.take()),
-            StorageType::Custom {
-                blockstore,
-                datastore,
-                lock,
-            } => Repo::new_raw(
-                blockstore.take().expect("Requires blockstore"),
-                datastore.take().expect("Requires datastore"),
-                lock.take()
-                    .expect("Requires lockfile for data and block store"),
-            ),
-        }
+impl Repo<DefaultStorage> {
+    // pub fn new(repo_type: &mut StorageType) -> Self {
+    //     match repo_type {
+    //         StorageType::Memory => Repo::new_memory(),
+    //         #[cfg(not(target_arch = "wasm32"))]
+    //         StorageType::Disk(path) => Repo::new_fs(path),
+    //         #[cfg(target_arch = "wasm32")]
+    //         StorageType::IndexedDb { namespace } => Repo::new_idb(namespace.take()),
+    //         StorageType::Custom {
+    //             blockstore,
+    //             datastore,
+    //             lock,
+    //         } => Repo::new_raw(
+    //             blockstore.take().expect("Requires blockstore"),
+    //             datastore.take().expect("Requires datastore"),
+    //             lock.take()
+    //                 .expect("Requires lockfile for data and block store"),
+    //         ),
+    //     }
+    // }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_fs(path: impl AsRef<Path>) -> Self {
+        let mut default = DefaultStorage::default();
+
+        let path = path.as_ref().to_path_buf();
+        let mut blockstore_path = path.clone();
+        let mut datastore_path = path.clone();
+        let mut lockfile_path = path;
+        blockstore_path.push("blockstore");
+        datastore_path.push("datastore");
+        lockfile_path.push("repo_lock");
+
+        default.set_blockstore_path(blockstore_path);
+        default.set_datastore_path(datastore_path);
+        default.set_lockfile(lockfile_path);
+
+        Self::new_raw(default.clone(), default.clone(), default)
     }
 
+    pub fn new_memory() -> Self {
+        let default = DefaultStorage::default();
+        Self::new_raw(default.clone(), default.clone(), default)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_idb(namespace: Option<String>) -> Self {
+        let mut default = DefaultStorage::default();
+        default.set_namespace(namespace);
+        Self::new_raw(default.clone(), default.clone(), default)
+    }
+}
+
+impl<S: RepoTypes> Repo<S> {
     pub fn new_raw(
-        block_store: Box<dyn BlockStore>,
-        data_store: Box<dyn DataStore>,
-        lockfile: Box<dyn Lock>,
+        block_store: S::TBlockStore,
+        data_store: S::TDataStore,
+        lockfile: S::TLock,
     ) -> Self {
         let inner = RepoInner {
             initialized: AtomicBool::default(),
@@ -401,37 +438,6 @@ impl Repo {
         Repo {
             inner: Arc::new(inner),
         }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn new_fs(path: impl AsRef<Path>) -> Self {
-        let path = path.as_ref().to_path_buf();
-        let mut blockstore_path = path.clone();
-        let mut datastore_path = path.clone();
-        let mut lockfile_path = path;
-        blockstore_path.push("blockstore");
-        datastore_path.push("datastore");
-        lockfile_path.push("repo_lock");
-
-        let block_store = Box::new(blockstore::flatfs::FsBlockStore::new(blockstore_path));
-        let data_store = Box::new(datastore::flatfs::FsDataStore::new(datastore_path));
-        let lockfile = Box::new(lock::FsLock::new(lockfile_path));
-        Self::new_raw(block_store, data_store, lockfile)
-    }
-
-    pub fn new_memory() -> Self {
-        let block_store = Box::new(blockstore::memory::MemBlockStore::new(Default::default()));
-        let data_store = Box::new(datastore::memory::MemDataStore::new(Default::default()));
-        let lockfile = Box::new(lock::MemLock);
-        Self::new_raw(block_store, data_store, lockfile)
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn new_idb(namespace: Option<String>) -> Self {
-        let block_store = Box::new(blockstore::idb::IdbBlockStore::new(namespace.clone()));
-        let data_store = Box::new(datastore::idb::IdbDataStore::new(namespace));
-        let lockfile = Box::new(lock::MemLock);
-        Self::new_raw(block_store, data_store, lockfile)
     }
 
     pub fn set_max_storage_size(&self, size: usize) {
@@ -587,22 +593,22 @@ impl Repo {
     }
 
     /// Puts a block into the block store.
-    pub fn put_block(&self, block: &Block) -> RepoPutBlock {
+    pub fn put_block(&self, block: &Block) -> RepoPutBlock<S> {
         RepoPutBlock::new(self, block).broadcast_on_new_block(true)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
     /// until it has been fetched.
     #[inline]
-    pub fn get_block<C: Borrow<Cid>>(&self, cid: C) -> RepoGetBlock {
-        RepoGetBlock::new(self.clone(), cid)
+    pub fn get_block<C: Borrow<Cid>>(&self, cid: C) -> RepoGetBlock<S> {
+        RepoGetBlock::new(Repo::clone(self), cid)
     }
 
     /// Retrives a set of blocks from the block store, or starts fetching them from the network and awaits
     /// until it has been fetched.
     #[inline]
-    pub fn get_blocks(&self, cids: impl IntoIterator<Item = impl Borrow<Cid>>) -> RepoGetBlocks {
-        RepoGetBlocks::new(self.clone()).blocks(cids)
+    pub fn get_blocks(&self, cids: impl IntoIterator<Item = impl Borrow<Cid>>) -> RepoGetBlocks<S> {
+        RepoGetBlocks::new(Repo::clone(self)).blocks(cids)
     }
 
     /// Get the size of listed blocks
@@ -720,8 +726,8 @@ impl Repo {
     ///
     /// Recursively pinned Cids cannot be re-pinned non-recursively but non-recursively pinned Cids
     /// can be "upgraded to" being recursively pinned.
-    pub fn pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin {
-        RepoInsertPin::new(self.clone(), cid)
+    pub fn pin<C: Borrow<Cid>>(&self, cid: C) -> RepoInsertPin<S> {
+        RepoInsertPin::new(Repo::clone(self), cid)
     }
 
     /// Unpins a given Cid recursively or only directly.
@@ -730,12 +736,12 @@ impl Repo {
     ///
     /// Unpinning an indirectly pinned Cid is not possible other than through its recursively
     /// pinned tree roots.
-    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin {
-        RepoRemovePin::new(self.clone(), cid)
+    pub fn remove_pin<C: Borrow<Cid>>(&self, cid: C) -> RepoRemovePin<S> {
+        RepoRemovePin::new(Repo::clone(self), cid)
     }
 
-    pub fn fetch<C: Borrow<Cid>>(&self, cid: C) -> RepoFetch {
-        RepoFetch::new(self.clone(), cid)
+    pub fn fetch<C: Borrow<Cid>>(&self, cid: C) -> RepoFetch<S> {
+        RepoFetch::new(Repo::clone(self), cid)
     }
 
     /// Pins a given Cid recursively or directly (non-recursively).
@@ -845,26 +851,26 @@ pub struct GCGuard<'a> {
     _g: RwLockReadGuard<'a, ()>,
 }
 
-impl Repo {
+impl<S: RepoTypes> Repo<S> {
     /// Hold a guard to prevent GC from running until this guard has dropped
     /// Note: Until this guard drops, the GC task, if enabled, would not perform any cleanup.
     ///       If the GC task is running, this guard will await until GC finishes
-    pub async fn gc_guard(&self) -> GCGuard {
+    pub async fn gc_guard(&self) -> GCGuard<'_> {
         let _g = self.inner.gclock.read().await;
         GCGuard { _g }
     }
 
-    pub fn data_store(&self) -> &dyn DataStore {
-        &*self.inner.data_store
+    pub fn data_store(&self) -> &S::TDataStore {
+        &self.inner.data_store
     }
 }
 
-pub struct RepoGetBlock {
-    instance: RepoGetBlocks,
+pub struct RepoGetBlock<S: RepoTypes> {
+    instance: RepoGetBlocks<S>,
 }
 
-impl RepoGetBlock {
-    pub fn new(repo: Repo, cid: impl Borrow<Cid>) -> Self {
+impl<S: RepoTypes> RepoGetBlock<S> {
+    pub fn new(repo: Repo<S>, cid: impl Borrow<Cid>) -> Self {
         let instance = RepoGetBlocks::new(repo).block(cid);
         Self { instance }
     }
@@ -902,7 +908,7 @@ impl RepoGetBlock {
     }
 }
 
-impl Future for RepoGetBlock {
+impl<S: RepoTypes> Future for RepoGetBlock<S> {
     type Output = Result<Block, Error>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut self;
@@ -913,8 +919,8 @@ impl Future for RepoGetBlock {
     }
 }
 
-pub struct RepoGetBlocks {
-    repo: Option<Repo>,
+pub struct RepoGetBlocks<S: RepoTypes> {
+    repo: Option<Repo<S>>,
     cids: IndexSet<Cid>,
     providers: IndexSet<PeerId>,
     local: bool,
@@ -923,8 +929,8 @@ pub struct RepoGetBlocks {
     stream: Option<BoxStream<'static, Result<Block, Error>>>,
 }
 
-impl RepoGetBlocks {
-    pub fn new(repo: Repo) -> Self {
+impl<S: RepoTypes> RepoGetBlocks<S> {
+    pub fn new(repo: Repo<S>) -> Self {
         Self {
             repo: Some(repo),
             cids: IndexSet::new(),
@@ -977,7 +983,7 @@ impl RepoGetBlocks {
     }
 }
 
-impl Stream for RepoGetBlocks {
+impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
     type Item = Result<Block, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -1067,7 +1073,7 @@ impl Stream for RepoGetBlocks {
                                 }
                             }
                             .map_err(move |e| {
-                                // Although we request would eventually be cancelled if timeout or cancelled, we can still signal to swarm
+                                // Although the request would eventually be canceled if timeout or canceled, we can still signal to swarm
                                 // about the block being unwanted for future changes.
                                 _ = events.try_send(RepoEvent::UnwantBlock(cid));
                                 e
@@ -1101,7 +1107,7 @@ impl Stream for RepoGetBlocks {
     }
 }
 
-impl IntoFuture for RepoGetBlocks {
+impl<S: RepoTypes> IntoFuture for RepoGetBlocks<S> {
     type Output = Result<Vec<Block>, Error>;
     type IntoFuture = BoxFuture<'static, Self::Output>;
     fn into_future(self) -> Self::IntoFuture {
@@ -1113,18 +1119,18 @@ impl IntoFuture for RepoGetBlocks {
     }
 }
 
-pub struct RepoPutBlock {
-    repo: Repo,
+pub struct RepoPutBlock<S: RepoTypes> {
+    repo: Repo<S>,
     block: Option<Block>,
     span: Option<Span>,
     broadcast_on_new_block: bool,
 }
 
-impl RepoPutBlock {
-    fn new(repo: &Repo, block: &Block) -> Self {
+impl<S: RepoTypes> RepoPutBlock<S> {
+    fn new(repo: &Repo<S>, block: &Block) -> Self {
         let block = Some(block.clone());
         Self {
-            repo: repo.clone(),
+            repo: Repo::clone(repo),
             block,
             span: None,
             broadcast_on_new_block: true,
@@ -1142,7 +1148,7 @@ impl RepoPutBlock {
     }
 }
 
-impl IntoFuture for RepoPutBlock {
+impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
     type IntoFuture = BoxFuture<'static, Self::Output>;
     type Output = Result<Cid, Error>;
     fn into_future(mut self) -> Self::IntoFuture {
@@ -1175,8 +1181,8 @@ impl IntoFuture for RepoPutBlock {
     }
 }
 
-pub struct RepoFetch {
-    repo: Repo,
+pub struct RepoFetch<S: RepoTypes> {
+    repo: Repo<S>,
     cid: Cid,
     span: Option<Span>,
     providers: Vec<PeerId>,
@@ -1185,8 +1191,8 @@ pub struct RepoFetch {
     refs: crate::refs::IpldRefs,
 }
 
-impl RepoFetch {
-    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+impl<S: RepoTypes> RepoFetch<S> {
+    pub fn new<C: Borrow<Cid>>(repo: Repo<S>, cid: C) -> Self {
         let cid = cid.borrow();
         Self {
             repo,
@@ -1245,7 +1251,7 @@ impl RepoFetch {
     }
 }
 
-impl IntoFuture for RepoFetch {
+impl<S: RepoTypes> IntoFuture for RepoFetch<S> {
     type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -1290,8 +1296,8 @@ impl IntoFuture for RepoFetch {
     }
 }
 
-pub struct RepoInsertPin {
-    repo: Repo,
+pub struct RepoInsertPin<S: RepoTypes> {
+    repo: Repo<S>,
     cid: Cid,
     span: Option<Span>,
     providers: Vec<PeerId>,
@@ -1301,8 +1307,8 @@ pub struct RepoInsertPin {
     refs: crate::refs::IpldRefs,
 }
 
-impl RepoInsertPin {
-    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+impl<S: RepoTypes> RepoInsertPin<S> {
+    pub fn new<C: Borrow<Cid>>(repo: Repo<S>, cid: C) -> Self {
         let cid = cid.borrow();
         Self {
             repo,
@@ -1378,7 +1384,7 @@ impl RepoInsertPin {
     }
 }
 
-impl IntoFuture for RepoInsertPin {
+impl<S: RepoTypes> IntoFuture for RepoInsertPin<S> {
     type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -1425,16 +1431,16 @@ impl IntoFuture for RepoInsertPin {
     }
 }
 
-pub struct RepoRemovePin {
-    repo: Repo,
+pub struct RepoRemovePin<S: RepoTypes> {
+    repo: Repo<S>,
     cid: Cid,
     span: Option<Span>,
     recursive: bool,
     refs: crate::refs::IpldRefs,
 }
 
-impl RepoRemovePin {
-    pub fn new<C: Borrow<Cid>>(repo: Repo, cid: C) -> Self {
+impl<S: RepoTypes> RepoRemovePin<S> {
+    pub fn new<C: Borrow<Cid>>(repo: Repo<S>, cid: C) -> Self {
         let cid = cid.borrow();
         Self {
             repo,
@@ -1458,7 +1464,7 @@ impl RepoRemovePin {
     }
 }
 
-impl IntoFuture for RepoRemovePin {
+impl<S: RepoTypes> IntoFuture for RepoRemovePin<S> {
     type Output = Result<(), Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;

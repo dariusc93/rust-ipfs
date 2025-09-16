@@ -1,6 +1,5 @@
 use crate::error::Error;
 use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore};
-use async_trait::async_trait;
 use futures::StreamExt;
 use ipld_core::cid::{self, Cid};
 use std::path::PathBuf;
@@ -14,9 +13,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Describes an in-memory `DataStore`.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MemDataStore {
-    inner: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
+    inner: Arc<Mutex<HashMap<Vec<u8>, Vec<u8>>>>,
     // this could also be PinDocument however doing any serialization allows to see the required
     // error types easier
     pin: Arc<Mutex<HashMap<Vec<u8>, Vec<u8>>>>,
@@ -105,7 +104,6 @@ impl MemDataStore {
     }
 }
 
-#[async_trait]
 impl PinStore for MemDataStore {
     async fn is_pinned(&self, block: &Cid) -> Result<bool, Error> {
         let key = block.to_bytes();
@@ -197,7 +195,7 @@ impl PinStore for MemDataStore {
                 return Ok(());
             }
             Some(Ok(PinKind::IndirectFrom(cid))) => {
-                return Err(anyhow::anyhow!("pinned indirectly through {}", cid))
+                return Err(anyhow::anyhow!("pinned indirectly through {}", cid));
             }
             // same here as above with the same message
             _ => return Err(anyhow::anyhow!("not pinned or pinned indirectly")),
@@ -312,7 +310,6 @@ impl PinStore for MemDataStore {
     }
 }
 
-#[async_trait]
 impl DataStore for MemDataStore {
     async fn init(&self) -> Result<(), Error> {
         Ok(())
@@ -485,7 +482,7 @@ impl PinDocument {
                             return Err(PinUpdateError::UnexpectedNumberOfDescendants(
                                 other,
                                 descendants,
-                            ))
+                            ));
                         }
                         Recursive::Count(_) => false,
                         Recursive::Intent | Recursive::Not => {
@@ -502,7 +499,7 @@ impl PinDocument {
                             return Err(PinUpdateError::UnexpectedNumberOfDescendants(
                                 other,
                                 descendants,
-                            ))
+                            ));
                         }
                         Recursive::Count(_) | Recursive::Intent => {
                             self.recursive = Recursive::Not;

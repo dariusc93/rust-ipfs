@@ -4,7 +4,7 @@ use futures::stream::StreamExt;
 use rust_ipfs::p2p::PeerInfo;
 use rust_ipfs::{Ipfs, IpfsPath, Multiaddr};
 
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 
 use std::process::exit;
 use tokio::io::AsyncWriteExt;
@@ -38,9 +38,10 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
 
     // Initialize the repo and start a daemon.
-    // UninitializedIpfs will handle starting up the repository and return the facade (ipfs::Ipfs)
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    // IpfsBuilder will handle starting up the repository and return the facade (ipfs::Ipfs)
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
+        .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .start()
         .await?;

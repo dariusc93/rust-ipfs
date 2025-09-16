@@ -4,7 +4,6 @@ use crate::{
     repo::{BlockPut, BlockStore},
     Block, Error,
 };
-use async_trait::async_trait;
 use futures::{channel::oneshot, stream::BoxStream, SinkExt, StreamExt};
 use idb::{Database, DatabaseEvent, Factory, ObjectStoreParams, TransactionMode};
 use ipld_core::cid::Cid;
@@ -41,7 +40,6 @@ impl IdbBlockStore {
     }
 }
 
-#[async_trait]
 impl BlockStore for IdbBlockStore {
     async fn init(&self) -> Result<(), Error> {
         let factory = self.factory.clone();

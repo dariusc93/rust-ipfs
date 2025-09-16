@@ -11,18 +11,19 @@ use std::{
     time::Duration,
 };
 
-use futures::StreamExt;
-use ipld_core::cid::Cid;
-use libp2p::core::transport::PortUse;
-use libp2p::{
-    core::Endpoint,
+use connexa::prelude::{
     swarm::{
         behaviour::ConnectionEstablished, dial_opts::DialOpts, ConnectionClosed, ConnectionDenied,
         ConnectionId, DialFailure, FromSwarm, NetworkBehaviour, NotifyHandler, OneShotHandler,
         THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
     },
+    transport::transport::PortUse,
+    transport::Endpoint,
     Multiaddr, PeerId,
 };
+use futures::StreamExt;
+use ipld_core::cid::Cid;
+
 use pollable_map::stream::StreamMap;
 
 mod bitswap_pb {
@@ -35,13 +36,13 @@ mod bitswap_pb {
     }
 }
 
-use crate::{repo::Repo, Block};
-
 use self::{
     message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType},
     protocol::{BitswapProtocol, Message},
     sessions::{HaveSession, HaveSessionEvent, WantSession, WantSessionEvent},
 };
+use crate::repo::DefaultStorage;
+use crate::{repo::Repo, Block};
 
 const CAP_THRESHOLD: usize = 100;
 
@@ -62,14 +63,14 @@ pub struct Behaviour {
     events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<ConnectionId>>,
     blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
-    store: Repo,
+    store: Repo<DefaultStorage>,
     want_session: StreamMap<Cid, WantSession>,
     have_session: StreamMap<Cid, HaveSession>,
     waker: Option<Waker>,
 }
 
 impl Behaviour {
-    pub fn new(store: &Repo) -> Self {
+    pub fn new(store: &Repo<DefaultStorage>) -> Self {
         Self {
             events: Default::default(),
             connections: Default::default(),
@@ -487,7 +488,7 @@ impl NetworkBehaviour for Behaviour {
                         handler: NotifyHandler::Any,
                         event: BitswapMessage::default()
                             .add_response(cid, BitswapResponse::Have(false)),
-                    })
+                    });
                 }
                 HaveSessionEvent::Block { peer_id, bytes } => {
                     return Poll::Ready(ToSwarm::NotifyHandler {
@@ -495,7 +496,7 @@ impl NetworkBehaviour for Behaviour {
                         handler: NotifyHandler::Any,
                         event: BitswapMessage::default()
                             .add_response(cid, BitswapResponse::Block(bytes)),
-                    })
+                    });
                 }
                 HaveSessionEvent::Cancelled => {
                     //TODO: Maybe notify peers from this session about any cancelled request?
@@ -535,7 +536,7 @@ impl NetworkBehaviour for Behaviour {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
                 WantSessionEvent::BlockStored => {
-                    return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }))
+                    return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
                 }
                 WantSessionEvent::Dial { peer_id } => {
                     let opts = DialOpts::peer_id(peer_id).build();
@@ -559,14 +560,19 @@ impl NetworkBehaviour for Behaviour {
 mod test {
     use std::time::Duration;
 
-    use crate::block::BlockCodec;
+    use crate::{block::BlockCodec, repo::DefaultStorage};
+    use connexa::prelude::{
+        swarm::{dial_opts::DialOpts, NetworkBehaviour, Swarm, SwarmBuilder, SwarmEvent},
+        transport::{
+            noise,
+            transport::{MemoryTransport, Transport},
+            upgrade::Version,
+            yamux,
+        },
+        Multiaddr, PeerId,
+    };
     use futures::StreamExt;
     use ipld_core::cid::Cid;
-    use libp2p::{
-        core::{transport::MemoryTransport, upgrade::Version},
-        swarm::{dial_opts::DialOpts, NetworkBehaviour, SwarmEvent},
-        Multiaddr, PeerId, Swarm, SwarmBuilder, Transport,
-    };
     use multihash_codetable::{Code, MultihashDigest};
 
     use crate::{repo::Repo, Block};
@@ -578,9 +584,9 @@ mod test {
         Block::new_unchecked(cid, data)
     }
 
-    async fn wait_on_connection<B: NetworkBehaviour>(
-        swarm1: &mut Swarm<B>,
-        swarm2: &mut Swarm<B>,
+    async fn wait_on_connection(
+        swarm1: &mut Swarm<Behaviour>,
+        swarm2: &mut Swarm<Behaviour>,
         peer_id: PeerId,
     ) {
         loop {
@@ -954,7 +960,7 @@ mod test {
         Ok(())
     }
 
-    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<Behaviour>, Repo) {
+    async fn build_swarm() -> (PeerId, Multiaddr, Swarm<Behaviour>, Repo<DefaultStorage>) {
         let repo = Repo::new_memory();
 
         let mut swarm = SwarmBuilder::with_new_identity()
@@ -962,8 +968,8 @@ mod test {
             .with_other_transport(|kp| {
                 MemoryTransport::default()
                     .upgrade(Version::V1)
-                    .authenticate(libp2p::noise::Config::new(kp).expect("valid config"))
-                    .multiplex(libp2p::yamux::Config::default())
+                    .authenticate(noise::Config::new(kp).expect("valid config"))
+                    .multiplex(yamux::Config::default())
                     .timeout(Duration::from_secs(20))
                     .boxed()
             })
@@ -992,6 +998,7 @@ mod test {
     }
 
     #[derive(NetworkBehaviour)]
+    #[behaviour(prelude = "connexa::prelude::swarm::derive_prelude")]
     struct Behaviour {
         bitswap: super::Behaviour,
         address_book: crate::p2p::addressbook::Behaviour,

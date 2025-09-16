@@ -3,16 +3,21 @@
 use futures_timeout::TimeoutExt;
 use std::borrow::Borrow;
 
-use crate::p2p::DnsResolver;
 use crate::path::{IpfsPath, PathRoot};
+use crate::repo::DataStore;
 use crate::Ipfs;
 
+#[cfg(feature = "dns")]
 mod dnslink;
+
+#[cfg(feature = "dns")]
+use connexa::prelude::transport::dns::DnsResolver;
 
 /// IPNS facade around [`Ipns`].
 #[derive(Clone, Debug)]
 pub struct Ipns {
     ipfs: Ipfs,
+    #[cfg(feature = "dns")]
     resolver: DnsResolver,
 }
 
@@ -27,11 +32,13 @@ impl Ipns {
     pub fn new(ipfs: Ipfs) -> Self {
         Ipns {
             ipfs,
+            #[cfg(feature = "dns")]
             resolver: DnsResolver::default(),
         }
     }
 
     /// Set dns resolver
+    #[cfg(feature = "dns")]
     pub fn set_resolver(&mut self, resolver: DnsResolver) {
         self.resolver = resolver;
     }
@@ -47,9 +54,9 @@ impl Ipns {
                 use std::str::FromStr;
                 use std::time::Duration;
 
+                use connexa::prelude::PeerId;
                 use futures::StreamExt;
                 use ipld_core::cid::Cid;
-                use libp2p::PeerId;
                 use multihash::Multihash;
 
                 let mut path_iter = path.iter();
@@ -127,6 +134,7 @@ impl Ipns {
                         Ok(internal_path)
                     })
             }
+            #[cfg(feature = "dns")]
             PathRoot::Dns(domain) => {
                 let path_iter = path.iter();
                 dnslink::resolve(self.resolver, domain, path_iter)
@@ -142,8 +150,8 @@ impl Ipns {
         path: impl Borrow<IpfsPath>,
         option: IpnsOption,
     ) -> Result<IpfsPath, IpnsError> {
+        use connexa::prelude::dht::Quorum;
         use ipld_core::cid::Cid;
-        use libp2p::kad::Quorum;
         use multihash::Multihash;
         use std::str::FromStr;
 

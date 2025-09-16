@@ -1,7 +1,12 @@
+use connexa::prelude::gossipsub::{IdentTopic, IntoGossipsubTopic, TopicHash};
+use connexa::prelude::GossipsubEvent;
 use futures::future::pending;
-use futures::stream::StreamExt;
+use futures::stream::{BoxStream, StreamExt};
+use futures::{Stream, TryFutureExt};
 use futures_timeout::TimeoutExt;
-use rust_ipfs::{Node, PubsubEvent};
+use rust_ipfs::{Node, PeerId};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 mod common;
@@ -23,13 +28,9 @@ async fn subscribe_only_once() {
 #[tokio::test]
 async fn resubscribe_after_unsubscribe() {
     let a = Node::new("test_node").await;
-
-    let mut stream = a.pubsub_subscribe("topic").await.unwrap();
+    a.pubsub_subscribe("topic").await.unwrap();
     a.pubsub_unsubscribe("topic").await.unwrap();
-    // sender has been dropped
-    assert_eq!(stream.next().await, None);
-
-    drop(a.pubsub_subscribe("topic").await.unwrap());
+    a.pubsub_subscribe("topic").await.unwrap();
 }
 
 // #[tokio::test]
@@ -49,18 +50,18 @@ async fn resubscribe_after_unsubscribe() {
 //     assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
 // }
 
-#[tokio::test]
-async fn unsubscribe_via_drop() {
-    let a = Node::new("test_node").await;
-
-    let msgs = a.pubsub_subscribe("topic").await.unwrap();
-    assert_eq!(a.pubsub_subscribed().await.unwrap(), &["topic"]);
-
-    drop(msgs);
-
-    let empty: &[&str] = &[];
-    assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
-}
+// #[tokio::test]
+// async fn unsubscribe_via_drop() {
+//     let a = Node::new("test_node").await;
+//
+//     a.pubsub_subscribe("topic").await.unwrap();
+//     assert_eq!(a.pubsub_subscribed().await.unwrap(), &["topic"]);
+//
+//     drop(msgs);
+//
+//     let empty: &[&str] = &[];
+//     assert_eq!(a.pubsub_subscribed().await.unwrap(), empty);
+// }
 
 #[tokio::test]
 async fn publish_between_two_nodes_single_topic() {
@@ -70,19 +71,29 @@ async fn publish_between_two_nodes_single_topic() {
 
     let topic = "shared".to_owned();
 
-    let mut a_msgs = nodes[0].pubsub_subscribe(topic.clone()).await.unwrap();
-    let mut b_msgs = nodes[1].pubsub_subscribe(topic.clone()).await.unwrap();
+    let mut a_msgs = nodes[0]
+        .pubsub_subscribe(&topic)
+        .and_then(|_| nodes[0].pubsub_listener(&topic))
+        .await
+        .map(|st| PubsubStream::new(&topic, st))
+        .unwrap();
+    let mut b_msgs = nodes[1]
+        .pubsub_subscribe(&topic)
+        .and_then(|_| nodes[1].pubsub_listener(&topic))
+        .await
+        .map(|st| PubsubStream::new(&topic, st))
+        .unwrap();
 
     // need to wait to see both sides so that the messages will get through
     let mut appeared = false;
     for _ in 0..100usize {
         if nodes[0]
-            .pubsub_peers(Some(topic.clone()))
+            .pubsub_peers(&topic)
             .await
             .unwrap()
             .contains(&nodes[1].id)
             && nodes[1]
-                .pubsub_peers(Some(topic.clone()))
+                .pubsub_peers(&topic)
                 .await
                 .unwrap()
                 .contains(&nodes[0].id)
@@ -102,23 +113,23 @@ async fn publish_between_two_nodes_single_topic() {
     );
 
     nodes[0]
-        .pubsub_publish(topic.clone(), b"foobar".to_vec())
+        .pubsub_publish(&topic, b"foobar".to_vec())
         .await
         .unwrap();
     nodes[1]
-        .pubsub_publish(topic.clone(), b"barfoo".to_vec())
+        .pubsub_publish(&topic, b"barfoo".to_vec())
         .await
         .unwrap();
 
     let expected = [
         (
-            libp2p::gossipsub::IdentTopic::new(topic.clone()),
+            IdentTopic::new(topic.clone()),
             Some(nodes[0].id),
             b"foobar",
             nodes[1].id,
         ),
         (
-            libp2p::gossipsub::IdentTopic::new(topic.clone()),
+            IdentTopic::new(topic.clone()),
             Some(nodes[1].id),
             b"barfoo",
             nodes[0].id,
@@ -159,10 +170,12 @@ async fn publish_between_two_nodes_single_topic() {
 
     drop(b_msgs);
 
+    nodes[1].pubsub_unsubscribe(&topic).await.unwrap();
+
     let mut disappeared = false;
     for _ in 0..100usize {
         if !nodes[0]
-            .pubsub_peers(Some(topic.clone()))
+            .pubsub_peers(&topic)
             .await
             .unwrap()
             .contains(&nodes[1].id)
@@ -180,7 +193,7 @@ async fn publish_between_two_nodes_single_topic() {
 }
 
 #[tokio::test]
-async fn pubsub_event_without_filter() {
+async fn pubsub_event() {
     use futures::stream::StreamExt;
 
     let nodes = spawn_nodes::<2>(Topology::Line).await;
@@ -189,43 +202,8 @@ async fn pubsub_event_without_filter() {
     let node_b = &nodes[1];
     let node_b_peer_id = node_b.id;
 
-    let mut ev_a = node_a.pubsub_events(None).await.unwrap();
-    let mut ev_b = node_b.pubsub_events(None).await.unwrap();
-
-    let _st_a = node_a.pubsub_subscribe("test0").await.unwrap();
-    let _st_b = node_b.pubsub_subscribe("test1").await.unwrap();
-
-    let next_ev_a = ev_a.next().await.unwrap();
-    let next_ev_b = ev_b.next().await.unwrap();
-
-    assert_eq!(
-        next_ev_a,
-        PubsubEvent::Subscribe {
-            peer_id: node_b_peer_id,
-            topic: Some("test1".to_string())
-        }
-    );
-    assert_eq!(
-        next_ev_b,
-        PubsubEvent::Subscribe {
-            peer_id: node_a_peer_id,
-            topic: Some("test0".to_string())
-        }
-    );
-}
-
-#[tokio::test]
-async fn pubsub_event_with_filter() {
-    use futures::stream::StreamExt;
-
-    let nodes = spawn_nodes::<2>(Topology::Line).await;
-    let node_a = &nodes[0];
-    let node_a_peer_id = node_a.id;
-    let node_b = &nodes[1];
-    let node_b_peer_id = node_b.id;
-
-    let mut ev_a = node_a.pubsub_events("test0".to_string()).await.unwrap();
-    let mut ev_b = node_b.pubsub_events("test0".to_string()).await.unwrap();
+    let mut ev_a = node_a.pubsub_listener("test0".to_string()).await.unwrap();
+    let mut ev_b = node_b.pubsub_listener("test0".to_string()).await.unwrap();
 
     let _st_a = node_a.pubsub_subscribe("test0").await.unwrap();
     let _st_b = node_b.pubsub_subscribe("test0").await.unwrap();
@@ -235,16 +213,14 @@ async fn pubsub_event_with_filter() {
 
     assert_eq!(
         next_ev_a,
-        PubsubEvent::Subscribe {
+        GossipsubEvent::Subscribed {
             peer_id: node_b_peer_id,
-            topic: None,
         }
     );
     assert_eq!(
         next_ev_b,
-        PubsubEvent::Subscribe {
+        GossipsubEvent::Subscribed {
             peer_id: node_a_peer_id,
-            topic: None,
         }
     );
 }
@@ -262,19 +238,29 @@ async fn publish_between_two_nodes_different_topics() {
 
     // Node A subscribes to Topic B
     // Node B subscribes to Topic A
-    let mut a_msgs = node_a.pubsub_subscribe(topic_b.clone()).await.unwrap();
-    let mut b_msgs = node_b.pubsub_subscribe(topic_a.clone()).await.unwrap();
+    let mut a_msgs = node_a
+        .pubsub_subscribe(&topic_b)
+        .and_then(|_| node_a.pubsub_listener(&topic_b))
+        .await
+        .map(|st| PubsubStream::new(&topic_b, st))
+        .unwrap();
+    let mut b_msgs = node_b
+        .pubsub_subscribe(&topic_a)
+        .and_then(|_| node_b.pubsub_listener(&topic_a))
+        .await
+        .map(|st| PubsubStream::new(&topic_a, st))
+        .unwrap();
 
     // need to wait to see both sides so that the messages will get through
     let mut appeared = false;
     for _ in 0..100usize {
         if node_a
-            .pubsub_peers(Some(topic_a.clone()))
+            .pubsub_peers(&topic_a)
             .await
             .unwrap()
             .contains(&node_b.id)
             && node_b
-                .pubsub_peers(Some(topic_b.clone()))
+                .pubsub_peers(&topic_b)
                 .await
                 .unwrap()
                 .contains(&node_a.id)
@@ -310,13 +296,13 @@ async fn publish_between_two_nodes_different_topics() {
     // subscribing to the streams they are sending to.
     let expected = [
         (
-            libp2p::gossipsub::IdentTopic::new(topic_a.clone()),
+            IdentTopic::new(topic_a.clone()),
             Some(node_a.id),
             b"foobar",
             node_b.id,
         ),
         (
-            libp2p::gossipsub::IdentTopic::new(topic_b.clone()),
+            IdentTopic::new(topic_b.clone()),
             Some(node_b.id),
             b"barfoo",
             node_a.id,
@@ -344,12 +330,12 @@ async fn publish_between_two_nodes_different_topics() {
     // initial expected creation.
     assert_eq!(expected, actual);
 
-    drop(b_msgs);
+    node_b.pubsub_unsubscribe(&topic_a).await.unwrap();
 
     let mut disappeared = false;
     for _ in 0..100usize {
         if !node_a
-            .pubsub_peers(Some(topic_a.clone()))
+            .pubsub_peers(topic_a.clone())
             .await
             .unwrap()
             .contains(&node_b.id)
@@ -364,6 +350,47 @@ async fn publish_between_two_nodes_different_topics() {
     }
 
     assert!(disappeared, "timed out before a saw b's unsubscription");
+}
+
+struct PubsubStream {
+    topic: TopicHash,
+    st: BoxStream<'static, GossipsubEvent>,
+}
+
+impl PubsubStream {
+    pub fn new(topic: impl IntoGossipsubTopic, st: BoxStream<'static, GossipsubEvent>) -> Self {
+        let topic = topic.into_topic();
+        Self { topic, st }
+    }
+}
+
+pub struct PubsubMessage {
+    pub source: Option<PeerId>,
+    pub data: Vec<u8>,
+    pub sequence_number: Option<u64>,
+    pub topic: TopicHash,
+}
+
+impl Stream for PubsubStream {
+    type Item = PubsubMessage;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            match futures::ready!(self.st.poll_next_unpin(cx)) {
+                Some(ev) => match ev {
+                    GossipsubEvent::Message { message } => {
+                        return Poll::Ready(Some(PubsubMessage {
+                            source: message.source,
+                            data: message.data.to_vec(),
+                            sequence_number: message.sequence_number,
+                            topic: self.topic.clone(),
+                        }))
+                    }
+                    _ => continue,
+                },
+                None => return Poll::Ready(None),
+            }
+        }
+    }
 }
 
 #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]

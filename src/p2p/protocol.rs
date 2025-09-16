@@ -1,12 +1,12 @@
-use libp2p::core::transport::PortUse;
-use libp2p::{
-    core::Endpoint,
+use connexa::prelude::{
     swarm::{
         self, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
         THandlerInEvent, ToSwarm,
     },
+    transport::{transport::PortUse, Endpoint},
     Multiaddr, PeerId, StreamProtocol,
 };
+
 use std::convert::Infallible;
 use std::task::{Context, Poll};
 

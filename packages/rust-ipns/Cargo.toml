@@ -13,22 +13,15 @@ keywords = ["libp2p", "ipfs"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cbor4ii = { version = "1.0.0", features = ["serde1"] }
+serde_ipld_dagcbor.workspace = true
+bytes = { workspace = true, features = ["serde"] }
 quick-protobuf.workspace = true
 cid.workspace = true
 serde = { workspace = true, features = ["derive"] }
 multihash.workspace = true
 chrono.workspace = true
 
-libp2p-identity = { version = "0.2.10", optional = true, features = [
-    "ecdsa",
-    "ed25519",
-    "peerid",
-    "rand",
-    "rsa",
-    "secp256k1",
-] }
-derive_more = { version = "2.0.1", features = ["full"] }
+libp2p-identity = { version = "0.2.12", optional = true, features = ["peerid", "rand"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["js"] }
@@ -37,5 +30,11 @@ getrandom = { workspace = true, features = ["js"] }
 clap = { workspace = true, features = ["derive"] }
 
 [features]
-default = ["libp2p"]
 libp2p = ["dep:libp2p-identity"]
+
+default = ["libp2p", "rsa", "ed25519", "secp256k1", "ecdsa"]
+
+rsa = ["libp2p-identity?/rsa"]
+ed25519 = ["libp2p-identity?/ed25519"]
+secp256k1 = ["libp2p-identity?/secp256k1"]
+ecdsa = ["libp2p-identity?/ecdsa"]

@@ -241,10 +241,7 @@ impl Behaviour {
             self.events
                 .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
                     peer_id,
-                    result: Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Peer is not added in relay list",
-                    )),
+                    result: Box::new(std::io::Error::other("Peer is not added in relay list")),
                 }));
             return;
         }
@@ -278,8 +275,7 @@ impl Behaviour {
                 self.events
                     .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
                         peer_id,
-                        result: Box::new(std::io::Error::new(
-                            std::io::ErrorKind::Other,
+                        result: Box::new(std::io::Error::other(
                             "no qualified connections available",
                         )),
                     }));
@@ -519,10 +515,7 @@ impl Behaviour {
             self.events
                 .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
                     peer_id: connection.peer_id,
-                    result: Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        err.to_string(),
-                    )),
+                    result: Box::new(std::io::Error::other(err.to_string())),
                 }))
         }
     }
@@ -611,10 +604,7 @@ impl Behaviour {
         self.events
             .push_back(ToSwarm::GenerateEvent(Event::ReservationFailure {
                 peer_id,
-                result: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error.to_string(),
-                )),
+                result: Box::new(std::io::Error::other(error.to_string())),
             }));
 
         //TODO: perform checks and do a reconnect attempt

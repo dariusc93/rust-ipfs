@@ -1,11 +1,10 @@
 use std::convert::Infallible;
 use std::task::{Context, Poll};
 
-use libp2p::{
-    core::upgrade::DeniedUpgrade,
-    swarm::{
-        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
-    },
+use connexa::prelude::transport::upgrade::DeniedUpgrade;
+
+use connexa::prelude::swarm::{
+    handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
 };
 
 #[derive(Default, Debug)]

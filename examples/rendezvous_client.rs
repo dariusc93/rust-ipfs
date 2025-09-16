@@ -1,8 +1,7 @@
 use clap::Parser;
-use libp2p::Multiaddr;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::Ipfs;
-use rust_ipfs::UninitializedIpfsDefault as UninitializedIpfs;
+use rust_ipfs::{Ipfs, Multiaddr};
 
 #[derive(Debug, Parser)]
 #[clap(name = "rendezvous-client")]
@@ -16,10 +15,10 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let ipfs: Ipfs = UninitializedIpfs::new()
+    let ipfs: Ipfs = IpfsBuilder::new()
         .with_rendezvous_client()
+        .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
-        .listen_as_external_addr()
         .start()
         .await?;
 

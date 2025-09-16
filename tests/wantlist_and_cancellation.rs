@@ -38,7 +38,7 @@ where
     }
 }
 
-async fn check_cid_subscriptions(ipfs: &Node, cid: &Cid, expected_count: usize) {
+fn check_cid_subscriptions(ipfs: &Node, cid: &Cid, expected_count: usize) {
     let subscription_count = {
         let subs = ipfs.get_subscriptions().lock();
         if expected_count > 0 {
@@ -82,7 +82,7 @@ async fn wantlist_cancellation() {
     );
 
     // ensure that there is a single related subscription
-    check_cid_subscriptions(&ipfs, &cid, 1).await;
+    check_cid_subscriptions(&ipfs, &cid, 1);
 
     // fire up an additional get request, this time within the same async task...
     let ipfs_clone = ipfs.clone();
@@ -94,7 +94,7 @@ async fn wantlist_cancellation() {
     };
 
     // ensure that there are 2 related subscriptions
-    check_cid_subscriptions(&ipfs, &cid, 2).await;
+    check_cid_subscriptions(&ipfs, &cid, 2);
 
     // ...and an additional one within the same task, for good measure
     let ipfs_clone = ipfs.clone();
@@ -106,7 +106,7 @@ async fn wantlist_cancellation() {
     };
 
     // ensure that there are 3 related subscription
-    check_cid_subscriptions(&ipfs, &cid, 3).await;
+    check_cid_subscriptions(&ipfs, &cid, 3);
 
     // cancel the first requested Cid
     abort_handle1.abort();
@@ -125,7 +125,7 @@ async fn wantlist_cancellation() {
     );
 
     // ensure that there are 2 related subscriptions
-    check_cid_subscriptions(&ipfs, &cid, 2).await;
+    check_cid_subscriptions(&ipfs, &cid, 2);
 
     // cancel the second requested Cid
     drop(get_request2);
@@ -144,7 +144,7 @@ async fn wantlist_cancellation() {
     );
 
     // ensure that there is a single related subscription
-    check_cid_subscriptions(&ipfs, &cid, 1).await;
+    check_cid_subscriptions(&ipfs, &cid, 1);
 
     // cancel the second requested Cid
     drop(get_request3);
@@ -163,5 +163,5 @@ async fn wantlist_cancellation() {
     );
 
     // ensure that there are no related subscriptions
-    check_cid_subscriptions(&ipfs, &cid, 0).await;
+    check_cid_subscriptions(&ipfs, &cid, 0);
 }

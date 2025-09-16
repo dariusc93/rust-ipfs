@@ -134,7 +134,7 @@ impl PostOrderIterator {
                 needed_zeroes -= zeroes.len();
             }
 
-            buffer.extend(core::iter::repeat(0).take(needed_zeroes));
+            buffer.extend(core::iter::repeat_n(0, needed_zeroes));
         }
 
         let mut writer = Writer::new(BytesWriter::new(&mut buffer[..]));

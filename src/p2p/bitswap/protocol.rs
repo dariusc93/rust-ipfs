@@ -2,8 +2,11 @@ use std::io;
 use std::iter;
 
 use asynchronous_codec::{FramedRead, FramedWrite};
+use connexa::prelude::transport::upgrade::InboundUpgrade;
+use connexa::prelude::transport::upgrade::OutboundUpgrade;
+use connexa::prelude::transport::upgrade::UpgradeInfo;
+use connexa::prelude::StreamProtocol;
 use futures::{future::BoxFuture, AsyncRead, AsyncWrite, SinkExt, StreamExt};
-use libp2p::{core::UpgradeInfo, InboundUpgrade, OutboundUpgrade, StreamProtocol};
 
 use super::{bitswap_pb, message::BitswapMessage};
 
@@ -44,7 +47,7 @@ where
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
 
             let message = BitswapMessage::from_proto(message).map_err(|e| {
-                tracing::error!(error = %e, "unable to parse message");
+                tracing::error!(error = %e, "unable to parse bitswap message");
                 e
             })?;
 

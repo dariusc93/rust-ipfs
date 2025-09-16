@@ -1,8 +1,7 @@
 use futures::{pin_mut, StreamExt};
 use ipld_core::cid::Cid;
-use libp2p::{kad::Quorum, multiaddr::Protocol, Multiaddr};
 use multihash_codetable::{Code, MultihashDigest};
-use rust_ipfs::{p2p::MultiaddrExt, Block, Node};
+use rust_ipfs::{p2p::MultiaddrExt, Block, Multiaddr, Node, Protocol, Quorum};
 
 use std::time::Duration;
 
@@ -178,6 +177,9 @@ async fn dht_providing() {
 
     assert!(providers
         .take(1)
+        .filter_map(|result| async move { result.ok() })
+        .map(futures::stream::iter)
+        .flatten()
         .collect::<Vec<_>>()
         .await
         .iter()

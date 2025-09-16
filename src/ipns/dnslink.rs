@@ -1,6 +1,7 @@
 use crate::error::Error;
-use crate::p2p::DnsResolver;
 use crate::path::IpfsPath;
+#[cfg(feature = "dns")]
+use connexa::prelude::transport::dns::DnsResolver;
 
 use tracing_futures::Instrument;
 
@@ -10,6 +11,7 @@ pub async fn resolve<'a>(
     domain: &str,
     mut path: impl Iterator<Item = &'a str>,
 ) -> Result<IpfsPath, Error> {
+    use hickory_resolver::name_server::TokioConnectionProvider;
     use hickory_resolver::Resolver;
     use std::borrow::Cow;
     use std::str::FromStr;
@@ -36,7 +38,9 @@ pub async fn resolve<'a>(
         // when trust-dns support lands in future libp2p-dns investigate if we could share one, no need
         // to have multiple related caches.
         let (config, opt) = resolver.into();
-        let resolver = Resolver::tokio(config, opt);
+        let resolver = Resolver::builder_with_config(config, TokioConnectionProvider::default())
+            .with_options(opt)
+            .build();
 
         // previous implementation searched $domain and _dnslink.$domain concurrently. not sure did
         // `domain` assume fqdn names or not, but local suffices were not being searched on windows at
@@ -101,25 +105,22 @@ pub async fn resolve<'a>(
 #[cfg(test)]
 mod tests {
     use super::resolve;
+    use connexa::prelude::transport::dns::DnsResolver;
 
     #[tokio::test]
     async fn resolve_ipfs_io() {
         tracing_subscriber::fmt::init();
-        let res = resolve(
-            crate::p2p::DnsResolver::Cloudflare,
-            "ipfs.io",
-            std::iter::empty(),
-        )
-        .await
-        .unwrap()
-        .to_string();
+        let res = resolve(DnsResolver::Cloudflare, "ipfs.io", std::iter::empty())
+            .await
+            .unwrap()
+            .to_string();
         assert_eq!(res, "/ipns/website.ipfs.io");
     }
 
     #[tokio::test]
     async fn resolve_website_ipfs_io() {
         let res = resolve(
-            crate::p2p::DnsResolver::Cloudflare,
+            DnsResolver::Cloudflare,
             "website.ipfs.io",
             std::iter::empty(),
         )

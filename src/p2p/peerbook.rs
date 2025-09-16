@@ -1,16 +1,17 @@
 use core::task::{Context, Poll};
-use libp2p::core::{Endpoint, Multiaddr};
-use libp2p::identify::Info;
-use libp2p::swarm::derive_prelude::ConnectionEstablished;
-use libp2p::swarm::{self, dummy::ConnectionHandler as DummyConnectionHandler, NetworkBehaviour};
-use libp2p::swarm::{
-    ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, THandler, THandlerInEvent, ToSwarm,
-};
-use libp2p::PeerId;
 use std::collections::hash_map::Entry;
 use std::time::Duration;
 
-use libp2p::core::transport::PortUse;
+use connexa::prelude::{
+    identify::Info,
+    swarm::{
+        self, behaviour::ConnectionEstablished, ConnectionClosed, ConnectionDenied, ConnectionId,
+        FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
+    },
+    transport::{transport::PortUse, Endpoint},
+    Multiaddr, PeerId,
+};
+
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 
@@ -77,7 +78,7 @@ impl Behaviour {
 }
 
 impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = DummyConnectionHandler;
+    type ConnectionHandler = connexa::dummy::DummyHandler;
     type ToSwarm = Infallible;
 
     fn handle_pending_inbound_connection(
@@ -106,7 +107,7 @@ impl NetworkBehaviour for Behaviour {
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(DummyConnectionHandler)
+        Ok(connexa::dummy::DummyHandler)
     }
 
     fn handle_established_outbound_connection(
@@ -117,7 +118,7 @@ impl NetworkBehaviour for Behaviour {
         _: Endpoint,
         _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(DummyConnectionHandler)
+        Ok(connexa::dummy::DummyHandler)
     }
 
     fn on_connection_handler_event(

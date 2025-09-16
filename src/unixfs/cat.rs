@@ -1,11 +1,12 @@
+use crate::repo::DefaultStorage;
 use crate::{dag::IpldDag, repo::Repo, Block, Ipfs};
 use async_stream::try_stream;
 use bytes::Bytes;
+use connexa::prelude::PeerId;
 use either::Either;
 use futures::future::BoxFuture;
 use futures::stream::{BoxStream, FusedStream, Stream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
-use libp2p::PeerId;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::ops::Range;
 use std::pin::Pin;
@@ -23,7 +24,7 @@ use super::TraversalFailed;
 /// Returns a stream of bytes on the file pointed with the Cid.
 #[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsCat {
-    core: Option<Either<Ipfs, Repo>>,
+    core: Option<Either<Ipfs, Repo<DefaultStorage>>>,
     span: Span,
     length: Option<usize>,
     starting_point: Option<StartingPoint>,
@@ -39,11 +40,17 @@ impl UnixfsCat {
         Self::with_either(Either::Left(ipfs.clone()), starting_point)
     }
 
-    pub fn with_repo(repo: &Repo, starting_point: impl Into<StartingPoint>) -> Self {
+    pub fn with_repo(
+        repo: &Repo<DefaultStorage>,
+        starting_point: impl Into<StartingPoint>,
+    ) -> Self {
         Self::with_either(Either::Right(repo.clone()), starting_point)
     }
 
-    fn with_either(core: Either<Ipfs, Repo>, starting_point: impl Into<StartingPoint>) -> Self {
+    fn with_either(
+        core: Either<Ipfs, Repo<DefaultStorage>>,
+        starting_point: impl Into<StartingPoint>,
+    ) -> Self {
         let starting_point = starting_point.into();
         Self {
             core: Some(core),

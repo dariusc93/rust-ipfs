@@ -1,6 +1,9 @@
 use std::task::{Context, Poll};
 
-use crate::{repo::Repo, Block};
+use crate::{
+    repo::{DefaultStorage, Repo},
+    Block,
+};
 use bytes::Bytes;
 use either::Either;
 #[allow(unused_imports)]
@@ -47,7 +50,7 @@ impl From<&Path> for AddOpt {
 
 #[must_use = "does nothing unless you `.await` or poll the stream"]
 pub struct UnixfsAdd {
-    core: Option<Either<Ipfs, Repo>>,
+    core: Option<Either<Ipfs, Repo<DefaultStorage>>>,
     opt: Option<AddOpt>,
     span: Span,
     chunk: Chunker,
@@ -62,11 +65,11 @@ impl UnixfsAdd {
         Self::with_either(Either::Left(ipfs.clone()), opt)
     }
 
-    pub fn with_repo(repo: &Repo, opt: impl Into<AddOpt>) -> Self {
+    pub fn with_repo(repo: &Repo<DefaultStorage>, opt: impl Into<AddOpt>) -> Self {
         Self::with_either(Either::Right(repo.clone()), opt)
     }
 
-    fn with_either(core: Either<Ipfs, Repo>, opt: impl Into<AddOpt>) -> Self {
+    fn with_either(core: Either<Ipfs, Repo<DefaultStorage>>, opt: impl Into<AddOpt>) -> Self {
         let opt = opt.into();
         Self {
             core: Some(core),

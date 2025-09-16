@@ -1,16 +1,14 @@
 // echo example based on libp2p-stream example
-#[cfg(feature = "experimental_stream")]
+#[cfg(feature = "stream")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use rust_ipfs::{Multiaddr, PeerId, StreamProtocol};
     use std::time::Duration;
 
     use clap::Parser;
     use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
-    use libp2p::{Multiaddr, PeerId, StreamProtocol};
     use rand::RngCore;
-    use rust_ipfs::{
-        p2p::MultiaddrExt, Ipfs, Keypair, UninitializedIpfsDefault as UninitializedIpfs,
-    };
+    use rust_ipfs::{builder::DefaultIpfsBuilder as IpfsBuilder, p2p::MultiaddrExt, Ipfs, Keypair};
 
     #[derive(Debug, Parser)]
     #[clap(name = "stream")]
@@ -27,8 +25,8 @@ async fn main() -> anyhow::Result<()> {
 
     println!("peer id: {}", keypair.public().to_peer_id());
     // Initialize the repo and start a daemon
-    let ipfs = UninitializedIpfs::new()
-        .set_keypair(&keypair)
+    let ipfs = IpfsBuilder::with_keypair(&keypair)?
+        .enable_tcp()
         .add_listening_addr("/ip4/127.0.0.1/tcp/0".parse()?)
         .with_streams()
         .start()
@@ -84,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    async fn echo(mut stream: rust_ipfs::libp2p::Stream) -> std::io::Result<usize> {
+    async fn echo(mut stream: connexa::prelude::Stream) -> std::io::Result<usize> {
         let mut total = 0;
 
         let mut buf = [0u8; 100];
@@ -100,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    async fn send(mut stream: rust_ipfs::libp2p::Stream) -> std::io::Result<()> {
+    async fn send(mut stream: connexa::prelude::Stream) -> std::io::Result<()> {
         let num_bytes = rand::random::<usize>() % 1000;
 
         let mut bytes = vec![0; num_bytes];
@@ -130,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(feature = "experimental_stream"))]
+#[cfg(not(feature = "stream"))]
 fn main() {
-    unimplemented!("\"experimental_stream\" not enabled")
+    unimplemented!("\"stream\" not enabled")
 }
