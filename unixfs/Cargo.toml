@@ -13,7 +13,7 @@ default = ["filetime"]
 
 [dependencies]
 ipld-core = "0.4.1"
-ipld-dagpb = "0.2.1"
+ipld-dagpb = "0.2.2"
 multihash = "0.19.3"
 multihash-codetable = { version = "0.1.4", default-features = false, features = ["std", "sha2"] }
 multihash-derive = "0.9.1"
