@@ -43,8 +43,7 @@ where
             let message = framed
                 .next()
                 .await
-                .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
+                .ok_or_else(|| std::io::Error::from(io::ErrorKind::UnexpectedEof))??;
 
             let message = BitswapMessage::from_proto(message).map_err(|e| {
                 tracing::error!(error = %e, "unable to parse bitswap message");
