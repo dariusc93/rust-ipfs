@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "Rust implementation of IPNS"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Darius Clark"]
 keywords = ["libp2p", "ipfs"]
 
@@ -24,7 +24,7 @@ chrono.workspace = true
 libp2p-identity = { version = "0.2.12", optional = true, features = ["peerid", "rand"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { workspace = true, features = ["js"] }
+getrandom = { workspace = true, features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 clap = { workspace = true, features = ["derive"] }

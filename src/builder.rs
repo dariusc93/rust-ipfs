@@ -25,7 +25,6 @@ use connexa::prelude::{gossipsub, ping, swarm};
 use futures::{StreamExt, TryStreamExt};
 use std::collections::{BTreeSet, HashMap};
 use std::convert::Infallible;
-use std::path::Path;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -285,7 +284,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
 
     /// Sets a path
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_path<P: AsRef<Path>>(mut self, path: P) -> Self {
+    pub fn set_path<P: AsRef<std::path::Path>>(mut self, path: P) -> Self {
         let path = path.as_ref().to_path_buf();
         self.options.ipfs_path = Some(path);
         self
