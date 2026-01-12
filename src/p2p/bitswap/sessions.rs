@@ -607,19 +607,38 @@ impl HaveSession {
             .and_modify(|state| *state = HaveWantState::Block)
             .or_insert(HaveWantState::Block);
 
-        if !matches!(
-            self.state,
-            HaveSessionState::GetBlock { .. } | HaveSessionState::Block { .. }
-        ) {
-            let repo = self.repo.clone();
-            let cid = self.cid;
-            let fut = async move { repo.get_block_now(&cid).await }.boxed();
+        // Handle block request based on current session state.
+        //
+        // When multiple peers request the same block simultaneously, we need to ensure
+        // late-arriving peers are served even if we already have the block bytes.
+        // Without waking the session in the Block state, late-arriving peers would
+        // never receive the block because poll_next wouldn't be called again.
+        match &self.state {
+            HaveSessionState::Block { .. } => {
+                // Block bytes are already available in memory. Wake the session
+                // so poll_next runs again and serves this newly-added peer.
+                tracing::info!(session = %self.cid, %peer_id, name = "have_session", "waking session to serve block to new peer");
+                if let Some(w) = self.waker.take() {
+                    w.wake();
+                }
+            }
+            HaveSessionState::GetBlock { .. } => {
+                // Block fetch is already in progress. No action needed - the session
+                // will be polled automatically when the fetch completes, at which point
+                // this peer will be served along with any others waiting.
+            }
+            _ => {
+                // No block fetch in progress. Start fetching the block from the repo.
+                let repo = self.repo.clone();
+                let cid = self.cid;
+                let fut = async move { repo.get_block_now(&cid).await }.boxed();
 
-            tracing::info!(session = %self.cid, %peer_id, name = "have_session", "change state to get_block");
-            self.state = HaveSessionState::GetBlock { fut };
+                tracing::info!(session = %self.cid, %peer_id, name = "have_session", "change state to get_block");
+                self.state = HaveSessionState::GetBlock { fut };
 
-            if let Some(w) = self.waker.take() {
-                w.wake();
+                if let Some(w) = self.waker.take() {
+                    w.wake();
+                }
             }
         }
     }
@@ -698,14 +717,23 @@ impl Stream for HaveSession {
                 .all(|(_, state)| matches!(state, HaveWantState::BlockSent))
                 || this.want.is_empty()
             {
-                // Since we have no more peers who want the block, we will finalize the session
-                this.state = HaveSessionState::Complete;
-                this.want.clear();
-                this.send_dont_have.clear();
-                return Poll::Ready(Some(HaveSessionEvent::Cancelled));
+                // All currently-known peers have been served, but don't complete the session yet.
+                //
+                // More peers may request this block after a slight delay (e.g., due to network
+                // latency in DHT provider discovery). By keeping the Block state with bytes in
+                // memory, we allow need_block() to wake us again when late-arriving peers request
+                // the same block. This fixes the issue where only the first few simultaneous
+                // requesters would receive the block.
+                //
+                // The session will eventually be cleaned up by the session manager's timeout
+                // or explicit cancellation, not by completing here.
+                this.waker = Some(cx.waker().clone());
+                return Poll::Pending;
             }
 
-            this.state = HaveSessionState::Idle;
+            // Some peers may still be in intermediate states (Pending/Sent). Keep the Block
+            // state so bytes remain available, and wait for state changes.
+            this.waker = Some(cx.waker().clone());
             return Poll::Pending;
         }
 
