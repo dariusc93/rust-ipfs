@@ -4453,9 +4453,9 @@ dependencies = [
 
 [[package]]
 name = "serde_ipld_dagjson"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3359b47ba7f4a306ef5984665e10539e212e97217afa489437d533208eecda36"
+checksum = "82d2d9d1f29999ee9a3d774fe2a5db4cc199da5178d0350f5e4482ea04252aee"
 dependencies = [
  "ipld-core",
  "serde",
