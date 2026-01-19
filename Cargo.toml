@@ -55,7 +55,7 @@ futures-timer = "3.0.0"
 getrandom = { version = "0.3.3" }
 hickory-resolver = "0.25.2"
 idb = "0.6.4"
-indexmap = "2.11.4"
+indexmap = "2.13.0"
 ipld-core = { version = "0.4.1", features = ["serde"] }
 ipld-dagpb = "0.2.2"
 libp2p-relay-manager = { version = "0.4.0", path = "packages/libp2p-relay-manager" }
