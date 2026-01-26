@@ -997,6 +997,198 @@ mod test {
         unreachable!()
     }
 
+    /// Regression test for issue #458: concurrent block requests from multiple peers.
+    ///
+    /// ## The Bug
+    ///
+    /// When multiple peers request the same block simultaneously from a single provider,
+    /// only 1-2 peers would receive the block while others timeout. This occurred because
+    /// `HaveSession` had two flaws:
+    ///
+    /// 1. **Missing waker in `need_block()`**: When a peer called `need_block()` while
+    ///    the session was already in `Block` state (holding bytes), no waker was triggered.
+    ///    The session wouldn't be polled again to serve the new peer.
+    ///
+    /// 2. **Premature state transition in `poll_next()`**: After serving known peers,
+    ///    the session would transition to `Idle` (dropping block bytes) or `Complete`
+    ///    without setting a waker. Late-arriving peers couldn't be served.
+    ///
+    /// ## Test Setup
+    ///
+    /// - 1 provider node holding a block
+    /// - 4 requester nodes connected to the provider
+    /// - All 4 requesters call `get()` simultaneously
+    ///
+    /// ## Expected Results
+    ///
+    /// - **Without fix**: ~1/4 peers receive the block (flaky, timing-dependent)
+    /// - **With fix**: 4/4 peers receive the block (deterministic)
+    #[tokio::test]
+    async fn concurrent_block_requests_single_provider() -> anyhow::Result<()> {
+        use std::collections::HashSet;
+
+        const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+        const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+        // === Setup: Create provider and requester swarms ===
+        //
+        // We use separate variables for each swarm to satisfy the borrow checker
+        // in the `select!` macro (can't mutably borrow Vec elements concurrently).
+
+        let (provider_id, provider_addr, mut provider_swarm, provider_repo) = build_swarm().await;
+        let (req1_id, _, mut req1_swarm, req1_repo) = build_swarm().await;
+        let (req2_id, _, mut req2_swarm, req2_repo) = build_swarm().await;
+        let (req3_id, _, mut req3_swarm, req3_repo) = build_swarm().await;
+        let (req4_id, _, mut req4_swarm, req4_repo) = build_swarm().await;
+
+        let block = create_block();
+        let cid = *block.cid();
+
+        provider_repo.put_block(&block).await?;
+
+        // === Phase 1: Establish connections ===
+        //
+        // All requesters dial the provider. We wait until all connections are established
+        // before proceeding to ensure a fair concurrent request scenario.
+
+        for swarm in [&mut req1_swarm, &mut req2_swarm, &mut req3_swarm, &mut req4_swarm] {
+            swarm.dial(
+                DialOpts::peer_id(provider_id)
+                    .addresses(vec![provider_addr.clone()])
+                    .build(),
+            )?;
+        }
+
+        let mut connected: HashSet<PeerId> = HashSet::new();
+        while connected.len() < 4 {
+            futures::select! {
+                _ = provider_swarm.next() => {}
+                e = req1_swarm.select_next_some() => {
+                    if matches!(e, SwarmEvent::ConnectionEstablished { .. }) {
+                        connected.insert(req1_id);
+                    }
+                }
+                e = req2_swarm.select_next_some() => {
+                    if matches!(e, SwarmEvent::ConnectionEstablished { .. }) {
+                        connected.insert(req2_id);
+                    }
+                }
+                e = req3_swarm.select_next_some() => {
+                    if matches!(e, SwarmEvent::ConnectionEstablished { .. }) {
+                        connected.insert(req3_id);
+                    }
+                }
+                e = req4_swarm.select_next_some() => {
+                    if matches!(e, SwarmEvent::ConnectionEstablished { .. }) {
+                        connected.insert(req4_id);
+                    }
+                }
+            }
+        }
+
+        // === Phase 2: Fire concurrent requests ===
+        //
+        // All requesters issue `get()` calls back-to-back. This creates the race condition
+        // where multiple WANT_BLOCK messages arrive at the provider's HaveSession in rapid
+        // succession. Without the fix, only the first peer(s) get served before the session
+        // transitions away from Block state.
+
+        for swarm in [&mut req1_swarm, &mut req2_swarm, &mut req3_swarm, &mut req4_swarm] {
+            swarm
+                .behaviour_mut()
+                .bitswap
+                .get(&cid, &[provider_id], Some(REQUEST_TIMEOUT));
+        }
+
+        // === Phase 3: Collect results ===
+        //
+        // Poll all swarms until each requester either receives the block or times out.
+
+        let mut received: HashSet<PeerId> = HashSet::new();
+        let mut failed: HashSet<PeerId> = HashSet::new();
+
+        /// Helper to classify bitswap events as success/failure.
+        fn classify_event(e: &SwarmEvent<BehaviourEvent>) -> Option<bool> {
+            match e {
+                SwarmEvent::Behaviour(BehaviourEvent::Bitswap(
+                    super::Event::BlockRetrieved { .. },
+                )) => Some(true),
+                SwarmEvent::Behaviour(BehaviourEvent::Bitswap(
+                    super::Event::CancelBlock { .. },
+                )) => Some(false),
+                _ => None,
+            }
+        }
+
+        let timeout = tokio::time::sleep(TEST_TIMEOUT);
+        tokio::pin!(timeout);
+
+        loop {
+            tokio::select! {
+                // Provider must keep polling to process incoming requests
+                _ = provider_swarm.next() => {}
+
+                e = req1_swarm.select_next_some() => {
+                    if let Some(ok) = classify_event(&e) {
+                        let _ = if ok { &mut received } else { &mut failed }.insert(req1_id);
+                    }
+                }
+                e = req2_swarm.select_next_some() => {
+                    if let Some(ok) = classify_event(&e) {
+                        let _ = if ok { &mut received } else { &mut failed }.insert(req2_id);
+                    }
+                }
+                e = req3_swarm.select_next_some() => {
+                    if let Some(ok) = classify_event(&e) {
+                        let _ = if ok { &mut received } else { &mut failed }.insert(req3_id);
+                    }
+                }
+                e = req4_swarm.select_next_some() => {
+                    if let Some(ok) = classify_event(&e) {
+                        let _ = if ok { &mut received } else { &mut failed }.insert(req4_id);
+                    }
+                }
+
+                _ = &mut timeout => break,
+            }
+
+            // Early exit once all requesters have a definitive result
+            if received.len() + failed.len() == 4 {
+                break;
+            }
+        }
+
+        // === Verify results ===
+
+        println!(
+            "Results: {}/4 received, {} failed/timeout",
+            received.len(),
+            failed.len()
+        );
+
+        for (name, repo) in [
+            ("req1", &req1_repo),
+            ("req2", &req2_repo),
+            ("req3", &req3_repo),
+            ("req4", &req4_repo),
+        ] {
+            let status = match repo.get_block_now(&cid).await {
+                Ok(Some(b)) if b == block => "ok",
+                _ => "MISSING",
+            };
+            println!("  {name}: {status}");
+        }
+
+        assert_eq!(
+            received.len(),
+            4,
+            "All 4 requesters should receive the block, but only {} did",
+            received.len()
+        );
+
+        Ok(())
+    }
+
     #[derive(NetworkBehaviour)]
     #[behaviour(prelude = "connexa::prelude::swarm::derive_prelude")]
     struct Behaviour {
