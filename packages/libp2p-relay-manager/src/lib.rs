@@ -23,7 +23,7 @@ use libp2p::{
     },
     Multiaddr, PeerId,
 };
-use rand::seq::SliceRandom;
+use rand::prelude::IndexedRandom;
 
 #[derive(Debug)]
 pub enum Event {
@@ -269,7 +269,7 @@ impl Behaviour {
         }
 
         let mut temp_connections = connections.clone();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let connection = loop {
             if temp_connections.is_empty() {
                 self.events
@@ -328,7 +328,7 @@ impl Behaviour {
             return None;
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let peer_id = relay_peers.choose(&mut rng)?;
 

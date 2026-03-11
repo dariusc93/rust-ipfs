@@ -11,6 +11,7 @@
 - feat: Use RepoType in Repo and impl DefaultStorage. [PR 414](https://github.com/dariusc93/rust-ipfs/pull/414)
 - refactor: change layout of the storage modules. [PR 422](https://github.com/dariusc93/rust-ipfs/pull/422)
 - refactor: use connexa internally, splitting and reducing logic. [PR 448](https://github.com/dariusc93/rust-ipfs/pull/448)
+- chore: update dependencies.
 
 # 0.14.1
 - fix: remove expect when session failed to get next block.
