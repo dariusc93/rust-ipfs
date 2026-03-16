@@ -45,7 +45,7 @@ base64 = { version = "0.22.1" }
 bytes = "1.11.1"
 cid = "0.11.1"
 chrono = { version = "0.4.42" }
-clap = { version = "4.5.48", features = ["derive"] }
+clap = { version = "4.5.60", features = ["derive"] }
 connexa = { version = "0.4.1", features = ["identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "mdns"] }
 either = { version = "1.15.0" }
 fs2 = "0.4.3"
