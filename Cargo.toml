@@ -37,7 +37,7 @@ test_js_interop = []
 
 [workspace.dependencies]
 anyhow = "1.0.100"
-async-rt = "0.1.8"
+async-rt = "0.1.9"
 async-stream = { version = "0.3.6" }
 async-trait = { version = "0.1.89" }
 asynchronous-codec = "0.7.0"
