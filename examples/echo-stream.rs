@@ -99,10 +99,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     async fn send(mut stream: connexa::prelude::Stream) -> std::io::Result<()> {
-        let num_bytes = rand::random::<usize>() % 1000;
+        let num_bytes: usize = rand::random_range(0..1000);
 
         let mut bytes = vec![0; num_bytes];
-        rand::thread_rng().fill_bytes(&mut bytes);
+        rand::rng().fill_bytes(&mut bytes);
 
         stream.write_all(&bytes).await?;
 
@@ -110,10 +110,7 @@ async fn main() -> anyhow::Result<()> {
         stream.read_exact(&mut buf).await?;
 
         if bytes != buf {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "incorrect echo",
-            ));
+            return Err(std::io::Error::other("incorrect echo"));
         }
 
         stream.close().await?;
