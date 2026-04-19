@@ -1,3 +1,7 @@
+# 0.7.2
+
+- chore: update libp2p-identity to 0.2.13.
+
 # 0.7.1
 
 - chore: move signature v2 to a const variable. [PR XXX](https://github.com/dariusc93/rust-ipfs/pull/XXX)
