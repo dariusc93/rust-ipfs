@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 name = "rust-unixfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
-version = "0.5.0"
+version = "0.5.1"
 
 [features]
 default = ["filetime"]
@@ -16,7 +16,7 @@ ipld-core = "0.4.1"
 ipld-dagpb = "0.2.2"
 multihash = "0.19.3"
 multihash-codetable = { version = "0.2.1", default-features = false, features = ["std", "sha2"] }
-multihash-derive = "0.9.1"
+multihash-derive = "0.9.2"
 
 either = { default-features = false, version = "1.15.0" }
 filetime = { optional = true, version = "0.2.26" }
