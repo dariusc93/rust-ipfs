@@ -61,7 +61,7 @@ ipld-dagpb = "0.2.2"
 libp2p-relay-manager = { version = "0.4.0", path = "packages/libp2p-relay-manager" }
 multibase = "0.9.2"
 multihash = "0.19.3"
-multihash-codetable = { version = "0.1.4" }
+multihash-codetable = { version = "0.2.1" }
 multihash-derive = "0.9.1"
 parking_lot = "0.12.4"
 pollable-map = "0.1.7"
