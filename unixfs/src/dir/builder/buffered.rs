@@ -416,6 +416,34 @@ mod tests {
         assert_eq!(root.codec(), 0x70);
     }
 
+    #[test]
+    fn hamt_sharding_through_builder() {
+        let mut opts = TreeOptions::default();
+        opts.shard_threshold(Some(0));
+        let mut builder = BufferingTreeBuilder::new(opts);
+        builder.put_link("d/0", some_cid(1), 1).unwrap();
+        builder.put_link("d/dir", some_cid(2), 1).unwrap();
+        builder.put_link("d/file.txt", some_cid(3), 1).unwrap();
+
+        let nodes = builder.build().collect::<Result<Vec<_>, _>>().unwrap();
+
+        let is_hamt = |block: &[u8]| {
+            crate::pb::FlatUnixFs::try_parse(block)
+                .map(|f| f.data.Type == crate::pb::UnixFsType::HAMTShard)
+                .unwrap_or(false)
+        };
+
+        let dir = nodes.iter().find(|n| n.path == "d").expect("dir node");
+        assert!(is_hamt(&dir.block[..]));
+
+        // the 0/dir collision yields one interior sub-shard emitted with an empty path
+        let interiors = nodes
+            .iter()
+            .filter(|n| n.path.is_empty() && is_hamt(&n.block[..]))
+            .count();
+        assert_eq!(interiors, 1);
+    }
+
     fn verify_results(
         mut expected: Vec<(
             impl AsRef<str> + core::fmt::Debug,
