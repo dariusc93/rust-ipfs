@@ -213,6 +213,7 @@ impl Walker {
 
                 // depth + 1 because all entries below a directory are children of next, as in,
                 // deeper
+                pending.reserve(flat.links.len());
                 let links = flat
                     .links
                     .into_iter()
@@ -249,6 +250,7 @@ impl Walker {
 
                 // similar to directory, the depth is +1 for nested entries, but the sibling buckets
                 // are at depth
+                pending.reserve(flat.links.len());
                 let links = flat
                     .links
                     .into_iter()
