@@ -107,7 +107,7 @@ impl Ipns {
                 let stream = self.ipfs.dht_get(mb).await?;
 
                 //TODO: Implement configurable timeout
-                let mut records = stream
+                let records = stream
                     .filter_map(|record| async move {
                         let key = &record.key.as_ref()[6..];
                         let record = rust_ipns::Record::decode(&record.value).ok()?;
@@ -120,13 +120,10 @@ impl Ipns {
                     .await
                     .unwrap_or_default();
 
-                if records.is_empty() {
-                    return Err(anyhow::anyhow!("No records found").into());
-                }
-
-                records.sort_by_key(|record| record.sequence());
-
-                let record = records.last().ok_or(anyhow::anyhow!("No records found"))?;
+                let record = records
+                    .iter()
+                    .max_by(|a, b| a.compare(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .ok_or_else(|| anyhow::anyhow!("No records found"))?;
 
                 let data = record.data()?;
 
