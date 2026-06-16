@@ -77,25 +77,31 @@ impl Ipns {
                 let repo = self.ipfs.repo();
                 let datastore = repo.data_store();
 
-                if let Ok(Some(data)) = datastore.get(mb.as_bytes()).await {
-                    if let Ok(path) = rust_ipns::Record::decode(data)
+                if let Ok(Some(data)) = datastore.get(mb.as_bytes()).await
+                    && let Ok(path) = rust_ipns::Record::decode(data)
                         .map_err(std::io::Error::from)
                         .and_then(|record| {
-                        //Although stored locally, we should verify the record anyway
-                        record.verify(*peer)?;
-                        let data = record.data()?;
-                        let path = String::from_utf8_lossy(data.value());
-                        IpfsPath::from_str(&path)
-                            .and_then(|mut internal_path| {
-                                internal_path.path.push_split(path_iter.by_ref()).map_err(
-                                    |_| crate::path::IpfsPathError::InvalidPath(path.to_string()),
-                                )?;
-                                Ok(internal_path)
-                            })
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    }) {
-                        return Ok(path);
-                    }
+                            //Although stored locally, we should verify the record anyway
+                            record.verify(*peer)?;
+                            let data = record.data()?;
+                            let path = String::from_utf8_lossy(data.value());
+                            IpfsPath::from_str(&path)
+                                .and_then(|mut internal_path| {
+                                    internal_path.path.push_split(path_iter.by_ref()).map_err(
+                                        |_| {
+                                            crate::path::IpfsPathError::InvalidPath(
+                                                path.to_string(),
+                                            )
+                                        },
+                                    )?;
+                                    Ok(internal_path)
+                                })
+                                .map_err(|e| {
+                                    std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+                                })
+                        })
+                {
+                    return Ok(path);
                 }
 
                 let stream = self.ipfs.dht_get(mb).await?;
