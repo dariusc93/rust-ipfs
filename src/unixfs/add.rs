@@ -14,6 +14,7 @@ use futures::{
 };
 use ipld_core::cid::Version;
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
+use rust_unixfs::Metadata;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -57,6 +58,7 @@ pub struct UnixfsAdd {
     chunk: Chunker,
     cid_version: Version,
     raw_leaves: Option<bool>,
+    metadata: Metadata,
     pin: bool,
     provide: bool,
     wrap: bool,
@@ -81,6 +83,7 @@ impl UnixfsAdd {
             chunk: Chunker::Size(256 * 1024),
             cid_version: Version::V0,
             raw_leaves: None,
+            metadata: Metadata::default(),
             pin: true,
             provide: false,
             wrap: false,
@@ -105,6 +108,11 @@ impl UnixfsAdd {
 
     pub fn raw_leaves(mut self, raw_leaves: bool) -> Self {
         self.raw_leaves = Some(raw_leaves);
+        self
+    }
+
+    pub fn metadata(mut self, metadata: Metadata) -> Self {
+        self.metadata = metadata;
         self
     }
 
@@ -144,6 +152,7 @@ impl Stream for UnixfsAdd {
                     let chunk = self.chunk;
                     let cid_version = self.cid_version;
                     let raw_leaves = self.raw_leaves;
+                    let metadata = self.metadata.clone();
                     let pin = self.pin;
                     let provide = self.provide;
                     let wrap = self.wrap;
@@ -177,7 +186,8 @@ impl Stream for UnixfsAdd {
                         let mut adder = {
                             let mut builder = FileAdderBuilder::default()
                                 .with_chunker(chunk)
-                                .with_cid_version(cid_version);
+                                .with_cid_version(cid_version)
+                                .with_metadata(metadata);
                             if let Some(raw_leaves) = raw_leaves {
                                 builder = builder.with_raw_leaves(raw_leaves);
                             }

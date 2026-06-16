@@ -2,6 +2,7 @@ use ipld_core::cid::{Cid, Version};
 use multihash::{self, Multihash};
 
 use crate::pb::{FlatUnixFs, PBLink, UnixFs, UnixFsType};
+use crate::Metadata;
 use alloc::borrow::Cow;
 use core::fmt;
 use quick_protobuf::{MessageWrite, Writer};
@@ -28,6 +29,7 @@ pub struct FileAdder {
     // help collector (or layout) to decide how this should be persisted.
     unflushed_links: Vec<Link>,
     config: Config,
+    metadata: Metadata,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -155,6 +157,7 @@ pub struct FileAdderBuilder {
     collector: Collector,
     cid_version: Version,
     raw_leaves: Option<bool>,
+    metadata: Metadata,
 }
 
 impl Default for FileAdderBuilder {
@@ -164,6 +167,7 @@ impl Default for FileAdderBuilder {
             collector: Collector::default(),
             cid_version: Version::V0,
             raw_leaves: None,
+            metadata: Metadata::default(),
         }
     }
 }
@@ -196,6 +200,10 @@ impl FileAdderBuilder {
         }
     }
 
+    pub fn with_metadata(self, metadata: Metadata) -> Self {
+        FileAdderBuilder { metadata, ..self }
+    }
+
     /// Returns a new FileAdder
     pub fn build(self) -> FileAdder {
         let FileAdderBuilder {
@@ -203,6 +211,7 @@ impl FileAdderBuilder {
             collector,
             cid_version,
             raw_leaves,
+            metadata,
         } = self;
 
         let raw_leaves = raw_leaves.unwrap_or(matches!(cid_version, Version::V1));
@@ -214,6 +223,7 @@ impl FileAdderBuilder {
                 cid_version,
                 raw_leaves,
             },
+            metadata,
             ..Default::default()
         }
     }
@@ -302,7 +312,18 @@ impl FileAdder {
         );
         let root_links = self.flush_buffered_links(true);
         // should probably error if there is neither?
-        last_leaf.into_iter().chain(root_links)
+        let mut blocks = last_leaf.into_iter().chain(root_links).collect::<Vec<_>>();
+
+        if self.metadata.mode().is_some() || self.metadata.mtime().is_some() {
+            if let Some((cid, block)) = blocks.last_mut() {
+                let (new_cid, new_block) =
+                    apply_root_metadata(*cid, block, self.config, &self.metadata);
+                *cid = new_cid;
+                *block = new_block;
+            }
+        }
+
+        blocks.into_iter()
     }
 
     /// Returns `None` when the input is empty but there are links, otherwise a new Cid and a
@@ -400,6 +421,35 @@ fn render_and_hash(flat: &FlatUnixFs<'_>, config: Config) -> (Cid, Vec<u8>) {
         .expect("unsure how this could fail");
     let cid = config.cid_of(crate::file::DAG_PB_CODEC, &out);
     (cid, out)
+}
+
+fn apply_root_metadata(
+    cid: Cid,
+    block: &[u8],
+    config: Config,
+    metadata: &Metadata,
+) -> (Cid, Vec<u8>) {
+    let (mode, mtime) = metadata.to_pb();
+
+    if cid.codec() == crate::file::RAW_LEAF_CODEC {
+        let inner = FlatUnixFs {
+            links: Vec::new(),
+            data: UnixFs {
+                Type: UnixFsType::File,
+                Data: (!block.is_empty()).then_some(Cow::Borrowed(block)),
+                filesize: Some(block.len() as u64),
+                mode,
+                mtime,
+                ..Default::default()
+            },
+        };
+        render_and_hash(&inner, config)
+    } else {
+        let mut flat = FlatUnixFs::try_from(block).expect("file root must be a dag-pb node");
+        flat.data.mode = mode;
+        flat.data.mtime = mtime;
+        render_and_hash(&flat, config)
+    }
 }
 
 /// Chunker strategy
@@ -775,6 +825,43 @@ mod tests {
         assert_eq!(cid.version(), Version::V1);
         assert_eq!(cid.codec(), 0x55);
         assert_eq!(block.as_slice(), content);
+    }
+
+    #[test]
+    fn file_root_metadata() {
+        use crate::Metadata;
+        use ipld_core::cid::Version;
+
+        let content: &[u8] = b"foobar\n";
+        let md = Metadata::new(Some(0o100644), Some((1_700_000_000, 0)));
+
+        // multi-block (dag-pb leaves): the root is a dag-pb file link node, re-rendered with metadata
+        let blocks = FileAdder::builder()
+            .with_chunker(Chunker::Size(2))
+            .with_metadata(md.clone())
+            .build()
+            .collect_blocks(content, 0);
+        let (root_cid, root_block) = blocks.last().unwrap();
+        assert_eq!(root_cid.codec(), 0x70);
+        let parsed = crate::pb::FlatUnixFs::try_parse(root_block).unwrap();
+        assert_eq!(parsed.data.mode, Some(0o100644));
+        let mtime = parsed.data.mtime.as_ref().unwrap();
+        assert_eq!(mtime.Seconds, 1_700_000_000);
+        assert_eq!(mtime.FractionalNanoseconds, None);
+
+        // single raw leaf + metadata must convert to a dag-pb file node to hold it
+        let blocks = FileAdder::builder()
+            .with_cid_version(Version::V1)
+            .with_metadata(md)
+            .build()
+            .collect_blocks(content, 0);
+        assert_eq!(blocks.len(), 1);
+        let (cid, block) = &blocks[0];
+        assert_eq!(cid.codec(), 0x70, "raw leaf with metadata becomes dag-pb");
+        let parsed = crate::pb::FlatUnixFs::try_parse(block).unwrap();
+        assert_eq!(parsed.data.Type, crate::pb::UnixFsType::File);
+        assert_eq!(parsed.data.mode, Some(0o100644));
+        assert_eq!(parsed.data.Data.as_deref(), Some(content));
     }
 
     #[test]
