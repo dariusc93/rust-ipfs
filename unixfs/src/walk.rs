@@ -33,18 +33,25 @@ fn convert_link(
     nested_depth: usize,
     nth: usize,
     link: PBLink<'_>,
-) -> Result<(Cid, String, usize), InvalidCidInLink> {
+) -> Result<(Cid, String, usize), Error> {
     let hash = link.Hash.as_deref().unwrap_or_default();
     let cid = match Cid::try_from(hash) {
         Ok(cid) => cid,
-        Err(e) => return Err(InvalidCidInLink::from((nth, link, e))),
+        Err(e) => return Err(InvalidCidInLink::from((nth, link, e)).into()),
     };
     let name = match link.Name {
         Some(Cow::Borrowed(s)) if !s.is_empty() => s.to_owned(),
-        None | Some(Cow::Borrowed(_)) => todo!("link cannot be empty"),
+        None | Some(Cow::Borrowed(_)) => {
+            return Err(Error::InvalidLinkName {
+                nth,
+                name: String::new(),
+            })
+        }
         Some(Cow::Owned(_s)) => unreachable!("FlatUnixFs is never transformed to owned"),
     };
-    assert!(!name.contains('/'));
+    if name.contains('/') {
+        return Err(Error::InvalidLinkName { nth, name });
+    }
     Ok((cid, name, nested_depth))
 }
 
@@ -54,19 +61,26 @@ fn convert_sharded_link(
     sibling_depth: usize,
     nth: usize,
     link: PBLink<'_>,
-) -> Result<(Cid, String, usize), InvalidCidInLink> {
+) -> Result<(Cid, String, usize), Error> {
     let hash = link.Hash.as_deref().unwrap_or_default();
     let cid = match Cid::try_from(hash) {
         Ok(cid) => cid,
-        Err(e) => return Err(InvalidCidInLink::from((nth, link, e))),
+        Err(e) => return Err(InvalidCidInLink::from((nth, link, e)).into()),
     };
     let (depth, name) = match link.Name {
         Some(Cow::Borrowed(s)) if s.len() > 2 => (nested_depth, s[2..].to_owned()),
         Some(Cow::Borrowed(s)) if s.len() == 2 => (sibling_depth, String::from("")),
-        None | Some(Cow::Borrowed(_)) => todo!("link cannot be empty"),
+        None | Some(Cow::Borrowed(_)) => {
+            return Err(Error::InvalidLinkName {
+                nth,
+                name: String::new(),
+            })
+        }
         Some(Cow::Owned(_s)) => unreachable!("FlatUnixFs is never transformed to owned"),
     };
-    assert!(!name.contains('/'));
+    if name.contains('/') {
+        return Err(Error::InvalidLinkName { nth, name });
+    }
     Ok((cid, name, depth))
 }
 
@@ -635,6 +649,7 @@ impl AsRef<[u8]> for FileSegment<'_> {
 
 /// Errors which can occur while walking a tree.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// An unsupported type of UnixFS node was encountered. There should be a way to skip these. Of the
     /// defined types only `Metadata` is unsupported, all undefined types as of 2020-06 are also
@@ -664,6 +679,14 @@ pub enum Error {
 
     /// HAMTSharded directory has unsupported properties
     UnsupportedHAMTShard(ShardError),
+
+    /// A directory or HAMTShard link had an empty name or a name containing '/'.
+    InvalidLinkName {
+        /// Index of the offending link within its parent node.
+        nth: usize,
+        /// The name that was empty or contained a path separator.
+        name: String,
+    },
 }
 
 impl From<ParsingFailed<'_>> for Error {
@@ -721,6 +744,9 @@ impl fmt::Display for Error {
             File(e) => write!(fmt, "invalid file: {e}"),
             UnsupportedDirectory(udp) => write!(fmt, "unsupported directory: {udp}"),
             UnsupportedHAMTShard(se) => write!(fmt, "unsupported hamtshard: {se}"),
+            InvalidLinkName { nth, name } => {
+                write!(fmt, "link #{nth} has an invalid name: {name:?}")
+            }
         }
     }
 }

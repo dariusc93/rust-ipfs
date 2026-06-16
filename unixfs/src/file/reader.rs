@@ -149,7 +149,7 @@ impl<'a> FileReader<'a> {
                 data,
                 blocksizes: inner.data.blocksizes,
                 metadata,
-                file_size: inner.data.filesize.unwrap(),
+                file_size: inner.data.filesize.unwrap_or(data.len() as u64),
             })
         }
     }
