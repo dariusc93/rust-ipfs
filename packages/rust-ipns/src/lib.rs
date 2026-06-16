@@ -4,7 +4,6 @@ use chrono::Duration;
 use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
-use cid::Cid;
 use libp2p_identity::Keypair;
 use libp2p_identity::PeerId;
 use libp2p_identity::PublicKey;
@@ -19,6 +18,95 @@ mod generate;
 const SIGNATURE_V2_BASE: &[u8] = &[
     0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x3a,
 ];
+
+/// Errors produced when creating, decoding, or validating an IPNS [`Record`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Error {
+    /// The record exceeds the 10 KiB IPNS size limit.
+    RecordTooLarge,
+    /// The record is missing its V2 signature.
+    MissingSignature,
+    /// The record is missing its data field.
+    EmptyData,
+    /// The signing key does not correspond to the IPNS name.
+    NameMismatch,
+    /// The IPNS name does not inline a public key and the record omits one.
+    MissingPublicKey,
+    /// The V2 signature failed verification.
+    InvalidSignature,
+    /// The record's EOL validity has elapsed.
+    Expired,
+    /// The dag-cbor data does not match the record's protobuf fields.
+    DataMismatch,
+    /// Unrecognized validity type.
+    InvalidValidityType,
+    /// Malformed protobuf.
+    Protobuf(quick_protobuf::Error),
+    /// Malformed dag-cbor data.
+    Cbor(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Malformed EOL validity timestamp.
+    InvalidValidity(chrono::ParseError),
+    /// A key or signing operation failed.
+    Crypto(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Malformed multihash or peer id.
+    Multihash(Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::RecordTooLarge => write!(f, "record exceeds the 10 KiB limit"),
+            Error::MissingSignature => write!(f, "record is missing a V2 signature"),
+            Error::EmptyData => write!(f, "record is missing its data field"),
+            Error::NameMismatch => write!(f, "public key does not match the IPNS name"),
+            Error::MissingPublicKey => {
+                write!(
+                    f,
+                    "record omits pubKey but the IPNS name does not inline one"
+                )
+            }
+            Error::InvalidSignature => write!(f, "signature is invalid"),
+            Error::Expired => write!(f, "record has expired"),
+            Error::DataMismatch => write!(f, "dag-cbor data does not match the protobuf fields"),
+            Error::InvalidValidityType => write!(f, "invalid validity type"),
+            Error::Protobuf(e) => write!(f, "protobuf error: {e}"),
+            Error::Cbor(e) => write!(f, "dag-cbor error: {e}"),
+            Error::InvalidValidity(e) => write!(f, "invalid validity timestamp: {e}"),
+            Error::Crypto(e) => write!(f, "cryptographic error: {e}"),
+            Error::Multihash(e) => write!(f, "invalid multihash: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Protobuf(e) => Some(e),
+            Error::Cbor(e) | Error::Crypto(e) | Error::Multihash(e) => Some(&**e),
+            Error::InvalidValidity(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<quick_protobuf::Error> for Error {
+    fn from(e: quick_protobuf::Error) -> Self {
+        Error::Protobuf(e)
+    }
+}
+
+impl From<chrono::ParseError> for Error {
+    fn from(e: chrono::ParseError) -> Self {
+        Error::InvalidValidity(e)
+    }
+}
+
+impl From<Error> for std::io::Error {
+    fn from(e: Error) -> Self {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(i32)]
@@ -52,14 +140,11 @@ impl<'de> Deserialize<'de> for ValidityType {
 }
 
 impl TryFrom<i32> for ValidityType {
-    type Error = std::io::Error;
+    type Error = Error;
     fn try_from(i: i32) -> Result<Self, Self::Error> {
         match i {
             0 => Ok(ValidityType::EOL),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid validity type",
-            )),
+            _ => Err(Error::InvalidValidityType),
         }
     }
 }
@@ -197,7 +282,7 @@ impl Record {
         duration: Duration,
         seq: u64,
         ttl: u64,
-    ) -> std::io::Result<Self> {
+    ) -> Result<Self, Error> {
         let value = value.as_ref().to_vec();
 
         let validity = Utc::now()
@@ -219,7 +304,7 @@ impl Record {
 
         let signature_v1 = keypair
             .sign(&signature_v1_construct)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| Error::Crypto(Box::new(e)))?;
 
         let document = Data {
             value: Bytes::from(value.clone()),
@@ -229,8 +314,7 @@ impl Record {
             ttl,
         };
 
-        let data = serde_ipld_dagcbor::to_vec(&document)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let data = serde_ipld_dagcbor::to_vec(&document).map_err(|e| Error::Cbor(Box::new(e)))?;
 
         let signature_v2_construct = SIGNATURE_V2_BASE
             .iter()
@@ -240,12 +324,12 @@ impl Record {
 
         let signature_v2 = keypair
             .sign(&signature_v2_construct)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| Error::Crypto(Box::new(e)))?;
 
         let public_key = match keypair.key_type().into() {
             KeyType::RSA => keypair
                 .to_protobuf_encoding()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+                .map_err(|e| Error::Crypto(Box::new(e)))?,
             _ => vec![],
         };
 
@@ -262,29 +346,26 @@ impl Record {
         })
     }
 
-    pub fn decode(data: impl AsRef<[u8]>) -> std::io::Result<Self> {
+    pub fn decode(data: impl AsRef<[u8]>) -> Result<Self, Error> {
         let data = data.as_ref();
 
         if data.len() > 10 * 1024 {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+            return Err(Error::RecordTooLarge);
         }
 
         let mut reader = BytesReader::from_bytes(data);
-        let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)?;
         let record = entry.into();
         Ok(record)
     }
 
-    pub fn encode(&self) -> std::io::Result<Vec<u8>> {
+    pub fn encode(&self) -> Result<Vec<u8>, Error> {
         let entry: generate::ipns_pb::IpnsEntry = self.into();
 
         let mut buf = Vec::with_capacity(entry.get_size());
         let mut writer = Writer::new(&mut buf);
 
-        entry
-            .write_message(&mut writer)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        entry.write_message(&mut writer)?;
 
         Ok(buf)
     }
@@ -299,10 +380,9 @@ impl Record {
         self.validity_type
     }
 
-    pub fn validity(&self) -> std::io::Result<DateTime<FixedOffset>> {
+    pub fn validity(&self) -> Result<DateTime<FixedOffset>, Error> {
         let time = String::from_utf8_lossy(&self.validity);
-        chrono::DateTime::parse_from_rfc3339(&time)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        Ok(chrono::DateTime::parse_from_rfc3339(&time)?)
     }
 
     pub fn ttl(&self) -> u64 {
@@ -317,9 +397,9 @@ impl Record {
         !self.signature_v2.is_empty()
     }
 
-    pub fn data(&self) -> std::io::Result<Data> {
-        let data: Data = serde_ipld_dagcbor::from_slice(&self.data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    pub fn data(&self) -> Result<Data, Error> {
+        let data: Data =
+            serde_ipld_dagcbor::from_slice(&self.data).map_err(|e| Error::Cbor(Box::new(e)))?;
 
         if data.value != self.value
             || data.validity != self.validity
@@ -327,58 +407,45 @@ impl Record {
             || data.sequence != self.sequence
             || data.ttl != self.ttl
         {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+            return Err(Error::DataMismatch);
         }
 
         Ok(data)
     }
 
-    pub fn value(&self) -> std::io::Result<Cid> {
-        let cid_str = String::from_utf8_lossy(&self.value);
-        Cid::try_from(cid_str.as_ref())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    /// The raw IPNS value.
+    pub fn value(&self) -> &[u8] {
+        &self.value
     }
 
     #[cfg(feature = "libp2p")]
-    pub fn verify_signature(&self, peer_id: PeerId) -> std::io::Result<()> {
+    pub fn verify_signature(&self, peer_id: PeerId) -> Result<(), Error> {
         use multihash::Multihash;
 
         if self.signature_v2.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "missing signatureV2",
-            ));
+            return Err(Error::MissingSignature);
         }
 
         if self.data.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Empty data field",
-            ));
+            return Err(Error::EmptyData);
         }
 
         let public_key = if self.public_key.is_empty() {
             let mh = Multihash::<64>::from_bytes(&peer_id.to_bytes())
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                .map_err(|e| Error::Multihash(Box::new(e)))?;
             // small keys are inlined in the name via an identity (code 0) multihash; anything
             // else (e.g. an RSA name) carries no inlined key, so the record must embed one.
             if mh.code() != 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "record omits pubKey but the IPNS name does not inline one",
-                ));
+                return Err(Error::MissingPublicKey);
             }
             PublicKey::try_decode_protobuf(mh.digest())
         } else {
             PublicKey::try_decode_protobuf(&self.public_key)
         }
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        .map_err(|e| Error::Crypto(Box::new(e)))?;
 
         if PeerId::from_public_key(&public_key) != peer_id {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "public key does not match the IPNS name",
-            ));
+            return Err(Error::NameMismatch);
         }
 
         self.data()?;
@@ -390,10 +457,7 @@ impl Record {
             .collect::<Vec<_>>();
 
         if !public_key.verify(&signature_v2, &self.signature_v2) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Signature is invalid",
-            ));
+            return Err(Error::InvalidSignature);
         }
 
         Ok(())
@@ -402,17 +466,25 @@ impl Record {
     /// Fully validates the record against `peer_id`: name binding, V2 signature, and that the EOL
     /// validity has not elapsed.
     #[cfg(feature = "libp2p")]
-    pub fn verify(&self, peer_id: PeerId) -> std::io::Result<()> {
+    pub fn verify(&self, peer_id: PeerId) -> Result<(), Error> {
         self.verify_signature(peer_id)?;
 
         if self.validity()?.with_timezone(&Utc) < Utc::now() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "record has expired",
-            ));
+            return Err(Error::Expired);
         }
 
         Ok(())
+    }
+
+    /// Orders this record against `other` by IPNS precedence: higher `sequence` wins, then the
+    /// later EOL `validity`.
+    /// Records should already be validated and refer to the same name.
+    pub fn compare(&self, other: &Record) -> Result<std::cmp::Ordering, Error> {
+        use std::cmp::Ordering;
+        match self.sequence.cmp(&other.sequence) {
+            Ordering::Equal => Ok(self.validity()?.cmp(&other.validity()?)),
+            ord => Ok(ord),
+        }
     }
 }
 
@@ -463,5 +535,22 @@ mod tests {
         tampered.verify_signature(attacker_peer).unwrap();
         // the embedded key does not hash to the victim's name, so it must not validate for it.
         assert!(tampered.verify_signature(victim_peer).is_err());
+    }
+
+    #[test]
+    fn compare_prefers_higher_sequence_then_later_validity() {
+        use std::cmp::Ordering;
+        let kp = Keypair::generate_ed25519();
+
+        let seq0 = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(24), 0, 0).unwrap();
+        let seq1 = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(1), 1, 0).unwrap();
+        // higher sequence wins even with an earlier EOL
+        assert_eq!(seq1.compare(&seq0).unwrap(), Ordering::Greater);
+        assert_eq!(seq0.compare(&seq1).unwrap(), Ordering::Less);
+
+        let near = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(1), 5, 0).unwrap();
+        let far = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(48), 5, 0).unwrap();
+        // equal sequence: the later EOL wins
+        assert_eq!(far.compare(&near).unwrap(), Ordering::Greater);
     }
 }

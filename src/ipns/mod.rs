@@ -78,7 +78,9 @@ impl Ipns {
                 let datastore = repo.data_store();
 
                 if let Ok(Some(data)) = datastore.get(mb.as_bytes()).await {
-                    if let Ok(path) = rust_ipns::Record::decode(data).and_then(|record| {
+                    if let Ok(path) = rust_ipns::Record::decode(data)
+                        .map_err(std::io::Error::from)
+                        .and_then(|record| {
                         //Although stored locally, we should verify the record anyway
                         record.verify(*peer)?;
                         let data = record.data()?;
@@ -234,6 +236,8 @@ pub enum IpnsError {
     IpfsPath(#[from] crate::path::IpfsPathError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Ipns(#[from] rust_ipns::Error),
     #[error(transparent)]
     Any(#[from] anyhow::Error),
 }
