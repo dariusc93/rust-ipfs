@@ -134,6 +134,25 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    /// Creates a new `Metadata` from an optional POSIX mode and an optional mtime as
+    /// `(seconds, nanos)` since the unix epoch.
+    pub fn new(mode: Option<u32>, mtime: Option<(i64, u32)>) -> Self {
+        Metadata { mode, mtime }
+    }
+
+    /// Returns a copy with the given POSIX mode set.
+    pub fn with_mode(mut self, mode: u32) -> Self {
+        self.mode = Some(mode);
+        self
+    }
+
+    /// Returns a copy with the given modification time set as `(seconds, nanos)` since the unix
+    /// epoch.
+    pub fn with_mtime(mut self, seconds: i64, nanos: u32) -> Self {
+        self.mtime = Some((seconds, nanos));
+        self
+    }
+
     /// Returns the full file mode, if one has been specified.
     ///
     /// The full file mode is originally read through `st_mode` field of `stat` struct defined in
