@@ -1,4 +1,4 @@
-use ipld_core::cid::Cid;
+use ipld_core::cid::{Cid, Version};
 use multihash::{self, Multihash};
 
 use crate::pb::{FlatUnixFs, PBLink, UnixFs, UnixFsType};
@@ -13,9 +13,9 @@ use sha2::{Digest, Sha256};
 /// Custom file tree builder can be created with [`FileAdder::builder()`] and configuring the
 /// chunker and collector.
 ///
-/// Current implementation maintains an internal buffer for the block creation and uses a
-/// non-customizable hash function to produce Cid version 0 links. Currently does not support
-/// inline links.
+/// Current implementation maintains an internal buffer for the block creation and uses sha2-256 to
+/// produce Cid version 0 (default) or version 1 links, optionally with raw leaves. Currently does
+/// not support inline links.
 #[derive(Default)]
 pub struct FileAdder {
     chunker: Chunker,
@@ -27,6 +27,45 @@ pub struct FileAdder {
     // large file and using a minimal chunk size. Could be that this must be moved to Collector to
     // help collector (or layout) to decide how this should be persisted.
     unflushed_links: Vec<Link>,
+    config: Config,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Config {
+    cid_version: Version,
+    raw_leaves: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            cid_version: Version::V0,
+            raw_leaves: false,
+        }
+    }
+}
+
+impl Config {
+    fn cid_of(&self, codec: u64, bytes: &[u8]) -> Cid {
+        let mh = Multihash::wrap(
+            multihash_codetable::Code::Sha2_256.into(),
+            &Sha256::digest(bytes),
+        )
+        .unwrap();
+        match self.cid_version {
+            Version::V0 => Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0"),
+            Version::V1 => Cid::new_v1(codec, mh),
+        }
+    }
+
+    fn cid_of_raw_leaf(&self, bytes: &[u8]) -> Cid {
+        let mh = Multihash::wrap(
+            multihash_codetable::Code::Sha2_256.into(),
+            &Sha256::digest(bytes),
+        )
+        .unwrap();
+        Cid::new_v1(crate::file::RAW_LEAF_CODEC, mh)
+    }
 }
 
 impl fmt::Debug for FileAdder {
@@ -111,10 +150,22 @@ impl fmt::Debug for Link {
 }
 
 /// Convenience type to facilitate configuring [`FileAdder`]s.
-#[derive(Default)]
 pub struct FileAdderBuilder {
     chunker: Chunker,
     collector: Collector,
+    cid_version: Version,
+    raw_leaves: Option<bool>,
+}
+
+impl Default for FileAdderBuilder {
+    fn default() -> Self {
+        FileAdderBuilder {
+            chunker: Chunker::default(),
+            collector: Collector::default(),
+            cid_version: Version::V0,
+            raw_leaves: None,
+        }
+    }
 }
 
 impl FileAdderBuilder {
@@ -131,13 +182,38 @@ impl FileAdderBuilder {
         }
     }
 
+    /// Sets the CID version of produced dag-pb nodes. Defaults to [`Version::V0`].
+    pub fn with_cid_version(self, cid_version: Version) -> Self {
+        FileAdderBuilder { cid_version, ..self }
+    }
+
+    /// Stores file leaves as bare raw (0x55) blocks instead of dag-pb file nodes. When left unset,
+    /// raw leaves are enabled for [`Version::V1`] and disabled for [`Version::V0`], matching kubo.
+    pub fn with_raw_leaves(self, raw_leaves: bool) -> Self {
+        FileAdderBuilder {
+            raw_leaves: Some(raw_leaves),
+            ..self
+        }
+    }
+
     /// Returns a new FileAdder
     pub fn build(self) -> FileAdder {
-        let FileAdderBuilder { chunker, collector } = self;
+        let FileAdderBuilder {
+            chunker,
+            collector,
+            cid_version,
+            raw_leaves,
+        } = self;
+
+        let raw_leaves = raw_leaves.unwrap_or(matches!(cid_version, Version::V1));
 
         FileAdder {
             chunker,
             collector,
+            config: Config {
+                cid_version,
+                raw_leaves,
+            },
             ..Default::default()
         }
     }
@@ -172,7 +248,8 @@ impl FileAdder {
             // blocks and user takes care of chunking (and buffering)?
             //
             // cat file | my_awesome_chunker | my_brilliant_collector
-            let leaf = Self::flush_buffered_leaf(accepted, &mut self.unflushed_links, false);
+            let leaf =
+                Self::flush_buffered_leaf(accepted, &mut self.unflushed_links, false, self.config);
             assert!(leaf.is_some(), "chunk completed, must produce a new block");
             self.block_buffer.clear();
             let links = self.flush_buffered_links(false);
@@ -198,6 +275,7 @@ impl FileAdder {
                     self.block_buffer.as_slice(),
                     &mut self.unflushed_links,
                     false,
+                    self.config,
                 );
                 assert!(leaf.is_some(), "chunk completed, must produce a new block");
                 self.block_buffer.clear();
@@ -216,8 +294,12 @@ impl FileAdder {
     /// Note: the API will hopefully evolve in a direction which will not allocate a new Vec for
     /// every block in the near-ish future.
     pub fn finish(mut self) -> impl Iterator<Item = (Cid, Vec<u8>)> {
-        let last_leaf =
-            Self::flush_buffered_leaf(&self.block_buffer, &mut self.unflushed_links, true);
+        let last_leaf = Self::flush_buffered_leaf(
+            &self.block_buffer,
+            &mut self.unflushed_links,
+            true,
+            self.config,
+        );
         let root_links = self.flush_buffered_links(true);
         // should probably error if there is neither?
         last_leaf.into_iter().chain(root_links)
@@ -229,51 +311,54 @@ impl FileAdder {
         input: &[u8],
         unflushed_links: &mut Vec<Link>,
         finishing: bool,
+        config: Config,
     ) -> Option<(Cid, Vec<u8>)> {
         if input.is_empty() && (!finishing || !unflushed_links.is_empty()) {
             return None;
         }
 
-        // for empty unixfs file the bytes is missing but filesize is present.
-
-        let data = if !input.is_empty() {
-            Some(Cow::Borrowed(input))
+        let (cid, block, total_size) = if config.raw_leaves {
+            let cid = config.cid_of_raw_leaf(input);
+            (cid, input.to_vec(), input.len() as u64)
         } else {
-            None
+            // for empty unixfs file the bytes is missing but filesize is present.
+            let data = if !input.is_empty() {
+                Some(Cow::Borrowed(input))
+            } else {
+                None
+            };
+
+            let inner = FlatUnixFs {
+                links: Vec::new(),
+                data: UnixFs {
+                    Type: UnixFsType::File,
+                    Data: data,
+                    filesize: Some(input.len() as u64),
+                    // no blocksizes as there are no links
+                    ..Default::default()
+                },
+            };
+
+            let (cid, vec) = render_and_hash(&inner, config);
+            let total_size = vec.len() as u64;
+            (cid, vec, total_size)
         };
-
-        let filesize = Some(input.len() as u64);
-
-        let inner = FlatUnixFs {
-            links: Vec::new(),
-            data: UnixFs {
-                Type: UnixFsType::File,
-                Data: data,
-                filesize,
-                // no blocksizes as there are no links
-                ..Default::default()
-            },
-        };
-
-        let (cid, vec) = render_and_hash(&inner);
-
-        let total_size = vec.len();
 
         let link = Link {
             depth: 0,
             target: cid,
-            total_size: total_size as u64,
+            total_size,
             file_size: input.len() as u64,
         };
 
         unflushed_links.push(link);
 
-        Some((cid, vec))
+        Some((cid, block))
     }
 
     fn flush_buffered_links(&mut self, finishing: bool) -> Vec<(Cid, Vec<u8>)> {
         self.collector
-            .flush_links(&mut self.unflushed_links, finishing)
+            .flush_links(&mut self.unflushed_links, finishing, self.config)
     }
 
     /// Test helper for collecting all of the produced blocks; probably not a good idea outside
@@ -305,7 +390,7 @@ impl FileAdder {
     }
 }
 
-fn render_and_hash(flat: &FlatUnixFs<'_>) -> (Cid, Vec<u8>) {
+fn render_and_hash(flat: &FlatUnixFs<'_>, config: Config) -> (Cid, Vec<u8>) {
     // TODO: as shown in later dagger we don't really need to render the FlatUnixFs fully; we could
     // either just render a fixed header and continue with the body OR links, though the links are
     // a bit more complicated.
@@ -313,12 +398,7 @@ fn render_and_hash(flat: &FlatUnixFs<'_>) -> (Cid, Vec<u8>) {
     let mut writer = Writer::new(&mut out);
     flat.write_message(&mut writer)
         .expect("unsure how this could fail");
-    let mh = Multihash::wrap(
-        multihash_codetable::Code::Sha2_256.into(),
-        &Sha256::digest(&out),
-    )
-    .unwrap();
-    let cid = Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0");
+    let cid = config.cid_of(crate::file::DAG_PB_CODEC, &out);
     (cid, out)
 }
 
@@ -376,11 +456,16 @@ impl Default for Collector {
 }
 
 impl Collector {
-    fn flush_links(&mut self, pending: &mut Vec<Link>, finishing: bool) -> Vec<(Cid, Vec<u8>)> {
+    fn flush_links(
+        &mut self,
+        pending: &mut Vec<Link>,
+        finishing: bool,
+        config: Config,
+    ) -> Vec<(Cid, Vec<u8>)> {
         use Collector::*;
 
         match self {
-            Balanced(bc) => bc.flush_links(pending, finishing),
+            Balanced(bc) => bc.flush_links(pending, finishing, config),
         }
     }
 }
@@ -440,7 +525,12 @@ impl BalancedCollector {
     /// In-place compression of the `pending` links to a balanced hierarchy. When `finishing`, the
     /// links will be compressed iteratively from the lowest level to produce a single root link
     /// block.
-    fn flush_links(&mut self, pending: &mut Vec<Link>, finishing: bool) -> Vec<(Cid, Vec<u8>)> {
+    fn flush_links(
+        &mut self,
+        pending: &mut Vec<Link>,
+        finishing: bool,
+        config: Config,
+    ) -> Vec<(Cid, Vec<u8>)> {
         /*
 
         file    |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
@@ -580,7 +670,7 @@ impl BalancedCollector {
                     },
                 };
 
-                let (cid, vec) = render_and_hash(&inner);
+                let (cid, vec) = render_and_hash(&inner, config);
 
                 // start overwriting at the first index of this level, then continue forward on
                 // next iterations.
@@ -668,6 +758,61 @@ mod tests {
 
         let (accepted, ready) = Chunker::Size(max).accept(&input, &existing);
         (accepted.len(), ready)
+    }
+
+    #[test]
+    fn cidv1_raw_single_leaf_is_root() {
+        use ipld_core::cid::Version;
+
+        let content: &[u8] = b"foobar\n";
+        let blocks = FileAdder::builder()
+            .with_cid_version(Version::V1)
+            .build()
+            .collect_blocks(content, 0);
+
+        assert_eq!(blocks.len(), 1);
+        let (cid, block) = &blocks[0];
+        assert_eq!(cid.version(), Version::V1);
+        assert_eq!(cid.codec(), 0x55);
+        assert_eq!(block.as_slice(), content);
+    }
+
+    #[test]
+    fn cidv1_raw_leaves_multiblock_roundtrip() {
+        use crate::walk::{ContinuedWalk, Walker};
+        use ipld_core::cid::Version;
+        use std::collections::HashMap;
+
+        let content: &[u8] = b"foobar\n";
+        let blocks = FileAdder::builder()
+            .with_chunker(Chunker::Size(2))
+            .with_cid_version(Version::V1)
+            .build()
+            .collect_blocks(content, 0);
+
+        let root_cid = blocks.last().unwrap().0;
+        assert_eq!(root_cid.version(), Version::V1);
+        assert_eq!(root_cid.codec(), 0x70);
+
+        let store: HashMap<Cid, Vec<u8>> = blocks.into_iter().collect();
+        assert!(store.keys().filter(|c| c.codec() == 0x55).count() >= 2);
+
+        let mut walker = Walker::new(root_cid, String::new());
+        let mut cache = None;
+        let mut reassembled = Vec::new();
+
+        while walker.should_continue() {
+            let (next, _) = walker.pending_links();
+            let block = store.get(next).expect("block present in store");
+            match walker.next(block, &mut cache).unwrap() {
+                ContinuedWalk::File(segment, ..) => {
+                    reassembled.extend_from_slice(segment.as_ref());
+                }
+                x => unreachable!("{x:?}"),
+            }
+        }
+
+        assert_eq!(reassembled, content);
     }
 
     #[test]
