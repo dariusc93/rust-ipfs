@@ -1,8 +1,7 @@
 //! Custom protobuf types which are used in encoding directorys.
 
 use super::NamedLeaf;
-use crate::pb::UnixFs;
-use ipld_core::cid::Cid;
+use crate::pb::{UnixFs, WriteableCid};
 use quick_protobuf::{MessageWrite, Writer, WriterBackend};
 
 /// Newtype which uses the &[Option<(NamedLeaf)>] as Vec<PBLink>.
@@ -66,46 +65,3 @@ impl MessageWrite for NamedLeafAsPBLink<'_> {
     }
 }
 
-/// Newtype around Cid to allow embedding it as PBLink::Hash without allocating a vector.
-struct WriteableCid<'a>(&'a Cid);
-
-impl MessageWrite for WriteableCid<'_> {
-    fn get_size(&self) -> usize {
-        use ipld_core::cid::Version::*;
-        use quick_protobuf::sizeofs::*;
-
-        let hash_len = self.0.hash().to_bytes().len();
-
-        match self.0.version() {
-            V0 => hash_len,
-            V1 => {
-                let version_len = 1;
-                let codec_len = sizeof_varint(self.0.codec());
-                version_len + codec_len + hash_len
-            }
-        }
-    }
-
-    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> quick_protobuf::Result<()> {
-        use ipld_core::cid::Version::*;
-
-        match self.0.version() {
-            V0 => { /* cidv0 has only the _multi_hash */ }
-            V1 => {
-                // it is possible that CidV1 should not be linked to from a unixfs
-                // directory; at least go-ipfs 0.5 `ipfs files` denies making a cbor link
-                // but happily accepts and does refs over one.
-                w.write_u8(1)?;
-                w.write_varint(self.0.codec())?;
-            }
-        }
-
-        self.0
-            .hash()
-            .to_bytes()
-            .iter()
-            // while this looks bad it cannot be measured; note we cannot use the
-            // write_bytes because that is length prefixed bytes write
-            .try_for_each(|b| w.write_u8(*b))
-    }
-}

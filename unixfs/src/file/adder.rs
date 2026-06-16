@@ -1,11 +1,11 @@
 use ipld_core::cid::{Cid, Version};
 use multihash::{self, Multihash};
 
-use crate::pb::{FlatUnixFs, PBLink, UnixFs, UnixFsType};
+use crate::pb::{FlatUnixFs, UnixFs, UnixFsType, WriteableCid};
 use crate::Metadata;
 use alloc::borrow::Cow;
 use core::fmt;
-use quick_protobuf::{MessageWrite, Writer};
+use quick_protobuf::{MessageWrite, Writer, WriterBackend};
 
 use sha2::{Digest, Sha256};
 
@@ -354,16 +354,94 @@ impl FileAdder {
     }
 }
 
-fn render_and_hash(flat: &FlatUnixFs<'_>, config: Config) -> (Cid, Vec<u8>) {
-    // TODO: as shown in later dagger we don't really need to render the FlatUnixFs fully; we could
-    // either just render a fixed header and continue with the body OR links, though the links are
-    // a bit more complicated.
-    let mut out = Vec::with_capacity(flat.get_size());
+fn render_and_hash<M: MessageWrite>(node: &M, config: Config) -> (Cid, Vec<u8>) {
+    let mut out = Vec::with_capacity(node.get_size());
     let mut writer = Writer::new(&mut out);
-    flat.write_message(&mut writer)
+    node.write_message(&mut writer)
         .expect("unsure how this could fail");
     let cid = config.cid_of(crate::file::DAG_PB_CODEC, &out);
     (cid, out)
+}
+
+/// Streaming dag-pb serializer for a file link block (a `File` node linking child blocks), avoiding
+/// the per-link byte-vector allocations of building intermediate `PBLink`s.
+struct LinkBlock<'a> {
+    links: &'a [Link],
+    filesize: u64,
+}
+
+impl MessageWrite for LinkBlock<'_> {
+    fn get_size(&self) -> usize {
+        use quick_protobuf::sizeofs::sizeof_len;
+        let links = self
+            .links
+            .iter()
+            .map(|link| 1 + sizeof_len(LinkAsPBLink(link).get_size()))
+            .sum::<usize>();
+        let data = LinkBlockData {
+            filesize: self.filesize,
+            links: self.links,
+        };
+        links + 1 + sizeof_len(data.get_size())
+    }
+
+    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> quick_protobuf::Result<()> {
+        for link in self.links {
+            w.write_with_tag(18, |w| w.write_message(&LinkAsPBLink(link)))?;
+        }
+        let data = LinkBlockData {
+            filesize: self.filesize,
+            links: self.links,
+        };
+        w.write_with_tag(10, |w| w.write_message(&data))
+    }
+}
+
+struct LinkAsPBLink<'a>(&'a Link);
+
+impl MessageWrite for LinkAsPBLink<'_> {
+    fn get_size(&self) -> usize {
+        use quick_protobuf::sizeofs::*;
+        1 + sizeof_len(WriteableCid(&self.0.target).get_size())
+            + 1
+            + sizeof_len(0)
+            + 1
+            + sizeof_varint(self.0.total_size)
+    }
+
+    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> quick_protobuf::Result<()> {
+        w.write_with_tag(10, |w| w.write_message(&WriteableCid(&self.0.target)))?;
+        w.write_with_tag(18, |w| w.write_string(""))?;
+        w.write_with_tag(24, |w| w.write_uint64(self.0.total_size))
+    }
+}
+
+struct LinkBlockData<'a> {
+    filesize: u64,
+    links: &'a [Link],
+}
+
+impl MessageWrite for LinkBlockData<'_> {
+    fn get_size(&self) -> usize {
+        use quick_protobuf::sizeofs::*;
+        1 + sizeof_varint(UnixFsType::File as u64)
+            + 1
+            + sizeof_varint(self.filesize)
+            + self
+                .links
+                .iter()
+                .map(|link| 1 + sizeof_varint(link.file_size))
+                .sum::<usize>()
+    }
+
+    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> quick_protobuf::Result<()> {
+        w.write_with_tag(8, |w| w.write_enum(UnixFsType::File as i32))?;
+        w.write_with_tag(24, |w| w.write_uint64(self.filesize))?;
+        for link in self.links {
+            w.write_with_tag(32, |w| w.write_uint64(link.file_size))?;
+        }
+        Ok(())
+    }
 }
 
 fn apply_root_metadata(
@@ -476,10 +554,6 @@ pub struct BalancedCollector {
     // pending links per depth (0 == leaves); a layer is compacted into the next once it grows past
     // the branching factor
     layers: Vec<Vec<Link>>,
-    // reused between link block generation
-    reused_links: Vec<PBLink<'static>>,
-    // reused between link block generation
-    reused_blocksizes: Vec<u64>,
 }
 
 impl fmt::Debug for BalancedCollector {
@@ -519,8 +593,6 @@ impl BalancedCollector {
         Self {
             branching_factor,
             layers: Vec::new(),
-            reused_links: Vec::new(),
-            reused_blocksizes: Vec::new(),
         }
     }
 
@@ -587,68 +659,22 @@ impl BalancedCollector {
     /// Renders the first `count` links of `layers[depth]` into a single dag-pb file link block,
     /// removing them, and returns the block plus the promoted link at `depth + 1`.
     fn render(&mut self, depth: usize, count: usize, config: Config) -> (Cid, Vec<u8>, Link) {
-        let mut reused_links = core::mem::take(&mut self.reused_links);
-        let mut reused_blocksizes = core::mem::take(&mut self.reused_blocksizes);
-        reused_links.clear();
-        reused_blocksizes.clear();
+        let links = &self.layers[depth][..count];
+        let filesize = links.iter().map(|link| link.file_size).sum::<u64>();
+        let nested_total_size = links.iter().map(|link| link.total_size).sum::<u64>();
 
-        let mut nested_size = 0;
-        let mut nested_total_size = 0;
+        let (cid, vec) = render_and_hash(&LinkBlock { links, filesize }, config);
 
-        for link in self.layers[depth].drain(0..count) {
-            Self::partition_link(
-                &link,
-                &mut reused_links,
-                &mut reused_blocksizes,
-                &mut nested_size,
-                &mut nested_total_size,
-            );
-        }
-
-        debug_assert_eq!(reused_links.len(), reused_blocksizes.len());
-
-        let inner = FlatUnixFs {
-            links: reused_links,
-            data: UnixFs {
-                Type: UnixFsType::File,
-                filesize: Some(nested_size),
-                blocksizes: reused_blocksizes,
-                ..Default::default()
-            },
-        };
-
-        let (cid, vec) = render_and_hash(&inner, config);
-
-        self.reused_links = inner.links;
-        self.reused_blocksizes = inner.data.blocksizes;
+        self.layers[depth].drain(0..count);
 
         let promoted = Link {
             depth: depth + 1,
             target: cid,
             total_size: nested_total_size + vec.len() as u64,
-            file_size: nested_size,
+            file_size: filesize,
         };
 
         (cid, vec, promoted)
-    }
-
-    /// Each link needs to be partitioned into the four mut arguments received by this function in
-    /// order to produce the expected UnixFs output.
-    fn partition_link(
-        link: &Link,
-        links: &mut Vec<PBLink<'static>>,
-        blocksizes: &mut Vec<u64>,
-        nested_size: &mut u64,
-        nested_total_size: &mut u64,
-    ) {
-        links.push(PBLink {
-            Hash: Some(link.target.to_bytes().into()),
-            Name: Some("".into()),
-            Tsize: Some(link.total_size),
-        });
-        blocksizes.push(link.file_size);
-        *nested_size += link.file_size;
-        *nested_total_size += link.total_size;
     }
 }
 

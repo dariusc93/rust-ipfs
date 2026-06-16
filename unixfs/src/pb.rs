@@ -115,6 +115,42 @@ impl quick_protobuf::message::MessageWrite for FlatUnixFs<'_> {
     }
 }
 
+/// Serializes a `Cid` as the bytes of a dag-pb `PBLink::Hash`, streaming the multihash directly
+/// (`code | size | digest`) so no intermediate byte vector is allocated.
+pub(crate) struct WriteableCid<'a>(pub(crate) &'a ipld_core::cid::Cid);
+
+impl quick_protobuf::message::MessageWrite for WriteableCid<'_> {
+    fn get_size(&self) -> usize {
+        use ipld_core::cid::Version::*;
+        use quick_protobuf::sizeofs::sizeof_varint;
+
+        let mh = self.0.hash();
+        let hash_len =
+            sizeof_varint(mh.code()) + sizeof_varint(mh.size() as u64) + mh.size() as usize;
+
+        match self.0.version() {
+            V0 => hash_len,
+            V1 => 1 + sizeof_varint(self.0.codec()) + hash_len,
+        }
+    }
+
+    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> ProtobufResult<()> {
+        use ipld_core::cid::Version::*;
+
+        if let V1 = self.0.version() {
+            w.write_u8(1)?;
+            w.write_varint(self.0.codec())?;
+        }
+
+        let mh = self.0.hash();
+        w.write_varint(mh.code())?;
+        w.write_varint(mh.size() as u64)?;
+        mh.digest()[..mh.size() as usize]
+            .iter()
+            .try_for_each(|b| w.write_u8(*b))
+    }
+}
+
 impl<'a> FlatUnixFs<'a> {
     pub(crate) fn try_parse(data: &'a [u8]) -> Result<Self, ParsingFailed<'a>> {
         Self::try_from(data)
