@@ -28,6 +28,9 @@ pub struct PostOrderIterator {
     total_size: u64,
     // interior HAMT shard blocks awaiting emission as anonymous nodes
     pending_blocks: VecDeque<ShardBlock>,
+    // a sharded directory node held back until its interior shards (above) have been emitted, so a
+    // post-order visit still yields the directory after its descendants
+    deferred: Option<ShardBlock>,
     // from TreeOptions
     opts: TreeOptions,
 }
@@ -83,6 +86,7 @@ impl PostOrderIterator {
             cid: None,
             total_size: 0,
             pending_blocks: VecDeque::new(),
+            deferred: None,
             opts,
         }
     }
@@ -182,6 +186,22 @@ impl PostOrderIterator {
             }));
         }
 
+        if let Some(node) = self.deferred.take() {
+            // full_path still holds this node's path: the interior shard drain above leaves it
+            // untouched, and no pending entries have been popped since the node was rendered.
+            self.block_buffer.clear();
+            self.block_buffer.extend_from_slice(&node.block);
+            self.cid = Some(node.cid);
+            self.total_size = node.total_size;
+
+            return Some(Ok(TreeNode {
+                path: self.full_path.as_str(),
+                cid: self.cid.as_ref().expect("just set"),
+                total_size: self.total_size,
+                block: &self.block_buffer,
+            }));
+        }
+
         while let Some(visited) = self.pending.pop() {
             let (name, depth) = match &visited {
                 Visited::DescentRoot(_) => (None, 0),
@@ -264,6 +284,7 @@ impl PostOrderIterator {
 
                     self.cid = Some(leaf.link);
                     self.total_size = leaf.total_size;
+                    let has_interior = !interior.is_empty();
                     self.pending_blocks.extend(interior);
 
                     {
@@ -282,6 +303,15 @@ impl PostOrderIterator {
                                 *cell = Some(NamedLeaf(name, leaf.link, leaf.total_size));
                             }
                         }
+                    }
+
+                    if has_interior {
+                        self.deferred = Some(ShardBlock {
+                            cid: leaf.link,
+                            block: core::mem::take(&mut self.block_buffer),
+                            total_size: leaf.total_size,
+                        });
+                        return self.next_borrowed();
                     }
 
                     return Some(Ok(TreeNode {
@@ -314,7 +344,17 @@ impl PostOrderIterator {
 
                     self.cid = Some(leaf.link);
                     self.total_size = leaf.total_size;
+                    let has_interior = !interior.is_empty();
                     self.pending_blocks.extend(interior);
+
+                    if has_interior {
+                        self.deferred = Some(ShardBlock {
+                            cid: leaf.link,
+                            block: core::mem::take(&mut self.block_buffer),
+                            total_size: leaf.total_size,
+                        });
+                        return self.next_borrowed();
+                    }
 
                     return Some(Ok(TreeNode {
                         path: self.full_path.as_str(),

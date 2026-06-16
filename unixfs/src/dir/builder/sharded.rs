@@ -113,9 +113,10 @@ fn build_shard(
     });
 
     let (mode, mtime) = metadata.to_pb();
+    let start = bitfield.iter().position(|&b| b != 0).unwrap_or(bitfield.len() - 1);
     let data = UnixFs {
         Type: UnixFsType::HAMTShard,
-        Data: Some(Cow::Owned(bitfield.to_vec())),
+        Data: Some(Cow::Owned(bitfield[start..].to_vec())),
         fanout: Some(FANOUT as u64),
         hashType: Some(HASH_TYPE_MURMUR3),
         mode,
@@ -218,11 +219,12 @@ mod tests {
         assert_eq!(names(&parsed), ["7Ab", "85a", "B5file.txt"]);
 
         let bf = parsed.data.Data.as_deref().unwrap();
-        assert_eq!(bf.len(), 32);
+        // trimmed big-endian bitfield: highest occupied bucket is 0xB5, so leading zero bytes drop
+        assert_eq!(bf.len(), 23);
         assert_eq!(bf.iter().map(|b| b.count_ones()).sum::<u32>(), 3);
         for idx in [0x7Au8, 0x85, 0xB5] {
             let i = idx as usize;
-            assert_ne!(bf[32 - 1 - i / 8] & (1 << (i % 8)), 0, "bit for {idx:#x}");
+            assert_ne!(bf[bf.len() - 1 - i / 8] & (1 << (i % 8)), 0, "bit for {idx:#x}");
         }
     }
 
