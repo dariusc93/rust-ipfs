@@ -642,6 +642,21 @@ mod tests {
     }
 
     #[test]
+    fn compare_prefers_v2_over_v1_only() {
+        use std::cmp::Ordering;
+        let kp = Keypair::generate_ed25519();
+
+        let with_v2 = record_for(&kp, 1);
+        let mut v1_only = record_for(&kp, 48); // later EOL, but no V2
+        v1_only.signature_v2.clear();
+        assert!(with_v2.has_signature_v2() && !v1_only.has_signature_v2());
+
+        // V2 presence outranks both sequence and the later validity
+        assert_eq!(with_v2.compare(&v1_only).unwrap(), Ordering::Greater);
+        assert_eq!(v1_only.compare(&with_v2).unwrap(), Ordering::Less);
+    }
+
+    #[test]
     fn metadata_roundtrips_and_is_signed() {
         let kp = Keypair::generate_ed25519();
         let peer = PeerId::from_public_key(&kp.public());
