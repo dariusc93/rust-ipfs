@@ -149,7 +149,7 @@ impl<'a> FileReader<'a> {
                 data,
                 blocksizes: inner.data.blocksizes,
                 metadata,
-                file_size: inner.data.filesize.unwrap(),
+                file_size: inner.data.filesize.unwrap_or(data.len() as u64),
             })
         }
     }
@@ -210,6 +210,22 @@ impl Traversal {
         self.last_ending
             .check_is_suitable_next(self.last_offset, tree_range)?;
         FileReader::from_continued(self, tree_range.start, next_block)
+    }
+
+    pub(crate) fn continue_walk_raw<'a>(
+        self,
+        next_block: &'a [u8],
+        tree_range: &Range<u64>,
+    ) -> Result<(&'a [u8], Traversal), FileReadFailed> {
+        self.last_ending
+            .check_is_suitable_next(self.last_offset, tree_range)?;
+        let traversal = Traversal {
+            last_ending: Ending::Chunk(tree_range.end),
+            last_offset: tree_range.start,
+            file_size: self.file_size,
+            metadata: self.metadata,
+        };
+        Ok((next_block, traversal))
     }
 
     /// Returns the total size of the file.

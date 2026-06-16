@@ -33,18 +33,25 @@ fn convert_link(
     nested_depth: usize,
     nth: usize,
     link: PBLink<'_>,
-) -> Result<(Cid, String, usize), InvalidCidInLink> {
+) -> Result<(Cid, String, usize), Error> {
     let hash = link.Hash.as_deref().unwrap_or_default();
     let cid = match Cid::try_from(hash) {
         Ok(cid) => cid,
-        Err(e) => return Err(InvalidCidInLink::from((nth, link, e))),
+        Err(e) => return Err(InvalidCidInLink::from((nth, link, e)).into()),
     };
     let name = match link.Name {
         Some(Cow::Borrowed(s)) if !s.is_empty() => s.to_owned(),
-        None | Some(Cow::Borrowed(_)) => todo!("link cannot be empty"),
+        None | Some(Cow::Borrowed(_)) => {
+            return Err(Error::InvalidLinkName {
+                nth,
+                name: String::new(),
+            })
+        }
         Some(Cow::Owned(_s)) => unreachable!("FlatUnixFs is never transformed to owned"),
     };
-    assert!(!name.contains('/'));
+    if name.contains('/') {
+        return Err(Error::InvalidLinkName { nth, name });
+    }
     Ok((cid, name, nested_depth))
 }
 
@@ -54,19 +61,26 @@ fn convert_sharded_link(
     sibling_depth: usize,
     nth: usize,
     link: PBLink<'_>,
-) -> Result<(Cid, String, usize), InvalidCidInLink> {
+) -> Result<(Cid, String, usize), Error> {
     let hash = link.Hash.as_deref().unwrap_or_default();
     let cid = match Cid::try_from(hash) {
         Ok(cid) => cid,
-        Err(e) => return Err(InvalidCidInLink::from((nth, link, e))),
+        Err(e) => return Err(InvalidCidInLink::from((nth, link, e)).into()),
     };
     let (depth, name) = match link.Name {
         Some(Cow::Borrowed(s)) if s.len() > 2 => (nested_depth, s[2..].to_owned()),
         Some(Cow::Borrowed(s)) if s.len() == 2 => (sibling_depth, String::from("")),
-        None | Some(Cow::Borrowed(_)) => todo!("link cannot be empty"),
+        None | Some(Cow::Borrowed(_)) => {
+            return Err(Error::InvalidLinkName {
+                nth,
+                name: String::new(),
+            })
+        }
         Some(Cow::Owned(_s)) => unreachable!("FlatUnixFs is never transformed to owned"),
     };
-    assert!(!name.contains('/'));
+    if name.contains('/') {
+        return Err(Error::InvalidLinkName { nth, name });
+    }
     Ok((cid, name, depth))
 }
 
@@ -150,6 +164,45 @@ impl Walker {
             return Ok(ContinuedWalk::File(segment, cid, path, metadata, *sz));
         }
 
+        let next_is_raw = next
+            .as_ref()
+            .is_some_and(|(cid, _, _)| cid.codec() == crate::file::RAW_LEAF_CODEC);
+
+        if next_is_raw {
+            let file_size = bytes.len() as u64;
+            let (cid, name, depth) = next.take().expect("validated raw next above");
+
+            match current {
+                None => {
+                    *current = Some(InnerEntry::new_root_file(
+                        cid,
+                        Metadata::default(),
+                        &name,
+                        None,
+                        file_size,
+                        depth,
+                    ));
+                }
+                Some(ie) => {
+                    ie.as_file(cid, &name, depth, Metadata::default(), None, file_size);
+                }
+            };
+
+            if let next_local @ Some(_) = pending.pop() {
+                *next = next_local;
+                *should_continue = true;
+            }
+
+            let ie = current.as_ref().unwrap();
+            return Ok(ContinuedWalk::File(
+                FileSegment::first(bytes, true),
+                &ie.cid,
+                &ie.path,
+                &ie.metadata,
+                file_size,
+            ));
+        }
+
         let flat = FlatUnixFs::try_from(bytes)?;
         let metadata = Metadata::from(&flat.data);
 
@@ -160,6 +213,7 @@ impl Walker {
 
                 // depth + 1 because all entries below a directory are children of next, as in,
                 // deeper
+                pending.reserve(flat.links.len());
                 let links = flat
                     .links
                     .into_iter()
@@ -196,6 +250,7 @@ impl Walker {
 
                 // similar to directory, the depth is +1 for nested entries, but the sibling buckets
                 // are at depth
+                pending.reserve(flat.links.len());
                 let links = flat
                     .links
                     .into_iter()
@@ -635,6 +690,7 @@ impl AsRef<[u8]> for FileSegment<'_> {
 
 /// Errors which can occur while walking a tree.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// An unsupported type of UnixFS node was encountered. There should be a way to skip these. Of the
     /// defined types only `Metadata` is unsupported, all undefined types as of 2020-06 are also
@@ -664,6 +720,14 @@ pub enum Error {
 
     /// HAMTSharded directory has unsupported properties
     UnsupportedHAMTShard(ShardError),
+
+    /// A directory or HAMTShard link had an empty name or a name containing '/'.
+    InvalidLinkName {
+        /// Index of the offending link within its parent node.
+        nth: usize,
+        /// The name that was empty or contained a path separator.
+        name: String,
+    },
 }
 
 impl From<ParsingFailed<'_>> for Error {
@@ -721,6 +785,9 @@ impl fmt::Display for Error {
             File(e) => write!(fmt, "invalid file: {e}"),
             UnsupportedDirectory(udp) => write!(fmt, "unsupported directory: {udp}"),
             UnsupportedHAMTShard(se) => write!(fmt, "unsupported hamtshard: {se}"),
+            InvalidLinkName { nth, name } => {
+                write!(fmt, "link #{nth} has an invalid name: {name:?}")
+            }
         }
     }
 }
@@ -901,6 +968,101 @@ mod tests {
                 x => unreachable!("{:?}", x),
             };
         }
+    }
+
+    #[test]
+    fn walk_single_raw_leaf_file() {
+        let mut blocks = FakeBlockstore::default();
+        let content: &[u8] = b"foobar\n";
+        let cid = blocks.insert_v1_raw(content);
+
+        let mut walker = Walker::new(cid, String::new());
+        let mut cache = None;
+
+        assert!(walker.should_continue());
+        let (next, _) = walker.pending_links();
+        assert_eq!(next, &cid);
+
+        let block = blocks.get_by_cid(&cid);
+        match walker.next(block, &mut cache).unwrap() {
+            ContinuedWalk::File(segment, _, _, _, size) => {
+                assert_eq!(segment.as_ref(), content);
+                assert!(segment.is_first());
+                assert!(segment.is_last());
+                assert_eq!(size, content.len() as u64);
+            }
+            x => unreachable!("{x:?}"),
+        }
+
+        assert!(!walker.should_continue());
+    }
+
+    #[test]
+    fn walk_multiblock_raw_leaf_file() {
+        let (blocks, root) = raw_leaf_multiblock_blockstore();
+
+        let mut walker = Walker::new(root, String::new());
+        let mut cache = None;
+        let mut reassembled = Vec::new();
+
+        while walker.should_continue() {
+            let (next, _) = walker.pending_links();
+            let block = blocks.get_by_cid(next);
+            match walker.next(block, &mut cache).unwrap() {
+                ContinuedWalk::File(segment, ..) => {
+                    reassembled.extend_from_slice(segment.as_ref());
+                }
+                x => unreachable!("{x:?}"),
+            }
+        }
+
+        assert_eq!(reassembled, b"foobar\n".to_vec());
+    }
+
+    fn raw_leaf_multiblock_blockstore() -> (FakeBlockstore, Cid) {
+        use quick_protobuf::{MessageWrite, Writer};
+
+        let mut blocks = FakeBlockstore::default();
+        let leaves: [&[u8]; 3] = [b"foo", b"ba", b"r\n"];
+
+        let mut links = Vec::new();
+        let mut blocksizes = Vec::new();
+        let mut filesize = 0u64;
+
+        for leaf in leaves {
+            let cid = blocks.insert_v1_raw(leaf);
+            let sz = leaf.len() as u64;
+            links.push(crate::pb::PBLink {
+                Hash: Some(Cow::Owned(cid.to_bytes())),
+                Name: Some(Cow::Borrowed("")),
+                Tsize: Some(sz),
+            });
+            blocksizes.push(sz);
+            filesize += sz;
+        }
+
+        let root = crate::pb::FlatUnixFs {
+            links,
+            data: crate::pb::UnixFs {
+                Type: crate::pb::UnixFsType::File,
+                Data: None,
+                filesize: Some(filesize),
+                blocksizes,
+                hashType: None,
+                fanout: None,
+                mode: None,
+                mtime: None,
+            },
+        };
+
+        let mut out = Vec::new();
+        {
+            let mut writer = Writer::new(&mut out);
+            root.write_message(&mut writer).unwrap();
+        }
+
+        let root_cid = blocks.insert_v0(&out);
+        (blocks, root_cid)
     }
 
     trait CountsExt {

@@ -12,7 +12,7 @@ pub(super) struct DirBuilder {
     /// Immediate files, symlinks or directories in this directory
     pub nodes: BTreeMap<String, Entry>,
     /// Metadata for this directory
-    metadata: Metadata,
+    pub metadata: Metadata,
     /// Id of the parent; None for the root node
     pub parent_id: Option<u64>,
     /// Internal id, used for propagating Cids back from children during post order visit.

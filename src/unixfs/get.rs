@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tracing::{Instrument, Span};
 
 use crate::repo::DefaultStorage;
@@ -125,7 +125,7 @@ impl Stream for UnixfsGet {
                         let mut total_size = None;
                         let mut written = 0;
 
-                        let mut file = match tokio::fs::File::create(dest)
+                        let file = match tokio::fs::File::create(dest)
                             .await
                             .map_err(TraversalFailed::Io) {
                                 Ok(f) => f,
@@ -134,6 +134,7 @@ impl Stream for UnixfsGet {
                                     return;
                                 }
                             };
+                        let mut file = BufWriter::new(file);
 
                         let block  = match dag
                             ._resolve(path.clone(), true, &providers, local_only, timeout)
@@ -186,10 +187,6 @@ impl Stream for UnixfsGet {
                                             yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                             return;
                                         }
-                                        if let Err(e) = file.sync_all().await {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
-                                            return;
-                                        }
 
                                         written += n;
                                     }
@@ -205,6 +202,15 @@ impl Stream for UnixfsGet {
                                 }
                             };
                         };
+
+                        if let Err(e) = file.flush().await {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
+                            return;
+                        }
+                        if let Err(e) = file.get_ref().sync_all().await {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
+                            return;
+                        }
 
                         yield UnixfsStatus::CompletedStatus { path, written, total_size }
                     };

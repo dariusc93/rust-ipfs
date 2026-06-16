@@ -1,5 +1,5 @@
 use core::fmt;
-use ipld_core::cid::Cid;
+use ipld_core::cid::{Cid, Version};
 
 mod dir_builder;
 use dir_builder::DirBuilder;
@@ -12,6 +12,8 @@ pub use buffered::BufferingTreeBuilder;
 
 mod custom_pb;
 use custom_pb::CustomFlatUnixFs;
+
+mod sharded;
 
 enum Entry {
     Leaf(Leaf),
@@ -55,6 +57,8 @@ impl fmt::Debug for Leaf {
 pub struct TreeOptions {
     block_size_limit: Option<u64>,
     wrap_with_directory: bool,
+    cid_version: Version,
+    shard_threshold: Option<u64>,
 }
 
 impl Default for TreeOptions {
@@ -62,6 +66,8 @@ impl Default for TreeOptions {
         TreeOptions {
             block_size_limit: Some(512 * 1024),
             wrap_with_directory: false,
+            cid_version: Version::V0,
+            shard_threshold: Some(256 * 1024),
         }
     }
 }
@@ -77,6 +83,18 @@ impl TreeOptions {
     /// Defaults to false.
     pub fn wrap_with_directory(&mut self) {
         self.wrap_with_directory = true;
+    }
+
+    /// Sets the CID version of produced directory nodes. Defaults to [`Version::V0`].
+    pub fn cid_version(&mut self, version: Version) {
+        self.cid_version = version;
+    }
+
+    /// Sets the directory size estimate (sum of entry name lengths plus child CID byte lengths)
+    /// strictly above which a directory is written as a HAMT shard instead of a flat directory.
+    /// Defaults to `Some(256 * 1024)`. `None` disables sharding.
+    pub fn shard_threshold(&mut self, threshold: Option<u64>) {
+        self.shard_threshold = threshold;
     }
 }
 
@@ -127,9 +145,12 @@ impl std::error::Error for TreeBuildingFailed {}
 pub enum TreeConstructionFailed {
     /// Failed to serialize the protobuf node for the directory
     Protobuf(quick_protobuf::Error),
-    /// The resulting directory would be too large and HAMT sharding is yet to be implemented or
-    /// denied.
+    /// The resulting directory would be too large and HAMT sharding is disabled
+    /// (`block_size_limit` smaller than a single shard node, or sharding turned off).
     TooLargeBlock(u64),
+    /// A HAMT shard could not be resolved within the maximum trie depth because the given number of
+    /// entries share an identical name hash.
+    ShardTooDeep(usize),
 }
 
 impl fmt::Display for TreeConstructionFailed {
@@ -139,6 +160,7 @@ impl fmt::Display for TreeConstructionFailed {
         match self {
             Protobuf(e) => write!(fmt, "serialization failed: {e}"),
             TooLargeBlock(size) => write!(fmt, "attempted to create block of {size} bytes"),
+            ShardTooDeep(n) => write!(fmt, "{n} entries share an identical name hash"),
         }
     }
 }
