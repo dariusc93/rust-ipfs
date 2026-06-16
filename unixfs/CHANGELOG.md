@@ -1,7 +1,7 @@
 # 0.6.0
 
 - feat: write-side CIDv1, raw leaves, HAMT directory sharding, symlinks, and mode/mtime metadata, byte-for-byte
-  compatability improvements with with go and js equivalents.
+  compatability improvements with go and js equivalents.
 
 # 0.5.1
 
