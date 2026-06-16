@@ -214,9 +214,10 @@ impl Ipns {
         let record = rust_ipns::Record::new(
             &keypair,
             path_bytes.as_bytes(),
-            chrono::Duration::try_hours(48).expect("shouldnt panic"),
+            chrono::Utc::now() + chrono::Duration::try_hours(48).expect("shouldnt panic"),
             seq,
-            60000,
+            // IPNS TTL is a caching hint; 60s.
+            std::time::Duration::from_secs(60),
         )?;
 
         let bytes = record.encode()?;

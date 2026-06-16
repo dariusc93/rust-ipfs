@@ -1,6 +1,5 @@
 use bytes::Bytes;
 use chrono::DateTime;
-use chrono::Duration;
 use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -11,13 +10,16 @@ use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize, Serializer};
-use std::ops::Add;
 
 mod generate;
 
 const SIGNATURE_V2_BASE: &[u8] = &[
     0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x3a,
 ];
+
+/// libp2p inlines a public key into the PeerID (via an `identity` multihash) when its protobuf
+/// encoding is at most this many bytes; larger keys are referenced by a sha2-256 hash instead.
+const MAX_INLINE_KEY_LENGTH: usize = 42;
 
 /// Errors produced when creating, decoding, or validating an IPNS [`Record`].
 #[derive(Debug)]
@@ -275,20 +277,21 @@ impl Data {
 }
 
 impl Record {
+    /// Creates and signs an IPNS record pointing at `value`, valid until the absolute `eol`
+    /// (End-Of-Life) timestamp. `ttl` is a caching hint for resolvers.
     #[cfg(feature = "libp2p")]
     pub fn new(
         keypair: &Keypair,
         value: impl AsRef<[u8]>,
-        duration: Duration,
+        eol: DateTime<Utc>,
         seq: u64,
-        ttl: u64,
+        ttl: std::time::Duration,
     ) -> Result<Self, Error> {
         let value = value.as_ref().to_vec();
 
-        let validity = Utc::now()
-            .add(duration)
-            .to_rfc3339_opts(SecondsFormat::Nanos, true)
-            .into_bytes();
+        let ttl = u64::try_from(ttl.as_nanos()).unwrap_or(u64::MAX);
+
+        let validity = eol.to_rfc3339_opts(SecondsFormat::Nanos, true).into_bytes();
 
         let validity_type = ValidityType::EOL;
 
@@ -326,11 +329,11 @@ impl Record {
             .sign(&signature_v2_construct)
             .map_err(|e| Error::Crypto(Box::new(e)))?;
 
-        let public_key = match keypair.key_type().into() {
-            KeyType::RSA => keypair
-                .to_protobuf_encoding()
-                .map_err(|e| Error::Crypto(Box::new(e)))?,
-            _ => vec![],
+        let encoded_public_key = keypair.public().encode_protobuf();
+        let public_key = if encoded_public_key.len() > MAX_INLINE_KEY_LENGTH {
+            encoded_public_key
+        } else {
+            Vec::new()
         };
 
         Ok(Record {
@@ -491,9 +494,17 @@ impl Record {
 #[cfg(all(test, feature = "libp2p"))]
 mod tests {
     use super::*;
+    use chrono::Duration;
 
     fn record_for(kp: &Keypair, hours: i64) -> Record {
-        Record::new(kp, b"/ipfs/bafkqaaa", Duration::hours(hours), 0, 0).unwrap()
+        Record::new(
+            kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(hours),
+            0,
+            std::time::Duration::ZERO,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -538,18 +549,70 @@ mod tests {
     }
 
     #[test]
+    fn create_and_verify_across_key_types() {
+        // Ed25519/Secp256k1 inline into the name; ECDSA does not, so its record must embed the
+        // public key. All must create and verify (and survive a wire round-trip).
+        for kp in [
+            Keypair::generate_ed25519(),
+            Keypair::generate_secp256k1(),
+            Keypair::generate_ecdsa(),
+        ] {
+            let peer = PeerId::from_public_key(&kp.public());
+            let rec = Record::new(
+                &kp,
+                b"/ipfs/bafkqaaa",
+                Utc::now() + Duration::hours(24),
+                0,
+                std::time::Duration::ZERO,
+            )
+            .unwrap();
+            rec.verify(peer).unwrap();
+            let decoded = Record::decode(rec.encode().unwrap()).unwrap();
+            decoded.verify(peer).unwrap();
+        }
+    }
+
+    #[test]
     fn compare_prefers_higher_sequence_then_later_validity() {
         use std::cmp::Ordering;
         let kp = Keypair::generate_ed25519();
 
-        let seq0 = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(24), 0, 0).unwrap();
-        let seq1 = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(1), 1, 0).unwrap();
+        let seq0 = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(24),
+            0,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let seq1 = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(1),
+            1,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
         // higher sequence wins even with an earlier EOL
         assert_eq!(seq1.compare(&seq0).unwrap(), Ordering::Greater);
         assert_eq!(seq0.compare(&seq1).unwrap(), Ordering::Less);
 
-        let near = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(1), 5, 0).unwrap();
-        let far = Record::new(&kp, b"/ipfs/bafkqaaa", Duration::hours(48), 5, 0).unwrap();
+        let near = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(1),
+            5,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let far = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(48),
+            5,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
         // equal sequence: the later EOL wins
         assert_eq!(far.compare(&near).unwrap(), Ordering::Greater);
     }
