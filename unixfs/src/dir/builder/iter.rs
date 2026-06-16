@@ -1,6 +1,7 @@
 use super::{
     CustomFlatUnixFs, DirBuilder, Entry, Leaf, NamedLeaf, TreeConstructionFailed, TreeOptions,
 };
+use crate::Metadata;
 use core::fmt;
 use ipld_core::cid::{Cid, Version};
 use multihash::Multihash;
@@ -61,9 +62,11 @@ enum Visited {
         /// Leaves will be stored directly in this field when there are no DirBuilder descendants,
         /// in the `PostOrderIterator::persisted_cids` otherwise.
         leaves: LeafStorage,
+        metadata: Metadata,
     },
     PostRoot {
         leaves: LeafStorage,
+        metadata: Metadata,
     },
 }
 
@@ -90,6 +93,7 @@ impl PostOrderIterator {
         block_size_limit: &Option<u64>,
         cid_version: Version,
         shard_threshold: &Option<u64>,
+        metadata: &Metadata,
     ) -> Result<(Leaf, Vec<ShardBlock>), TreeConstructionFailed> {
         use crate::pb::{UnixFs, UnixFsType};
         use quick_protobuf::{BytesWriter, MessageWrite, Writer};
@@ -103,14 +107,17 @@ impl PostOrderIterator {
                 .sum::<u64>();
 
             if estimate > *threshold {
-                return sharded::build_sharded(links, buffer, cid_version);
+                return sharded::build_sharded(links, buffer, cid_version, metadata);
             }
         }
 
+        let (mode, mtime) = metadata.to_pb();
         let node = CustomFlatUnixFs {
             links,
             data: UnixFs {
                 Type: UnixFsType::Directory,
+                mode,
+                mtime,
                 ..Default::default()
             },
         };
@@ -204,6 +211,7 @@ impl PostOrderIterator {
             match visited {
                 Visited::DescentRoot(node) => {
                     let children = &mut self.reused_children;
+                    let metadata = node.metadata;
                     let leaves = partition_children_leaves(depth, node.nodes.into_iter(), children);
                     let any_children = !children.is_empty();
 
@@ -214,7 +222,7 @@ impl PostOrderIterator {
                         leaves.into()
                     };
 
-                    self.pending.push(Visited::PostRoot { leaves });
+                    self.pending.push(Visited::PostRoot { leaves, metadata });
                     self.pending.append(children);
                 }
                 Visited::Descent {
@@ -224,9 +232,10 @@ impl PostOrderIterator {
                     index,
                 } => {
                     let children = &mut self.reused_children;
+                    let metadata = node.metadata;
+                    let parent_id = node.parent_id.expect("only roots parent_id is None");
                     let leaves = partition_children_leaves(depth, node.nodes.into_iter(), children);
                     let any_children = !children.is_empty();
-                    let parent_id = node.parent_id.expect("only roots parent_id is None");
 
                     let leaves = if any_children {
                         self.persisted_cids.insert(node.id, leaves);
@@ -241,6 +250,7 @@ impl PostOrderIterator {
                         depth,
                         leaves,
                         index,
+                        metadata,
                     });
 
                     self.pending.append(children);
@@ -250,6 +260,7 @@ impl PostOrderIterator {
                     name,
                     leaves,
                     index,
+                    metadata,
                     ..
                 } => {
                     let leaves = leaves.into_inner(&mut self.persisted_cids);
@@ -261,6 +272,7 @@ impl PostOrderIterator {
                         &self.opts.block_size_limit,
                         self.opts.cid_version,
                         &self.opts.shard_threshold,
+                        &metadata,
                     ) {
                         Ok(rendered) => rendered,
                         Err(e) => return Some(Err(e)),
@@ -295,7 +307,7 @@ impl PostOrderIterator {
                         block: &self.block_buffer,
                     }));
                 }
-                Visited::PostRoot { leaves } => {
+                Visited::PostRoot { leaves, metadata } => {
                     let leaves = leaves.into_inner(&mut self.persisted_cids);
 
                     if !self.opts.wrap_with_directory {
@@ -310,6 +322,7 @@ impl PostOrderIterator {
                         &self.opts.block_size_limit,
                         self.opts.cid_version,
                         &self.opts.shard_threshold,
+                        &metadata,
                     ) {
                         Ok(rendered) => rendered,
                         Err(e) => return Some(Err(e)),

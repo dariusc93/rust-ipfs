@@ -1,5 +1,6 @@
 use super::{CustomFlatUnixFs, Leaf, NamedLeaf, TreeConstructionFailed};
 use crate::pb::{UnixFs, UnixFsType};
+use crate::Metadata;
 use alloc::borrow::Cow;
 use ipld_core::cid::{Cid, Version};
 use multihash::Multihash;
@@ -31,6 +32,7 @@ pub(super) fn build_sharded(
     links: &[Option<NamedLeaf>],
     buffer: &mut Vec<u8>,
     cid_version: Version,
+    metadata: &Metadata,
 ) -> Result<(Leaf, Vec<ShardBlock>), TreeConstructionFailed> {
     let entries = links
         .iter()
@@ -42,7 +44,7 @@ pub(super) fn build_sharded(
         .collect::<Vec<_>>();
 
     let mut interior = Vec::new();
-    let root = build_shard(&entries, 0, cid_version, &mut interior)?;
+    let root = build_shard(&entries, 0, cid_version, &mut interior, metadata)?;
 
     buffer.clear();
     buffer.extend_from_slice(&root.block);
@@ -61,6 +63,7 @@ fn build_shard(
     depth: usize,
     cid_version: Version,
     interior: &mut Vec<ShardBlock>,
+    metadata: &Metadata,
 ) -> Result<ShardBlock, TreeConstructionFailed> {
     if depth >= MAX_DEPTH {
         return Err(TreeConstructionFailed::ShardTooDeep(entries.len()));
@@ -93,7 +96,8 @@ fn build_shard(
                     leaf: e.leaf,
                 })
                 .collect::<Vec<_>>();
-            let child = build_shard(&child_entries, depth + 1, cid_version, interior)?;
+            let child =
+                build_shard(&child_entries, depth + 1, cid_version, interior, &Metadata::default())?;
             let link = NamedLeaf(format!("{index:02X}"), child.cid, child.total_size);
             interior.push(child);
             link
@@ -108,11 +112,14 @@ fn build_shard(
         a.0.as_bytes().cmp(b.0.as_bytes())
     });
 
+    let (mode, mtime) = metadata.to_pb();
     let data = UnixFs {
         Type: UnixFsType::HAMTShard,
         Data: Some(Cow::Owned(bitfield.to_vec())),
         fanout: Some(FANOUT as u64),
         hashType: Some(HASH_TYPE_MURMUR3),
+        mode,
+        mtime,
         ..Default::default()
     };
 
@@ -197,7 +204,7 @@ mod tests {
     fn shard_without_collision() {
         let links = [link("a", 1), link("b", 2), link("file.txt", 3)];
         let mut buffer = Vec::new();
-        let (_leaf, interior) = build_sharded(&links, &mut buffer, Version::V0).unwrap();
+        let (_leaf, interior) = build_sharded(&links, &mut buffer, Version::V0, &crate::Metadata::default()).unwrap();
         assert!(interior.is_empty());
 
         let parsed = FlatUnixFs::try_parse(&buffer).unwrap();
@@ -224,7 +231,7 @@ mod tests {
         // both 0 and dir hash to byte0 0x2A; they split at depth 1 (0xC9 vs 0x7C)
         let links = [link("0", 1), link("dir", 2)];
         let mut buffer = Vec::new();
-        let (_leaf, interior) = build_sharded(&links, &mut buffer, Version::V0).unwrap();
+        let (_leaf, interior) = build_sharded(&links, &mut buffer, Version::V0, &crate::Metadata::default()).unwrap();
         assert_eq!(interior.len(), 1);
 
         let root = FlatUnixFs::try_parse(&buffer).unwrap();
@@ -241,7 +248,7 @@ mod tests {
         let entries: [(&str, u8); 3] = [("0", 1), ("dir", 2), ("file.txt", 3)];
         let links = entries.map(|(n, c)| link(n, c));
         let mut buffer = Vec::new();
-        let (leaf, interior) = build_sharded(&links, &mut buffer, Version::V0).unwrap();
+        let (leaf, interior) = build_sharded(&links, &mut buffer, Version::V0, &crate::Metadata::default()).unwrap();
 
         let mut blocks = HashMap::new();
         blocks.insert(leaf.link, buffer);

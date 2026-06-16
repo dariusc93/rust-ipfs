@@ -444,6 +444,26 @@ mod tests {
         assert_eq!(interiors, 1);
     }
 
+    #[test]
+    fn directory_metadata_is_written() {
+        use crate::Metadata;
+
+        let md = Metadata::new(Some(0o40755), Some((1_700_000_000, 0)));
+        let mut builder = BufferingTreeBuilder::default();
+        builder.set_metadata("d", md).unwrap();
+        builder.put_link("d/a.txt", some_cid(1), 1).unwrap();
+
+        let nodes = builder.build().collect::<Result<Vec<_>, _>>().unwrap();
+        let dir = nodes.iter().find(|n| n.path == "d").expect("dir node");
+
+        let parsed = crate::pb::FlatUnixFs::try_parse(&dir.block[..]).unwrap();
+        assert_eq!(parsed.data.Type, crate::pb::UnixFsType::Directory);
+        assert_eq!(parsed.data.mode, Some(0o40755));
+        let mtime = parsed.data.mtime.as_ref().unwrap();
+        assert_eq!(mtime.Seconds, 1_700_000_000);
+        assert_eq!(mtime.FractionalNanoseconds, None);
+    }
+
     fn verify_results(
         mut expected: Vec<(
             impl AsRef<str> + core::fmt::Debug,
