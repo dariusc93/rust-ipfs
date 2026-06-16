@@ -1,5 +1,7 @@
 use bytes::Bytes;
 use chrono::DateTime;
+use ipld_core::ipld::Ipld;
+use std::collections::BTreeMap;
 use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -55,6 +57,8 @@ pub enum Error {
     InvalidPublicKey(DecodingError),
     /// Malformed multihash or peer id.
     Multihash(multihash::Error),
+    /// A metadata key collides with a reserved IPNS field name.
+    ReservedMetadataKey(String),
 }
 
 impl std::fmt::Display for Error {
@@ -80,6 +84,7 @@ impl std::fmt::Display for Error {
             Error::SigningError(e) => write!(f, "signing error: {e}"),
             Error::InvalidPublicKey(e) => write!(f, "invalid public key: {e}"),
             Error::Multihash(e) => write!(f, "invalid multihash: {e}"),
+            Error::ReservedMetadataKey(k) => write!(f, "metadata key `{k}` is reserved"),
         }
     }
 }
@@ -237,11 +242,21 @@ pub struct Data {
 
     #[serde(rename = "TTL")]
     pub ttl: u64,
+
+    /// Additional non-standard metadata keys carried in the dag-cbor map. Empty for typical
+    /// records; preserved verbatim on decode/encode and covered by the V2 signature.
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, Ipld>,
 }
 
 impl Data {
     pub fn value(&self) -> &[u8] {
         &self.value
+    }
+
+    /// Non-standard metadata keys carried alongside the reserved IPNS fields.
+    pub fn metadata(&self) -> &BTreeMap<String, Ipld> {
+        &self.metadata
     }
 
     pub fn validity_type(&self) -> ValidityType {
@@ -271,6 +286,26 @@ impl Record {
         seq: u64,
         ttl: std::time::Duration,
     ) -> Result<Self, Error> {
+        Self::new_with_metadata(keypair, value, eol, seq, ttl, BTreeMap::new())
+    }
+
+    /// Like [`Record::new`] but attaches additional dag-cbor `metadata` keys to the record. Keys
+    /// must not collide with the reserved fields (`Value`, `Validity`, `ValidityType`, `Sequence`,
+    /// `TTL`).
+    pub fn new_with_metadata(
+        keypair: &Keypair,
+        value: impl AsRef<[u8]>,
+        eol: DateTime<Utc>,
+        seq: u64,
+        ttl: std::time::Duration,
+        metadata: BTreeMap<String, Ipld>,
+    ) -> Result<Self, Error> {
+        for reserved in ["Value", "Validity", "ValidityType", "Sequence", "TTL"] {
+            if metadata.contains_key(reserved) {
+                return Err(Error::ReservedMetadataKey(reserved.to_string()));
+            }
+        }
+
         let value = value.as_ref().to_vec();
 
         let ttl = u64::try_from(ttl.as_nanos()).unwrap_or(u64::MAX);
@@ -299,6 +334,7 @@ impl Record {
             validity: Bytes::from(validity.clone()),
             sequence: seq,
             ttl,
+            metadata,
         };
 
         let data = serde_ipld_dagcbor::to_vec(&document).map_err(|e| Error::Cbor(Box::new(e)))?;
@@ -376,11 +412,13 @@ impl Record {
         self.ttl
     }
 
-    pub fn signature_v1(&self) -> bool {
+    /// Whether the record carries a (legacy) V1 signature.
+    pub fn has_signature_v1(&self) -> bool {
         !self.signature_v1.is_empty()
     }
 
-    pub fn signature_v2(&self) -> bool {
+    /// Whether the record carries a V2 signature.
+    pub fn has_signature_v2(&self) -> bool {
         !self.signature_v2.is_empty()
     }
 
@@ -465,7 +503,12 @@ impl Record {
     /// Records should already be validated and refer to the same name.
     pub fn compare(&self, other: &Record) -> Result<std::cmp::Ordering, Error> {
         use std::cmp::Ordering;
-        match self.sequence.cmp(&other.sequence) {
+
+        match self
+            .has_signature_v2()
+            .cmp(&other.has_signature_v2())
+            .then_with(|| self.sequence.cmp(&other.sequence))
+        {
             Ordering::Equal => Ok(self.validity()?.cmp(&other.validity()?)),
             ord => Ok(ord),
         }
@@ -596,5 +639,45 @@ mod tests {
         .unwrap();
         // equal sequence: the later EOL wins
         assert_eq!(far.compare(&near).unwrap(), Ordering::Greater);
+    }
+
+    #[test]
+    fn metadata_roundtrips_and_is_signed() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let mut metadata = BTreeMap::new();
+        metadata.insert("Foo".to_string(), Ipld::String("bar".into()));
+        metadata.insert("Count".to_string(), Ipld::Integer(7));
+
+        let rec = Record::new_with_metadata(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(24),
+            0,
+            std::time::Duration::ZERO,
+            metadata.clone(),
+        )
+        .unwrap();
+        rec.verify(peer).unwrap();
+
+        // survives a wire round-trip, still verifies, and exposes the metadata unchanged
+        let decoded = Record::decode(rec.encode().unwrap()).unwrap();
+        decoded.verify(peer).unwrap();
+        assert_eq!(decoded.data().unwrap().metadata(), &metadata);
+
+        // reserved keys are rejected
+        let mut bad = BTreeMap::new();
+        bad.insert("TTL".to_string(), Ipld::Integer(1));
+        assert!(matches!(
+            Record::new_with_metadata(
+                &kp,
+                b"/x",
+                Utc::now() + Duration::hours(1),
+                0,
+                std::time::Duration::ZERO,
+                bad,
+            ),
+            Err(Error::ReservedMetadataKey(_))
+        ));
     }
 }

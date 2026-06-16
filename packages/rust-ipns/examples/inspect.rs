@@ -29,8 +29,8 @@ fn main() -> std::io::Result<()> {
 
     let ttl = record.ttl();
 
-    let sig_v1 = record.signature_v1();
-    let sig_v2 = record.signature_v2();
+    let sig_v1 = record.has_signature_v1();
+    let sig_v2 = record.has_signature_v2();
 
     println!("Value: {value}");
     println!("Validity Type: {validity_type}");

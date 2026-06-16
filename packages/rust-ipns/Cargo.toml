@@ -14,6 +14,7 @@ keywords = ["libp2p", "ipfs"]
 
 [dependencies]
 serde_ipld_dagcbor.workspace = true
+ipld-core.workspace = true
 bytes = { workspace = true, features = ["serde"] }
 quick-protobuf.workspace = true
 serde = { workspace = true, features = ["derive"] }
