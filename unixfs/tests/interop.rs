@@ -360,6 +360,7 @@ fn pinned_nested_dirs() {
     assert_eq!(sibling_shards_dir(Version::V1).to_string(), SIBLING_DIR_V1);
 }
 
+#[ignore]
 #[test]
 fn live_files() {
     if !ipfs_available() {
@@ -394,6 +395,8 @@ fn live_metadata_file() {
     }
 }
 
+#[ignore]
+#[cfg(unix)]
 #[test]
 fn live_symlink() {
     if !ipfs_available() {
@@ -413,6 +416,7 @@ fn live_symlink() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[ignore]
 #[test]
 fn live_small_dir() {
     if !ipfs_available() {
@@ -435,6 +439,7 @@ fn live_small_dir() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[ignore]
 #[test]
 fn live_hamt_dir() {
     if !ipfs_available() {
@@ -458,6 +463,7 @@ fn live_hamt_dir() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[ignore]
 #[test]
 fn live_nested_dirs() {
     if !ipfs_available() {

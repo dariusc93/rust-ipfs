@@ -155,6 +155,7 @@ impl FileAdderBuilder {
         }
     }
 
+    /// Sets the metadata to be applied
     pub fn with_metadata(self, metadata: Metadata) -> Self {
         FileAdderBuilder { metadata, ..self }
     }
