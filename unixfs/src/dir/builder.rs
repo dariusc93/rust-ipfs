@@ -92,7 +92,7 @@ impl TreeOptions {
 
     /// Sets the directory size estimate (sum of entry name lengths plus child CID byte lengths)
     /// strictly above which a directory is written as a HAMT shard instead of a flat directory.
-    /// Defaults to `Some(256 * 1024)`, matching kubo. `None` disables sharding.
+    /// Defaults to `Some(256 * 1024)`. `None` disables sharding.
     pub fn shard_threshold(&mut self, threshold: Option<u64>) {
         self.shard_threshold = threshold;
     }

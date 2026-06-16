@@ -22,12 +22,6 @@ pub struct FileAdder {
     chunker: Chunker,
     collector: Collector,
     block_buffer: Vec<u8>,
-    // all unflushed links as a flat vec; this is compacted as we grow and need to create a link
-    // block for the last N blocks, as decided by the collector.
-    // FIXME: this is a cause of likely "accidentally quadratic" behavior visible when adding a
-    // large file and using a minimal chunk size. Could be that this must be moved to Collector to
-    // help collector (or layout) to decide how this should be persisted.
-    unflushed_links: Vec<Link>,
     config: Config,
     metadata: Metadata,
 }
@@ -74,59 +68,17 @@ impl fmt::Debug for FileAdder {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             fmt,
-            "FileAdder {{ chunker: {:?}, block_buffer: {}/{}, unflushed_links: {} }}",
+            "FileAdder {{ chunker: {:?}, block_buffer: {}/{} }}",
             self.chunker,
             self.block_buffer.len(),
             self.block_buffer.capacity(),
-            LinkFormatter(&self.unflushed_links),
         )
-    }
-}
-
-struct LinkFormatter<'a>(&'a [Link]);
-
-impl fmt::Display for LinkFormatter<'_> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut iter = self.0.iter().peekable();
-
-        write!(fmt, "[")?;
-
-        let mut current = match iter.peek() {
-            Some(Link { depth, .. }) => depth,
-            None => return write!(fmt, "]"),
-        };
-
-        let mut count = 0;
-
-        for Link {
-            depth: next_depth, ..
-        } in iter
-        {
-            if current == next_depth {
-                count += 1;
-            } else {
-                write!(fmt, "{current}: {count}/")?;
-
-                let steps_between = if current > next_depth {
-                    current - next_depth
-                } else {
-                    next_depth - current
-                };
-
-                for _ in 0..steps_between - 1 {
-                    write!(fmt, "0/")?;
-                }
-                count = 1;
-                current = next_depth;
-            }
-        }
-
-        write!(fmt, "{current}: {count}]")
     }
 }
 
 /// Represents an intermediate structure which will be serialized into link blocks as both PBLink
 /// and UnixFs::blocksize. Also holds `depth`, which helps with compaction of the link blocks.
+#[derive(Clone)]
 struct Link {
     /// Depth of this link. Zero is leaf, and anything above it is, at least for
     /// [`BalancedCollector`], the compacted link blocks.
@@ -188,11 +140,14 @@ impl FileAdderBuilder {
 
     /// Sets the CID version of produced dag-pb nodes. Defaults to [`Version::V0`].
     pub fn with_cid_version(self, cid_version: Version) -> Self {
-        FileAdderBuilder { cid_version, ..self }
+        FileAdderBuilder {
+            cid_version,
+            ..self
+        }
     }
 
     /// Stores file leaves as bare raw (0x55) blocks instead of dag-pb file nodes. When left unset,
-    /// raw leaves are enabled for [`Version::V1`] and disabled for [`Version::V0`], matching kubo.
+    /// raw leaves are enabled for [`Version::V1`] and disabled for [`Version::V0`].
     pub fn with_raw_leaves(self, raw_leaves: bool) -> Self {
         FileAdderBuilder {
             raw_leaves: Some(raw_leaves),
@@ -250,20 +205,9 @@ impl FileAdder {
     pub fn push(&mut self, input: &[u8]) -> (impl Iterator<Item = (Cid, Vec<u8>)>, usize) {
         let (accepted, ready) = self.chunker.accept(input, &self.block_buffer);
 
-        if self.block_buffer.is_empty() && ready {
-            // save single copy as the caller is giving us whole chunks.
-            //
-            // TODO: though, this path does make one question if there is any point in keeping
-            // block_buffer and chunker here; perhaps FileAdder should only handle pre-chunked
-            // blocks and user takes care of chunking (and buffering)?
-            //
-            // cat file | my_awesome_chunker | my_brilliant_collector
-            let leaf =
-                Self::flush_buffered_leaf(accepted, &mut self.unflushed_links, false, self.config);
-            assert!(leaf.is_some(), "chunk completed, must produce a new block");
-            self.block_buffer.clear();
-            let links = self.flush_buffered_links(false);
-            (leaf.into_iter().chain(links), accepted.len())
+        let (blocks, consumed) = if self.block_buffer.is_empty() && ready {
+            // the caller is giving us whole chunks, no internal buffering needed
+            (self.flush_leaf(accepted), accepted.len())
         } else {
             // slower path as we manage the buffer.
 
@@ -276,25 +220,30 @@ impl FileAdder {
             self.block_buffer.extend_from_slice(accepted);
             let written = accepted.len();
 
-            let (leaf, links) = if !ready {
+            if !ready {
                 // a new block did not become ready, which means we couldn't have gotten a new cid.
-                (None, Vec::new())
+                (Vec::new(), written)
             } else {
-                // a new leaf must be output, as well as possibly a new link block
-                let leaf = Self::flush_buffered_leaf(
-                    self.block_buffer.as_slice(),
-                    &mut self.unflushed_links,
-                    false,
-                    self.config,
-                );
-                assert!(leaf.is_some(), "chunk completed, must produce a new block");
+                let buffered = core::mem::take(&mut self.block_buffer);
+                let blocks = self.flush_leaf(&buffered);
+                self.block_buffer = buffered;
                 self.block_buffer.clear();
-                let links = self.flush_buffered_links(false);
+                (blocks, written)
+            }
+        };
 
-                (leaf, links)
-            };
-            (leaf.into_iter().chain(links), written)
-        }
+        (blocks.into_iter(), consumed)
+    }
+
+    /// Renders a leaf for the given input and pushes it into the collector, returning the leaf block
+    /// followed by any link blocks the push produced.
+    fn flush_leaf(&mut self, input: &[u8]) -> Vec<(Cid, Vec<u8>)> {
+        let has_prior = self.collector.has_links();
+        let (cid, block, link) = Self::flush_buffered_leaf(input, has_prior, false, self.config)
+            .expect("chunk completed, must produce a new block");
+        let mut blocks = vec![(cid, block)];
+        blocks.extend(self.collector.push_link(link, self.config));
+        blocks
     }
 
     /// Called after the last [`FileAdder::push`] to finish the tree construction.
@@ -304,15 +253,16 @@ impl FileAdder {
     /// Note: the API will hopefully evolve in a direction which will not allocate a new Vec for
     /// every block in the near-ish future.
     pub fn finish(mut self) -> impl Iterator<Item = (Cid, Vec<u8>)> {
-        let last_leaf = Self::flush_buffered_leaf(
-            &self.block_buffer,
-            &mut self.unflushed_links,
-            true,
-            self.config,
-        );
-        let root_links = self.flush_buffered_links(true);
-        // should probably error if there is neither?
-        let mut blocks = last_leaf.into_iter().chain(root_links).collect::<Vec<_>>();
+        let has_prior = self.collector.has_links();
+        let buffered = core::mem::take(&mut self.block_buffer);
+        let last_leaf = Self::flush_buffered_leaf(&buffered, has_prior, true, self.config);
+
+        let mut blocks = Vec::new();
+        if let Some((cid, block, link)) = last_leaf {
+            blocks.push((cid, block));
+            blocks.extend(self.collector.push_link(link, self.config));
+        }
+        blocks.extend(self.collector.finish(self.config));
 
         if self.metadata.mode().is_some() || self.metadata.mtime().is_some() {
             if let Some((cid, block)) = blocks.last_mut() {
@@ -330,11 +280,11 @@ impl FileAdder {
     /// block.
     fn flush_buffered_leaf(
         input: &[u8],
-        unflushed_links: &mut Vec<Link>,
+        has_prior_leaf: bool,
         finishing: bool,
         config: Config,
-    ) -> Option<(Cid, Vec<u8>)> {
-        if input.is_empty() && (!finishing || !unflushed_links.is_empty()) {
+    ) -> Option<(Cid, Vec<u8>, Link)> {
+        if input.is_empty() && (!finishing || has_prior_leaf) {
             return None;
         }
 
@@ -372,14 +322,7 @@ impl FileAdder {
             file_size: input.len() as u64,
         };
 
-        unflushed_links.push(link);
-
-        Some((cid, block))
-    }
-
-    fn flush_buffered_links(&mut self, finishing: bool) -> Vec<(Cid, Vec<u8>)> {
-        self.collector
-            .flush_links(&mut self.unflushed_links, finishing, self.config)
+        Some((cid, block, link))
     }
 
     /// Test helper for collecting all of the produced blocks; probably not a good idea outside
@@ -506,16 +449,21 @@ impl Default for Collector {
 }
 
 impl Collector {
-    fn flush_links(
-        &mut self,
-        pending: &mut Vec<Link>,
-        finishing: bool,
-        config: Config,
-    ) -> Vec<(Cid, Vec<u8>)> {
-        use Collector::*;
-
+    fn has_links(&self) -> bool {
         match self {
-            Balanced(bc) => bc.flush_links(pending, finishing, config),
+            Collector::Balanced(bc) => bc.has_links(),
+        }
+    }
+
+    fn push_link(&mut self, link: Link, config: Config) -> Vec<(Cid, Vec<u8>)> {
+        match self {
+            Collector::Balanced(bc) => bc.push_link(link, config),
+        }
+    }
+
+    fn finish(&mut self, config: Config) -> Vec<(Cid, Vec<u8>)> {
+        match self {
+            Collector::Balanced(bc) => bc.finish(config),
         }
     }
 }
@@ -525,6 +473,9 @@ impl Collector {
 #[derive(Clone)]
 pub struct BalancedCollector {
     branching_factor: usize,
+    // pending links per depth (0 == leaves); a layer is compacted into the next once it grows past
+    // the branching factor
+    layers: Vec<Vec<Link>>,
     // reused between link block generation
     reused_links: Vec<PBLink<'static>>,
     // reused between link block generation
@@ -567,199 +518,118 @@ impl BalancedCollector {
 
         Self {
             branching_factor,
+            layers: Vec::new(),
             reused_links: Vec::new(),
             reused_blocksizes: Vec::new(),
         }
     }
 
-    /// In-place compression of the `pending` links to a balanced hierarchy. When `finishing`, the
-    /// links will be compressed iteratively from the lowest level to produce a single root link
-    /// block.
-    fn flush_links(
-        &mut self,
-        pending: &mut Vec<Link>,
-        finishing: bool,
-        config: Config,
-    ) -> Vec<(Cid, Vec<u8>)> {
-        /*
+    fn has_links(&self) -> bool {
+        self.layers.iter().any(|layer| !layer.is_empty())
+    }
 
-        file    |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
-        links-0 |-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|E|F|G|
-        links-1 |-------|-------|-------|-------|-B-----|-C-----|-D-----|\   /
-        links-2 |-A-----------------------------|                         ^^^
-              ^                                                     one short
-               \--- link.depth
-
-        pending [A, B, C, D, E, F, G]
-
-        #flush_buffered_links(...) first iteration:
-
-        file    |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
-        links-0 |-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|E|F|G|
-        links-1 |-------|-------|-------|-------|-B-----|-C-----|-D-----|=#1==|
-        links-2 |-A-----------------------------|
-
-        pending [A, B, C, D, E, F, G] => [A, B, C, D, 1]
-
-        new link block #1 is created for E, F, and G.
-
-        #flush_buffered_links(...) second iteration:
-
-        file    |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
-        links-0 |-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|
-        links-1 |-------|-------|-------|-------|-B-----|-C-----|-D-----|-#1--|
-        links-2 |-A-----------------------------|=========================#2==|
-
-        pending [A, B, C, D, 1] => [A, 2]
-
-        new link block #2 is created for B, C, D, and #1.
-
-        #flush_buffered_links(...) last iteration:
-
-        file    |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
-        links-0 |-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|
-        links-1 |-------|-------|-------|-------|-------|-------|-------|-#1--|
-        links-2 |-A-----------------------------|-------------------------#2--|
-        links-3 |=========================================================#3==|
-
-        pending [A, 2] => [3]
-
-        new link block #3 is created for A, and #2. (the root block)
-        */
-
+    /// Pushes one link to the bottom layer, compacting any layer that grows past the branching
+    /// factor into a single link in the layer above. Keeping per-depth buffers makes this O(n)
+    /// overall rather than rescanning one flat vec on every call.
+    fn push_link(&mut self, link: Link, config: Config) -> Vec<(Cid, Vec<u8>)> {
         let mut ret = Vec::new();
 
-        let mut reused_links = core::mem::take(&mut self.reused_links);
-        let mut reused_blocksizes = core::mem::take(&mut self.reused_blocksizes);
+        if self.layers.is_empty() {
+            self.layers.push(Vec::new());
+        }
+        self.layers[0].push(link);
 
-        if let Some(need) = self.branching_factor.checked_sub(reused_links.capacity()) {
-            reused_links.reserve(need);
+        let mut depth = 0;
+        while self.layers[depth].len() > self.branching_factor {
+            let count = self.branching_factor;
+            let (cid, block, promoted) = self.render(depth, count, config);
+            ret.push((cid, block));
+
+            if depth + 1 == self.layers.len() {
+                self.layers.push(Vec::new());
+            }
+            self.layers[depth + 1].push(promoted);
+            depth += 1;
         }
 
-        if let Some(need) = self
-            .branching_factor
-            .checked_sub(reused_blocksizes.capacity())
-        {
-            reused_blocksizes.reserve(need);
-        }
+        ret
+    }
 
-        'outer: for level in 0.. {
-            if pending.len() == 1 && finishing
-                || pending.len() <= self.branching_factor && !finishing
-            {
-                // when there is just a single linking block left and we are finishing, we are
-                // done. It might not be part of the `ret` as will be the case with single chunk
-                // files for example.
-                //
-                // normally when not finishing we do nothing if we don't have enough links.
+    /// Drains the remaining links bottom-up into a single root. A lone remaining link is the root
+    /// itself (e.g. a single chunk file) and is not wrapped any further.
+    fn finish(&mut self, config: Config) -> Vec<(Cid, Vec<u8>)> {
+        let mut ret = Vec::new();
+
+        loop {
+            let total = self.layers.iter().map(|layer| layer.len()).sum::<usize>();
+            if total <= 1 {
                 break;
             }
 
-            // when finishing, we iterate the level to completion in blocks of
-            // self.branching_factor and *insert* values at the offset of the first compressed
-            // link. on following iterations this will be the index after the higher level index.
-            let mut starting_point = 0;
-
-            // when creating the link blocks, start overwriting the pending links at the first
-            // found link for this depth. this index will be incremented for successive link
-            // blocks.
-            let mut last_overwrite = None;
-
-            while let Some(mut first_at) = &pending[starting_point..]
+            let depth = self
+                .layers
                 .iter()
-                .position(|Link { depth, .. }| depth == &level)
-            {
-                // fix first_at as absolute index from being possible relative to the
-                // starting_point
-                first_at += starting_point;
+                .position(|layer| !layer.is_empty())
+                .expect("total > 1 so some layer is non-empty");
+            let count = self.layers[depth].len().min(self.branching_factor);
+            let (cid, block, promoted) = self.render(depth, count, config);
+            ret.push((cid, block));
 
-                if !finishing && pending[first_at..].len() <= self.branching_factor {
-                    if let Some(last_overwrite) = last_overwrite {
-                        // drain any processed
-                        pending.drain((last_overwrite + 1)..first_at);
-                    }
-                    break 'outer;
-                }
-
-                reused_links.clear();
-                reused_blocksizes.clear();
-
-                let mut nested_size = 0;
-                let mut nested_total_size = 0;
-
-                let last = (first_at + self.branching_factor).min(pending.len());
-
-                for (index, link) in pending[first_at..last].iter().enumerate() {
-                    assert_eq!(
-                        link.depth,
-                        level,
-                        "unexpected link depth {} when searching at level {} index {}",
-                        link.depth,
-                        level,
-                        index + first_at
-                    );
-
-                    Self::partition_link(
-                        link,
-                        &mut reused_links,
-                        &mut reused_blocksizes,
-                        &mut nested_size,
-                        &mut nested_total_size,
-                    );
-                }
-
-                debug_assert_eq!(reused_links.len(), reused_blocksizes.len());
-
-                let inner = FlatUnixFs {
-                    links: reused_links,
-                    data: UnixFs {
-                        Type: UnixFsType::File,
-                        filesize: Some(nested_size),
-                        blocksizes: reused_blocksizes,
-                        ..Default::default()
-                    },
-                };
-
-                let (cid, vec) = render_and_hash(&inner, config);
-
-                // start overwriting at the first index of this level, then continue forward on
-                // next iterations.
-                let index = last_overwrite.map(|i| i + 1).unwrap_or(first_at);
-                pending[index] = Link {
-                    depth: level + 1,
-                    target: cid,
-                    total_size: nested_total_size + vec.len() as u64,
-                    file_size: nested_size,
-                };
-
-                ret.push((cid, vec));
-
-                reused_links = inner.links;
-                reused_blocksizes = inner.data.blocksizes;
-
-                starting_point = last;
-                last_overwrite = Some(index);
+            if depth + 1 == self.layers.len() {
+                self.layers.push(Vec::new());
             }
+            self.layers[depth + 1].push(promoted);
+        }
 
-            if let Some(last_overwrite) = last_overwrite {
-                pending.truncate(last_overwrite + 1);
-            }
+        ret
+    }
 
-            // this holds regardless of finishing; we would had broken 'outer had there been less
-            // than full blocks left.
-            debug_assert_eq!(
-                pending.iter().position(|l| l.depth == level),
-                None,
-                "should have no more of depth {}: {}",
-                level,
-                LinkFormatter(pending.as_slice())
+    /// Renders the first `count` links of `layers[depth]` into a single dag-pb file link block,
+    /// removing them, and returns the block plus the promoted link at `depth + 1`.
+    fn render(&mut self, depth: usize, count: usize, config: Config) -> (Cid, Vec<u8>, Link) {
+        let mut reused_links = core::mem::take(&mut self.reused_links);
+        let mut reused_blocksizes = core::mem::take(&mut self.reused_blocksizes);
+        reused_links.clear();
+        reused_blocksizes.clear();
+
+        let mut nested_size = 0;
+        let mut nested_total_size = 0;
+
+        for link in self.layers[depth].drain(0..count) {
+            Self::partition_link(
+                &link,
+                &mut reused_links,
+                &mut reused_blocksizes,
+                &mut nested_size,
+                &mut nested_total_size,
             );
         }
 
-        self.reused_links = reused_links;
-        self.reused_blocksizes = reused_blocksizes;
+        debug_assert_eq!(reused_links.len(), reused_blocksizes.len());
 
-        ret
+        let inner = FlatUnixFs {
+            links: reused_links,
+            data: UnixFs {
+                Type: UnixFsType::File,
+                filesize: Some(nested_size),
+                blocksizes: reused_blocksizes,
+                ..Default::default()
+            },
+        };
+
+        let (cid, vec) = render_and_hash(&inner, config);
+
+        self.reused_links = inner.links;
+        self.reused_blocksizes = inner.data.blocksizes;
+
+        let promoted = Link {
+            depth: depth + 1,
+            target: cid,
+            total_size: nested_total_size + vec.len() as u64,
+            file_size: nested_size,
+        };
+
+        (cid, vec, promoted)
     }
 
     /// Each link needs to be partitioned into the four mut arguments received by this function in
@@ -784,7 +654,6 @@ impl BalancedCollector {
 
 #[cfg(test)]
 mod tests {
-
     use super::{BalancedCollector, Chunker, FileAdder};
     use crate::test_support::FakeBlockstore;
     use core::convert::TryFrom;
@@ -900,6 +769,45 @@ mod tests {
         }
 
         assert_eq!(reassembled, content);
+    }
+
+    #[test]
+    fn balanced_layout_goldens() {
+        // captured from the pre-rewrite balanced collector: (leaf_count, block_count, root_cid)
+        let expected: &[(usize, usize, &str)] = &[
+            (1, 1, "QmS9JArPwa55ePgDnyg6TzX24mYTS1b1vLqWNebyVotKxQ"),
+            (2, 3, "QmTpBU2C6VXLUqBpR8ggWW8phBNR9Ca3rz5o7gD6xyPyG7"),
+            (173, 174, "QmYHm62RFqvrEHc7ZqeJsdExdXWs4WvV4B8PKaYFfzp3ja"),
+            (174, 175, "QmUSeZmRgMby21R1ooTqUddcMrme1SE5JUapFPBKY3do18"),
+            (175, 178, "Qma9U731USCLRRP5Scd9m2Y6mJ9Zf6oEYPEr5mu7L96ts8"),
+            (176, 179, "Qmdhoohod5MVTgRKFsvHFjPqbb78GEzgScqg1VZXJg9GfT"),
+            (348, 351, "QmTfgy9uX5oyKuGm9QsU7SpmhP1HegJUaTNZwseg5VWECp"),
+            (349, 353, "QmW3rbpL6Yxa1UREkN8bFvrm8b5LiyHNUWzu5w3Rm5q8T4"),
+            (
+                30276,
+                30451,
+                "QmcF5gzgZqJrvjrZbCSTXgFUS9qtq3yrQCXj5ds7QMbAj3",
+            ),
+            (
+                30277,
+                30455,
+                "Qmf3YNMKeAwk6UAMdMGQFDcJmxyrESQReerPJPT9cRbEcq",
+            ),
+        ];
+
+        for &(n, blocks_len, root) in expected {
+            let content: Vec<u8> = (0..n).map(|i| (i % 251) as u8).collect();
+            let blocks = FileAdder::builder()
+                .with_chunker(Chunker::Size(1))
+                .build()
+                .collect_blocks(&content, 0);
+            assert_eq!(blocks.len(), blocks_len, "block count for {n} leaves");
+            assert_eq!(
+                blocks.last().unwrap().0.to_string(),
+                root,
+                "root cid for {n} leaves"
+            );
+        }
     }
 
     #[test]

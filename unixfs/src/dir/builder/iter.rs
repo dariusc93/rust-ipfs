@@ -96,7 +96,7 @@ impl PostOrderIterator {
         metadata: &Metadata,
     ) -> Result<(Leaf, Vec<ShardBlock>), TreeConstructionFailed> {
         use crate::pb::{UnixFs, UnixFsType};
-        use quick_protobuf::{BytesWriter, MessageWrite, Writer};
+        use quick_protobuf::{MessageWrite, Writer};
         use sha2::{Digest, Sha256};
 
         if let Some(threshold) = shard_threshold {
@@ -132,28 +132,12 @@ impl PostOrderIterator {
             }
         }
 
-        let cap = buffer.capacity();
+        buffer.clear();
+        buffer.reserve(size);
 
-        if let Some(additional) = size.checked_sub(cap) {
-            buffer.reserve(additional);
-        }
-
-        if let Some(mut needed_zeroes) = size.checked_sub(buffer.len()) {
-            let zeroes = [0; 8];
-
-            while needed_zeroes > 8 {
-                buffer.extend_from_slice(&zeroes[..]);
-                needed_zeroes -= zeroes.len();
-            }
-
-            buffer.extend(core::iter::repeat_n(0, needed_zeroes));
-        }
-
-        let mut writer = Writer::new(BytesWriter::new(&mut buffer[..]));
+        let mut writer = Writer::new(&mut *buffer);
         node.write_message(&mut writer)
             .map_err(TreeConstructionFailed::Protobuf)?;
-
-        buffer.truncate(size);
 
         #[allow(clippy::needless_borrows_for_generic_args)]
         let mh = Multihash::wrap(Code::Sha2_256.into(), &Sha256::digest(&buffer)).unwrap();
