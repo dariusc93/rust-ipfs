@@ -5,28 +5,47 @@
 
 use crate::pb::{FlatUnixFs, UnixFs, UnixFsType};
 use alloc::borrow::Cow;
+use ipld_core::cid::{Cid, Version};
+use multihash::Multihash;
+use multihash_codetable::Code;
 use quick_protobuf::{MessageWrite, Writer};
+use sha2::{Digest, Sha256};
 
-/// Appends a dag-pb block for for a symlink to the given target_path. It is expected that the
-/// `target_path` is valid relative unix path relative to the place in which this is used but
-/// targets validity cannot really be judged.
-pub fn serialize_symlink_block(target_path: &str, block_buffer: &mut Vec<u8>) {
-    // should this fail or not? protobuf encoding cannot fail here, however we might create a too
-    // large block but what's the limit?
-    //
-    // why not return a (Cid, Vec<u8>) like usually with cidv0? well...
-
-    let node = FlatUnixFs {
+fn symlink_node(target_path: &str) -> FlatUnixFs<'_> {
+    FlatUnixFs {
         links: Vec::new(),
         data: UnixFs {
             Type: UnixFsType::Symlink,
             Data: Some(Cow::Borrowed(target_path.as_bytes())),
             ..Default::default()
         },
-    };
+    }
+}
 
+/// Appends a dag-pb block for a symlink to the given target_path. It is expected that the
+/// `target_path` is a valid unix path relative to the place in which this is used but the target's
+/// validity cannot really be judged.
+pub fn serialize_symlink_block(target_path: &str, block_buffer: &mut Vec<u8>) {
+    let node = symlink_node(target_path);
     let mut writer = Writer::new(block_buffer);
     node.write_message(&mut writer).expect("unexpected failure");
+}
+
+/// Builds a dag-pb block for a symlink to the given target_path, returning its `Cid` under the
+/// chosen version and the block bytes. Symlinks are never raw leaves.
+pub fn symlink_block(target_path: &str, cid_version: Version) -> (Cid, Vec<u8>) {
+    let node = symlink_node(target_path);
+    let mut block = Vec::new();
+    let mut writer = Writer::new(&mut block);
+    node.write_message(&mut writer).expect("unexpected failure");
+
+    let mh = Multihash::wrap(Code::Sha2_256.into(), &Sha256::digest(&block)).unwrap();
+    let cid = match cid_version {
+        Version::V0 => Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0"),
+        Version::V1 => Cid::new_v1(crate::file::DAG_PB_CODEC, mh),
+    };
+
+    (cid, block)
 }
 
 #[cfg(test)]
@@ -57,6 +76,24 @@ mod tests {
             cid.to_string(),
             "QmfLJN6HLyREnWr7QQNmgmuNziUhcbwUopkHQ8gD3pMfp6"
         );
+    }
+
+    #[test]
+    fn symlink_block_versions() {
+        use super::symlink_block;
+        use ipld_core::cid::Version;
+
+        let (cid_v0, block_v0) = symlink_block("b", Version::V0);
+        assert_eq!(
+            cid_v0.to_string(),
+            "QmfLJN6HLyREnWr7QQNmgmuNziUhcbwUopkHQ8gD3pMfp6"
+        );
+
+        let (cid_v1, block_v1) = symlink_block("b", Version::V1);
+        assert_eq!(cid_v1.version(), Version::V1);
+        assert_eq!(cid_v1.codec(), 0x70);
+
+        assert_eq!(block_v0, block_v1);
     }
 
     #[test]

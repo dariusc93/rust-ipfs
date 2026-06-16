@@ -396,6 +396,26 @@ mod tests {
         verify_results(expected, actual);
     }
 
+    #[test]
+    fn cidv1_directory_node() {
+        use ipld_core::cid::Version;
+
+        let mut opts = TreeOptions::default();
+        opts.cid_version(Version::V1);
+        let mut builder = BufferingTreeBuilder::new(opts);
+        builder.put_link("dir/file.txt", some_cid(0), 1).unwrap();
+
+        let cids = builder
+            .build()
+            .map(|res| res.map(|n| n.cid))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        let root = cids.last().unwrap();
+        assert_eq!(root.version(), Version::V1);
+        assert_eq!(root.codec(), 0x70);
+    }
+
     fn verify_results(
         mut expected: Vec<(
             impl AsRef<str> + core::fmt::Debug,

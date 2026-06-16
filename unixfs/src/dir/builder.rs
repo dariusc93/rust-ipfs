@@ -1,5 +1,5 @@
 use core::fmt;
-use ipld_core::cid::Cid;
+use ipld_core::cid::{Cid, Version};
 
 mod dir_builder;
 use dir_builder::DirBuilder;
@@ -55,6 +55,7 @@ impl fmt::Debug for Leaf {
 pub struct TreeOptions {
     block_size_limit: Option<u64>,
     wrap_with_directory: bool,
+    cid_version: Version,
 }
 
 impl Default for TreeOptions {
@@ -62,6 +63,7 @@ impl Default for TreeOptions {
         TreeOptions {
             block_size_limit: Some(512 * 1024),
             wrap_with_directory: false,
+            cid_version: Version::V0,
         }
     }
 }
@@ -77,6 +79,11 @@ impl TreeOptions {
     /// Defaults to false.
     pub fn wrap_with_directory(&mut self) {
         self.wrap_with_directory = true;
+    }
+
+    /// Sets the CID version of produced directory nodes. Defaults to [`Version::V0`].
+    pub fn cid_version(&mut self, version: Version) {
+        self.cid_version = version;
     }
 }
 

@@ -2,7 +2,7 @@ use super::{
     CustomFlatUnixFs, DirBuilder, Entry, Leaf, NamedLeaf, TreeConstructionFailed, TreeOptions,
 };
 use core::fmt;
-use ipld_core::cid::Cid;
+use ipld_core::cid::{Cid, Version};
 use multihash::Multihash;
 use multihash_codetable::Code;
 use std::collections::HashMap;
@@ -83,6 +83,7 @@ impl PostOrderIterator {
         links: &[Option<NamedLeaf>],
         buffer: &mut Vec<u8>,
         block_size_limit: &Option<u64>,
+        cid_version: Version,
     ) -> Result<Leaf, TreeConstructionFailed> {
         use crate::pb::{UnixFs, UnixFsType};
         use quick_protobuf::{BytesWriter, MessageWrite, Writer};
@@ -145,7 +146,10 @@ impl PostOrderIterator {
 
         #[allow(clippy::needless_borrows_for_generic_args)]
         let mh = Multihash::wrap(Code::Sha2_256.into(), &Sha256::digest(&buffer)).unwrap();
-        let cid = Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0");
+        let cid = match cid_version {
+            Version::V0 => Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0"),
+            Version::V1 => Cid::new_v1(crate::file::DAG_PB_CODEC, mh),
+        };
 
         let combined_from_links = links
             .iter()
@@ -234,6 +238,7 @@ impl PostOrderIterator {
                         &leaves,
                         buffer,
                         &self.opts.block_size_limit,
+                        self.opts.cid_version,
                     ) {
                         Ok(leaf) => leaf,
                         Err(e) => return Some(Err(e)),
@@ -280,6 +285,7 @@ impl PostOrderIterator {
                         &leaves,
                         buffer,
                         &self.opts.block_size_limit,
+                        self.opts.cid_version,
                     ) {
                         Ok(leaf) => leaf,
                         Err(e) => return Some(Err(e)),

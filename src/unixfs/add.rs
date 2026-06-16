@@ -12,6 +12,7 @@ use futures::{
     stream::{BoxStream, FusedStream},
     FutureExt, Stream, StreamExt, TryFutureExt,
 };
+use ipld_core::cid::Version;
 use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
@@ -54,6 +55,8 @@ pub struct UnixfsAdd {
     opt: Option<AddOpt>,
     span: Span,
     chunk: Chunker,
+    cid_version: Version,
+    raw_leaves: Option<bool>,
     pin: bool,
     provide: bool,
     wrap: bool,
@@ -76,6 +79,8 @@ impl UnixfsAdd {
             opt: Some(opt),
             span: Span::current(),
             chunk: Chunker::Size(256 * 1024),
+            cid_version: Version::V0,
+            raw_leaves: None,
             pin: true,
             provide: false,
             wrap: false,
@@ -90,6 +95,16 @@ impl UnixfsAdd {
 
     pub fn chunk(mut self, chunk: Chunker) -> Self {
         self.chunk = chunk;
+        self
+    }
+
+    pub fn cid_version(mut self, version: Version) -> Self {
+        self.cid_version = version;
+        self
+    }
+
+    pub fn raw_leaves(mut self, raw_leaves: bool) -> Self {
+        self.raw_leaves = Some(raw_leaves);
         self
     }
 
@@ -127,6 +142,8 @@ impl Stream for UnixfsAdd {
                     };
                     let option = self.opt.take().expect("option already constructed");
                     let chunk = self.chunk;
+                    let cid_version = self.cid_version;
+                    let raw_leaves = self.raw_leaves;
                     let pin = self.pin;
                     let provide = self.provide;
                     let wrap = self.wrap;
@@ -157,9 +174,15 @@ impl Stream for UnixfsAdd {
                             AddOpt::Stream { name, total, stream } => (name, total, stream),
                         };
 
-                        let mut adder = FileAdderBuilder::default()
-                            .with_chunker(chunk)
-                            .build();
+                        let mut adder = {
+                            let mut builder = FileAdderBuilder::default()
+                                .with_chunker(chunk)
+                                .with_cid_version(cid_version);
+                            if let Some(raw_leaves) = raw_leaves {
+                                builder = builder.with_raw_leaves(raw_leaves);
+                            }
+                            builder.build()
+                        };
 
                         yield UnixfsStatus::ProgressStatus { written, total_size };
 
@@ -236,6 +259,7 @@ impl Stream for UnixfsAdd {
                                     async move {
                                         let mut opts = rust_unixfs::dir::builder::TreeOptions::default();
                                         opts.wrap_with_directory();
+                                        opts.cid_version(cid_version);
 
                                         let mut tree = rust_unixfs::dir::builder::BufferingTreeBuilder::new(opts);
                                         tree.put_link(&name, cid, written as _)?;
