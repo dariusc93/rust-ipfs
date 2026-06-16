@@ -3,9 +3,9 @@ use chrono::DateTime;
 use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
-use libp2p_identity::Keypair;
 use libp2p_identity::PeerId;
 use libp2p_identity::PublicKey;
+use libp2p_identity::{DecodingError, Keypair, SigningError};
 use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
@@ -50,9 +50,11 @@ pub enum Error {
     /// Malformed EOL validity timestamp.
     InvalidValidity(chrono::ParseError),
     /// A key or signing operation failed.
-    Crypto(Box<dyn std::error::Error + Send + Sync + 'static>),
+    SigningError(SigningError),
+    /// Invalid public key.
+    InvalidPublicKey(DecodingError),
     /// Malformed multihash or peer id.
-    Multihash(Box<dyn std::error::Error + Send + Sync + 'static>),
+    Multihash(multihash::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -75,7 +77,8 @@ impl std::fmt::Display for Error {
             Error::Protobuf(e) => write!(f, "protobuf error: {e}"),
             Error::Cbor(e) => write!(f, "dag-cbor error: {e}"),
             Error::InvalidValidity(e) => write!(f, "invalid validity timestamp: {e}"),
-            Error::Crypto(e) => write!(f, "cryptographic error: {e}"),
+            Error::SigningError(e) => write!(f, "signing error: {e}"),
+            Error::InvalidPublicKey(e) => write!(f, "invalid public key: {e}"),
             Error::Multihash(e) => write!(f, "invalid multihash: {e}"),
         }
     }
@@ -85,7 +88,10 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Protobuf(e) => Some(e),
-            Error::Cbor(e) | Error::Crypto(e) | Error::Multihash(e) => Some(&**e),
+            Error::SigningError(e) => Some(e),
+            Error::InvalidPublicKey(e) => Some(e),
+            Error::Multihash(e) => Some(e),
+            Error::Cbor(e) => Some(&**e),
             Error::InvalidValidity(e) => Some(e),
             _ => None,
         }
@@ -258,7 +264,6 @@ impl Data {
 impl Record {
     /// Creates and signs an IPNS record pointing at `value`, valid until the absolute `eol`
     /// (End-Of-Life) timestamp. `ttl` is a caching hint for resolvers.
-    #[cfg(feature = "libp2p")]
     pub fn new(
         keypair: &Keypair,
         value: impl AsRef<[u8]>,
@@ -286,7 +291,7 @@ impl Record {
 
         let signature_v1 = keypair
             .sign(&signature_v1_construct)
-            .map_err(|e| Error::Crypto(Box::new(e)))?;
+            .map_err(Error::SigningError)?;
 
         let document = Data {
             value: Bytes::from(value.clone()),
@@ -306,7 +311,7 @@ impl Record {
 
         let signature_v2 = keypair
             .sign(&signature_v2_construct)
-            .map_err(|e| Error::Crypto(Box::new(e)))?;
+            .map_err(Error::SigningError)?;
 
         let encoded_public_key = keypair.public().encode_protobuf();
         let public_key = if encoded_public_key.len() > MAX_INLINE_KEY_LENGTH {
@@ -400,7 +405,6 @@ impl Record {
         &self.value
     }
 
-    #[cfg(feature = "libp2p")]
     pub fn verify_signature(&self, peer_id: PeerId) -> Result<(), Error> {
         use multihash::Multihash;
 
@@ -413,8 +417,7 @@ impl Record {
         }
 
         let public_key = if self.public_key.is_empty() {
-            let mh = Multihash::<64>::from_bytes(&peer_id.to_bytes())
-                .map_err(|e| Error::Multihash(Box::new(e)))?;
+            let mh = Multihash::<64>::from_bytes(&peer_id.to_bytes()).map_err(Error::Multihash)?;
             // small keys are inlined in the name via an identity (code 0) multihash; anything
             // else (e.g. an RSA name) carries no inlined key, so the record must embed one.
             if mh.code() != 0 {
@@ -424,7 +427,7 @@ impl Record {
         } else {
             PublicKey::try_decode_protobuf(&self.public_key)
         }
-        .map_err(|e| Error::Crypto(Box::new(e)))?;
+        .map_err(Error::InvalidPublicKey)?;
 
         if PeerId::from_public_key(&public_key) != peer_id {
             return Err(Error::NameMismatch);
@@ -447,7 +450,6 @@ impl Record {
 
     /// Fully validates the record against `peer_id`: name binding, V2 signature, and that the EOL
     /// validity has not elapsed.
-    #[cfg(feature = "libp2p")]
     pub fn verify(&self, peer_id: PeerId) -> Result<(), Error> {
         self.verify_signature(peer_id)?;
 
@@ -470,7 +472,7 @@ impl Record {
     }
 }
 
-#[cfg(all(test, feature = "libp2p"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Duration;
