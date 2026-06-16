@@ -340,13 +340,13 @@ impl Record {
     }
 
     #[cfg(feature = "libp2p")]
-    pub fn verify(&self, peer_id: PeerId) -> std::io::Result<()> {
+    pub fn verify_signature(&self, peer_id: PeerId) -> std::io::Result<()> {
         use multihash::Multihash;
 
-        if self.signature_v2.is_empty() && self.signature_v1.is_empty() {
+        if self.signature_v2.is_empty() {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Empty signature field",
+                std::io::ErrorKind::InvalidData,
+                "missing signatureV2",
             ));
         }
 
@@ -357,27 +357,31 @@ impl Record {
             ));
         }
 
-        let key = peer_id.to_bytes();
+        let public_key = if self.public_key.is_empty() {
+            let mh = Multihash::<64>::from_bytes(&peer_id.to_bytes())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            // small keys are inlined in the name via an identity (code 0) multihash; anything
+            // else (e.g. an RSA name) carries no inlined key, so the record must embed one.
+            if mh.code() != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "record omits pubKey but the IPNS name does not inline one",
+                ));
+            }
+            PublicKey::try_decode_protobuf(mh.digest())
+        } else {
+            PublicKey::try_decode_protobuf(&self.public_key)
+        }
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mh = Multihash::from_bytes(&key).expect("valid hash");
-        let cid = Cid::new_v1(0x72, mh);
-
-        let public_key = match self.public_key.is_empty() {
-            true => cid.hash().digest(),
-            //TODO: Validate internal public key against the multhash publickey
-            false => self.public_key.as_ref(),
-        };
-
-        let pk = PublicKey::try_decode_protobuf(public_key)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        //TODO: Implement support for RSA
-        if matches!(pk.key_type().into(), KeyType::RSA) {
+        if PeerId::from_public_key(&public_key) != peer_id {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "RSA Keys are not supported at this time",
+                std::io::ErrorKind::InvalidData,
+                "public key does not match the IPNS name",
             ));
         }
+
+        self.data()?;
 
         let signature_v2 = SIGNATURE_V2_BASE
             .iter()
@@ -385,9 +389,7 @@ impl Record {
             .copied()
             .collect::<Vec<_>>();
 
-        self.data()?;
-
-        if !pk.verify(&signature_v2, &self.signature_v2) {
+        if !public_key.verify(&signature_v2, &self.signature_v2) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Signature is invalid",
@@ -395,5 +397,71 @@ impl Record {
         }
 
         Ok(())
+    }
+
+    /// Fully validates the record against `peer_id`: name binding, V2 signature, and that the EOL
+    /// validity has not elapsed.
+    #[cfg(feature = "libp2p")]
+    pub fn verify(&self, peer_id: PeerId) -> std::io::Result<()> {
+        self.verify_signature(peer_id)?;
+
+        if self.validity()?.with_timezone(&Utc) < Utc::now() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "record has expired",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "libp2p"))]
+mod tests {
+    use super::*;
+
+    fn record_for(kp: &Keypair, hours: i64) -> Record {
+        Record::new(kp, b"/ipfs/bafkqaaa", Duration::hours(hours), 0, 0).unwrap()
+    }
+
+    #[test]
+    fn valid_record_roundtrips_and_verifies() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let rec = record_for(&kp, 24);
+        rec.verify(peer).unwrap();
+
+        let decoded = Record::decode(rec.encode().unwrap()).unwrap();
+        decoded.verify(peer).unwrap();
+    }
+
+    #[test]
+    fn verify_rejects_expired_record_but_signature_still_checks() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let rec = record_for(&kp, -1);
+        rec.verify_signature(peer).unwrap();
+        assert!(rec.verify(peer).is_err());
+    }
+
+    #[test]
+    fn embedded_pubkey_must_match_the_name() {
+        let attacker = Keypair::generate_ed25519();
+        let victim = Keypair::generate_ed25519();
+        let attacker_peer = PeerId::from_public_key(&attacker.public());
+        let victim_peer = PeerId::from_public_key(&victim.public());
+
+        // a genuine attacker record, with the attacker's pubKey spliced into the protobuf
+        // (field 7, tag 0x3a) to mimic a record that carries an embedded key.
+        let mut bytes = record_for(&attacker, 24).encode().unwrap();
+        let pk = attacker.public().encode_protobuf();
+        bytes.push(0x3a);
+        bytes.push(pk.len() as u8); // an ed25519 protobuf key is < 128 bytes
+        bytes.extend_from_slice(&pk);
+
+        let tampered = Record::decode(&bytes).unwrap();
+        tampered.verify_signature(attacker_peer).unwrap();
+        // the embedded key does not hash to the victim's name, so it must not validate for it.
+        assert!(tampered.verify_signature(victim_peer).is_err());
     }
 }
