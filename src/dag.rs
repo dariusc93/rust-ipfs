@@ -18,7 +18,8 @@ use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::{
     dagpb::{wrap_node_data, NodeData},
     dir::{Cache, ShardedLookup},
-    resolve, MaybeResolved,
+    resolve,
+    MaybeResolved,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -477,7 +478,7 @@ impl DagGet {
     }
 }
 
-impl std::future::IntoFuture for DagGet {
+impl IntoFuture for DagGet {
     type Output = Result<Ipld, ResolveError>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -587,7 +588,7 @@ impl DagPut {
     }
 }
 
-impl std::future::IntoFuture for DagPut {
+impl IntoFuture for DagPut {
     type Output = Result<Cid, anyhow::Error>;
 
     type IntoFuture = BoxFuture<'static, Self::Output>;

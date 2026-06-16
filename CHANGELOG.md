@@ -1,3 +1,7 @@
+# 0.16.0
+
+- update to connexa 0.5.
+
 # 0.15.0
 - chore: cleanup of imports and duplicated code.
 - refactor: use impl Trait in function parameter instead. [PR 383](https://github.com/dariusc93/rust-ipfs/pull/383)

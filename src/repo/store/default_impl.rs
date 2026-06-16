@@ -1,3 +1,5 @@
+pub mod keystore;
+
 #[cfg(not(target_arch = "wasm32"))]
 use crate::repo::store::blockstore::flatfs::FsBlockStore;
 #[cfg(target_arch = "wasm32")]

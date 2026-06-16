@@ -1,13 +1,13 @@
 [package]
 authors = ["Darius C", "Rust-IPFS contributors"]
-rust-version = "1.83"
-edition = "2021"
+rust-version = "1.93.0"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 name = "rust-ipfs"
 readme = "README.md"
 repository = "https://github.com/dariusc93/rust-ipfs"
 description = "IPFS node implementation"
-version = "0.15.0"
+version = "0.16.0"
 
 [features]
 default = ["full"]
@@ -46,7 +46,7 @@ bytes = "1.11.1"
 cid = "0.11.1"
 chrono = { version = "0.4.42" }
 clap = { version = "4.5.48", features = ["derive"] }
-connexa = { version = "0.4.1", features = ["identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "mdns"] }
+connexa = { version = "0.5.2", features = ["identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "mdns", "fs", "indexeddb"] }
 either = { version = "1.15.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
