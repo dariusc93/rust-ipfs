@@ -203,6 +203,42 @@ fn hamt_dir(version: Version) -> Cid {
     dir_root(builder)
 }
 
+/// A sharded subdir ("sub") next to a normal file, inside the wrapped root. Exercises the
+/// iterator's deferred-emission path for a shard that is NOT the root.
+fn nested_subdir_dir(version: Version) -> Cid {
+    let mut opts = TreeOptions::default();
+    opts.cid_version(version);
+    opts.wrap_with_directory();
+    let mut builder = BufferingTreeBuilder::new(opts);
+    let (readme, rt) = file_root(b"hello", None, version, None);
+    builder.put_link("readme.txt", readme, rt).unwrap();
+    let (empty, et) = file_root(b"", None, version, None);
+    for i in 0..HAMT_FILES {
+        builder
+            .put_link(&format!("sub/file-{i:05}"), empty, et)
+            .unwrap();
+    }
+    dir_root(builder)
+}
+
+/// Two sibling sharded subdirs under the wrapped root.
+fn sibling_shards_dir(version: Version) -> Cid {
+    let mut opts = TreeOptions::default();
+    opts.cid_version(version);
+    opts.wrap_with_directory();
+    let mut builder = BufferingTreeBuilder::new(opts);
+    let (empty, et) = file_root(b"", None, version, None);
+    for i in 0..HAMT_FILES {
+        builder
+            .put_link(&format!("alpha/a-{i:05}"), empty, et)
+            .unwrap();
+        builder
+            .put_link(&format!("beta/b-{i:05}"), empty, et)
+            .unwrap();
+    }
+    dir_root(builder)
+}
+
 fn version_args(version: Version) -> Vec<String> {
     match version {
         Version::V0 => Vec::new(),
@@ -240,6 +276,11 @@ const SMALL_DIR_V1: &str = "bafybeic7au5c3eydqdymxffpwtuahdr3saj2dxptw34y6uvkyoy
 
 const HAMT_DIR_V0: &str = "QmXNw274pqF5fjJkgZBJV5Hob8dzH8SUPiEMdTAeMb7492";
 const HAMT_DIR_V1: &str = "bafybeie43ouwdxahhv64kcn47jmknnquqpv4jo3jaejmv3uqgomkey4giu";
+
+const NESTED_DIR_V0: &str = "QmVfqsn13Lwu2ZUvcfsxenwBSxDNo1h3RTvDdbJGqM537J";
+const NESTED_DIR_V1: &str = "bafybeidoputpooro7qarpdimkkaagrtmy2qynkqinn5hakjms6lnb32hqi";
+const SIBLING_DIR_V0: &str = "QmNmFcLAFyJ9qBc2dGGDPLTf9ozkaVfJU3pH9yXjxEGSKk";
+const SIBLING_DIR_V1: &str = "bafybeie76nplpl5g2rvf5in3rntjqki5aoctciwr6k2k53hg6suydd6cza";
 
 /// `(content, chunk, version, expected_cid)` for plain file leaves and balanced layouts.
 fn file_cases() -> Vec<(Vec<u8>, Option<usize>, Version, &'static str)> {
@@ -309,6 +350,14 @@ fn pinned_small_dir() {
 fn pinned_hamt_dir() {
     assert_eq!(hamt_dir(Version::V0).to_string(), HAMT_DIR_V0);
     assert_eq!(hamt_dir(Version::V1).to_string(), HAMT_DIR_V1);
+}
+
+#[test]
+fn pinned_nested_dirs() {
+    assert_eq!(nested_subdir_dir(Version::V0).to_string(), NESTED_DIR_V0);
+    assert_eq!(nested_subdir_dir(Version::V1).to_string(), NESTED_DIR_V1);
+    assert_eq!(sibling_shards_dir(Version::V0).to_string(), SIBLING_DIR_V0);
+    assert_eq!(sibling_shards_dir(Version::V1).to_string(), SIBLING_DIR_V1);
 }
 
 #[test]
@@ -403,6 +452,49 @@ fn live_hamt_dir() {
             hamt_dir(version).to_string(),
             kubo,
             "rust vs kubo HAMT {version:?}"
+        );
+        assert_eq!(kubo, pinned, "pinned vector drifted from kubo");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn live_nested_dirs() {
+    if !ipfs_available() {
+        eprintln!("skipping live_nested_dirs: no `ipfs` on PATH");
+        return;
+    }
+
+    let dir = scratch_dir("nested");
+    std::fs::write(dir.join("readme.txt"), b"hello").unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    for i in 0..HAMT_FILES {
+        std::fs::write(dir.join("sub").join(format!("file-{i:05}")), b"").unwrap();
+    }
+    for (version, pinned) in [(Version::V0, NESTED_DIR_V0), (Version::V1, NESTED_DIR_V1)] {
+        let kubo = kubo_add_path(&dir, &version_args(version));
+        assert_eq!(
+            nested_subdir_dir(version).to_string(),
+            kubo,
+            "rust vs kubo nested {version:?}"
+        );
+        assert_eq!(kubo, pinned, "pinned vector drifted from kubo");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+
+    let dir = scratch_dir("siblings");
+    std::fs::create_dir_all(dir.join("alpha")).unwrap();
+    std::fs::create_dir_all(dir.join("beta")).unwrap();
+    for i in 0..HAMT_FILES {
+        std::fs::write(dir.join("alpha").join(format!("a-{i:05}")), b"").unwrap();
+        std::fs::write(dir.join("beta").join(format!("b-{i:05}")), b"").unwrap();
+    }
+    for (version, pinned) in [(Version::V0, SIBLING_DIR_V0), (Version::V1, SIBLING_DIR_V1)] {
+        let kubo = kubo_add_path(&dir, &version_args(version));
+        assert_eq!(
+            sibling_shards_dir(version).to_string(),
+            kubo,
+            "rust vs kubo siblings {version:?}"
         );
         assert_eq!(kubo, pinned, "pinned vector drifted from kubo");
     }
