@@ -165,27 +165,6 @@ impl From<generate::ipns_pb::mod_IpnsEntry::ValidityType> for ValidityType {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(i32)]
-pub enum KeyType {
-    RSA = 0,
-    Ed25519 = 1,
-    Secp256k1 = 2,
-    ECDSA = 3,
-}
-
-#[cfg(feature = "libp2p")]
-impl From<libp2p_identity::KeyType> for KeyType {
-    fn from(ty: libp2p_identity::KeyType) -> Self {
-        match ty {
-            libp2p_identity::KeyType::Ed25519 => KeyType::Ed25519,
-            libp2p_identity::KeyType::RSA => KeyType::RSA,
-            libp2p_identity::KeyType::Secp256k1 => KeyType::Secp256k1,
-            libp2p_identity::KeyType::Ecdsa => KeyType::ECDSA,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Record {
     data: Vec<u8>,
