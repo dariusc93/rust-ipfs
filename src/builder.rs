@@ -1,14 +1,12 @@
 use crate::context::IpfsContext;
-use crate::keystore::Keystore;
 use crate::p2p::{
     create_create_behaviour, AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig,
     TSwarm,
 };
-use crate::repo::{DefaultStorage, GCConfig, GCTrigger, Repo};
+use crate::repo::{DefaultKeystore, DefaultStorage, GCConfig, GCTrigger, Repo};
 use crate::{
     context, ipns_to_dht_key, p2p, to_dht_key, ConnectionLimits, FDLimit, Ipfs, IpfsEvent,
-    IpfsOptions, Keypair, Multiaddr, NetworkBehaviour, RecordKey, RepoProvider, TSwarmEvent,
-    TSwarmEventFn,
+    IpfsOptions, Keypair, Multiaddr, NetworkBehaviour, RecordKey, RepoProvider, TSwarmEvent, TSwarmEventFn,
 };
 use anyhow::Error;
 use async_rt::AbortableJoinHandle;
@@ -16,6 +14,7 @@ use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use connexa::behaviour::request_response::RequestResponseConfig;
 use connexa::builder::{ConnexaBuilder, FileDescLimit, IntoKeypair};
 use connexa::dummy;
+use connexa::keystore::Keychain;
 use connexa::prelude::identify::Event;
 use connexa::prelude::swarm::SwarmEvent;
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,7 +33,7 @@ use tracing_futures::Instrument;
 /// Configured Ipfs which can only be started.
 #[allow(clippy::type_complexity)]
 pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
-    init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore>,
+    init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore, DefaultKeystore>,
     options: IpfsOptions,
     repo_handle: Repo<DefaultStorage>,
     swarm_event: Option<TSwarmEventFn<C>>,
@@ -46,12 +45,6 @@ pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync +
 }
 
 pub type DefaultIpfsBuilder = IpfsBuilder<dummy::Behaviour>;
-
-#[deprecated(note = "Use IpfsBuilder instead")]
-pub type UninitializedIpfs<T> = IpfsBuilder<T>;
-
-#[deprecated(note = "Use DefaultIpfsBuilder instead")]
-pub type UninitializedIpfsDefault = DefaultIpfsBuilder;
 
 impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> Default for IpfsBuilder<C> {
     fn default() -> Self {
@@ -68,17 +61,48 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
 
     /// New instance with an existing keypair
     pub fn with_keypair(keypair: impl IntoKeypair) -> std::io::Result<Self> {
-        Ok(Self {
-            init: ConnexaBuilder::with_existing_identity(keypair)?,
+        let builder = ConnexaBuilder::with_existing_identity(keypair)?;
+        Ok(Self::from_identity(builder))
+    }
+
+    /// Create an instance that resolves its identity from `keychain` under `label`
+    /// loading it, or generating and storing a new identity if none exists yet.
+    pub fn with_keychain_identity(
+        keychain: Keychain<DefaultKeystore>,
+        label: impl Into<String>,
+    ) -> Self {
+        let builder = ConnexaBuilder::with_keychain_identity(keychain, label);
+        Self::from_identity(builder)
+    }
+
+    /// Create an instance that loads its identity from `keychain` under `label`.
+    pub fn with_existing_keychain_identity(
+        keychain: Keychain<DefaultKeystore>,
+        label: impl Into<String>,
+    ) -> Self {
+        let builder = ConnexaBuilder::with_existing_keychain_identity(keychain, label);
+        Self::from_identity(builder)
+    }
+
+    fn from_identity(
+        builder: ConnexaBuilder<
+            p2p::Behaviour<C>,
+            IpfsContext,
+            IpfsEvent,
+            MemoryStore,
+            DefaultKeystore,
+        >,
+    ) -> Self {
+        Self {
+            init: builder,
             options: Default::default(),
             repo_handle: Repo::new_memory(),
-            // record_validators: Default::default(),
             record_key_validator: Default::default(),
             swarm_event: None,
             gc_config: None,
             gc_repo_duration: None,
             custom_behaviour: None,
-        })
+        }
     }
 
     /// Set default listening unspecified ipv4 and ipv6 addresses for tcp and quic
@@ -351,12 +375,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         self
     }
 
-    /// Set a keystore
-    pub fn set_keystore(mut self, keystore: &Keystore) -> Self {
-        self.options.keystore = keystore.clone();
-        self
-    }
-
     /// Enables quic transport
     #[cfg(feature = "quic")]
     #[cfg(not(target_arch = "wasm32"))]
@@ -435,12 +453,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     /// Enables secure websocket transport
     #[cfg(feature = "websocket")]
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn enable_secure_websocket_with_config<F>(mut self, f: F) -> std::io::Result<Self>
+    pub fn enable_secure_websocket_with_config<F>(mut self, f: F) -> Self
     where
-        F: FnOnce(&Keypair) -> std::io::Result<(Vec<String>, String)>,
+        F: FnOnce(&Keypair) -> std::io::Result<(Vec<String>, String)> + 'static,
     {
-        self.init = self.init.enable_secure_websocket_with_config(f)?;
-        Ok(self)
+        self.init = self.init.enable_secure_websocket_with_config(f);
+        self
     }
 
     /// Enables DNS
@@ -469,12 +487,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     /// Enables WebRTC transport, allowing one to generate a certificate using the provided keypair in the closure.
     #[cfg(feature = "webrtc")]
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn enable_webrtc_with_config<F>(mut self, f: F) -> std::io::Result<Self>
+    pub fn enable_webrtc_with_config<F>(mut self, f: F) -> Self
     where
-        F: FnOnce(&Keypair) -> std::io::Result<String>,
+        F: FnOnce(&Keypair) -> std::io::Result<String> + 'static,
     {
-        self.init = self.init.enable_webrtc_with_config(f)?;
-        Ok(self)
+        self.init = self.init.enable_webrtc_with_config(f);
+        self
     }
 
     /// Enable WebRTC transport with a provided pre-generated pem.
@@ -483,7 +501,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     pub fn enable_webrtc_with_pem(self, pem: impl Into<String>) -> Self {
         let pem = pem.into();
         self.enable_webrtc_with_config(move |_| Ok(pem))
-            .expect("pem is provided; should not fail")
     }
 
     /// Enables memory transport
@@ -577,8 +594,6 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         repo.init().instrument(init_span.clone()).await?;
 
         let repo_events = repo.initialize_channel();
-
-        let keystore = options.keystore.clone();
 
         //Note: If `All` or `Pinned` are used, we would have to auto adjust the amount of
         //      provider records by adding the amount of blocks to the config.
@@ -680,24 +695,21 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         context.repo_events.replace(repo_events);
 
         let connexa = init
-            .with_custom_behaviour_with_context(
-                (options, repo.clone()),
-                |keys, (options, repo)| {
-                    let custom_behaviour = match custom_behaviour {
-                        Some(custom_behaviour) => Some(custom_behaviour(keys)?),
-                        None => None,
-                    };
-                    Ok(create_create_behaviour(
-                        keys,
-                        &options,
-                        &repo,
-                        custom_behaviour,
-                    ))
-                },
-            )?
+            .with_custom_behaviour_with_context((options, repo.clone()), |keys, (options, repo)| {
+                let custom_behaviour = match custom_behaviour {
+                    Some(custom_behaviour) => Some(custom_behaviour(keys)?),
+                    None => None,
+                };
+                Ok(create_create_behaviour(
+                    keys,
+                    &options,
+                    &repo,
+                    custom_behaviour,
+                ))
+            })
             .set_context(context)
-            .set_custom_task_callback(|swarm, context, event| context.handle_event(swarm, event))
-            .set_swarm_event_callback(move |swarm, event, context| {
+            .set_custom_task_callback(|swarm, _, context, event| context.handle_event(swarm, event))
+            .set_swarm_event_callback(move |swarm, _, event, context| {
                 if let Some(callback) = swarm_event.as_ref() {
                     callback(swarm, event);
                 }
@@ -719,7 +731,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                     }
                 }
             })
-            .set_pollable_callback(|cx, swarm, context| {
+            .set_pollable_callback(|cx, swarm, _, context| {
                 let custom = swarm
                     .behaviour_mut()
                     .custom
@@ -730,7 +742,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 }
                 Poll::Pending
             })
-            .set_preload(|_, swarm, _| {
+            .set_preload(|_, swarm, _, _| {
                 for addr in listening_addrs {
                     if let Err(e) = swarm.listen_on(addr.clone()) {
                         tracing::error!(%addr, %e, "failed to listen on address");
@@ -749,12 +761,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                     }
                 }
             })
-            .build()?;
+            .build()
+            .await?;
 
         let ipfs = Ipfs {
             span: facade_span,
             repo,
-            keystore,
             connexa,
             record_key_validator: Arc::new(record_key_validator),
             _gc_guard: gc_handle,

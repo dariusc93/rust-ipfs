@@ -29,7 +29,9 @@ use tracing::{Instrument, Span};
 #[cfg(test)]
 mod common_tests;
 
-pub use store::{blockstore, datastore, default_impl::DefaultStorage};
+pub use store::{
+    blockstore, datastore, default_impl::keystore::DefaultKeystore, default_impl::DefaultStorage,
+};
 
 pub mod lock;
 

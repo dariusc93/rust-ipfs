@@ -6,14 +6,18 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // tracing_subscriber::fmt::init();
+
     let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
         .enable_tcp()
+        .enable_quic()
         .enable_dns()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .start()
         .await?;
     ipfs.default_bootstrap().await?;
+    ipfs.bootstrap().await?;
 
     let readme_bytes = ipfs
         .cat_unixfs(IpfsPath::from_str(

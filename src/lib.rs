@@ -31,7 +31,6 @@ mod context;
 pub mod dag;
 pub mod error;
 pub mod ipns;
-mod keystore;
 pub mod p2p;
 pub mod path;
 pub mod refs;
@@ -49,8 +48,6 @@ use futures::{
     stream::BoxStream,
     StreamExt,
 };
-
-use keystore::Keystore;
 
 use p2p::{MultiaddrExt, PeerInfo};
 use repo::{DefaultStorage, RepoFetch, RepoInsertPin, RepoRemovePin};
@@ -78,18 +75,19 @@ pub use connexa::prelude::request_response::{
 pub use connexa::prelude::swarm::derive_prelude::{ConnectionId, ListenerId};
 pub use connexa::prelude::swarm::dial_opts::{DialOpts, PeerCondition};
 pub use connexa::prelude::{
-    connection_limits::ConnectionLimits,
-    gossipsub, identify, ping,
-    swarm::{self, NetworkBehaviour},
-    GossipsubMessage, Stream,
+    connection_limits::ConnectionLimits, gossipsub,
+    identify,
+    ping, swarm::{self, NetworkBehaviour}, GossipsubMessage,
+    Stream,
 };
 pub use connexa::prelude::{
-    identity::Keypair, ConnectionEvent, Multiaddr, PeerId, Protocol, StreamProtocol,
+    identity::Keypair, ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol,
 };
 pub use connexa::{behaviour::request_response::RequestResponseConfig, dummy};
 use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
 
+use connexa::keystore::Keychain;
 use connexa::prelude::gossipsub::IntoGossipsubTopic;
 use connexa::prelude::rendezvous::IntoNamespace;
 #[cfg(feature = "stream")]
@@ -130,8 +128,6 @@ struct IpfsOptions {
 
     /// Address book configuration
     pub addr_config: AddressBookConfig,
-
-    pub keystore: Keystore,
 
     /// Repo Provider option
     pub provider: RepoProvider,
@@ -177,7 +173,6 @@ impl Default for IpfsOptions {
             bootstrap: Default::default(),
             addr_config: Default::default(),
             provider: Default::default(),
-            keystore: Keystore::in_memory(),
             listening_addrs: vec![],
             span: None,
             protocols: Default::default(),
@@ -210,8 +205,7 @@ impl fmt::Debug for IpfsOptions {
 pub struct Ipfs {
     span: Span,
     repo: Repo<DefaultStorage>,
-    connexa: Connexa<IpfsEvent>,
-    keystore: Keystore,
+    connexa: Connexa<IpfsEvent, DefaultKeystore>,
     record_key_validator:
         Arc<HashMap<String, Box<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>>,
     _gc_guard: AbortableJoinHandle<()>,
@@ -745,7 +739,7 @@ impl Ipfs {
         &self,
         peers: impl IntoIterator<Item = PeerId>,
         request: impl IntoRequest,
-    ) -> Result<BoxStream<'static, (PeerId, std::io::Result<Bytes>)>, Error> {
+    ) -> Result<BoxStream<'static, (PeerId, Result<Bytes, connexa::error::Error>)>, Error> {
         self.connexa
             .request_response()
             .send_requests(peers, request)
@@ -901,7 +895,7 @@ impl Ipfs {
             .map_err(Into::into)
     }
 
-    pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnectionEvent>, Error> {
+    pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnexaSwarmEvent>, Error> {
         self.connexa.swarm().listener().await.map_err(Into::into)
     }
 
@@ -914,7 +908,7 @@ impl Ipfs {
         let st = async_stream::stream! {
             while let Some(event) = st.next().await {
                 yield match event {
-                    ConnectionEvent::ConnectionEstablished { peer_id, connection_id, endpoint, .. } if peer_id == target => {
+                    ConnexaSwarmEvent::ConnectionEstablished { peer_id, connection_id, endpoint, .. } if peer_id == target => {
                         match endpoint {
                             ConnectedPoint::Listener { send_back_addr, .. } => {
                                 PeerConnectionEvents::IncomingConnection { connection_id, addr: send_back_addr }
@@ -924,7 +918,7 @@ impl Ipfs {
                             }
                         }
                     },
-                    ConnectionEvent::ConnectionClosed { peer_id, connection_id, .. } if peer_id == target => {
+                    ConnexaSwarmEvent::ConnectionClosed { peer_id, connection_id, .. } if peer_id == target => {
                         PeerConnectionEvents::ClosedConnection { connection_id }
                     }
                     _ => continue,
@@ -954,7 +948,7 @@ impl Ipfs {
     pub async fn get_providers(
         &self,
         cid: Cid,
-    ) -> Result<BoxStream<'static, std::io::Result<HashSet<PeerId>>>, Error> {
+    ) -> Result<BoxStream<'static, Result<HashSet<PeerId>, connexa::error::Error>>, Error> {
         self.dht_get_providers(cid).await
     }
 
@@ -962,7 +956,7 @@ impl Ipfs {
     pub async fn dht_get_providers(
         &self,
         key: impl ToRecordKey,
-    ) -> Result<BoxStream<'static, std::io::Result<HashSet<PeerId>>>, Error> {
+    ) -> Result<BoxStream<'static, Result<HashSet<PeerId>, connexa::error::Error>>, Error> {
         self.connexa
             .dht()
             .get_providers(key)
@@ -1362,9 +1356,9 @@ impl Ipfs {
         self.connexa.keypair()
     }
 
-    /// Returns the keystore
-    pub fn keystore(&self) -> &Keystore {
-        &self.keystore
+    /// Returns the keychain
+    pub fn keychain(&self) -> &Keychain<DefaultKeystore> {
+        &self.connexa.keychain()
     }
 
     /// Exit daemon.
@@ -1592,7 +1586,7 @@ pub(crate) fn to_dht_key<B: AsRef<str>, F: Fn(&str) -> anyhow::Result<RecordKey>
 }
 
 use crate::p2p::AddressBookConfig;
-use crate::repo::{RepoGetBlock, RepoPutBlock};
+use crate::repo::{DefaultKeystore, RepoGetBlock, RepoPutBlock};
 #[cfg(all(feature = "full", not(target_arch = "wasm32")))]
 #[doc(hidden)]
 pub use node::Node;

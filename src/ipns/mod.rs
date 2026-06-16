@@ -158,7 +158,12 @@ impl Ipns {
         let path = path.borrow();
 
         let keypair = match key {
-            Some(key) => self.ipfs.keystore().get_keypair(key).await?,
+            Some(key) => self
+                .ipfs
+                .keychain()
+                .get(key)
+                .await
+                .map_err(anyhow::Error::from)?,
             None => self.ipfs.keypair().clone(),
         };
 
