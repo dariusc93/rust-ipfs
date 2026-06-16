@@ -41,6 +41,23 @@ impl FakeBlockstore {
         cid
     }
 
+    pub fn insert_v1_raw(&mut self, block: &[u8]) -> Cid {
+        use sha2::Digest;
+        let mut sha = sha2::Sha256::new();
+        sha.update(block);
+        let result = sha.finalize();
+
+        let mh = Multihash::wrap(multihash_codetable::Code::Sha2_256.into(), &result[..]).unwrap();
+        let cid = Cid::new_v1(0x55, mh);
+
+        assert!(
+            self.blocks.insert(cid, block.to_vec()).is_none(),
+            "duplicate cid {cid}"
+        );
+
+        cid
+    }
+
     pub fn with_fixtures() -> Self {
         let mut this = Self::default();
         let foobar_blocks: &[&[u8]] = &[

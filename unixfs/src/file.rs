@@ -16,6 +16,8 @@ pub mod visit;
 /// File adder capable of constructing UnixFs v1 trees
 pub mod adder;
 
+pub(crate) const RAW_LEAF_CODEC: u64 = 0x55;
+
 /// Describes the errors which can happen during a visit or lower level block-by-block walking of
 /// the DAG.
 #[derive(Debug)]

@@ -182,6 +182,19 @@ impl Stream for UnixfsCat {
                             StartingPoint::Right(block) => block,
                         };
 
+                        if block.cid().codec() == 0x55 {
+                            let content = visit.start_from_raw(block.data()).0;
+                            if !content.is_empty() {
+                                if let Some(length) = length {
+                                    if content.len() > length {
+                                        Err::<(), TraversalFailed>(TraversalFailed::MaxLengthExceeded { size: content.len(), length })?;
+                                    }
+                                }
+                                yield Bytes::copy_from_slice(content);
+                            }
+                            return;
+                        }
+
                         let mut cache = None;
                         let mut size = 0;
 

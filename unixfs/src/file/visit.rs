@@ -38,6 +38,14 @@ impl IdleFileVisit {
         self.start_from_reader(fr, &mut None)
     }
 
+    /// Begins the visitation of a raw-codec (0x55) leaf, whose bytes are the file content directly
+    /// with no dag-pb/UnixFs wrapper. Any target range is applied to the returned content.
+    pub fn start_from_raw(self, block: &'_ [u8]) -> FileVisitResult<'_> {
+        let range = 0..block.len() as u64;
+        let content = maybe_target_slice(block, &range, self.range.as_ref());
+        (content, block.len() as u64, Metadata::default(), None)
+    }
+
     pub(crate) fn start_from_parsed<'a>(
         self,
         block: FlatUnixFs<'a>,
@@ -159,10 +167,22 @@ impl FileVisit {
         cache: &mut Option<Cache>,
     ) -> Result<(&'a [u8], Option<Self>), FileReadFailed> {
         let traversal = self.state;
-        let (_, range) = self
+        let (cid, range) = self
             .pending
             .pop()
             .expect("User called continue_walk there must have been a next link");
+
+        if cid.codec() == crate::file::RAW_LEAF_CODEC {
+            let (content, traversal) = traversal.continue_walk_raw(next, &range)?;
+            let content = maybe_target_slice(content, &range, self.range.as_ref());
+            return if !self.pending.is_empty() {
+                self.state = traversal;
+                Ok((content, Some(self)))
+            } else {
+                *cache = Some(self.pending.into());
+                Ok((content, None))
+            };
+        }
 
         // interesting, validation doesn't trigger if the range is the same?
         let fr = traversal.continue_walk(next, &range)?;
