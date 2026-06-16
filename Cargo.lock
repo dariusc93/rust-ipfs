@@ -4275,9 +4275,9 @@ version = "0.8.1"
 dependencies = [
  "bytes",
  "chrono",
- "cid",
  "clap",
  "getrandom 0.3.4",
+ "ipld-core",
  "libp2p-identity",
  "multihash",
  "quick-protobuf",

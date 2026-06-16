@@ -14,14 +14,14 @@ keywords = ["libp2p", "ipfs"]
 
 [dependencies]
 serde_ipld_dagcbor.workspace = true
+ipld-core.workspace = true
 bytes = { workspace = true, features = ["serde"] }
 quick-protobuf.workspace = true
-cid.workspace = true
 serde = { workspace = true, features = ["derive"] }
 multihash.workspace = true
 chrono.workspace = true
 
-libp2p-identity = { version = "0.2.13", optional = true, features = ["peerid", "rand"] }
+libp2p-identity = { version = "0.2.13", features = ["peerid", "rand"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
@@ -30,11 +30,9 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 clap = { workspace = true, features = ["derive"] }
 
 [features]
-libp2p = ["dep:libp2p-identity"]
+default = ["rsa", "ed25519", "secp256k1", "ecdsa"]
 
-default = ["libp2p", "rsa", "ed25519", "secp256k1", "ecdsa"]
-
-rsa = ["libp2p-identity?/rsa"]
-ed25519 = ["libp2p-identity?/ed25519"]
-secp256k1 = ["libp2p-identity?/secp256k1"]
-ecdsa = ["libp2p-identity?/ecdsa"]
+rsa = ["libp2p-identity/rsa"]
+ed25519 = ["libp2p-identity/ed25519"]
+secp256k1 = ["libp2p-identity/secp256k1"]
+ecdsa = ["libp2p-identity/ecdsa"]

@@ -22,7 +22,11 @@ fn parse_and_reconstruct_kubo_record() {
         .unwrap()
         .into();
 
-    record.verify(PeerId::from_public_key(&public_key)).unwrap();
+    let peer_id = PeerId::from_public_key(&public_key);
+    // these fixtures have a long-elapsed EOL, so full verify() rejects them as expired while the
+    // signature/name binding still checks out.
+    record.verify_signature(peer_id).unwrap();
+    assert!(record.verify(peer_id).is_err());
 
     let new_record_bytes = record.encode().unwrap();
     assert_eq!(original_record_bytes, new_record_bytes);
@@ -38,7 +42,9 @@ fn parse_and_reconstruct_kubo_record_seq_zero() {
         .unwrap()
         .into();
 
-    record.verify(PeerId::from_public_key(&public_key)).unwrap();
+    let peer_id = PeerId::from_public_key(&public_key);
+    record.verify_signature(peer_id).unwrap();
+    assert!(record.verify(peer_id).is_err());
 
     let new_record_bytes = record.encode().unwrap();
     assert_eq!(original_record_bytes, new_record_bytes);

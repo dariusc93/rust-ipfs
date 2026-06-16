@@ -119,7 +119,7 @@ pollable-map.workspace = true
 quick-protobuf-codec.workspace = true
 quick-protobuf.workspace = true
 rand.workspace = true
-rust-ipns = { workspace = true, features = ["libp2p"] }
+rust-ipns = { workspace = true }
 rust-unixfs = { workspace = true }
 serde = { features = ["derive"], workspace = true }
 serde_ipld_dagcbor.workspace = true

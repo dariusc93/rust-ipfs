@@ -19,7 +19,7 @@ fn main() -> std::io::Result<()> {
 
     let record = Record::decode(bytes)?;
 
-    let value = record.value()?;
+    let value = String::from_utf8_lossy(record.value());
 
     let validity_type = record.validity_type();
 
@@ -29,10 +29,10 @@ fn main() -> std::io::Result<()> {
 
     let ttl = record.ttl();
 
-    let sig_v1 = record.signature_v1();
-    let sig_v2 = record.signature_v2();
+    let sig_v1 = record.has_signature_v1();
+    let sig_v2 = record.has_signature_v2();
 
-    println!("Value: /ipfs/{value}");
+    println!("Value: {value}");
     println!("Validity Type: {validity_type}");
     println!("Validity: {validity}");
     println!("Sequence: {seq}");

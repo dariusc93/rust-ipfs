@@ -1,3 +1,7 @@
+# 0.9.0
+
+- feat: update ipns logic
+
 # 0.7.2
 
 - chore: update libp2p-identity to 0.2.13.

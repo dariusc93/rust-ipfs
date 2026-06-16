@@ -1,4 +1,4 @@
-use chrono::Duration;
+use chrono::{Duration, Utc};
 
 use libp2p_identity::Keypair;
 use rust_ipns::Record;
@@ -9,9 +9,9 @@ fn main() -> std::io::Result<()> {
     let record = Record::new(
         &keypair,
         b"/path/cid",
-        Duration::try_seconds(60).unwrap(),
+        Utc::now() + Duration::try_seconds(60).unwrap(),
         0,
-        0,
+        std::time::Duration::ZERO,
     )?;
 
     let peer_id = keypair.public().to_peer_id();

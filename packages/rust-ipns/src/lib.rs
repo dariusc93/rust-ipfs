@@ -1,24 +1,125 @@
 use bytes::Bytes;
 use chrono::DateTime;
-use chrono::Duration;
+use ipld_core::ipld::Ipld;
+use std::collections::BTreeMap;
 use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
-use cid::Cid;
-use libp2p_identity::Keypair;
 use libp2p_identity::PeerId;
 use libp2p_identity::PublicKey;
+use libp2p_identity::{DecodingError, Keypair, SigningError};
 use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize, Serializer};
-use std::ops::Add;
 
 mod generate;
 
 const SIGNATURE_V2_BASE: &[u8] = &[
     0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x3a,
 ];
+
+/// libp2p inlines a public key into the PeerID (via an `identity` multihash) when its protobuf
+/// encoding is at most this many bytes; larger keys are referenced by a sha2-256 hash instead.
+const MAX_INLINE_KEY_LENGTH: usize = 42;
+
+/// Errors produced when creating, decoding, or validating an IPNS [`Record`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Error {
+    /// The record exceeds the 10 KiB IPNS size limit.
+    RecordTooLarge,
+    /// The record is missing its V2 signature.
+    MissingSignature,
+    /// The record is missing its data field.
+    EmptyData,
+    /// The signing key does not correspond to the IPNS name.
+    NameMismatch,
+    /// The IPNS name does not inline a public key and the record omits one.
+    MissingPublicKey,
+    /// The V2 signature failed verification.
+    InvalidSignature,
+    /// The record's EOL validity has elapsed.
+    Expired,
+    /// The dag-cbor data does not match the record's protobuf fields.
+    DataMismatch,
+    /// Unrecognized validity type.
+    InvalidValidityType,
+    /// Malformed protobuf.
+    Protobuf(quick_protobuf::Error),
+    /// Malformed dag-cbor data.
+    Cbor(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Malformed EOL validity timestamp.
+    InvalidValidity(chrono::ParseError),
+    /// A key or signing operation failed.
+    SigningError(SigningError),
+    /// Invalid public key.
+    InvalidPublicKey(DecodingError),
+    /// Malformed multihash or peer id.
+    Multihash(multihash::Error),
+    /// A metadata key collides with a reserved IPNS field name.
+    ReservedMetadataKey(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::RecordTooLarge => write!(f, "record exceeds the 10 KiB limit"),
+            Error::MissingSignature => write!(f, "record is missing a V2 signature"),
+            Error::EmptyData => write!(f, "record is missing its data field"),
+            Error::NameMismatch => write!(f, "public key does not match the IPNS name"),
+            Error::MissingPublicKey => {
+                write!(
+                    f,
+                    "record omits pubKey but the IPNS name does not inline one"
+                )
+            }
+            Error::InvalidSignature => write!(f, "signature is invalid"),
+            Error::Expired => write!(f, "record has expired"),
+            Error::DataMismatch => write!(f, "dag-cbor data does not match the protobuf fields"),
+            Error::InvalidValidityType => write!(f, "invalid validity type"),
+            Error::Protobuf(e) => write!(f, "protobuf error: {e}"),
+            Error::Cbor(e) => write!(f, "dag-cbor error: {e}"),
+            Error::InvalidValidity(e) => write!(f, "invalid validity timestamp: {e}"),
+            Error::SigningError(e) => write!(f, "signing error: {e}"),
+            Error::InvalidPublicKey(e) => write!(f, "invalid public key: {e}"),
+            Error::Multihash(e) => write!(f, "invalid multihash: {e}"),
+            Error::ReservedMetadataKey(k) => write!(f, "metadata key `{k}` is reserved"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Protobuf(e) => Some(e),
+            Error::SigningError(e) => Some(e),
+            Error::InvalidPublicKey(e) => Some(e),
+            Error::Multihash(e) => Some(e),
+            Error::Cbor(e) => Some(&**e),
+            Error::InvalidValidity(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<quick_protobuf::Error> for Error {
+    fn from(e: quick_protobuf::Error) -> Self {
+        Error::Protobuf(e)
+    }
+}
+
+impl From<chrono::ParseError> for Error {
+    fn from(e: chrono::ParseError) -> Self {
+        Error::InvalidValidity(e)
+    }
+}
+
+impl From<Error> for std::io::Error {
+    fn from(e: Error) -> Self {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(i32)]
@@ -52,14 +153,11 @@ impl<'de> Deserialize<'de> for ValidityType {
 }
 
 impl TryFrom<i32> for ValidityType {
-    type Error = std::io::Error;
+    type Error = Error;
     fn try_from(i: i32) -> Result<Self, Self::Error> {
         match i {
             0 => Ok(ValidityType::EOL),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid validity type",
-            )),
+            _ => Err(Error::InvalidValidityType),
         }
     }
 }
@@ -74,27 +172,6 @@ impl From<generate::ipns_pb::mod_IpnsEntry::ValidityType> for ValidityType {
     fn from(v_ty: generate::ipns_pb::mod_IpnsEntry::ValidityType) -> Self {
         match v_ty {
             generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL => ValidityType::EOL,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(i32)]
-pub enum KeyType {
-    RSA = 0,
-    Ed25519 = 1,
-    Secp256k1 = 2,
-    ECDSA = 3,
-}
-
-#[cfg(feature = "libp2p")]
-impl From<libp2p_identity::KeyType> for KeyType {
-    fn from(ty: libp2p_identity::KeyType) -> Self {
-        match ty {
-            libp2p_identity::KeyType::Ed25519 => KeyType::Ed25519,
-            libp2p_identity::KeyType::RSA => KeyType::RSA,
-            libp2p_identity::KeyType::Secp256k1 => KeyType::Secp256k1,
-            libp2p_identity::KeyType::Ecdsa => KeyType::ECDSA,
         }
     }
 }
@@ -165,11 +242,21 @@ pub struct Data {
 
     #[serde(rename = "TTL")]
     pub ttl: u64,
+
+    /// Additional non-standard metadata keys carried in the dag-cbor map. Empty for typical
+    /// records; preserved verbatim on decode/encode and covered by the V2 signature.
+    #[serde(flatten)]
+    pub metadata: BTreeMap<String, Ipld>,
 }
 
 impl Data {
     pub fn value(&self) -> &[u8] {
         &self.value
+    }
+
+    /// Non-standard metadata keys carried alongside the reserved IPNS fields.
+    pub fn metadata(&self) -> &BTreeMap<String, Ipld> {
+        &self.metadata
     }
 
     pub fn validity_type(&self) -> ValidityType {
@@ -190,20 +277,40 @@ impl Data {
 }
 
 impl Record {
-    #[cfg(feature = "libp2p")]
+    /// Creates and signs an IPNS record pointing at `value`, valid until the absolute `eol`
+    /// (End-Of-Life) timestamp. `ttl` is a caching hint for resolvers.
     pub fn new(
         keypair: &Keypair,
         value: impl AsRef<[u8]>,
-        duration: Duration,
+        eol: DateTime<Utc>,
         seq: u64,
-        ttl: u64,
-    ) -> std::io::Result<Self> {
+        ttl: std::time::Duration,
+    ) -> Result<Self, Error> {
+        Self::new_with_metadata(keypair, value, eol, seq, ttl, BTreeMap::new())
+    }
+
+    /// Like [`Record::new`] but attaches additional dag-cbor `metadata` keys to the record. Keys
+    /// must not collide with the reserved fields (`Value`, `Validity`, `ValidityType`, `Sequence`,
+    /// `TTL`).
+    pub fn new_with_metadata(
+        keypair: &Keypair,
+        value: impl AsRef<[u8]>,
+        eol: DateTime<Utc>,
+        seq: u64,
+        ttl: std::time::Duration,
+        metadata: BTreeMap<String, Ipld>,
+    ) -> Result<Self, Error> {
+        for reserved in ["Value", "Validity", "ValidityType", "Sequence", "TTL"] {
+            if metadata.contains_key(reserved) {
+                return Err(Error::ReservedMetadataKey(reserved.to_string()));
+            }
+        }
+
         let value = value.as_ref().to_vec();
 
-        let validity = Utc::now()
-            .add(duration)
-            .to_rfc3339_opts(SecondsFormat::Nanos, true)
-            .into_bytes();
+        let ttl = u64::try_from(ttl.as_nanos()).unwrap_or(u64::MAX);
+
+        let validity = eol.to_rfc3339_opts(SecondsFormat::Nanos, true).into_bytes();
 
         let validity_type = ValidityType::EOL;
 
@@ -219,7 +326,7 @@ impl Record {
 
         let signature_v1 = keypair
             .sign(&signature_v1_construct)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(Error::SigningError)?;
 
         let document = Data {
             value: Bytes::from(value.clone()),
@@ -227,10 +334,10 @@ impl Record {
             validity: Bytes::from(validity.clone()),
             sequence: seq,
             ttl,
+            metadata,
         };
 
-        let data = serde_ipld_dagcbor::to_vec(&document)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let data = serde_ipld_dagcbor::to_vec(&document).map_err(|e| Error::Cbor(Box::new(e)))?;
 
         let signature_v2_construct = SIGNATURE_V2_BASE
             .iter()
@@ -240,13 +347,13 @@ impl Record {
 
         let signature_v2 = keypair
             .sign(&signature_v2_construct)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(Error::SigningError)?;
 
-        let public_key = match keypair.key_type().into() {
-            KeyType::RSA => keypair
-                .to_protobuf_encoding()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-            _ => vec![],
+        let encoded_public_key = keypair.public().encode_protobuf();
+        let public_key = if encoded_public_key.len() > MAX_INLINE_KEY_LENGTH {
+            encoded_public_key
+        } else {
+            Vec::new()
         };
 
         Ok(Record {
@@ -262,29 +369,26 @@ impl Record {
         })
     }
 
-    pub fn decode(data: impl AsRef<[u8]>) -> std::io::Result<Self> {
+    pub fn decode(data: impl AsRef<[u8]>) -> Result<Self, Error> {
         let data = data.as_ref();
 
         if data.len() > 10 * 1024 {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+            return Err(Error::RecordTooLarge);
         }
 
         let mut reader = BytesReader::from_bytes(data);
-        let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)?;
         let record = entry.into();
         Ok(record)
     }
 
-    pub fn encode(&self) -> std::io::Result<Vec<u8>> {
+    pub fn encode(&self) -> Result<Vec<u8>, Error> {
         let entry: generate::ipns_pb::IpnsEntry = self.into();
 
         let mut buf = Vec::with_capacity(entry.get_size());
         let mut writer = Writer::new(&mut buf);
 
-        entry
-            .write_message(&mut writer)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        entry.write_message(&mut writer)?;
 
         Ok(buf)
     }
@@ -299,27 +403,28 @@ impl Record {
         self.validity_type
     }
 
-    pub fn validity(&self) -> std::io::Result<DateTime<FixedOffset>> {
+    pub fn validity(&self) -> Result<DateTime<FixedOffset>, Error> {
         let time = String::from_utf8_lossy(&self.validity);
-        chrono::DateTime::parse_from_rfc3339(&time)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        Ok(chrono::DateTime::parse_from_rfc3339(&time)?)
     }
 
     pub fn ttl(&self) -> u64 {
         self.ttl
     }
 
-    pub fn signature_v1(&self) -> bool {
+    /// Whether the record carries a (legacy) V1 signature.
+    pub fn has_signature_v1(&self) -> bool {
         !self.signature_v1.is_empty()
     }
 
-    pub fn signature_v2(&self) -> bool {
+    /// Whether the record carries a V2 signature.
+    pub fn has_signature_v2(&self) -> bool {
         !self.signature_v2.is_empty()
     }
 
-    pub fn data(&self) -> std::io::Result<Data> {
-        let data: Data = serde_ipld_dagcbor::from_slice(&self.data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    pub fn data(&self) -> Result<Data, Error> {
+        let data: Data =
+            serde_ipld_dagcbor::from_slice(&self.data).map_err(|e| Error::Cbor(Box::new(e)))?;
 
         if data.value != self.value
             || data.validity != self.validity
@@ -327,57 +432,46 @@ impl Record {
             || data.sequence != self.sequence
             || data.ttl != self.ttl
         {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+            return Err(Error::DataMismatch);
         }
 
         Ok(data)
     }
 
-    pub fn value(&self) -> std::io::Result<Cid> {
-        let cid_str = String::from_utf8_lossy(&self.value);
-        Cid::try_from(cid_str.as_ref())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    /// The raw IPNS value.
+    pub fn value(&self) -> &[u8] {
+        &self.value
     }
 
-    #[cfg(feature = "libp2p")]
-    pub fn verify(&self, peer_id: PeerId) -> std::io::Result<()> {
+    pub fn verify_signature(&self, peer_id: PeerId) -> Result<(), Error> {
         use multihash::Multihash;
 
-        if self.signature_v2.is_empty() && self.signature_v1.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Empty signature field",
-            ));
+        if self.signature_v2.is_empty() {
+            return Err(Error::MissingSignature);
         }
 
         if self.data.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Empty data field",
-            ));
+            return Err(Error::EmptyData);
         }
 
-        let key = peer_id.to_bytes();
-
-        let mh = Multihash::from_bytes(&key).expect("valid hash");
-        let cid = Cid::new_v1(0x72, mh);
-
-        let public_key = match self.public_key.is_empty() {
-            true => cid.hash().digest(),
-            //TODO: Validate internal public key against the multhash publickey
-            false => self.public_key.as_ref(),
-        };
-
-        let pk = PublicKey::try_decode_protobuf(public_key)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        //TODO: Implement support for RSA
-        if matches!(pk.key_type().into(), KeyType::RSA) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "RSA Keys are not supported at this time",
-            ));
+        let public_key = if self.public_key.is_empty() {
+            let mh = Multihash::<64>::from_bytes(&peer_id.to_bytes()).map_err(Error::Multihash)?;
+            // small keys are inlined in the name via an identity (code 0) multihash; anything
+            // else (e.g. an RSA name) carries no inlined key, so the record must embed one.
+            if mh.code() != 0 {
+                return Err(Error::MissingPublicKey);
+            }
+            PublicKey::try_decode_protobuf(mh.digest())
+        } else {
+            PublicKey::try_decode_protobuf(&self.public_key)
         }
+        .map_err(Error::InvalidPublicKey)?;
+
+        if PeerId::from_public_key(&public_key) != peer_id {
+            return Err(Error::NameMismatch);
+        }
+
+        self.data()?;
 
         let signature_v2 = SIGNATURE_V2_BASE
             .iter()
@@ -385,15 +479,220 @@ impl Record {
             .copied()
             .collect::<Vec<_>>();
 
-        self.data()?;
-
-        if !pk.verify(&signature_v2, &self.signature_v2) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Signature is invalid",
-            ));
+        if !public_key.verify(&signature_v2, &self.signature_v2) {
+            return Err(Error::InvalidSignature);
         }
 
         Ok(())
+    }
+
+    /// Fully validates the record against `peer_id`: name binding, V2 signature, and that the EOL
+    /// validity has not elapsed.
+    pub fn verify(&self, peer_id: PeerId) -> Result<(), Error> {
+        self.verify_signature(peer_id)?;
+
+        if self.validity()?.with_timezone(&Utc) < Utc::now() {
+            return Err(Error::Expired);
+        }
+
+        Ok(())
+    }
+
+    /// Orders this record against `other` by IPNS precedence: higher `sequence` wins, then the
+    /// later EOL `validity`.
+    /// Records should already be validated and refer to the same name.
+    pub fn compare(&self, other: &Record) -> Result<std::cmp::Ordering, Error> {
+        use std::cmp::Ordering;
+
+        match self
+            .has_signature_v2()
+            .cmp(&other.has_signature_v2())
+            .then_with(|| self.sequence.cmp(&other.sequence))
+        {
+            Ordering::Equal => Ok(self.validity()?.cmp(&other.validity()?)),
+            ord => Ok(ord),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+
+    fn record_for(kp: &Keypair, hours: i64) -> Record {
+        Record::new(
+            kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(hours),
+            0,
+            std::time::Duration::ZERO,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn valid_record_roundtrips_and_verifies() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let rec = record_for(&kp, 24);
+        rec.verify(peer).unwrap();
+
+        let decoded = Record::decode(rec.encode().unwrap()).unwrap();
+        decoded.verify(peer).unwrap();
+    }
+
+    #[test]
+    fn verify_rejects_expired_record_but_signature_still_checks() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let rec = record_for(&kp, -1);
+        rec.verify_signature(peer).unwrap();
+        assert!(rec.verify(peer).is_err());
+    }
+
+    #[test]
+    fn embedded_pubkey_must_match_the_name() {
+        let attacker = Keypair::generate_ed25519();
+        let victim = Keypair::generate_ed25519();
+        let attacker_peer = PeerId::from_public_key(&attacker.public());
+        let victim_peer = PeerId::from_public_key(&victim.public());
+
+        // a genuine attacker record, with the attacker's pubKey spliced into the protobuf
+        // (field 7, tag 0x3a) to mimic a record that carries an embedded key.
+        let mut bytes = record_for(&attacker, 24).encode().unwrap();
+        let pk = attacker.public().encode_protobuf();
+        bytes.push(0x3a);
+        bytes.push(pk.len() as u8); // an ed25519 protobuf key is < 128 bytes
+        bytes.extend_from_slice(&pk);
+
+        let tampered = Record::decode(&bytes).unwrap();
+        tampered.verify_signature(attacker_peer).unwrap();
+        // the embedded key does not hash to the victim's name, so it must not validate for it.
+        assert!(tampered.verify_signature(victim_peer).is_err());
+    }
+
+    #[test]
+    fn create_and_verify_across_key_types() {
+        // Ed25519/Secp256k1 inline into the name; ECDSA does not, so its record must embed the
+        // public key. All must create and verify (and survive a wire round-trip).
+        for kp in [
+            Keypair::generate_ed25519(),
+            Keypair::generate_secp256k1(),
+            Keypair::generate_ecdsa(),
+        ] {
+            let peer = PeerId::from_public_key(&kp.public());
+            let rec = Record::new(
+                &kp,
+                b"/ipfs/bafkqaaa",
+                Utc::now() + Duration::hours(24),
+                0,
+                std::time::Duration::ZERO,
+            )
+            .unwrap();
+            rec.verify(peer).unwrap();
+            let decoded = Record::decode(rec.encode().unwrap()).unwrap();
+            decoded.verify(peer).unwrap();
+        }
+    }
+
+    #[test]
+    fn compare_prefers_higher_sequence_then_later_validity() {
+        use std::cmp::Ordering;
+        let kp = Keypair::generate_ed25519();
+
+        let seq0 = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(24),
+            0,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let seq1 = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(1),
+            1,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        // higher sequence wins even with an earlier EOL
+        assert_eq!(seq1.compare(&seq0).unwrap(), Ordering::Greater);
+        assert_eq!(seq0.compare(&seq1).unwrap(), Ordering::Less);
+
+        let near = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(1),
+            5,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let far = Record::new(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(48),
+            5,
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        // equal sequence: the later EOL wins
+        assert_eq!(far.compare(&near).unwrap(), Ordering::Greater);
+    }
+
+    #[test]
+    fn compare_prefers_v2_over_v1_only() {
+        use std::cmp::Ordering;
+        let kp = Keypair::generate_ed25519();
+
+        let with_v2 = record_for(&kp, 1);
+        let mut v1_only = record_for(&kp, 48); // later EOL, but no V2
+        v1_only.signature_v2.clear();
+        assert!(with_v2.has_signature_v2() && !v1_only.has_signature_v2());
+
+        // V2 presence outranks both sequence and the later validity
+        assert_eq!(with_v2.compare(&v1_only).unwrap(), Ordering::Greater);
+        assert_eq!(v1_only.compare(&with_v2).unwrap(), Ordering::Less);
+    }
+
+    #[test]
+    fn metadata_roundtrips_and_is_signed() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let mut metadata = BTreeMap::new();
+        metadata.insert("Foo".to_string(), Ipld::String("bar".into()));
+        metadata.insert("Count".to_string(), Ipld::Integer(7));
+
+        let rec = Record::new_with_metadata(
+            &kp,
+            b"/ipfs/bafkqaaa",
+            Utc::now() + Duration::hours(24),
+            0,
+            std::time::Duration::ZERO,
+            metadata.clone(),
+        )
+        .unwrap();
+        rec.verify(peer).unwrap();
+
+        // survives a wire round-trip, still verifies, and exposes the metadata unchanged
+        let decoded = Record::decode(rec.encode().unwrap()).unwrap();
+        decoded.verify(peer).unwrap();
+        assert_eq!(decoded.data().unwrap().metadata(), &metadata);
+
+        // reserved keys are rejected
+        let mut bad = BTreeMap::new();
+        bad.insert("TTL".to_string(), Ipld::Integer(1));
+        assert!(matches!(
+            Record::new_with_metadata(
+                &kp,
+                b"/x",
+                Utc::now() + Duration::hours(1),
+                0,
+                std::time::Duration::ZERO,
+                bad,
+            ),
+            Err(Error::ReservedMetadataKey(_))
+        ));
     }
 }
