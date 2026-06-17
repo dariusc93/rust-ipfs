@@ -1,10 +1,14 @@
+//! A mutable filesystem (MFS) layer over immutable UnixFS DAGs.
+
 use crate::repo::{DataStore, DefaultStorage, Repo};
 use crate::{Block, Error};
 use anyhow::anyhow;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use ipld_core::cid::{Cid, Version};
 use multihash_codetable::Code;
 use rust_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
-use rust_unixfs::dir::{describe, NodeDescription};
+use rust_unixfs::dir::{describe, DirLink, NodeDescription};
 use rust_unixfs::file::adder::FileAdder;
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::collections::BTreeMap;
@@ -15,7 +19,7 @@ const ROOT_KEY: &[u8] = b"/mfs/root";
 const VERSION: Version = Version::V1;
 const HASHER: Code = Code::Sha2_256;
 
-/// A directory's immediate children: name -> (target Cid, cumulative dag size used as the link Tsize).
+/// A directory's immediate children. name to target Cid, cumulative dag size used as the link Tsize.
 type DirMap = BTreeMap<String, DirEntry>;
 
 #[derive(Debug, Clone, Copy)]
@@ -53,11 +57,20 @@ pub struct MfsStat {
 #[derive(Clone)]
 pub struct Mfs {
     repo: Repo<DefaultStorage>,
+    shard_threshold: Option<u64>,
 }
 
 impl Mfs {
     pub(crate) fn new(repo: Repo<DefaultStorage>) -> Self {
-        Self { repo }
+        Self {
+            repo,
+            shard_threshold: Some(256 * 1024),
+        }
+    }
+
+    pub fn with_shard_threshold(mut self, threshold: Option<u64>) -> Self {
+        self.shard_threshold = threshold;
+        self
     }
 
     fn repo(&self) -> &Repo<DefaultStorage> {
@@ -73,7 +86,7 @@ impl Mfs {
     /// Creates a directory at `path`. With `parents`, missing intermediate directories are created;
     /// otherwise a missing parent is an error.
     pub async fn mkdir(&self, path: &str, parents: bool) -> Result<(), Error> {
-        let (cid, tsize, blocks) = encode_dir(&DirMap::new())?;
+        let (cid, tsize, blocks) = encode_dir(&DirMap::new(), self.shard_threshold)?;
         self.set_entry(path, DirEntry { cid, tsize }, blocks, parents, false)
             .await
     }
@@ -193,7 +206,7 @@ impl Mfs {
         let comps = split_path(path)?;
         let Some(root) = self.snapshot_root().await? else {
             if comps.is_empty() {
-                let (cid, tsize, _) = encode_dir(&DirMap::new())?;
+                let (cid, tsize, _) = encode_dir(&DirMap::new(), self.shard_threshold)?;
                 return Ok(MfsStat {
                     cid,
                     kind: MfsKind::Directory,
@@ -303,7 +316,7 @@ impl Mfs {
         mut blocks: Vec<Block>,
     ) -> Result<(), Error> {
         for i in (0..frames.len()).rev() {
-            let (cid, tsize, mut blks) = encode_dir(&frames[i])?;
+            let (cid, tsize, mut blks) = encode_dir(&frames[i], self.shard_threshold)?;
             blocks.append(&mut blks);
             if i == 0 {
                 return self.commit_root(guard, cid, blocks).await;
@@ -385,18 +398,52 @@ impl Mfs {
                     )
                 })
                 .collect()),
-            NodeDescription::HamtShard => Err(anyhow!(
-                "{cid} is a HAMT-sharded directory; not supported in MFS phase 1"
-            )),
+            NodeDescription::HamtShard { links } => {
+                let mut map = DirMap::new();
+                self.collect_shard(links, &mut map).await?;
+                Ok(map)
+            }
             _ => Err(anyhow!("{cid} is not a directory")),
         }
     }
 
-    /// Classifies an entry by its block; `link_tsize` is the cumulative size recorded by the parent.
+    fn collect_shard<'a>(
+        &'a self,
+        links: Vec<DirLink>,
+        map: &'a mut DirMap,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        async move {
+            for link in links {
+                if is_shard_prefix(&link.name) {
+                    let block = self.get_block(&link.target).await?;
+                    match describe(block.data()) {
+                        NodeDescription::HamtShard { links } => {
+                            self.collect_shard(links, map).await?;
+                        }
+                        _ => return Err(anyhow!("malformed HAMT shard under {}", link.target)),
+                    }
+                } else {
+                    let name = link.name.get(2..).unwrap_or_default().to_string();
+                    map.insert(
+                        name,
+                        DirEntry {
+                            cid: link.target,
+                            tsize: link.tsize,
+                        },
+                    );
+                }
+            }
+            Ok(())
+        }
+        .boxed()
+    }
+
     async fn classify(&self, cid: &Cid, _link_tsize: u64) -> Result<MfsKind, Error> {
         let block = self.get_block(cid).await?;
         Ok(match describe(block.data()) {
-            NodeDescription::Directory { .. } | NodeDescription::HamtShard => MfsKind::Directory,
+            NodeDescription::Directory { .. } | NodeDescription::HamtShard { .. } => {
+                MfsKind::Directory
+            }
             NodeDescription::File { size } => MfsKind::File { size },
             NodeDescription::Symlink => MfsKind::Symlink,
             NodeDescription::Other => MfsKind::File {
@@ -452,14 +499,19 @@ fn split_path(path: &str) -> Result<Vec<String>, Error> {
     Ok(comps)
 }
 
-/// Encodes a single flat directory node from its children, returning its Cid, cumulative size, and
-/// every block produced (the directory node, last). HAMT sharding is disabled in phase 1.
-fn encode_dir(entries: &DirMap) -> Result<(Cid, u64, Vec<Block>), Error> {
+fn is_shard_prefix(name: &str) -> bool {
+    name.len() == 2 && name.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn encode_dir(
+    entries: &DirMap,
+    shard_threshold: Option<u64>,
+) -> Result<(Cid, u64, Vec<Block>), Error> {
     let mut opts = TreeOptions::default();
     opts.wrap_with_directory();
     opts.cid_version(VERSION);
     opts.hasher(HASHER);
-    opts.shard_threshold(None);
+    opts.shard_threshold(shard_threshold);
 
     let mut builder = BufferingTreeBuilder::new(opts);
     for (name, entry) in entries {
@@ -547,21 +599,28 @@ mod tests {
         let mfs = mfs().await;
         assert!(mfs.ls("/").await.unwrap().is_empty());
         assert_eq!(mfs.stat("/").await.unwrap().kind, MfsKind::Directory);
-        assert!(mfs.root().await.unwrap().is_none(), "reads must not create a root");
+        assert!(
+            mfs.root().await.unwrap().is_none(),
+            "reads must not create a root"
+        );
     }
 
     #[tokio::test]
     async fn write_read_roundtrip() {
         let mfs = mfs().await;
 
-        mfs.write("/docs/hello.txt", b"hello mfs", true).await.unwrap();
+        mfs.write("/docs/hello.txt", b"hello mfs", true)
+            .await
+            .unwrap();
         assert_eq!(mfs.read("/docs/hello.txt").await.unwrap(), b"hello mfs");
 
         let st = mfs.stat("/docs/hello.txt").await.unwrap();
         assert_eq!(st.kind, MfsKind::File { size: 9 });
 
         // overwrite
-        mfs.write("/docs/hello.txt", b"changed", false).await.unwrap();
+        mfs.write("/docs/hello.txt", b"changed", false)
+            .await
+            .unwrap();
         assert_eq!(mfs.read("/docs/hello.txt").await.unwrap(), b"changed");
 
         // a directory listing reflects the file
@@ -584,6 +643,44 @@ mod tests {
             MfsKind::File { size } => assert_eq!(size, data.len() as u64),
             other => panic!("expected file, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn large_dir_shards_and_roundtrips() {
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo).with_shard_threshold(Some(0));
+
+        let n = 64usize;
+        for i in 0..n {
+            mfs.write(
+                &format!("/d/file{i:03}"),
+                format!("content {i}").as_bytes(),
+                true,
+            )
+            .await
+            .unwrap();
+        }
+
+        let cid = mfs.stat("/d").await.unwrap().cid;
+        let block = mfs.get_block(&cid).await.unwrap();
+        assert!(
+            matches!(describe(block.data()), NodeDescription::HamtShard { .. }),
+            "directory should be HAMT-sharded"
+        );
+
+        let entries = mfs.ls("/d").await.unwrap();
+        assert_eq!(entries.len(), n);
+
+        assert_eq!(mfs.read("/d/file007").await.unwrap(), b"content 7");
+        assert_eq!(mfs.read("/d/file063").await.unwrap(), b"content 63");
+
+        mfs.write("/d/file064", b"new", false).await.unwrap();
+        assert_eq!(mfs.ls("/d").await.unwrap().len(), n + 1);
+
+        mfs.rm("/d/file007", false).await.unwrap();
+        assert_eq!(mfs.ls("/d").await.unwrap().len(), n);
+        assert!(mfs.read("/d/file007").await.is_err());
     }
 
     #[tokio::test]
@@ -618,7 +715,10 @@ mod tests {
         assert!(mfs.mkdir("/x/y", false).await.is_err());
         mfs.mkdir("/x", false).await.unwrap();
         mfs.mkdir("/x/y", false).await.unwrap();
-        assert!(mfs.mkdir("/x/y", false).await.is_err(), "duplicate mkdir must fail");
+        assert!(
+            mfs.mkdir("/x/y", false).await.is_err(),
+            "duplicate mkdir must fail"
+        );
     }
 
     #[tokio::test]
