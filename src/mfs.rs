@@ -1,5 +1,6 @@
 //! A mutable filesystem (MFS) layer over immutable UnixFS DAGs.
 
+use crate::path::{IpfsPath, PathRoot};
 use crate::repo::{DataStore, DefaultStorage, Repo};
 use crate::{Block, Error};
 use anyhow::anyhow;
@@ -11,7 +12,8 @@ use rust_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
 use rust_unixfs::dir::{describe, DirLink, NodeDescription};
 use rust_unixfs::file::adder::FileAdder;
 use rust_unixfs::file::visit::IdleFileVisit;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::str::FromStr;
 
 /// Datastore key holding the current MFS root Cid.
 const ROOT_KEY: &[u8] = b"/mfs/root";
@@ -53,6 +55,14 @@ pub struct MfsStat {
     pub size: u64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct WriteOptions {
+    pub offset: u64,
+    pub create: bool,
+    pub parents: bool,
+    pub truncate: bool,
+}
+
 /// Handle to the node's mutable filesystem. Obtain it via [`crate::Ipfs::mfs`].
 #[derive(Clone)]
 pub struct Mfs {
@@ -91,21 +101,71 @@ impl Mfs {
             .await
     }
 
-    /// Writes `data` as the file at `path`, creating it or overwriting an existing file. With
-    /// `parents`, missing intermediate directories are created. Errors if `path` is a directory.
+    /// Writes `data` as the whole file at `path`, creating or replacing it.
     pub async fn write(&self, path: &str, data: &[u8], parents: bool) -> Result<(), Error> {
+        self.write_with(
+            path,
+            data,
+            WriteOptions {
+                offset: 0,
+                create: true,
+                parents,
+                truncate: true,
+            },
+        )
+        .await
+    }
+
+    /// Writes `data` into the file at `path` starting at `opts.offset`, preserving the surrounding
+    /// bytes (read-modify-rewrite). `create` makes a missing file, `truncate` discards existing
+    /// content first, `parents` creates missing directories.
+    pub async fn write_with(
+        &self,
+        path: &str,
+        data: &[u8],
+        opts: WriteOptions,
+    ) -> Result<(), Error> {
         let comps = split_path(path)?;
         if comps.is_empty() {
             return Err(anyhow!("cannot write to the root directory"));
         }
-        if let Ok((cid, tsize)) = self.resolve(&comps).await
-            && matches!(self.classify(&cid, tsize).await?, MfsKind::Directory)
-        {
-            return Err(anyhow!("'{path}' is a directory"));
+
+        let existing = self.read_existing_file(&comps).await?;
+        if existing.is_none() && !opts.create {
+            return Err(anyhow!("'{path}' does not exist; pass create"));
         }
 
-        let (cid, tsize, blocks) = encode_file(data)?;
-        self.set_entry(path, DirEntry { cid, tsize }, blocks, parents, true)
+        let mut content = if opts.truncate {
+            Vec::new()
+        } else {
+            existing.unwrap_or_default()
+        };
+        let offset = opts.offset as usize;
+        let end = offset + data.len();
+        if content.len() < end {
+            content.resize(end, 0);
+        }
+        content[offset..end].copy_from_slice(data);
+
+        let (cid, tsize, blocks) = encode_file(&content)?;
+        self.set_entry(path, DirEntry { cid, tsize }, blocks, opts.parents, true)
+            .await
+    }
+
+    /// Sets the file at `path` to exactly `size` bytes, truncating or zero-extending.
+    pub async fn truncate(&self, path: &str, size: u64) -> Result<(), Error> {
+        let comps = split_path(path)?;
+        if comps.is_empty() {
+            return Err(anyhow!("cannot truncate the root directory"));
+        }
+        let mut content = self
+            .read_existing_file(&comps)
+            .await?
+            .ok_or_else(|| anyhow!("'{path}' does not exist"))?;
+        content.resize(size as usize, 0);
+
+        let (cid, tsize, blocks) = encode_file(&content)?;
+        self.set_entry(path, DirEntry { cid, tsize }, blocks, false, true)
             .await
     }
 
@@ -153,10 +213,24 @@ impl Mfs {
             .await
     }
 
-    /// Copies the MFS entry at `from` to `to` (both MFS paths). Copying from `/ipfs` is a later phase.
+    /// Copies `from` to the MFS path `to`. `from` is either another MFS path or an `/ipfs` (or
+    /// `/ipld`) path, in which case the referenced DAG is fetched locally and imported.
     pub async fn cp(&self, from: &str, to: &str, parents: bool) -> Result<(), Error> {
-        let from_comps = split_path(from)?;
-        let (cid, tsize) = self.resolve(&from_comps).await?;
+        let (cid, tsize) = if is_ipfs_path(from) {
+            let path = IpfsPath::from_str(from)?;
+            let root = match path.root() {
+                PathRoot::Ipld(cid) => *cid,
+                _ => return Err(anyhow!("cp source must resolve to an /ipfs or /ipld cid")),
+            };
+            let sub: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+            let source = self.resolve_ipfs(root, &sub).await?;
+            let tsize = self.fetch_and_measure(source).await?;
+            (source, tsize)
+        } else {
+            let from_comps = split_path(from)?;
+            self.resolve(&from_comps).await?
+        };
+
         self.set_entry(to, DirEntry { cid, tsize }, Vec::new(), parents, false)
             .await
     }
@@ -386,18 +460,7 @@ impl Mfs {
     async fn load_dir(&self, cid: &Cid) -> Result<DirMap, Error> {
         let block = self.get_block(cid).await?;
         match describe(block.data()) {
-            NodeDescription::Directory { links } => Ok(links
-                .into_iter()
-                .map(|l| {
-                    (
-                        l.name,
-                        DirEntry {
-                            cid: l.target,
-                            tsize: l.tsize,
-                        },
-                    )
-                })
-                .collect()),
+            NodeDescription::Directory { links } => Ok(links_to_map(links)),
             NodeDescription::HamtShard { links } => {
                 let mut map = DirMap::new();
                 self.collect_shard(links, &mut map).await?;
@@ -405,6 +468,42 @@ impl Mfs {
             }
             _ => Err(anyhow!("{cid} is not a directory")),
         }
+    }
+
+    async fn resolve_ipfs(&self, root: Cid, sub: &[String]) -> Result<Cid, Error> {
+        let mut cid = root;
+        for seg in sub {
+            let block = self.repo().get_block(cid).await?;
+            let map = match describe(block.data()) {
+                NodeDescription::Directory { links } => links_to_map(links),
+                NodeDescription::HamtShard { .. } => {
+                    return Err(anyhow!("cp through a HAMT-sharded directory is not yet supported"))
+                }
+                _ => return Err(anyhow!("{cid} is not a directory")),
+            };
+            let entry = map
+                .get(seg)
+                .ok_or_else(|| anyhow!("path not found in source: {seg}"))?;
+            cid = entry.cid;
+        }
+        Ok(cid)
+    }
+
+    async fn fetch_and_measure(&self, root: Cid) -> Result<u64, Error> {
+        let mut total = 0u64;
+        let mut seen = HashSet::new();
+        let mut stack = vec![root];
+        while let Some(cid) = stack.pop() {
+            if !seen.insert(cid) {
+                continue;
+            }
+            let block = self.repo().get_block(cid).await?;
+            total += block.data().len() as u64;
+            let mut refs = BTreeSet::new();
+            let _ = block.references(&mut refs);
+            stack.extend(refs);
+        }
+        Ok(total)
     }
 
     fn collect_shard<'a>(
@@ -450,6 +549,21 @@ impl Mfs {
                 size: block.data().len() as u64,
             },
         })
+    }
+
+    async fn read_existing_file(&self, comps: &[String]) -> Result<Option<Vec<u8>>, Error> {
+        let Some(root) = self.snapshot_root().await? else {
+            return Ok(None);
+        };
+        let _gc = self.repo().gc_guard().await;
+        let (cid, tsize) = match self.resolve_from(root, comps).await {
+            Ok(resolved) => resolved,
+            Err(_) => return Ok(None),
+        };
+        if matches!(self.classify(&cid, tsize).await?, MfsKind::Directory) {
+            return Err(anyhow!("path is a directory"));
+        }
+        Ok(Some(self.read_file(&cid).await?))
     }
 
     /// Reads a UnixFS file DAG (or raw leaf) rooted at `cid` into a byte vector, fetching blocks
@@ -501,6 +615,25 @@ fn split_path(path: &str) -> Result<Vec<String>, Error> {
 
 fn is_shard_prefix(name: &str) -> bool {
     name.len() == 2 && name.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn is_ipfs_path(path: &str) -> bool {
+    path.starts_with("/ipfs/") || path.starts_with("/ipld/")
+}
+
+fn links_to_map(links: Vec<DirLink>) -> DirMap {
+    links
+        .into_iter()
+        .map(|l| {
+            (
+                l.name,
+                DirEntry {
+                    cid: l.target,
+                    tsize: l.tsize,
+                },
+            )
+        })
+        .collect()
 }
 
 fn encode_dir(
@@ -631,6 +764,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn write_at_offset_and_truncate() {
+        let mfs = mfs().await;
+        mfs.write("/f", b"hello world", true).await.unwrap();
+
+        mfs.write_with(
+            "/f",
+            b"MFS",
+            WriteOptions {
+                offset: 6,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(mfs.read("/f").await.unwrap(), b"hello MFSld");
+
+        mfs.write_with(
+            "/f",
+            b"!!",
+            WriteOptions {
+                offset: 13,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(mfs.read("/f").await.unwrap(), b"hello MFSld\0\0!!");
+
+        mfs.write_with(
+            "/f",
+            b"fresh",
+            WriteOptions {
+                truncate: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(mfs.read("/f").await.unwrap(), b"fresh");
+
+        mfs.truncate("/f", 3).await.unwrap();
+        assert_eq!(mfs.read("/f").await.unwrap(), b"fre");
+        mfs.truncate("/f", 5).await.unwrap();
+        assert_eq!(mfs.read("/f").await.unwrap(), b"fre\0\0");
+
+        assert!(mfs
+            .write_with("/missing", b"x", WriteOptions::default())
+            .await
+            .is_err());
+        mfs.write_with(
+            "/created",
+            b"y",
+            WriteOptions {
+                create: true,
+                parents: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(mfs.read("/created").await.unwrap(), b"y");
+    }
+
+    #[tokio::test]
+    async fn offset_edit_multiblock() {
+        let mfs = mfs().await;
+        let mut data: Vec<u8> = (0..1_000_000u32).map(|i| i as u8).collect();
+        mfs.write("/big", &data, false).await.unwrap();
+
+        let patch = b"PATCHED";
+        let off = 500_000usize;
+        mfs.write_with(
+            "/big",
+            patch,
+            WriteOptions {
+                offset: off as u64,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        data[off..off + patch.len()].copy_from_slice(patch);
+        assert_eq!(mfs.read("/big").await.unwrap(), data);
+    }
+
+    #[tokio::test]
     async fn write_read_multiblock() {
         let mfs = mfs().await;
         // larger than the default chunk size so the file becomes a multi-block DAG
@@ -681,6 +901,48 @@ mod tests {
         mfs.rm("/d/file007", false).await.unwrap();
         assert_eq!(mfs.ls("/d").await.unwrap().len(), n);
         assert!(mfs.read("/d/file007").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cp_from_ipfs() {
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo.clone());
+
+        let (file_cid, _, blocks) = encode_file(b"imported content").unwrap();
+        repo.put_blocks(blocks).await.unwrap();
+
+        mfs.cp(&format!("/ipfs/{file_cid}"), "/imported.txt", true)
+            .await
+            .unwrap();
+        assert_eq!(mfs.read("/imported.txt").await.unwrap(), b"imported content");
+        assert!(matches!(
+            mfs.stat("/imported.txt").await.unwrap().kind,
+            MfsKind::File { .. }
+        ));
+
+        let (greeting_cid, greeting_tsize, gblocks) = encode_file(b"hi").unwrap();
+        repo.put_blocks(gblocks).await.unwrap();
+        let mut dirmap = DirMap::new();
+        dirmap.insert(
+            "greeting".into(),
+            DirEntry {
+                cid: greeting_cid,
+                tsize: greeting_tsize,
+            },
+        );
+        let (dir_cid, _, dblocks) = encode_dir(&dirmap, None).unwrap();
+        repo.put_blocks(dblocks).await.unwrap();
+
+        mfs.cp(&format!("/ipfs/{dir_cid}"), "/srcdir", false)
+            .await
+            .unwrap();
+        assert_eq!(mfs.ls("/srcdir").await.unwrap().len(), 1);
+
+        mfs.cp(&format!("/ipfs/{dir_cid}/greeting"), "/hi.txt", false)
+            .await
+            .unwrap();
+        assert_eq!(mfs.read("/hi.txt").await.unwrap(), b"hi");
     }
 
     #[tokio::test]
