@@ -1,11 +1,12 @@
+mod handler;
 mod message;
 mod pb;
 mod prefix;
-mod protocol;
-mod sessions;
+mod session;
+mod wantlist;
 
 use std::{
-    collections::{hash_map::Entry, BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Debug,
     task::{Context, Poll, Waker},
     time::Duration,
@@ -14,8 +15,8 @@ use std::{
 use connexa::prelude::{
     swarm::{
         behaviour::ConnectionEstablished, dial_opts::DialOpts, ConnectionClosed, ConnectionDenied,
-        ConnectionId, DialFailure, FromSwarm, NetworkBehaviour, NotifyHandler, OneShotHandler,
-        THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
+        ConnectionId, FromSwarm, NetworkBehaviour, NotifyHandler, THandler, THandlerInEvent,
+        THandlerOutEvent, ToSwarm,
     },
     transport::transport::PortUse,
     transport::Endpoint,
@@ -37,20 +38,15 @@ mod bitswap_pb {
 }
 
 use self::{
-    message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType},
-    protocol::{BitswapProtocol, Message},
-    sessions::{HaveSession, HaveSessionEvent, WantSession, WantSessionEvent},
+    message::RequestType,
+    session::{PeerSession, PeerSessionEvent},
+    wantlist::{Wantlist, WantlistDriver, WantlistEvent},
 };
 use crate::repo::DefaultStorage;
-use crate::{repo::Repo, Block};
+use crate::repo::Repo;
 
 const CAP_THRESHOLD: usize = 100;
-
-#[derive(Default, Debug, Clone, Copy)]
-pub struct Config {
-    pub max_wanted_blocks: Option<u8>,
-    pub timeout: Option<Duration>,
-}
+const DEFAULT_PRIORITY: i32 = 1;
 
 #[derive(Debug)]
 pub enum Event {
@@ -60,24 +56,27 @@ pub enum Event {
 }
 
 pub struct Behaviour {
-    events: VecDeque<ToSwarm<<Self as NetworkBehaviour>::ToSwarm, THandlerInEvent<Self>>>,
+    events: VecDeque<ToSwarm<Event, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<ConnectionId>>,
-    blacklist_connections: HashMap<PeerId, BTreeSet<ConnectionId>>,
+    unsupported: HashSet<PeerId>,
     store: Repo<DefaultStorage>,
-    want_session: StreamMap<Cid, WantSession>,
-    have_session: StreamMap<Cid, HaveSession>,
+    wantlist: Wantlist,
+    driver: WantlistDriver,
+    sessions: StreamMap<PeerId, PeerSession>,
     waker: Option<Waker>,
 }
 
 impl Behaviour {
     pub fn new(store: &Repo<DefaultStorage>) -> Self {
+        let wantlist = Wantlist::default();
         Self {
-            events: Default::default(),
-            connections: Default::default(),
-            blacklist_connections: Default::default(),
+            events: VecDeque::new(),
+            connections: HashMap::new(),
+            unsupported: HashSet::new(),
             store: store.clone(),
-            want_session: StreamMap::new(),
-            have_session: StreamMap::new(),
+            driver: WantlistDriver::new(wantlist.clone()),
+            wantlist,
+            sessions: StreamMap::new(),
             waker: None,
         }
     }
@@ -87,104 +86,102 @@ impl Behaviour {
     }
 
     pub fn gets(&mut self, cids: Vec<Cid>, providers: &[PeerId], timeout: Option<Duration>) {
-        let peers = match providers.is_empty() {
-            true => {
-                //If no providers are provided, we can send requests connected peers
-                self.connections
-                    .keys()
-                    .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
-                    .copied()
-                    .collect::<Vec<_>>()
-            }
-            false => {
-                let mut connected = VecDeque::new();
-                for peer_id in providers
-                    .iter()
-                    .filter(|peer_id| !self.blacklist_connections.contains_key(peer_id))
-                {
-                    if self.connections.contains_key(peer_id) {
-                        connected.push_back(*peer_id);
-                        continue;
-                    }
-                    let opts = DialOpts::peer_id(*peer_id).build();
-
-                    self.events.push_back(ToSwarm::Dial { opts });
-                }
-                Vec::from_iter(connected)
-            }
-        };
-
         for cid in &cids {
-            if self.want_session.contains_key(cid) {
-                continue;
-            }
-            let session = WantSession::new(&self.store, *cid, timeout);
-            self.want_session.insert(*cid, session);
+            self.wantlist
+                .want(*cid, RequestType::Have, DEFAULT_PRIORITY, timeout);
         }
 
-        if peers.is_empty() {
-            // Since no connections, peers or providers are provided, we need to notify swarm to attempt a form of content discovery
+        // A target is any peer we can broadcast to right now. Explicit providers that are not yet
+        // connected are dialed but do not count until the connection is up.
+        let mut have_target = false;
+        if providers.is_empty() {
+            have_target = self
+                .connections
+                .keys()
+                .any(|peer| !self.unsupported.contains(peer));
+        } else {
+            for peer in providers {
+                if self.unsupported.contains(peer) {
+                    continue;
+                }
+                if self.connections.contains_key(peer) {
+                    have_target = true;
+                } else {
+                    self.events.push_back(ToSwarm::Dial {
+                        opts: DialOpts::peer_id(*peer).build(),
+                    });
+                }
+            }
+        }
+
+        for session in self.sessions.values_mut() {
+            session.sync();
+        }
+
+        if !have_target {
             for cid in cids {
                 self.events
                     .push_back(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
             }
-            return;
         }
 
-        self.send_wants(peers, cids)
+        self.wake();
     }
 
     pub fn local_wantlist(&self) -> Vec<Cid> {
-        self.want_session.keys().copied().collect()
+        self.wantlist.cids()
     }
 
     pub fn peer_wantlist(&self, peer_id: PeerId) -> Vec<Cid> {
-        let mut blocks = HashSet::new();
-
-        for (cid, session) in self.have_session.iter() {
-            if session.has_peer(peer_id) {
-                blocks.insert(*cid);
-            }
-        }
-
-        Vec::from_iter(blocks)
+        self.sessions
+            .get(&peer_id)
+            .map(|session| session.peer_wantlist())
+            .unwrap_or_default()
     }
 
     // Note: This is called specifically to cancel the request and not just emitting a request
     //       after receiving a request.
     pub fn cancel(&mut self, cid: Cid) {
-        if self.want_session.remove(&cid).is_none() {
+        if !self.wantlist.cancel(&cid) {
             return;
+        }
+
+        for session in self.sessions.values_mut() {
+            session.sync();
         }
 
         self.events
             .push_back(ToSwarm::GenerateEvent(Event::CancelBlock { cid }));
+        self.wake();
+    }
 
+    // Notify connected peers that asked for these blocks that we now have them.
+    pub fn notify_new_blocks(&mut self, cid: impl IntoIterator<Item = Cid>) {
+        let blocks = cid.into_iter().collect::<Vec<_>>();
+        if blocks.is_empty() {
+            return;
+        }
+
+        for session in self.sessions.values_mut() {
+            session.serve_wanted(&blocks);
+        }
+
+        self.wake();
+    }
+
+    fn wake(&mut self) {
         if let Some(waker) = self.waker.take() {
             waker.wake();
         }
     }
 
-    // This will notify connected peers who have the bitswap protocol that we have this block
-    // if they wanted it
-    // TODO: Maybe have a general `Session` where we could collectively notify a peer of new blocks
-    //       in a single message
-    pub fn notify_new_blocks(&mut self, cid: impl IntoIterator<Item = Cid>) {
-        let blocks = cid.into_iter().collect::<Vec<_>>();
-
-        for (cid, session) in self.have_session.iter_mut() {
-            if !blocks.contains(cid) {
-                continue;
-            }
-
-            session.reset();
+    fn ensure_session(&mut self, peer_id: PeerId) {
+        if self.unsupported.contains(&peer_id) || self.sessions.contains_key(&peer_id) {
+            return;
         }
-
-        if !self.have_session.is_empty() {
-            if let Some(waker) = self.waker.take() {
-                waker.wake();
-            }
-        }
+        let session = PeerSession::new(self.wantlist.clone(), self.store.clone());
+        self.sessions.insert(peer_id, session);
+        self.wake();
     }
 
     fn on_connection_established(
@@ -192,21 +189,13 @@ impl Behaviour {
         ConnectionEstablished {
             connection_id,
             peer_id,
-            other_established,
             ..
         }: ConnectionEstablished,
     ) {
-        tracing::info!(%peer_id, %connection_id, "connection established");
         self.connections
             .entry(peer_id)
             .or_default()
             .insert(connection_id);
-
-        if other_established > 0 {
-            return;
-        }
-
-        self.send_wants(vec![peer_id], vec![]);
     }
 
     fn on_connection_close(
@@ -218,7 +207,6 @@ impl Behaviour {
             ..
         }: ConnectionClosed,
     ) {
-        tracing::debug!(%connection_id, %peer_id, "connection closed");
         if let Entry::Occupied(mut entry) = self.connections.entry(peer_id) {
             let list = entry.get_mut();
             list.remove(&connection_id);
@@ -227,81 +215,15 @@ impl Behaviour {
             }
         }
 
-        if let Entry::Occupied(mut entry) = self.blacklist_connections.entry(peer_id) {
-            let list = entry.get_mut();
-            list.remove(&connection_id);
-            if list.is_empty() {
-                entry.remove();
-            }
-        }
-
         if remaining_established == 0 {
-            tracing::debug!(%connection_id, %peer_id, "peer disconnected");
-            for (cid, session) in self.want_session.iter_mut() {
-                tracing::debug!(session=%*cid, %peer_id, "marking peer as disconnected");
-                session.peer_disconnected(peer_id);
-            }
-        }
-    }
-
-    fn on_dial_failure(
-        &mut self,
-        DialFailure {
-            connection_id,
-            peer_id,
-            error,
-        }: DialFailure,
-    ) {
-        let Some(peer_id) = peer_id else {
-            return;
-        };
-
-        tracing::warn!(%peer_id, %connection_id, error = %error, "unable to dial peer");
-
-        if self.connections.contains_key(&peer_id) {
-            // Since there is still an existing connection for the peer
-            // we can ignore the dial failure
-            return;
-        }
-
-        for session in self.want_session.values_mut() {
-            session.remove_peer(peer_id);
-        }
-
-        for session in self.have_session.values_mut() {
-            session.remove_peer(peer_id);
-        }
-    }
-
-    fn send_wants(&mut self, peers: Vec<PeerId>, cids: Vec<Cid>) {
-        if let Some(waker) = self.waker.take() {
-            waker.wake();
-        }
-
-        match cids.is_empty() {
-            false => {
-                for cid in cids {
-                    let Some(session) = self.want_session.get_mut(&cid) else {
-                        continue;
-                    };
-                    for peer_id in &peers {
-                        session.send_have_block(*peer_id)
-                    }
-                }
-            }
-            true => {
-                for session in self.want_session.values_mut() {
-                    for peer_id in &peers {
-                        session.send_have_block(*peer_id)
-                    }
-                }
-            }
+            self.sessions.remove(&peer_id);
+            self.unsupported.remove(&peer_id);
         }
     }
 }
 
 impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = OneShotHandler<BitswapProtocol, BitswapMessage, Message>;
+    type ConnectionHandler = handler::Handler;
     type ToSwarm = Event;
 
     fn handle_pending_inbound_connection(
@@ -330,7 +252,7 @@ impl NetworkBehaviour for Behaviour {
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::default())
+        Ok(handler::Handler::default())
     }
 
     fn handle_established_outbound_connection(
@@ -341,117 +263,30 @@ impl NetworkBehaviour for Behaviour {
         _: Endpoint,
         _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        Ok(OneShotHandler::default())
+        Ok(handler::Handler::default())
     }
 
     fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        connection_id: ConnectionId,
+        _connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
-        let message = match event {
-            Ok(Message::Receive { message }) => {
-                tracing::trace!(%peer_id, %connection_id, "message received");
-                if let Entry::Occupied(mut e) = self.blacklist_connections.entry(peer_id) {
-                    let list = e.get_mut();
-                    list.remove(&connection_id);
-                    if list.is_empty() {
-                        e.remove();
-                    }
+        match event {
+            handler::ToBehaviour::Ready => self.ensure_session(peer_id),
+            handler::ToBehaviour::Message(message) => {
+                self.ensure_session(peer_id);
+                if let Some(session) = self.sessions.get_mut(&peer_id) {
+                    session.on_message(message);
                 }
-
-                message
+                self.wake();
             }
-            Ok(Message::Sent) => {
-                tracing::trace!(%peer_id, %connection_id, "message sent");
-                return;
+            handler::ToBehaviour::Unsupported => {
+                self.unsupported.insert(peer_id);
+                self.sessions.remove(&peer_id);
             }
-            Err(e) => {
-                tracing::error!(%peer_id, %connection_id, error = %e, "error sending or receiving message");
-                //TODO: Depending on the underlining error, maybe blacklist the peer from further sending/receiving
-                //      until a valid response or request is produced?
-                self.blacklist_connections
-                    .entry(peer_id)
-                    .or_default()
-                    .insert(connection_id);
-                return;
-            }
-        };
-
-        if message.is_empty() {
-            tracing::warn!(%peer_id, %connection_id, "received an empty message");
-            return;
-        }
-
-        let BitswapMessage {
-            requests,
-            responses,
-            ..
-        } = message;
-
-        for request in requests {
-            let BitswapRequest {
-                ty,
-                cid,
-                send_dont_have,
-                cancel,
-                priority: _,
-            } = &request;
-
-            if !self.have_session.contains_key(cid) && !cancel {
-                // Lets build out have new sessions
-                let have_session = HaveSession::new(&self.store, *cid);
-                self.have_session.insert(*cid, have_session);
-            }
-
-            let Some(session) = self.have_session.get_mut(cid) else {
-                if !*cancel {
-                    tracing::warn!(block = %cid, %peer_id, %connection_id, "have session does not exist. Skipping request");
-                }
-                continue;
-            };
-
-            if *cancel {
-                session.cancel(peer_id);
-                continue;
-            }
-
-            match ty {
-                RequestType::Have => {
-                    session.want_block(peer_id, *send_dont_have);
-                }
-                RequestType::Block => {
-                    session.need_block(peer_id);
-                }
-            }
-        }
-
-        for (cid, response) in responses {
-            let Some(session) = self.want_session.get_mut(&cid) else {
-                tracing::warn!(block = %cid, %peer_id, %connection_id, "want session does not exist. Skipping response");
-                continue;
-            };
-            match response {
-                BitswapResponse::Have(have) => match have {
-                    true => {
-                        session.has_block(peer_id);
-                    }
-                    false => {
-                        session.dont_have_block(peer_id);
-                    }
-                },
-                BitswapResponse::Block(bytes) => {
-                    let Ok(block) = Block::new(cid, bytes) else {
-                        // The block is invalid so we will notify the session that we still dont have the block
-                        // from said peer
-                        // TODO: In the future, mark the peer as a bad sender
-                        tracing::error!(block = %cid, %peer_id, %connection_id, "block is invalid or corrupted");
-                        session.dont_have_block(peer_id);
-                        continue;
-                    };
-                    session.put_block(peer_id, block);
-                }
+            handler::ToBehaviour::Failed => {
+                self.sessions.remove(&peer_id);
             }
         }
     }
@@ -460,7 +295,6 @@ impl NetworkBehaviour for Behaviour {
         match event {
             FromSwarm::ConnectionEstablished(event) => self.on_connection_established(event),
             FromSwarm::ConnectionClosed(event) => self.on_connection_close(event),
-            FromSwarm::DialFailure(event) => self.on_dial_failure(event),
             _ => {}
         }
     }
@@ -472,82 +306,43 @@ impl NetworkBehaviour for Behaviour {
             self.events.shrink_to_fit();
         }
 
-        while let Poll::Ready(Some((cid, event))) = self.have_session.poll_next_unpin(ctx) {
+        while let Poll::Ready(Some(event)) = self.driver.poll_next_unpin(ctx) {
             match event {
-                HaveSessionEvent::Have { peer_id } => {
-                    return Poll::Ready(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_response(cid, BitswapResponse::Have(true)),
-                    });
-                }
-                HaveSessionEvent::DontHave { peer_id } => {
-                    return Poll::Ready(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_response(cid, BitswapResponse::Have(false)),
-                    });
-                }
-                HaveSessionEvent::Block { peer_id, bytes } => {
-                    return Poll::Ready(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_response(cid, BitswapResponse::Block(bytes)),
-                    });
-                }
-                HaveSessionEvent::Cancelled => {
-                    //TODO: Maybe notify peers from this session about any cancelled request?
-                    self.have_session.remove(&cid);
-                }
-            };
-        }
-
-        match self.want_session.poll_next_unpin(ctx) {
-            Poll::Ready(Some((cid, event))) => match event {
-                WantSessionEvent::SendWant { peer_id } => {
-                    return Poll::Ready(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_request(BitswapRequest::have(cid).send_dont_have(true)),
-                    });
-                }
-                WantSessionEvent::SendCancel { peer_id } => {
-                    return Poll::Ready(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default().add_request(BitswapRequest::cancel(cid)),
-                    });
-                }
-                WantSessionEvent::SendBlock { peer_id } => {
-                    ctx.waker().wake_by_ref();
-
-                    return Poll::Ready(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler: NotifyHandler::Any,
-                        event: BitswapMessage::default()
-                            .add_request(BitswapRequest::block(cid).send_dont_have(true)),
-                    });
-                }
-                WantSessionEvent::NeedBlock => {
+                WantlistEvent::NeedProviders(cid) => {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
-                WantSessionEvent::BlockStored => {
-                    return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
-                }
-                WantSessionEvent::Dial { peer_id } => {
-                    let opts = DialOpts::peer_id(peer_id).build();
-                    return Poll::Ready(ToSwarm::Dial { opts });
-                }
-                WantSessionEvent::Cancelled => {
-                    self.want_session.remove(&cid);
+                WantlistEvent::Expired(cid) => {
+                    for session in self.sessions.values_mut() {
+                        session.sync();
+                    }
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::CancelBlock { cid }));
                 }
-            },
-            Poll::Pending | Poll::Ready(None) => {}
+                WantlistEvent::Rebroadcast => {
+                    for session in self.sessions.values_mut() {
+                        session.sync();
+                    }
+                }
+            }
+        }
+
+        while let Poll::Ready(Some((peer_id, event))) = self.sessions.poll_next_unpin(ctx) {
+            match event {
+                PeerSessionEvent::Send(message) => {
+                    return Poll::Ready(ToSwarm::NotifyHandler {
+                        peer_id,
+                        handler: NotifyHandler::Any,
+                        event: handler::FromBehaviour::Send(message),
+                    });
+                }
+                PeerSessionEvent::Stored(cid) => {
+                    self.wantlist.cancel(&cid);
+                    for session in self.sessions.values_mut() {
+                        session.sync();
+                    }
+                    return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
+                }
+                PeerSessionEvent::DontHave(_cid) => {}
+            }
         }
 
         self.waker = Some(ctx.waker().clone());
