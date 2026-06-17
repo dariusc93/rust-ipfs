@@ -67,7 +67,7 @@ impl Default for TreeOptions {
         TreeOptions {
             block_size_limit: Some(512 * 1024),
             wrap_with_directory: false,
-            cid_version: Version::V0,
+            cid_version: Version::V1,
             shard_threshold: Some(256 * 1024),
             hasher: multihash_codetable::Code::Sha2_256,
         }
@@ -87,7 +87,7 @@ impl TreeOptions {
         self.wrap_with_directory = true;
     }
 
-    /// Sets the CID version of produced directory nodes. Defaults to [`Version::V0`].
+    /// Sets the CID version of produced directory nodes. Defaults to [`Version::V1`].
     pub fn cid_version(&mut self, version: Version) {
         self.cid_version = version;
     }

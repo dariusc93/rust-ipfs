@@ -140,9 +140,12 @@ mod tests {
 
     #[test]
     fn symlinks_in_trees_rooted() {
-        use crate::dir::builder::BufferingTreeBuilder;
+        use crate::dir::builder::{BufferingTreeBuilder, TreeOptions};
 
-        let mut tree = BufferingTreeBuilder::default();
+        // legacy vector captured with CIDv0; the default is now CIDv1.
+        let mut opts = TreeOptions::default();
+        opts.cid_version(ipld_core::cid::Version::V0);
+        let mut tree = BufferingTreeBuilder::new(opts);
 
         tree.put_link(
             "foo_directory/b/car",
@@ -173,6 +176,7 @@ mod tests {
         // note regarding the root directory; now we can add the paths without the first component
         // `foo_directory` and still get the same result as in `symlinks_in_trees_rooted`.
         let mut opts = TreeOptions::default();
+        opts.cid_version(ipld_core::cid::Version::V0);
         opts.wrap_with_directory();
 
         let mut tree = BufferingTreeBuilder::new(opts);

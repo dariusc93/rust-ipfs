@@ -13,8 +13,8 @@ use quick_protobuf::{MessageWrite, Writer, WriterBackend};
 /// chunker and collector.
 ///
 /// Current implementation maintains an internal buffer for the block creation and uses sha2-256 to
-/// produce Cid version 0 (default) or version 1 links, optionally with raw leaves. Currently does
-/// not support inline links.
+/// produce Cid version 1 with raw leaves (default) or version 0 links. Currently does not support
+/// inline links.
 #[derive(Default)]
 pub struct FileAdder {
     chunker: Chunker,
@@ -34,8 +34,8 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            cid_version: Version::V0,
-            raw_leaves: false,
+            cid_version: Version::V1,
+            raw_leaves: true,
             hasher: Code::Sha2_256,
         }
     }
@@ -105,7 +105,7 @@ impl Default for FileAdderBuilder {
         FileAdderBuilder {
             chunker: Chunker::default(),
             collector: Collector::default(),
-            cid_version: Version::V0,
+            cid_version: Version::V1,
             raw_leaves: None,
             metadata: Metadata::default(),
             hasher: Code::Sha2_256,
@@ -127,7 +127,7 @@ impl FileAdderBuilder {
         }
     }
 
-    /// Sets the CID version of produced dag-pb nodes. Defaults to [`Version::V0`].
+    /// Sets the CID version of produced dag-pb nodes.
     pub fn with_cid_version(self, cid_version: Version) -> Self {
         FileAdderBuilder {
             cid_version,
@@ -688,7 +688,7 @@ mod tests {
     use crate::test_support::FakeBlockstore;
     use core::convert::TryFrom;
     use hex_literal::hex;
-    use ipld_core::cid::Cid;
+    use ipld_core::cid::{Cid, Version};
 
     #[test]
     fn test_size_chunker() {
@@ -724,6 +724,36 @@ mod tests {
         assert_eq!(cid.version(), Version::V1);
         assert_eq!(cid.codec(), 0x55);
         assert_eq!(block.as_slice(), content);
+    }
+
+    #[test]
+    fn default_is_cidv1_raw_leaves() {
+        let single = FileAdder::default().collect_blocks(b"foobar\n", 0);
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0].0.version(), Version::V1);
+        assert_eq!(
+            single[0].0.codec(),
+            0x55,
+            "a single-chunk file is a bare raw leaf"
+        );
+
+        let multi = FileAdder::builder()
+            .with_chunker(Chunker::Size(2))
+            .build()
+            .collect_blocks(b"foobar\n", 0);
+        assert!(multi.len() > 1);
+        assert!(multi.iter().all(|(cid, _)| cid.version() == Version::V1));
+        assert_eq!(
+            multi.last().unwrap().0.codec(),
+            0x70,
+            "root is a dag-pb node"
+        );
+        assert!(
+            multi[..multi.len() - 1]
+                .iter()
+                .any(|(cid, _)| cid.codec() == 0x55),
+            "leaves are raw"
+        );
     }
 
     #[test]
@@ -862,6 +892,7 @@ mod tests {
         for &(n, blocks_len, root) in expected {
             let content: Vec<u8> = (0..n).map(|i| (i % 251) as u8).collect();
             let blocks = FileAdder::builder()
+                .with_cid_version(Version::V0)
                 .with_chunker(Chunker::Size(1))
                 .build()
                 .collect_blocks(&content, 0);
@@ -880,7 +911,7 @@ mod tests {
         // everyones favourite content
         let content = b"foobar\n";
 
-        let mut adder = FileAdder::default();
+        let mut adder = FileAdder::builder().with_cid_version(Version::V0).build();
 
         {
             let (mut ready_blocks, bytes) = adder.push(content);
@@ -907,7 +938,10 @@ mod tests {
 
         let blocks = FakeBlockstore::with_fixtures();
         let content = b"foobar\n";
-        let adder = FileAdder::builder().with_chunker(Chunker::Size(2)).build();
+        let adder = FileAdder::builder()
+            .with_cid_version(Version::V0)
+            .with_chunker(Chunker::Size(2))
+            .build();
 
         let blocks_received = adder.collect_blocks(content, 0);
 
@@ -947,7 +981,10 @@ mod tests {
         //
         // in future, if we ever add inline Cid generation this test would need to be changed not
         // to use those inline cids or raw leaves
-        let adder = FileAdder::builder().with_chunker(Chunker::Size(1)).build();
+        let adder = FileAdder::builder()
+            .with_cid_version(Version::V0)
+            .with_chunker(Chunker::Size(1))
+            .build();
 
         let blocks_received = adder.collect_blocks(content, 0);
 
@@ -966,7 +1003,10 @@ mod tests {
             wisi ipsum, vel rhoncus eget faucibus varius, luctus turpis nibh vel odio nulla pede.";
 
         for amt in 1..32 {
-            let adder = FileAdder::builder().with_chunker(Chunker::Size(32)).build();
+            let adder = FileAdder::builder()
+                .with_cid_version(Version::V0)
+                .with_chunker(Chunker::Size(32))
+                .build();
             let blocks_received = adder.collect_blocks(content, amt);
             assert_eq!(
                 blocks_received.last().unwrap().0.to_string(),
@@ -978,7 +1018,10 @@ mod tests {
 
     #[test]
     fn empty_file() {
-        let blocks = FileAdder::default().collect_blocks(b"", 0);
+        let blocks = FileAdder::builder()
+            .with_cid_version(Version::V0)
+            .build()
+            .collect_blocks(b"", 0);
         assert_eq!(blocks.len(), 1);
         // 0a == field dag-pb body (unixfs)
         // 04 == dag-pb body len, varint, 4 bytes
@@ -1007,6 +1050,7 @@ mod tests {
         let branching_factor = 174;
 
         let mut adder = FileAdder::builder()
+            .with_cid_version(Version::V0)
             .with_chunker(Chunker::Size(2))
             .with_collector(BalancedCollector::with_branching_factor(branching_factor))
             .build();
@@ -1046,6 +1090,7 @@ mod tests {
         let branching_factor = 174;
 
         let mut adder = FileAdder::builder()
+            .with_cid_version(Version::V0)
             .with_chunker(Chunker::Size(1))
             .with_collector(BalancedCollector::with_branching_factor(branching_factor))
             .build();

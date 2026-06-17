@@ -189,13 +189,20 @@ mod tests {
         super::OwnedTreeNode, BufferingTreeBuilder, Metadata, TreeBuildingFailed, TreeOptions,
     };
     use core::convert::TryFrom;
-    use ipld_core::cid::Cid;
+    use ipld_core::cid::{Cid, Version};
     use multihash_codetable::Code;
     use multihash_derive::MultihashDigest;
 
+    // The default builder now emits CIDv1; these legacy vectors were captured with CIDv0.
+    fn v0_builder() -> BufferingTreeBuilder {
+        let mut opts = TreeOptions::default();
+        opts.cid_version(Version::V0);
+        BufferingTreeBuilder::new(opts)
+    }
+
     #[test]
     fn some_directories() {
-        let mut builder = BufferingTreeBuilder::default();
+        let mut builder = v0_builder();
 
         // foobar\n
         let five_block_foobar =
@@ -273,6 +280,7 @@ mod tests {
             Cid::try_from("QmRJHYTNvC3hmd9gJQARxLR1QMEincccBV53bBw524yyq6").unwrap();
 
         let mut opts = TreeOptions::default();
+        opts.cid_version(Version::V0);
         opts.wrap_with_directory();
         let mut builder = BufferingTreeBuilder::new(opts);
         builder.put_link("a", five_block_foobar, 221).unwrap();
@@ -301,6 +309,7 @@ mod tests {
             .unwrap();
 
         let mut opts = TreeOptions::default();
+        opts.cid_version(Version::V0);
         opts.wrap_with_directory();
         let mut builder = BufferingTreeBuilder::new(opts);
         builder.put_link("a", five_block_foobar, 221).unwrap();
@@ -382,7 +391,7 @@ mod tests {
         let target =
             Cid::try_from("bafyreihakpd7te5nbmlhdk5ntvcvhf2hmfgrvcwna2sddq5zz5342mcbli").unwrap();
 
-        let mut builder = BufferingTreeBuilder::default();
+        let mut builder = v0_builder();
         builder.put_link("a/b", target, 12).unwrap();
 
         let actual = builder

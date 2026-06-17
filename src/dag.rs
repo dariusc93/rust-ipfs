@@ -696,14 +696,15 @@ impl ResolvedNode {
         }
     }
 
-    /// Unwraps the dagpb block variant and turns others into UnexpectedResolved.
+    /// Unwraps a dag-pb or raw block variant and turns others into UnexpectedResolved. A raw block
+    /// is a valid single-leaf unixfs file, so it is returned as-is for the caller to handle.
     /// This is useful wherever unixfs operations are continued after resolving an IpfsPath.
     pub fn into_unixfs_block(self) -> Result<Block, UnexpectedResolved> {
-        if self.source().codec() != <BlockCodec as Into<u64>>::into(BlockCodec::DagPb) {
-            Err(UnexpectedResolved::UnexpectedCodec(
-                BlockCodec::DagPb.into(),
-                Box::new(self),
-            ))
+        let codec = self.source().codec();
+        let dag_pb: u64 = BlockCodec::DagPb.into();
+        let raw: u64 = BlockCodec::Raw.into();
+        if codec != dag_pb && codec != raw {
+            Err(UnexpectedResolved::UnexpectedCodec(dag_pb, Box::new(self)))
         } else {
             match self {
                 ResolvedNode::Block(b) => Ok(b),
@@ -1238,7 +1239,11 @@ mod tests {
     async fn fail_resolving_through_file() {
         let Node { ipfs, .. } = Node::new("test_node").await;
 
-        let mut adder = rust_unixfs::file::adder::FileAdder::default();
+        // pin CIDv0 so the file is a dag-pb node; resolving through it yields the dag-pb specific
+        // error asserted below (a raw-leaf root would fail earlier with "no links").
+        let mut adder = rust_unixfs::file::adder::FileAdder::builder()
+            .with_cid_version(Version::V0)
+            .build();
         let (mut blocks, _) = adder.push(b"foobar\n");
         assert_eq!(blocks.next(), None);
 

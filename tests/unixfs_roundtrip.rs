@@ -152,6 +152,31 @@ async fn ls_lists_only_current_directory() {
 }
 
 #[tokio::test]
+async fn add_default_is_cidv1() {
+    use ipld_core::cid::Version;
+
+    let node = Node::new("add_default_is_cidv1").await;
+
+    // A small file's default root is now a raw-leaf CIDv1, not a CIDv0 dag-pb node.
+    let path = node.add_unixfs(payload(40)).await.expect("add small");
+    let cid = path.root().cid().copied().expect("ipld root");
+    assert_eq!(cid.version(), Version::V1);
+    assert_eq!(cid.codec(), 0x55, "small file root is a raw leaf");
+
+    // A multi-block file's default root is a CIDv1 dag-pb node over raw leaves.
+    let path = node
+        .add_unixfs(payload(40_000))
+        .chunk(Chunker::Size(64))
+        .await
+        .expect("add multiblock");
+    let cid = path.root().cid().copied().expect("ipld root");
+    assert_eq!(cid.version(), Version::V1);
+    assert_eq!(cid.codec(), 0x70, "multi-block root is dag-pb");
+
+    node.shutdown().await;
+}
+
+#[tokio::test]
 async fn add_with_blake3_hasher_roundtrips() {
     use multihash_codetable::Code;
 

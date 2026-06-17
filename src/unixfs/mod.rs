@@ -27,8 +27,8 @@ pub use get::UnixfsGet;
 pub use ls::{Entry, UnixfsLs};
 
 use crate::{
-    dag::{ResolveError, UnexpectedResolved},
-    Ipfs, IpfsPath,
+    dag::{ResolveError, UnexpectedResolved}, Ipfs,
+    IpfsPath,
 };
 
 pub struct IpfsUnixfs {
@@ -244,7 +244,10 @@ mod tests {
         // QmSy5pnHk1EnvE5dmJSyFKG5unXLGjPpBuJJCBQkBTvBaW.
         let content = "\u{8}\u{2}\u{12}\u{12}Here is some data\n\u{18}\u{12}";
 
-        let mut adder = rust_unixfs::file::adder::FileAdder::default();
+        // legacy go-ipfs 0.6.0 vector is CIDv0 while the default is now CIDv1.
+        let mut adder = rust_unixfs::file::adder::FileAdder::builder()
+            .with_cid_version(ipld_core::cid::Version::V0)
+            .build();
         let (mut blocks, consumed) = adder.push(content.as_bytes());
         assert_eq!(consumed, content.len(), "should had consumed all content");
         assert_eq!(

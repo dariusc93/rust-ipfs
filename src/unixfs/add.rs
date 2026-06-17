@@ -83,7 +83,7 @@ impl UnixfsAdd {
             opt: Some(opt),
             span: Span::current(),
             chunk: Chunker::Size(256 * 1024),
-            cid_version: Version::V0,
+            cid_version: Version::V1,
             raw_leaves: None,
             hasher: Code::Sha2_256,
             metadata: Metadata::default(),
