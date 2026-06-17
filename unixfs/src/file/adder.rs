@@ -367,19 +367,27 @@ fn render_and_hash<M: MessageWrite>(node: &M, config: Config) -> (Cid, Vec<u8>) 
     (cid, out)
 }
 
+/// A child link of a UnixFS file branch node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileBranchLink {
+    /// Target block.
     pub cid: Cid,
+    /// Content bytes this child covers (the UnixFS blocksize).
     pub blocksize: u64,
+    /// Cumulative dag size of the child (the dag-pb link Tsize).
     pub tsize: u64,
 }
 
+/// A decoded UnixFS file branch node (a `File` node with links).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileBranch {
+    /// Total content size of the subtree.
     pub filesize: u64,
+    /// Immediate child links, in order.
     pub links: Vec<FileBranchLink>,
 }
 
+/// Decodes a UnixFS file branch node, or `None` for a leaf, a non-file, or a metadata-carrying node.
 pub fn parse_file_branch(block: &[u8]) -> Option<FileBranch> {
     let flat = FlatUnixFs::try_parse(block).ok()?;
     if flat.data.Type != UnixFsType::File
@@ -407,6 +415,7 @@ pub fn parse_file_branch(block: &[u8]) -> Option<FileBranch> {
     })
 }
 
+/// Renders a single file branch node from the given links, byte-identical to [`FileAdder`].
 pub fn rebuild_file_branch(
     filesize: u64,
     links: &[FileBranchLink],
@@ -428,6 +437,42 @@ pub fn rebuild_file_branch(
         })
         .collect();
     render_and_hash(&LinkBlock { links: &links, filesize }, config)
+}
+
+/// Builds a balanced file tree over the given leaf links, returning the root cid, its cumulative
+/// size, and the branch blocks (the leaves are not re-emitted). Byte-identical to [`FileAdder`].
+pub fn build_file_from_leaves(
+    leaves: &[FileBranchLink],
+    cid_version: Version,
+    hasher: Code,
+) -> (Cid, u64, Vec<(Cid, Vec<u8>)>) {
+    assert!(!leaves.is_empty(), "at least one leaf is required");
+    let config = Config {
+        cid_version,
+        raw_leaves: true,
+        hasher,
+    };
+    let mut collector = BalancedCollector::default();
+    let mut blocks = Vec::new();
+    for leaf in leaves {
+        let link = Link {
+            depth: 0,
+            target: leaf.cid,
+            total_size: leaf.tsize,
+            file_size: leaf.blocksize,
+        };
+        blocks.extend(collector.push_link(link, config));
+    }
+    blocks.extend(collector.finish(config));
+
+    match blocks.last() {
+        Some((cid, _)) => {
+            let leaf_tsize: u64 = leaves.iter().map(|l| l.tsize).sum();
+            let branch_tsize: u64 = blocks.iter().map(|(_, b)| b.len() as u64).sum();
+            (*cid, leaf_tsize + branch_tsize, blocks)
+        }
+        None => (leaves[0].cid, leaves[0].tsize, blocks),
+    }
 }
 
 /// Streaming dag-pb serializer for a file link block (a `File` node linking child blocks), avoiding
@@ -769,6 +814,34 @@ mod tests {
         let (rebuilt, _) =
             rebuild_file_branch(branch.filesize, &branch.links, Version::V1, Code::Sha2_256);
         assert_eq!(rebuilt, root_cid);
+    }
+
+    #[test]
+    fn build_file_from_leaves_matches_adder() {
+        use super::{build_file_from_leaves, FileBranchLink};
+        use ipld_core::cid::Version;
+        use multihash_codetable::Code;
+
+        let content: Vec<u8> = (0..1500u32).flat_map(|i| i.to_le_bytes()).collect();
+        let adder_root = FileAdder::builder()
+            .with_chunker(Chunker::Size(7))
+            .with_cid_version(Version::V1)
+            .build()
+            .collect_blocks(&content, 0)
+            .last()
+            .unwrap()
+            .0;
+
+        let leaves: Vec<FileBranchLink> = content
+            .chunks(7)
+            .map(|c| FileBranchLink {
+                cid: crate::pb::make_cid(Version::V1, Code::Sha2_256, 0x55, c),
+                blocksize: c.len() as u64,
+                tsize: c.len() as u64,
+            })
+            .collect();
+        let (root, _, _) = build_file_from_leaves(&leaves, Version::V1, Code::Sha2_256);
+        assert_eq!(root, adder_root);
     }
 
     #[test]

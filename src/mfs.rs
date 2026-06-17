@@ -10,7 +10,9 @@ use ipld_core::cid::{Cid, Version};
 use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
 use rust_unixfs::dir::{describe, DirLink, NodeDescription};
-use rust_unixfs::file::adder::{parse_file_branch, rebuild_file_branch, FileAdder, FileBranchLink};
+use rust_unixfs::file::adder::{
+    build_file_from_leaves, parse_file_branch, rebuild_file_branch, FileAdder, FileBranchLink,
+};
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::str::FromStr;
@@ -21,6 +23,8 @@ const ROOT_KEY: &[u8] = b"/mfs/root";
 const VERSION: Version = Version::V1;
 const HASHER: Code = Code::Sha2_256;
 const RAW_LEAF_CODEC: u64 = 0x55;
+const CHUNK: u64 = 256 * 1024;
+const MAX_FILE_SIZE: u64 = 8 << 30;
 
 /// A directory's immediate children. name to target Cid, cumulative dag size used as the link Tsize.
 type DirMap = BTreeMap<String, DirEntry>;
@@ -136,9 +140,14 @@ impl Mfs {
             return Err(anyhow!("'{path}' does not exist; pass create"));
         }
 
+        let new_size = opts.offset.saturating_add(data.len() as u64);
+        if new_size > MAX_FILE_SIZE {
+            return Err(anyhow!("write would exceed the MFS file size limit"));
+        }
+
         if let Some((cid, tsize, filesize)) = existing
             && !opts.truncate
-            && opts.offset.saturating_add(data.len() as u64) <= filesize
+            && new_size <= filesize
         {
             let edited = {
                 let _gc = self.repo().gc_guard().await;
@@ -149,6 +158,26 @@ impl Mfs {
                     .set_entry(path, DirEntry { cid: new_cid, tsize }, blocks, opts.parents, true)
                     .await;
             }
+        }
+
+        if let Some((cid, _, filesize)) = existing
+            && !opts.truncate
+            && new_size > filesize
+            && let Some((new_cid, new_tsize, blocks)) =
+                self.grow_file(cid, filesize, opts.offset, data).await?
+        {
+            return self
+                .set_entry(
+                    path,
+                    DirEntry {
+                        cid: new_cid,
+                        tsize: new_tsize,
+                    },
+                    blocks,
+                    opts.parents,
+                    true,
+                )
+                .await;
         }
 
         let mut content = if opts.truncate || existing.is_none() {
@@ -174,13 +203,39 @@ impl Mfs {
         if comps.is_empty() {
             return Err(anyhow!("cannot truncate the root directory"));
         }
-        let mut content = self
-            .read_existing_file(&comps)
+        if size > MAX_FILE_SIZE {
+            return Err(anyhow!("truncate would exceed the MFS file size limit"));
+        }
+        let (file_cid, _, filesize) = self
+            .resolve_file(&comps)
             .await?
             .ok_or_else(|| anyhow!("'{path}' does not exist"))?;
-        content.resize(size as usize, 0);
+        if size == filesize {
+            return Ok(());
+        }
 
-        let (cid, tsize, blocks) = encode_file(&content)?;
+        let boundary = (size.min(filesize) / CHUNK) * CHUNK;
+        let read_end = size.min(filesize);
+        let _gc = self.repo().gc_guard().await;
+        let mut new_tail = if boundary < read_end {
+            self.read_file_range(&file_cid, boundary, read_end).await?
+        } else {
+            Vec::new()
+        };
+        new_tail.resize((size - boundary) as usize, 0);
+        let result = self
+            .rebuild_from_boundary(file_cid, filesize, boundary, new_tail)
+            .await?;
+        drop(_gc);
+
+        let (cid, tsize, blocks) = match result {
+            Some(r) => r,
+            None => {
+                let mut content = self.read_existing_file(&comps).await?.unwrap_or_default();
+                content.resize(size as usize, 0);
+                encode_file(&content)?
+            }
+        };
         self.set_entry(path, DirEntry { cid, tsize }, blocks, false, true)
             .await
     }
@@ -583,6 +638,7 @@ impl Mfs {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn overwrite_subtree<'a>(
         &'a self,
         cid: Cid,
@@ -637,6 +693,153 @@ impl Mfs {
             Ok(Some((new_cid, vec![Block::new(new_cid, new_leaf)?])))
         }
         .boxed()
+    }
+
+    async fn read_file_range(&self, cid: &Cid, start: u64, end: u64) -> Result<Vec<u8>, Error> {
+        let block = self.get_block(cid).await?;
+        if matches!(describe(block.data()), NodeDescription::Other) {
+            let leaf = block.data();
+            let s = (start as usize).min(leaf.len());
+            let e = (end as usize).min(leaf.len());
+            return Ok(leaf[s..e].to_vec());
+        }
+
+        let mut out = Vec::new();
+        let mut cache = None;
+        let (content, _, _, mut step) = IdleFileVisit::default()
+            .with_target_range(start..end)
+            .start(block.data())?;
+        out.extend_from_slice(content);
+        while let Some(visit) = step {
+            let next = *visit.pending_links().0;
+            let block = self.get_block(&next).await?;
+            let (content, next_step) = visit.continue_walk(block.data(), &mut cache)?;
+            out.extend_from_slice(content);
+            step = next_step;
+        }
+        Ok(out)
+    }
+
+    fn collect_prefix_leaves<'a>(
+        &'a self,
+        cid: Cid,
+        node_start: u64,
+        boundary: u64,
+        out: &'a mut Vec<FileBranchLink>,
+    ) -> BoxFuture<'a, Result<bool, Error>> {
+        async move {
+            let block = self.get_block(&cid).await?;
+            let Some(branch) = parse_file_branch(block.data()) else {
+                return Ok(false);
+            };
+            let mut child_start = node_start;
+            for link in &branch.links {
+                if child_start >= boundary {
+                    break;
+                }
+                let child_end = child_start + link.blocksize;
+                if link.cid.codec() == RAW_LEAF_CODEC {
+                    if child_end <= boundary && link.blocksize == CHUNK {
+                        out.push(link.clone());
+                    } else {
+                        return Ok(false);
+                    }
+                } else if !self
+                    .collect_prefix_leaves(link.cid, child_start, boundary, out)
+                    .await?
+                {
+                    return Ok(false);
+                }
+                child_start = child_end;
+            }
+            Ok(true)
+        }
+        .boxed()
+    }
+
+    async fn prefix_leaves(
+        &self,
+        file_cid: Cid,
+        filesize: u64,
+        boundary: u64,
+    ) -> Result<Option<Vec<FileBranchLink>>, Error> {
+        if file_cid.codec() == RAW_LEAF_CODEC {
+            let leaf = FileBranchLink {
+                cid: file_cid,
+                blocksize: filesize,
+                tsize: filesize,
+            };
+            return Ok(Some(if filesize > 0 && filesize <= boundary {
+                vec![leaf]
+            } else {
+                vec![]
+            }));
+        }
+        let mut out = Vec::new();
+        if self.collect_prefix_leaves(file_cid, 0, boundary, &mut out).await? {
+            Ok(Some(out))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn rebuild_from_boundary(
+        &self,
+        file_cid: Cid,
+        filesize: u64,
+        boundary: u64,
+        new_tail: Vec<u8>,
+    ) -> Result<Option<(Cid, u64, Vec<Block>)>, Error> {
+        let Some(mut leaves) = self.prefix_leaves(file_cid, filesize, boundary).await? else {
+            return Ok(None);
+        };
+
+        let mut new_blocks = Vec::new();
+        for chunk in new_tail.chunks(CHUNK as usize) {
+            let cid = Cid::new_v1(RAW_LEAF_CODEC, HASHER.digest(chunk));
+            leaves.push(FileBranchLink {
+                cid,
+                blocksize: chunk.len() as u64,
+                tsize: chunk.len() as u64,
+            });
+            new_blocks.push(Block::new(cid, chunk.to_vec())?);
+        }
+
+        if leaves.is_empty() {
+            let (cid, tsize, blocks) = encode_file(&[])?;
+            return Ok(Some((cid, tsize, blocks)));
+        }
+
+        let (root_cid, root_tsize, branch_blocks) =
+            build_file_from_leaves(&leaves, VERSION, HASHER);
+        for (cid, bytes) in branch_blocks {
+            new_blocks.push(Block::new(cid, bytes)?);
+        }
+        Ok(Some((root_cid, root_tsize, new_blocks)))
+    }
+
+    async fn grow_file(
+        &self,
+        file_cid: Cid,
+        filesize: u64,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<Option<(Cid, u64, Vec<Block>)>, Error> {
+        let boundary = (offset.min(filesize) / CHUNK) * CHUNK;
+        let _gc = self.repo().gc_guard().await;
+        let mut new_tail = if boundary < filesize {
+            self.read_file_range(&file_cid, boundary, filesize).await?
+        } else {
+            Vec::new()
+        };
+        let rel_off = (offset - boundary) as usize;
+        let rel_end = rel_off + data.len();
+        if new_tail.len() < rel_end {
+            new_tail.resize(rel_end, 0);
+        }
+        new_tail[rel_off..rel_end].copy_from_slice(data);
+        self.rebuild_from_boundary(file_cid, filesize, boundary, new_tail)
+            .await
     }
 
     async fn read_existing_file(&self, comps: &[String]) -> Result<Option<Vec<u8>>, Error> {
@@ -1002,6 +1205,193 @@ mod tests {
         let (expected2, _, _) = encode_file(&content).unwrap();
         assert_eq!(mfs.stat("/big").await.unwrap().cid, expected2);
         assert_eq!(mfs.read("/big").await.unwrap(), content);
+    }
+
+    fn fill(n: usize, seed: u32) -> Vec<u8> {
+        let mut v = vec![0u8; n];
+        let mut x = seed;
+        for b in v.iter_mut() {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *b = (x >> 24) as u8;
+        }
+        v
+    }
+
+    async fn assert_canonical(mfs: &Mfs, path: &str, expected: &[u8]) {
+        let (cid, _, _) = encode_file(expected).unwrap();
+        assert_eq!(
+            mfs.stat(path).await.unwrap().cid,
+            cid,
+            "non-canonical tree for {path}"
+        );
+        assert_eq!(mfs.read(path).await.unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn grow_append_truncate_are_canonical() {
+        use futures::StreamExt as _;
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo.clone());
+
+        let mut content = fill(800_000, 1);
+        mfs.write("/f", &content, true).await.unwrap();
+        let before = repo.list_blocks().await.collect::<Vec<_>>().await.len();
+
+        let app = fill(300_000, 2);
+        mfs.write_with(
+            "/f",
+            &app,
+            WriteOptions {
+                offset: content.len() as u64,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        content.extend_from_slice(&app);
+        assert_canonical(&mfs, "/f", &content).await;
+        let after = repo.list_blocks().await.collect::<Vec<_>>().await.len();
+        assert!(after - before < 8, "append should reuse, added {}", after - before);
+
+        let patch = fill(200_000, 3);
+        let off = content.len() - 50_000;
+        mfs.write_with(
+            "/f",
+            &patch,
+            WriteOptions {
+                offset: off as u64,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        content.resize((off + patch.len()).max(content.len()), 0);
+        content[off..off + patch.len()].copy_from_slice(&patch);
+        assert_canonical(&mfs, "/f", &content).await;
+
+        mfs.truncate("/f", 600_000).await.unwrap();
+        content.truncate(600_000);
+        assert_canonical(&mfs, "/f", &content).await;
+
+        mfs.truncate("/f", 900_000).await.unwrap();
+        content.resize(900_000, 0);
+        assert_canonical(&mfs, "/f", &content).await;
+
+        mfs.truncate("/f", 0).await.unwrap();
+        assert_canonical(&mfs, "/f", &[]).await;
+    }
+
+    #[tokio::test]
+    async fn small_file_grows_to_multiblock() {
+        let mfs = mfs().await;
+        mfs.write("/s", b"small", true).await.unwrap();
+
+        let app = fill(600_000, 9);
+        mfs.write_with(
+            "/s",
+            &app,
+            WriteOptions {
+                offset: 5,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let mut content = b"small".to_vec();
+        content.resize(5 + app.len(), 0);
+        content[5..5 + app.len()].copy_from_slice(&app);
+        assert_canonical(&mfs, "/s", &content).await;
+    }
+
+    #[tokio::test]
+    async fn empty_file_grow_is_canonical() {
+        let mfs = mfs().await;
+
+        mfs.write("/e", b"", true).await.unwrap();
+        let data = fill(CHUNK as usize + 5, 4);
+        mfs.write_with(
+            "/e",
+            &data,
+            WriteOptions {
+                offset: 0,
+                create: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_canonical(&mfs, "/e", &data).await;
+
+        mfs.write("/t", &fill(500_000, 5), true).await.unwrap();
+        mfs.truncate("/t", 0).await.unwrap();
+        let grow = fill(CHUNK as usize + 5, 6);
+        mfs.write_with(
+            "/t",
+            &grow,
+            WriteOptions {
+                offset: 0,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_canonical(&mfs, "/t", &grow).await;
+    }
+
+    #[tokio::test]
+    async fn imported_nonstandard_chunk_file_falls_back() {
+        use rust_unixfs::file::adder::{Chunker, FileAdder};
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo.clone());
+
+        // a file chunked at 400KiB (leaves larger than our 256KiB CHUNK), imported by reference
+        let content = fill(900_000, 7);
+        let mut adder = FileAdder::builder()
+            .with_chunker(Chunker::Size(400 * 1024))
+            .with_cid_version(VERSION)
+            .with_hasher(HASHER)
+            .build();
+        let mut blocks = Vec::new();
+        let mut root = None;
+        let mut off = 0;
+        while off < content.len() {
+            let (ready, consumed) = adder.push(&content[off..]);
+            for (cid, block) in ready {
+                root = Some(cid);
+                blocks.push(Block::new(cid, block).unwrap());
+            }
+            off += consumed;
+        }
+        for (cid, block) in adder.finish() {
+            root = Some(cid);
+            blocks.push(Block::new(cid, block).unwrap());
+        }
+        let root = root.unwrap();
+        repo.put_blocks(blocks).await.unwrap();
+
+        mfs.cp(&format!("/ipfs/{root}"), "/imported", true)
+            .await
+            .unwrap();
+
+        // grow it: the 400KiB leaves straddle our 256KiB boundary, so the editor must bail to
+        // read-modify-rewrite, which re-encodes canonically (correct content, our chunking)
+        let app = fill(100_000, 8);
+        let mut expected = content.clone();
+        expected.extend_from_slice(&app);
+        mfs.write_with(
+            "/imported",
+            &app,
+            WriteOptions {
+                offset: content.len() as u64,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_canonical(&mfs, "/imported", &expected).await;
     }
 
     #[tokio::test]

@@ -24,20 +24,32 @@ pub(crate) fn check_hamtshard_supported(
 /// dag size (`Tsize`) recorded on the link.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirLink {
+    /// Entry name.
     pub name: String,
+    /// Target block.
     pub target: Cid,
+    /// Cumulative dag size recorded on the link (the dag-pb Tsize).
     pub tsize: u64,
 }
 
 /// A classified view of a dag-pb / UnixFS (or raw) block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeDescription {
-    /// A UnixFS file. `size` is the logical file size (`filesize`) when present.
-    File { size: u64 },
+    /// A UnixFS file with its logical file size (`filesize`) when present.
+    File {
+        /// Logical file size.
+        size: u64,
+    },
     /// A flat (non-sharded) UnixFS directory and its immediate links.
-    Directory { links: Vec<DirLink> },
+    Directory {
+        /// Immediate child links.
+        links: Vec<DirLink>,
+    },
     /// A HAMT-sharded directory and its raw shard links (names carry the 2-hex-char bucket prefix).
-    HamtShard { links: Vec<DirLink> },
+    HamtShard {
+        /// Raw shard links.
+        links: Vec<DirLink>,
+    },
     /// A UnixFS symlink.
     Symlink,
     /// A raw leaf (codec 0x55) or any block that is not a parseable UnixFS node.
