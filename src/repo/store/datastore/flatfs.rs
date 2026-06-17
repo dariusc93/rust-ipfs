@@ -145,6 +145,12 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
                     yield item;
                 }
             } else {
+                // only canonical <key>.data files are entries; skip crash-leftover write temps
+                // (and anything else) so they never surface as corrupt key/value pairs.
+                if path.extension().and_then(|e| e.to_str()) != Some("data") {
+                    continue;
+                }
+
                 let root_str = data_path.to_string_lossy().to_string();
                 let path_str = path.to_string_lossy().to_string();
                 let raw_key = &path_str[root_str.len()..];
