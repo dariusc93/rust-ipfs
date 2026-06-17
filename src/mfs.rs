@@ -581,20 +581,31 @@ impl Mfs {
     async fn resolve_ipfs(&self, root: Cid, sub: &[String]) -> Result<Cid, Error> {
         let mut cid = root;
         for seg in sub {
-            let block = self.repo().get_block(cid).await?;
-            let map = match describe(block.data()) {
-                NodeDescription::Directory { links } => links_to_map(links),
-                NodeDescription::HamtShard { .. } => {
-                    return Err(anyhow!("cp through a HAMT-sharded directory is not yet supported"))
-                }
-                _ => return Err(anyhow!("{cid} is not a directory")),
-            };
-            let entry = map
-                .get(seg)
+            cid = self
+                .resolve_name(cid, seg)
+                .await?
                 .ok_or_else(|| anyhow!("path not found in source: {seg}"))?;
-            cid = entry.cid;
         }
         Ok(cid)
+    }
+
+    async fn resolve_name(&self, dir_cid: Cid, name: &str) -> Result<Option<Cid>, Error> {
+        use rust_unixfs::dir::{resolve, MaybeResolved};
+
+        let block = self.repo().get_block(dir_cid).await?;
+        let mut cache = None;
+        let mut step = resolve(block.data(), name, &mut cache)?;
+        loop {
+            match step {
+                MaybeResolved::Found(cid) => return Ok(Some(cid)),
+                MaybeResolved::NotFound => return Ok(None),
+                MaybeResolved::NeedToLoadMore(lookup) => {
+                    let next = *lookup.pending_links().0;
+                    let block = self.repo().get_block(next).await?;
+                    step = lookup.continue_walk(block.data(), &mut cache)?;
+                }
+            }
+        }
     }
 
     async fn fetch_and_measure(&self, root: Cid) -> Result<u64, Error> {
@@ -1530,6 +1541,40 @@ mod tests {
         mfs.rm("/d/file007", false).await.unwrap();
         assert_eq!(mfs.ls("/d").await.unwrap().len(), n);
         assert!(mfs.read("/d/file007").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cp_from_ipfs_through_hamt_dir() {
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo).with_shard_threshold(Some(0));
+
+        for i in 0..64u32 {
+            mfs.write(
+                &format!("/d/file{i:03}"),
+                format!("content {i}").as_bytes(),
+                true,
+            )
+            .await
+            .unwrap();
+        }
+
+        let dir_cid = mfs.stat("/d").await.unwrap().cid;
+        let block = mfs.get_block(&dir_cid).await.unwrap();
+        assert!(
+            matches!(describe(block.data()), NodeDescription::HamtShard { .. }),
+            "source dir should be HAMT-sharded"
+        );
+
+        mfs.cp(&format!("/ipfs/{dir_cid}/file042"), "/copied", false)
+            .await
+            .unwrap();
+        assert_eq!(mfs.read("/copied").await.unwrap(), b"content 42");
+
+        assert!(mfs
+            .cp(&format!("/ipfs/{dir_cid}/missing"), "/x", false)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
