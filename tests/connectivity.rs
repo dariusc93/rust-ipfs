@@ -3,22 +3,13 @@ use rust_ipfs::Node;
 use rust_ipfs::{Multiaddr, Protocol};
 use std::time::Duration;
 
-#[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
-mod common;
-#[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
-use common::interop::ForeignNode;
-
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 // Make sure two instances of ipfs can be connected by `Multiaddr`.
 #[tokio::test]
 async fn connect_two_nodes_by_addr() {
     let node_a = Node::new("a").await;
-
-    #[cfg(all(not(feature = "test_go_interop"), not(feature = "test_js_interop")))]
     let node_b = Node::new("b").await;
-    #[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
-    let node_b = ForeignNode::new();
 
     node_a
         .connect(node_b.addrs[0].clone())

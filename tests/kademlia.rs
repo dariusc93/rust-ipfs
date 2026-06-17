@@ -6,7 +6,7 @@ use rust_ipfs::{p2p::MultiaddrExt, Block, Multiaddr, Node, Protocol, Quorum};
 use std::time::Duration;
 
 mod common;
-use common::{interop::ForeignNode, spawn_nodes, Topology};
+use common::{spawn_nodes, Topology};
 use rust_ipfs::block::BlockCodec;
 
 fn strip_peer_id(mut addr: Multiaddr) -> Multiaddr {
@@ -31,10 +31,7 @@ async fn find_peer_local() {
 }
 
 // starts the specified number of rust IPFS nodes connected in a chain.
-#[cfg(all(not(feature = "test_go_interop"), not(feature = "test_js_interop")))]
-async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<ForeignNode>) {
-    // fire up `n` nodes
-
+async fn spawn_bootstrapped_nodes<const N: usize>() -> Vec<Node> {
     use rust_ipfs::DhtMode;
     let nodes = spawn_nodes::<N>(Topology::None).await;
 
@@ -46,9 +43,6 @@ async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<Foreig
         let (next_id, next_addr) = if i < N - 1 {
             (nodes[i + 1].id, nodes[i + 1].addrs[0].clone())
         } else {
-            // the last node in the chain also needs to know some address
-            // in order to bootstrap, so give it its neighbour's information
-            // and then bootstrap it as well
             (nodes[N - 2].id, nodes[N - 2].addrs[0].clone())
         };
 
@@ -58,51 +52,7 @@ async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<Foreig
         nodes[i].bootstrap().await.unwrap();
     }
 
-    // make sure that the nodes are not actively connected to each other
-    // and that we are actually going to be testing the DHT here
-    // for node in &nodes {
-    // assert!([1usize, 2].contains(&node.connected().await.unwrap().len()));
-    // }
-
-    (nodes, None)
-}
-
-// most of the setup is the same as in the not(feature = "test_X_interop") case, with
-// the addition of a foreign node in the middle of the chain; the first half of the chain
-// learns about the next peer, the foreign node being the last one, and the second half
-// learns about the previous peer, the foreign node being the first one; a visualization:
-// r[0] > r[1] > .. > foreign < .. < r[n - 3] < r[n - 2]
-#[cfg(any(feature = "test_go_interop", feature = "test_js_interop"))]
-async fn spawn_bootstrapped_nodes<const N: usize>() -> (Vec<Node>, Option<ForeignNode>) {
-    // start a foreign IPFS node
-    let foreign_node = ForeignNode::new();
-
-    // exclude one node to make room for the intermediary foreign node
-    const N: usize = n - 1;
-    let nodes = spawn_nodes::<N>(Topology::None).await;
-
-    // skip the last index again, as there is a foreign node without one bound to it
-    for i in 0..(n - 1) {
-        let (next_id, next_addr) = if i == n / 2 - 1 || i == n / 2 {
-            println!("telling rust node {} about the foreign node", i);
-            (foreign_node.id, foreign_node.addrs[0].clone())
-        } else if i < n / 2 {
-            println!("telling rust node {} about rust node {}", i, i + 1);
-            (nodes[i + 1].id, nodes[i + 1].addrs[0].clone())
-        } else {
-            println!("telling rust node {} about rust node {}", i, i - 1);
-            (nodes[i - 1].id, nodes[i - 1].addrs[0].clone())
-        };
-
-        nodes[i].add_peer(next_id, next_addr).await.unwrap();
-        nodes[i].bootstrap().await.unwrap();
-    }
-
-    // in this case we can't make sure that all the nodes only have 1 or 2 peers but it's not a big
-    // deal, since in reality this kind of extreme conditions are unlikely and we already test that
-    // in the pure-rust setup
-
-    (nodes, Some(foreign_node))
+    nodes
 }
 
 /// Check if `Ipfs::find_peer` works using DHT.
@@ -112,8 +62,8 @@ async fn dht_find_peer() {
     // works for numbers >=2, though 2 would essentially just
     // be the same as find_peer_local, so it should be higher
     const CHAIN_LEN: usize = 10;
-    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
-    let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
+    let nodes = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
+    let last_index = CHAIN_LEN - 1;
 
     // node 0 now tries to find the address of the very last node in the
     // chain; the chain should be long enough for it not to automatically
@@ -127,7 +77,7 @@ async fn dht_find_peer() {
 #[tokio::test]
 async fn dht_get_closest_peers() {
     const CHAIN_LEN: usize = 10;
-    let (nodes, _foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
+    let nodes = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
 
     assert_eq!(
         nodes[0].get_closest_peers(nodes[0].id).await.unwrap().len(),
@@ -159,8 +109,8 @@ async fn dht_popular_content_discovery() {
 #[tokio::test]
 async fn dht_providing() {
     const CHAIN_LEN: usize = 10;
-    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
-    let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
+    let nodes = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
+    let last_index = CHAIN_LEN - 1;
 
     // the last node puts a block in order to have something to provide
     let data = b"hello block\n".to_vec();
@@ -192,8 +142,8 @@ async fn dht_providing() {
 #[tokio::test]
 async fn bitswap_fetch_via_dht_discovery() {
     const CHAIN_LEN: usize = 50;
-    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
-    let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
+    let nodes = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
+    let last_index = CHAIN_LEN - 1;
 
     // the last node holds and provides a block; node 0 is not directly connected to it.
     let data = b"phase-0 dht discovery\n".to_vec();
@@ -217,8 +167,8 @@ async fn bitswap_fetch_via_dht_discovery() {
 #[tokio::test]
 async fn dht_get_put() {
     const CHAIN_LEN: usize = 10;
-    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
-    let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
+    let nodes = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
+    let last_index = CHAIN_LEN - 1;
 
     let (key, value) = (b"key".to_vec(), b"value".to_vec());
     let quorum = Quorum::One;
