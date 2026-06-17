@@ -1650,10 +1650,7 @@ mod node {
                 uninit = uninit.set_span(span);
             }
 
-            let list = match addr {
-                Some(addr) => addr,
-                None => vec![Multiaddr::empty().with(Protocol::Memory(0))],
-            };
+            let list = addr.unwrap_or_else(|| vec![Multiaddr::empty().with(Protocol::Memory(0))]);
 
             let ipfs = uninit.start().await.unwrap();
 
