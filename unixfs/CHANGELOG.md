@@ -5,6 +5,7 @@
 - feat: Add Walker::new_shallow so we can walk directories without loading the entire tree.
 - feat: Support custom hasher.
 - refactor: Change to use CIDv1 by default instead of CIDv0.
+- feat: Implemented MFS/Files api
 
 # 0.5.1
 
