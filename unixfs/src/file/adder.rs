@@ -1,13 +1,11 @@
 use ipld_core::cid::{Cid, Version};
-use multihash::{self, Multihash};
+use multihash_codetable::Code;
 
 use crate::pb::{FlatUnixFs, UnixFs, UnixFsType, WriteableCid};
 use crate::Metadata;
 use alloc::borrow::Cow;
 use core::fmt;
 use quick_protobuf::{MessageWrite, Writer, WriterBackend};
-
-use sha2::{Digest, Sha256};
 
 /// File tree builder. Implements [`core::default::Default`] which tracks the recent defaults.
 ///
@@ -30,6 +28,7 @@ pub struct FileAdder {
 struct Config {
     cid_version: Version,
     raw_leaves: bool,
+    hasher: Code,
 }
 
 impl Default for Config {
@@ -37,30 +36,18 @@ impl Default for Config {
         Config {
             cid_version: Version::V0,
             raw_leaves: false,
+            hasher: Code::Sha2_256,
         }
     }
 }
 
 impl Config {
     fn cid_of(&self, codec: u64, bytes: &[u8]) -> Cid {
-        let mh = Multihash::wrap(
-            multihash_codetable::Code::Sha2_256.into(),
-            &Sha256::digest(bytes),
-        )
-        .unwrap();
-        match self.cid_version {
-            Version::V0 => Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0"),
-            Version::V1 => Cid::new_v1(codec, mh),
-        }
+        crate::pb::make_cid(self.cid_version, self.hasher, codec, bytes)
     }
 
     fn cid_of_raw_leaf(&self, bytes: &[u8]) -> Cid {
-        let mh = Multihash::wrap(
-            multihash_codetable::Code::Sha2_256.into(),
-            &Sha256::digest(bytes),
-        )
-        .unwrap();
-        Cid::new_v1(crate::file::RAW_LEAF_CODEC, mh)
+        crate::pb::make_cid(Version::V1, self.hasher, crate::file::RAW_LEAF_CODEC, bytes)
     }
 }
 
@@ -110,6 +97,7 @@ pub struct FileAdderBuilder {
     cid_version: Version,
     raw_leaves: Option<bool>,
     metadata: Metadata,
+    hasher: Code,
 }
 
 impl Default for FileAdderBuilder {
@@ -120,6 +108,7 @@ impl Default for FileAdderBuilder {
             cid_version: Version::V0,
             raw_leaves: None,
             metadata: Metadata::default(),
+            hasher: Code::Sha2_256,
         }
     }
 }
@@ -160,6 +149,11 @@ impl FileAdderBuilder {
         FileAdderBuilder { metadata, ..self }
     }
 
+    /// Sets the multihash used for produced links.
+    pub fn with_hasher(self, hasher: Code) -> Self {
+        FileAdderBuilder { hasher, ..self }
+    }
+
     /// Returns a new FileAdder
     pub fn build(self) -> FileAdder {
         let FileAdderBuilder {
@@ -168,8 +162,16 @@ impl FileAdderBuilder {
             cid_version,
             raw_leaves,
             metadata,
+            hasher,
         } = self;
 
+        // A non-sha2-256 hash cannot be represented as CIDv0, so it forces CIDv1; raw leaves then
+        // default on as they do for any V1.
+        let cid_version = if hasher == Code::Sha2_256 {
+            cid_version
+        } else {
+            Version::V1
+        };
         let raw_leaves = raw_leaves.unwrap_or(matches!(cid_version, Version::V1));
 
         FileAdder {
@@ -178,6 +180,7 @@ impl FileAdderBuilder {
             config: Config {
                 cid_version,
                 raw_leaves,
+                hasher,
             },
             metadata,
             ..Default::default()
@@ -721,6 +724,40 @@ mod tests {
         assert_eq!(cid.version(), Version::V1);
         assert_eq!(cid.codec(), 0x55);
         assert_eq!(block.as_slice(), content);
+    }
+
+    #[test]
+    fn with_hasher_blake3() {
+        use ipld_core::cid::Version;
+        use multihash_codetable::{Code, MultihashDigest};
+
+        let content: &[u8] = b"foobar\n";
+
+        // A non-sha2-256 hash implies CIDv1 and raw leaves even without setting cid_version.
+        let blocks = FileAdder::builder()
+            .with_hasher(Code::Blake3_256)
+            .build()
+            .collect_blocks(content, 0);
+
+        assert_eq!(blocks.len(), 1);
+        let (cid, block) = &blocks[0];
+        assert_eq!(cid.version(), Version::V1);
+        assert_eq!(cid.codec(), 0x55);
+        assert_eq!(block.as_slice(), content);
+        assert_eq!(*cid.hash(), Code::Blake3_256.digest(content));
+
+        // Multi-block: every produced node (leaves and the dag-pb root) is hashed with blake3.
+        let blocks = FileAdder::builder()
+            .with_hasher(Code::Blake3_256)
+            .with_chunker(Chunker::Size(2))
+            .build()
+            .collect_blocks(content, 0);
+
+        assert!(blocks.len() > 1);
+        for (cid, block) in &blocks {
+            assert_eq!(cid.version(), Version::V1);
+            assert_eq!(*cid.hash(), Code::Blake3_256.digest(block));
+        }
     }
 
     #[test]

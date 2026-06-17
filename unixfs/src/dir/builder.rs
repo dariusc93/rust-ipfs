@@ -59,6 +59,7 @@ pub struct TreeOptions {
     wrap_with_directory: bool,
     cid_version: Version,
     shard_threshold: Option<u64>,
+    hasher: multihash_codetable::Code,
 }
 
 impl Default for TreeOptions {
@@ -68,6 +69,7 @@ impl Default for TreeOptions {
             wrap_with_directory: false,
             cid_version: Version::V0,
             shard_threshold: Some(256 * 1024),
+            hasher: multihash_codetable::Code::Sha2_256,
         }
     }
 }
@@ -95,6 +97,12 @@ impl TreeOptions {
     /// Defaults to `Some(256 * 1024)`. `None` disables sharding.
     pub fn shard_threshold(&mut self, threshold: Option<u64>) {
         self.shard_threshold = threshold;
+    }
+
+    /// Sets the multihash used for produced directory and shard nodes. Defaults to sha2-256. A hash
+    /// other than sha2-256 implies CIDv1.
+    pub fn hasher(&mut self, hasher: multihash_codetable::Code) {
+        self.hasher = hasher;
     }
 }
 

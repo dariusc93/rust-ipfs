@@ -4,8 +4,6 @@ use super::{
 use crate::Metadata;
 use core::fmt;
 use ipld_core::cid::{Cid, Version};
-use multihash::Multihash;
-use multihash_codetable::Code;
 use std::collections::{HashMap, VecDeque};
 
 use super::sharded::{self, ShardBlock};
@@ -96,12 +94,12 @@ impl PostOrderIterator {
         buffer: &mut Vec<u8>,
         block_size_limit: &Option<u64>,
         cid_version: Version,
+        hasher: multihash_codetable::Code,
         shard_threshold: &Option<u64>,
         metadata: &Metadata,
     ) -> Result<(Leaf, Vec<ShardBlock>), TreeConstructionFailed> {
         use crate::pb::{UnixFs, UnixFsType};
         use quick_protobuf::{MessageWrite, Writer};
-        use sha2::{Digest, Sha256};
 
         if let Some(threshold) = shard_threshold {
             let estimate = links
@@ -111,7 +109,7 @@ impl PostOrderIterator {
                 .sum::<u64>();
 
             if estimate > *threshold {
-                return sharded::build_sharded(links, buffer, cid_version, metadata);
+                return sharded::build_sharded(links, buffer, cid_version, hasher, metadata);
             }
         }
 
@@ -143,12 +141,7 @@ impl PostOrderIterator {
         node.write_message(&mut writer)
             .map_err(TreeConstructionFailed::Protobuf)?;
 
-        #[allow(clippy::needless_borrows_for_generic_args)]
-        let mh = Multihash::wrap(Code::Sha2_256.into(), &Sha256::digest(&buffer)).unwrap();
-        let cid = match cid_version {
-            Version::V0 => Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0"),
-            Version::V1 => Cid::new_v1(crate::file::DAG_PB_CODEC, mh),
-        };
+        let cid = crate::pb::make_cid(cid_version, hasher, crate::file::DAG_PB_CODEC, buffer);
 
         let combined_from_links = links
             .iter()
@@ -275,6 +268,7 @@ impl PostOrderIterator {
                         buffer,
                         &self.opts.block_size_limit,
                         self.opts.cid_version,
+                        self.opts.hasher,
                         &self.opts.shard_threshold,
                         &metadata,
                     ) {
@@ -335,6 +329,7 @@ impl PostOrderIterator {
                         buffer,
                         &self.opts.block_size_limit,
                         self.opts.cid_version,
+                        self.opts.hasher,
                         &self.opts.shard_threshold,
                         &metadata,
                     ) {

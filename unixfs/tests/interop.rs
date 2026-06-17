@@ -331,11 +331,11 @@ fn pinned_metadata_file() {
 fn pinned_symlink() {
     let md = Metadata::default();
     assert_eq!(
-        symlink_block("foobar", &md, Version::V0).0.to_string(),
+        symlink_block("foobar", &md, Version::V0, multihash_codetable::Code::Sha2_256).0.to_string(),
         SYMLINK_V0
     );
     assert_eq!(
-        symlink_block("foobar", &md, Version::V1).0.to_string(),
+        symlink_block("foobar", &md, Version::V1, multihash_codetable::Code::Sha2_256).0.to_string(),
         SYMLINK_V1
     );
 }
@@ -409,7 +409,7 @@ fn live_symlink() {
 
     for (version, pinned) in [(Version::V0, SYMLINK_V0), (Version::V1, SYMLINK_V1)] {
         let kubo = kubo_add_path(&link, &version_args(version));
-        let cid = symlink_block("foobar", &Metadata::default(), version).0;
+        let cid = symlink_block("foobar", &Metadata::default(), version, multihash_codetable::Code::Sha2_256).0;
         assert_eq!(cid.to_string(), kubo, "rust vs kubo symlink {version:?}");
         assert_eq!(kubo, pinned, "pinned vector drifted from kubo");
     }

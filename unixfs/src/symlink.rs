@@ -7,10 +7,8 @@ use crate::pb::{FlatUnixFs, UnixFs, UnixFsType};
 use crate::Metadata;
 use alloc::borrow::Cow;
 use ipld_core::cid::{Cid, Version};
-use multihash::Multihash;
 use multihash_codetable::Code;
 use quick_protobuf::{MessageWrite, Writer};
-use sha2::{Digest, Sha256};
 
 fn symlink_node<'a>(target_path: &'a str, metadata: &Metadata) -> FlatUnixFs<'a> {
     let (mode, mtime) = metadata.to_pb();
@@ -36,23 +34,20 @@ pub fn serialize_symlink_block(target_path: &str, block_buffer: &mut Vec<u8>) {
 }
 
 /// Builds a dag-pb block for a symlink to the given target_path, returning its `Cid` under the
-/// chosen version and the block bytes. `metadata` sets mode/mtime (use [`Metadata::default`] for
-/// none). Symlinks are never raw leaves.
+/// chosen version and hasher, and the block bytes. `metadata` sets mode/mtime (use
+/// [`Metadata::default`] for none). Symlinks are never raw leaves.
 pub fn symlink_block(
     target_path: &str,
     metadata: &Metadata,
     cid_version: Version,
+    hasher: Code,
 ) -> (Cid, Vec<u8>) {
     let node = symlink_node(target_path, metadata);
     let mut block = Vec::new();
     let mut writer = Writer::new(&mut block);
     node.write_message(&mut writer).expect("unexpected failure");
 
-    let mh = Multihash::wrap(Code::Sha2_256.into(), &Sha256::digest(&block)).unwrap();
-    let cid = match cid_version {
-        Version::V0 => Cid::new_v0(mh).expect("sha2_256 is the correct multihash for cidv0"),
-        Version::V1 => Cid::new_v1(crate::file::DAG_PB_CODEC, mh),
-    };
+    let cid = crate::pb::make_cid(cid_version, hasher, crate::file::DAG_PB_CODEC, &block);
 
     (cid, block)
 }
@@ -93,13 +88,23 @@ mod tests {
         use crate::Metadata;
         use ipld_core::cid::Version;
 
-        let (cid_v0, block_v0) = symlink_block("b", &Metadata::default(), Version::V0);
+        let (cid_v0, block_v0) = symlink_block(
+            "b",
+            &Metadata::default(),
+            Version::V0,
+            multihash_codetable::Code::Sha2_256,
+        );
         assert_eq!(
             cid_v0.to_string(),
             "QmfLJN6HLyREnWr7QQNmgmuNziUhcbwUopkHQ8gD3pMfp6"
         );
 
-        let (cid_v1, block_v1) = symlink_block("b", &Metadata::default(), Version::V1);
+        let (cid_v1, block_v1) = symlink_block(
+            "b",
+            &Metadata::default(),
+            Version::V1,
+            multihash_codetable::Code::Sha2_256,
+        );
         assert_eq!(cid_v1.version(), Version::V1);
         assert_eq!(cid_v1.codec(), 0x70);
 
@@ -113,7 +118,7 @@ mod tests {
         use ipld_core::cid::Version;
 
         let md = Metadata::new(Some(0o120777), Some((1_700_000_000, 0)));
-        let (_cid, block) = symlink_block("b", &md, Version::V0);
+        let (_cid, block) = symlink_block("b", &md, Version::V0, multihash_codetable::Code::Sha2_256);
 
         let parsed = crate::pb::FlatUnixFs::try_parse(&block).unwrap();
         assert_eq!(parsed.data.mode, Some(0o120777));
@@ -122,7 +127,12 @@ mod tests {
         // a zero FractionalNanoseconds must be omitted to match go/js
         assert_eq!(mtime.FractionalNanoseconds, None);
 
-        let (_c, plain) = symlink_block("b", &Metadata::default(), Version::V0);
+        let (_c, plain) = symlink_block(
+            "b",
+            &Metadata::default(),
+            Version::V0,
+            multihash_codetable::Code::Sha2_256,
+        );
         let plain = crate::pb::FlatUnixFs::try_parse(&plain).unwrap();
         assert!(plain.data.mode.is_none());
         assert!(plain.data.mtime.is_none());

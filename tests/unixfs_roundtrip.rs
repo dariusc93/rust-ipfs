@@ -152,6 +152,31 @@ async fn ls_lists_only_current_directory() {
 }
 
 #[tokio::test]
+async fn add_with_blake3_hasher_roundtrips() {
+    use multihash_codetable::Code;
+
+    let node = Node::new("add_with_blake3_hasher").await;
+    let data = payload(40_000);
+
+    let path = node
+        .add_unixfs(data.clone())
+        .chunk(Chunker::Size(64))
+        .hasher(Code::Blake3_256)
+        .await
+        .expect("add succeeds");
+
+    let blake3: u64 = Code::Blake3_256.into();
+    let cid = path.root().cid().copied().expect("ipld root");
+    assert_eq!(cid.hash().code(), blake3, "root must use blake3");
+
+    // The prefetching cat path is hash-agnostic and must still round-trip the bytes.
+    let out = node.cat_unixfs(path).await.expect("cat succeeds");
+    assert_eq!(out.as_ref(), data.as_slice());
+
+    node.shutdown().await;
+}
+
+#[tokio::test]
 async fn cat_roundtrip_default_chunk() {
     let node = Node::new("cat_roundtrip_default_chunk").await;
     // Larger than one default 256 KiB leaf so the standard chunker also spans multiple blocks.

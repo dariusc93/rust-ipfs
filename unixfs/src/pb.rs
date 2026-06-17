@@ -115,6 +115,27 @@ impl quick_protobuf::message::MessageWrite for FlatUnixFs<'_> {
     }
 }
 
+/// Hashes `bytes` with `hasher` and wraps the digest in a `Cid` of the given `codec`. CIDv0 is
+/// defined only for dag-pb with sha2-256, so any other hash yields a CIDv1 regardless of
+/// `cid_version`.
+pub(crate) fn make_cid(
+    cid_version: ipld_core::cid::Version,
+    hasher: multihash_codetable::Code,
+    codec: u64,
+    bytes: &[u8],
+) -> ipld_core::cid::Cid {
+    use ipld_core::cid::{Cid, Version};
+    use multihash_codetable::{Code, MultihashDigest};
+
+    let mh = hasher.digest(bytes);
+    match cid_version {
+        Version::V0 if hasher == Code::Sha2_256 => {
+            Cid::new_v0(mh).expect("sha2-256 is the correct multihash for cidv0")
+        }
+        _ => Cid::new_v1(codec, mh),
+    }
+}
+
 /// Serializes a `Cid` as the bytes of a dag-pb `PBLink::Hash`, streaming the multihash directly
 /// (`code | size | digest`) so no intermediate byte vector is allocated.
 pub(crate) struct WriteableCid<'a>(pub(crate) &'a ipld_core::cid::Cid);
