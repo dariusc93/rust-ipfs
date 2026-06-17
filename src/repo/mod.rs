@@ -490,40 +490,64 @@ impl<S: RepoTypes> Repo<S> {
         }
         let block_migration = {
             async move {
+                let mut errors = 0usize;
                 let mut stream = self.list_blocks().await;
                 while let Some(cid) = stream.next().await {
                     match self.get_block_now(&cid).await {
-                        Ok(Some(block)) => match repo.inner.block_store.put(&block).await {
-                            Ok(_) => {}
-                            Err(e) => error!("Error migrating {cid}: {e}"),
-                        },
-                        Ok(None) => error!("{cid} doesnt exist"),
-                        Err(e) => error!("Error getting block {cid}: {e}"),
+                        Ok(Some(block)) => {
+                            if let Err(e) = repo.inner.block_store.put(&block).await {
+                                error!("Error migrating {cid}: {e}");
+                                errors += 1;
+                            }
+                        }
+                        Ok(None) => {
+                            error!("{cid} doesnt exist");
+                            errors += 1;
+                        }
+                        Err(e) => {
+                            error!("Error getting block {cid}: {e}");
+                            errors += 1;
+                        }
                     }
                 }
+                errors
             }
         };
 
         let data_migration = {
             async move {
+                let mut errors = 0usize;
                 let mut data_stream = self.data_store().iter().await;
                 while let Some((k, v)) = data_stream.next().await {
                     if let Err(e) = repo.data_store().put(&k, &v).await {
                         error!("Unable to migrate {k:?} into repo: {e}");
+                        errors += 1;
                     }
                 }
+                errors
             }
         };
 
         let pins_migration = {
             async move {
+                let mut errors = 0usize;
                 let mut stream = self.data_store().list(None).await;
-                while let Some(Ok((cid, pin_mode))) = stream.next().await {
+                while let Some(item) = stream.next().await {
+                    let (cid, pin_mode) = match item {
+                        Ok(pin) => pin,
+                        Err(e) => {
+                            error!("Error listing pins during migration: {e}");
+                            errors += 1;
+                            continue;
+                        }
+                    };
                     match pin_mode {
-                        PinMode::Direct => match repo.data_store().insert_direct_pin(&cid).await {
-                            Ok(_) => {}
-                            Err(e) => error!("Unable to migrate pin {cid}: {e}"),
-                        },
+                        PinMode::Direct => {
+                            if let Err(e) = repo.data_store().insert_direct_pin(&cid).await {
+                                error!("Unable to migrate pin {cid}: {e}");
+                                errors += 1;
+                            }
+                        }
                         PinMode::Indirect => {
                             //No need to track since we will be obtaining the reference from the pin that is recursive
                             continue;
@@ -538,6 +562,7 @@ impl<S: RepoTypes> Repo<S> {
                                 Ok(None) => continue,
                                 Err(e) => {
                                     error!("Block {cid} does not exist but is pinned: {e}");
+                                    errors += 1;
                                     continue;
                                 }
                             };
@@ -551,15 +576,25 @@ impl<S: RepoTypes> Repo<S> {
 
                             if let Err(e) = repo.insert_recursive_pin(&cid, st).await {
                                 error!("Error migrating pin {cid}: {e}");
+                                errors += 1;
                                 continue;
                             }
                         }
                     }
                 }
+                errors
             }
         };
 
-        futures::join!(block_migration, data_migration, pins_migration);
+        let (block_errors, data_errors, pin_errors) =
+            futures::join!(block_migration, data_migration, pins_migration);
+
+        let total = block_errors + data_errors + pin_errors;
+        if total > 0 {
+            anyhow::bail!(
+                "migration incomplete: {block_errors} block, {data_errors} datastore, {pin_errors} pin error(s); see logs"
+            );
+        }
 
         Ok(())
     }
@@ -753,27 +788,40 @@ impl<S: RepoTypes> Repo<S> {
         Ok(removed)
     }
 
+    /// Collects the transitive references of `cid` (excluding `cid` itself). The accumulator doubles
+    /// as a visited set, so shared subtrees are walked once and any malformed cycle terminates.
     fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, BTreeSet<Cid>> {
+        async move {
+            let mut visited = BTreeSet::new();
+            visited.insert(cid);
+            self.collect_references(cid, &mut visited).await;
+            visited.remove(&cid);
+            visited
+        }
+        .boxed()
+    }
+
+    fn collect_references<'a>(
+        &'a self,
+        cid: Cid,
+        visited: &'a mut BTreeSet<Cid>,
+    ) -> BoxFuture<'a, ()> {
         async move {
             let block = match self.get_block_now(&cid).await {
                 Ok(Some(block)) => block,
-                _ => return BTreeSet::default(),
+                _ => return,
             };
 
             let mut references: BTreeSet<Cid> = BTreeSet::new();
             if block.references(&mut references).is_err() {
-                return BTreeSet::default();
+                return;
             }
 
-            let mut list = BTreeSet::new();
-
-            for cid in &references {
-                let mut inner_list = self.recursive_collections(*cid).await;
-                list.append(&mut inner_list);
+            for reference in references {
+                if visited.insert(reference) {
+                    self.collect_references(reference, visited).await;
+                }
             }
-
-            references.append(&mut list);
-            references
         }
         .boxed()
     }
@@ -1573,5 +1621,81 @@ impl<S: RepoTypes> IntoFuture for RepoRemovePin<S> {
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod repo_tests {
+    use super::*;
+    use ipld_core::codec::Codec;
+    use ipld_core::ipld::Ipld;
+    use multihash_codetable::{Code, MultihashDigest};
+
+    fn raw_block(data: &[u8]) -> Block {
+        let cid = Cid::new_v1(0x55, Code::Sha2_256.digest(data));
+        Block::new(cid, data.to_vec()).unwrap()
+    }
+
+    fn dag_cbor(ipld: &Ipld) -> Block {
+        let data = serde_ipld_dagcbor::codec::DagCborCodec::encode_to_vec(ipld).unwrap();
+        let cid = Cid::new_v1(0x71, Code::Sha2_256.digest(&data));
+        Block::new(cid, data).unwrap()
+    }
+
+    #[tokio::test]
+    async fn recursive_remove_walks_shared_subtree_once() {
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+
+        // diamond: root -> {a, b}, a -> shared, b -> shared
+        let shared = dag_cbor(&Ipld::String("shared".into()));
+        let a = dag_cbor(&Ipld::List(vec![Ipld::Integer(0), Ipld::Link(*shared.cid())]));
+        let b = dag_cbor(&Ipld::List(vec![Ipld::Integer(1), Ipld::Link(*shared.cid())]));
+        let root = dag_cbor(&Ipld::List(vec![Ipld::Link(*a.cid()), Ipld::Link(*b.cid())]));
+
+        for blk in [&shared, &a, &b, &root] {
+            repo.put_block(blk).await.unwrap();
+        }
+
+        let removed = repo.remove_block(*root.cid(), true).await.unwrap();
+
+        assert_eq!(removed.len(), 4, "expected root+a+b+shared once: {removed:?}");
+        for blk in [&shared, &a, &b, &root] {
+            assert!(
+                !repo.contains(blk.cid()).await.unwrap(),
+                "block still present: {}",
+                blk.cid()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn migrate_copies_blocks_and_pins() {
+        let src = Repo::new_memory();
+        src.init().await.unwrap();
+        let dst = Repo::new_memory();
+        dst.init().await.unwrap();
+
+        let direct = raw_block(b"direct pinned block");
+        let leaf = dag_cbor(&Ipld::String("leaf".into()));
+        let root = dag_cbor(&Ipld::List(vec![Ipld::Link(*leaf.cid())]));
+
+        for blk in [&direct, &leaf, &root] {
+            src.put_block(blk).await.unwrap();
+        }
+        src.pin(*direct.cid()).await.unwrap();
+        src.pin(*root.cid()).recursive().await.unwrap();
+
+        src.migrate(&dst).await.unwrap();
+
+        for blk in [&direct, &leaf, &root] {
+            assert!(dst.contains(blk.cid()).await.unwrap(), "missing block {}", blk.cid());
+        }
+        assert!(dst.is_pinned(direct.cid()).await.unwrap());
+        assert!(dst.is_pinned(root.cid()).await.unwrap());
+        assert!(
+            dst.is_pinned(leaf.cid()).await.unwrap(),
+            "leaf must be indirectly pinned after migrating the recursive pin"
+        );
     }
 }
