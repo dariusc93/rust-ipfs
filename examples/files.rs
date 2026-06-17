@@ -24,6 +24,19 @@ async fn main() -> anyhow::Result<()> {
     mfs.write("/docs/notes/todo.txt", b"buy milk\nwrite docs\n", true)
         .await?;
 
+    println!("> write from a stream");
+    let chunks = vec![
+        Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"streamed ")),
+        Ok(bytes::Bytes::from_static(b"line by ")),
+        Ok(bytes::Bytes::from_static(b"line\n")),
+    ];
+    mfs.write_stream("/docs/streamed.txt", futures::stream::iter(chunks), false)
+        .await?;
+    println!(
+        "  {}",
+        String::from_utf8_lossy(&mfs.read("/docs/streamed.txt").await?)
+    );
+
     println!("> ls /");
     print_ls(&mfs, "/").await?;
     println!("> ls /docs");

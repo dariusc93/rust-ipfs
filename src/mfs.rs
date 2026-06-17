@@ -4,8 +4,9 @@ use crate::path::{IpfsPath, PathRoot};
 use crate::repo::{DataStore, DefaultStorage, Repo};
 use crate::{Block, Error};
 use anyhow::anyhow;
+use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures::{FutureExt, Stream, StreamExt};
 use ipld_core::cid::{Cid, Version};
 use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
@@ -15,6 +16,7 @@ use rust_unixfs::file::adder::{
 };
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::Path;
 use std::str::FromStr;
 
 /// Datastore key holding the current MFS root Cid.
@@ -160,7 +162,10 @@ impl Mfs {
                     .set_entry_locked(
                         &mut guard,
                         path,
-                        DirEntry { cid: new_cid, tsize },
+                        DirEntry {
+                            cid: new_cid,
+                            tsize,
+                        },
                         blocks,
                         opts.parents,
                         true,
@@ -260,7 +265,108 @@ impl Mfs {
                 encode_file(&content)?
             }
         };
-        self.set_entry_locked(&mut guard, path, DirEntry { cid, tsize }, blocks, false, true)
+        self.set_entry_locked(
+            &mut guard,
+            path,
+            DirEntry { cid, tsize },
+            blocks,
+            false,
+            true,
+        )
+        .await
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    /// Write the whole content of `file` at `path`.
+    pub async fn write_from_file(
+        &self,
+        path: &str,
+        file: impl AsRef<Path>,
+        parents: bool,
+    ) -> Result<(), Error> {
+        let file = file.as_ref();
+
+        let meta = tokio::fs::metadata(file).await?;
+
+        if !meta.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("'{}' is not a valid file", file.display()),
+            )
+            .into());
+        }
+
+        if meta.len() > MAX_FILE_SIZE {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::FileTooLarge,
+                format!("'{}' is too large", file.display()),
+            )
+            .into());
+        }
+
+        let file = tokio::fs::File::open(file).await?;
+
+        let reader = tokio_util::io::ReaderStream::new(file);
+
+        self.write_stream(path, reader, parents).await
+    }
+
+    /// Writes the whole file at `path` from a byte stream without buffering the content, creating or
+    /// replacing it.
+    pub async fn write_stream<S>(&self, path: &str, stream: S, parents: bool) -> Result<(), Error>
+    where
+        S: Stream<Item = std::io::Result<Bytes>>,
+    {
+        let comps = split_path(path)?;
+        if comps.is_empty() {
+            return Err(anyhow!("cannot write to the root directory"));
+        }
+
+        let mut adder = FileAdder::builder()
+            .with_cid_version(VERSION)
+            .with_hasher(HASHER)
+            .build();
+        let mut tsize = 0u64;
+        let mut total = 0u64;
+        let mut root = None;
+
+        let mut store =
+            |blocks: &mut dyn Iterator<Item = (Cid, Vec<u8>)>| -> Result<Vec<Block>, Error> {
+                let mut batch = Vec::new();
+                for (cid, block) in blocks {
+                    tsize += block.len() as u64;
+                    root = Some(cid);
+                    batch.push(Block::new(cid, block)?);
+                }
+                Ok(batch)
+            };
+
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            let mut offset = 0;
+            while offset < chunk.len() {
+                let (mut ready, consumed) = adder.push(&chunk[offset..]);
+                let batch = store(&mut ready)?;
+                if !batch.is_empty() {
+                    self.repo().put_blocks(batch).await?;
+                }
+                offset += consumed;
+                total += consumed as u64;
+                if total > MAX_FILE_SIZE {
+                    return Err(anyhow!("write would exceed the MFS file size limit"));
+                }
+            }
+        }
+
+        let mut finished = adder.finish();
+        let batch = store(&mut finished)?;
+        if !batch.is_empty() {
+            self.repo().put_blocks(batch).await?;
+        }
+
+        let cid = root.ok_or_else(|| anyhow!("file produced no blocks"))?;
+        self.set_entry(path, DirEntry { cid, tsize }, Vec::new(), parents, true)
             .await
     }
 
@@ -722,7 +828,8 @@ impl Mfs {
                     }
                     child_start = child_end;
                 }
-                let (new_cid, bytes) = rebuild_file_branch(branch.filesize, &links, VERSION, HASHER);
+                let (new_cid, bytes) =
+                    rebuild_file_branch(branch.filesize, &links, VERSION, HASHER);
                 blocks.push(Block::new(new_cid, bytes)?);
                 return Ok(Some((new_cid, blocks)));
             }
@@ -828,7 +935,10 @@ impl Mfs {
             }));
         }
         let mut out = Vec::new();
-        if self.collect_prefix_leaves(file_cid, 0, boundary, &mut out).await? {
+        if self
+            .collect_prefix_leaves(file_cid, 0, boundary, &mut out)
+            .await?
+        {
             Ok(Some(out))
         } else {
             Ok(None)
@@ -1156,10 +1266,11 @@ mod tests {
         mfs.truncate("/f", 5).await.unwrap();
         assert_eq!(mfs.read("/f").await.unwrap(), b"fre\0\0");
 
-        assert!(mfs
-            .write_with("/missing", b"x", WriteOptions::default())
-            .await
-            .is_err());
+        assert!(
+            mfs.write_with("/missing", b"x", WriteOptions::default())
+                .await
+                .is_err()
+        );
         mfs.write_with(
             "/created",
             b"y",
@@ -1308,7 +1419,11 @@ mod tests {
         content.extend_from_slice(&app);
         assert_canonical(&mfs, "/f", &content).await;
         let after = repo.list_blocks().await.collect::<Vec<_>>().await.len();
-        assert!(after - before < 8, "append should reuse, added {}", after - before);
+        assert!(
+            after - before < 8,
+            "append should reuse, added {}",
+            after - before
+        );
 
         let patch = fill(200_000, 3);
         let off = content.len() - 50_000;
@@ -1359,6 +1474,24 @@ mod tests {
         content.resize(5 + app.len(), 0);
         content[5..5 + app.len()].copy_from_slice(&app);
         assert_canonical(&mfs, "/s", &content).await;
+    }
+
+    #[tokio::test]
+    async fn write_stream_is_canonical() {
+        let mfs = mfs().await;
+
+        let content = fill(700_000, 11);
+        let chunks: Vec<bytes::Bytes> = content
+            .chunks(33_333)
+            .map(bytes::Bytes::copy_from_slice)
+            .collect();
+        let stream = futures::stream::iter(chunks.into_iter().map(Ok::<_, std::io::Error>));
+        mfs.write_stream("/streamed", stream, true).await.unwrap();
+        assert_canonical(&mfs, "/streamed", &content).await;
+
+        let empty = futures::stream::iter(Vec::<std::io::Result<bytes::Bytes>>::new());
+        mfs.write_stream("/empty", empty, false).await.unwrap();
+        assert_canonical(&mfs, "/empty", &[]).await;
     }
 
     #[tokio::test]
@@ -1571,10 +1704,11 @@ mod tests {
             .unwrap();
         assert_eq!(mfs.read("/copied").await.unwrap(), b"content 42");
 
-        assert!(mfs
-            .cp(&format!("/ipfs/{dir_cid}/missing"), "/x", false)
-            .await
-            .is_err());
+        assert!(
+            mfs.cp(&format!("/ipfs/{dir_cid}/missing"), "/x", false)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -1589,7 +1723,10 @@ mod tests {
         mfs.cp(&format!("/ipfs/{file_cid}"), "/imported.txt", true)
             .await
             .unwrap();
-        assert_eq!(mfs.read("/imported.txt").await.unwrap(), b"imported content");
+        assert_eq!(
+            mfs.read("/imported.txt").await.unwrap(),
+            b"imported content"
+        );
         assert!(matches!(
             mfs.stat("/imported.txt").await.unwrap().kind,
             MfsKind::File { .. }
