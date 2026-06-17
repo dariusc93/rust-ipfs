@@ -20,6 +20,7 @@ mod add;
 mod cat;
 mod get;
 mod ls;
+mod prefetch;
 pub use add::UnixfsAdd;
 pub use cat::{StartingPoint, UnixfsCat};
 pub use get::UnixfsGet;
