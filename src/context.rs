@@ -16,7 +16,6 @@ use crate::{config::BOOTSTRAP_NODES, IpfsEvent};
 use ipld_core::cid::Cid;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use crate::repo::DefaultStorage;
 
@@ -25,13 +24,11 @@ use connexa::behaviour::Behaviour as ConnexaBehaviour;
 use connexa::prelude::identify::Info;
 use connexa::prelude::swarm::{NetworkBehaviour, Swarm};
 use connexa::prelude::{Multiaddr, PeerId};
-use tokio::sync::Notify;
 
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 pub struct IpfsContext {
     pub repo_events: Optional<Receiver<RepoEvent>>,
-    pub bitswap_cancellable: HashMap<Cid, Vec<Arc<Notify>>>,
     pub repo: Repo<DefaultStorage>,
     pub bootstraps: HashSet<Multiaddr>,
     pub find_peer_identify: HashMap<PeerId, Vec<oneshot::Sender<anyhow::Result<Info>>>>,
@@ -43,7 +40,6 @@ impl Default for IpfsContext {
     fn default() -> Self {
         Self {
             repo_events: Default::default(),
-            bitswap_cancellable: Default::default(),
             repo: Repo::new_memory(),
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
@@ -57,7 +53,6 @@ impl IpfsContext {
     pub fn new(repo: &Repo<DefaultStorage>) -> Self {
         Self {
             repo_events: Default::default(),
-            bitswap_cancellable: Default::default(),
             repo: repo.clone(),
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
@@ -376,31 +371,28 @@ impl IpfsContext {
         N::ToSwarm: Debug,
     {
         match event {
-            RepoEvent::WantBlock(cids, peers, timeout, signals) => {
+            RepoEvent::WantBlock(cids, peers, timeout) => {
                 let Some(bs) = custom.bitswap.as_mut() else {
                     return;
                 };
-                if let Some(signals) = signals {
-                    for (cid, signals) in signals {
-                        if signals.is_empty() {
-                            continue;
-                        }
-
-                        let entries = self.bitswap_cancellable.entry(cid).or_default();
-                        entries.extend(signals);
-                    }
-                }
                 bs.gets(cids, &peers, timeout);
             }
             RepoEvent::UnwantBlock(cid) => {
                 let Some(bs) = custom.bitswap.as_mut() else {
                     return;
                 };
-                bs.cancel(cid);
-                if let Some(list) = self.bitswap_cancellable.remove(&cid) {
-                    for signal in list {
-                        signal.notify_waiters();
-                    }
+                // The repo subscriptions map is the source of truth: the departing waiter removed
+                // itself under lock before emitting this event, so a still-present (non-empty) entry
+                // means another waiter (or a fresh one) holds the cid. Cancel only when none remain.
+                let still_wanted = self
+                    .repo
+                    .inner
+                    .subscriptions
+                    .lock()
+                    .get(&cid)
+                    .is_some_and(|waiters| !waiters.is_empty());
+                if !still_wanted {
+                    bs.cancel(cid);
                 }
             }
             RepoEvent::NewBlock(block) => {

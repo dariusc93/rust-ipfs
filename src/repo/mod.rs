@@ -7,7 +7,7 @@ use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use parking_lot::{Mutex, RwLock};
@@ -17,12 +17,12 @@ use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};
-use tokio::sync::{Notify, RwLockReadGuard};
+use tokio::sync::RwLockReadGuard;
 use tracing::{Instrument, Span};
 
 #[macro_use]
@@ -315,7 +315,32 @@ impl<C: Borrow<Cid>> PinKind<C> {
     }
 }
 
-type SubscriptionsMap = HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>;
+type SubscriptionsMap =
+    HashMap<Cid, HashMap<u64, futures::channel::oneshot::Sender<Result<Block, String>>>>;
+
+static SUBSCRIPTION_TOKEN: AtomicU64 = AtomicU64::new(0);
+
+struct WaiterGuard<S: RepoTypes> {
+    repo: Repo<S>,
+    events: Sender<RepoEvent>,
+    cid: Cid,
+    token: u64,
+}
+
+impl<S: RepoTypes> Drop for WaiterGuard<S> {
+    fn drop(&mut self) {
+        {
+            let mut map = self.repo.inner.subscriptions.lock();
+            if let Some(inner) = map.get_mut(&self.cid) {
+                inner.remove(&self.token);
+                if inner.is_empty() {
+                    map.remove(&self.cid);
+                }
+            }
+        }
+        let _ = self.events.try_send(RepoEvent::UnwantBlock(self.cid));
+    }
+}
 
 /// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
 pub trait StorageTypes: RepoTypes {}
@@ -352,14 +377,10 @@ pub(crate) struct RepoInner<S: RepoTypes> {
 /// Events used to communicate to the swarm on repo changes.
 #[derive(Debug)]
 pub enum RepoEvent {
-    /// Signals a desired block.
-    WantBlock(
-        Vec<Cid>,
-        Vec<PeerId>,
-        Option<Duration>,
-        Option<HashMap<Cid, Vec<Arc<Notify>>>>,
-    ),
-    /// Signals a desired block is no longer wanted.
+    /// Signals desired blocks.
+    WantBlock(Vec<Cid>, Vec<PeerId>, Option<Duration>),
+    /// Signals that a waiter for the cid went away; the cid should be re-evaluated for cancellation
+    /// against the (authoritative) subscriptions map.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
     NewBlock(Block),
@@ -1041,77 +1062,63 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                             }
                         };
 
-                        let mut notified: HashMap<Cid, Vec<_>> = HashMap::new();
-
                         let timeout = timeout.or(Some(Duration::from_secs(60)));
 
                         let mut blocks = FuturesOrdered::new();
+                        let mut wants = Vec::with_capacity(missing.len());
 
                         for cid in &missing {
                             let cid = *cid;
+                            let token = SUBSCRIPTION_TOKEN.fetch_add(1, Ordering::Relaxed);
                             let (tx, rx) = futures::channel::oneshot::channel();
                             repo.inner
                                 .subscriptions
                                 .lock()
                                 .entry(cid)
                                 .or_default()
-                                .push(tx);
+                                .insert(token, tx);
 
-                            let mut events = events.clone();
-                            let signal = Arc::new(Notify::new());
-                            let s2 = signal.clone();
+                            let guard = WaiterGuard {
+                                repo: repo.clone(),
+                                events: events.clone(),
+                                cid,
+                                token,
+                            };
+
                             let task = async move {
-                                let block_fut = rx;
-                                let notified_fut = signal.notified();
-                                futures::pin_mut!(notified_fut);
+                                // unregisters this waiter and emits UnwantBlock on every exit,
+                                // including this future being dropped before completion.
+                                let _guard = guard;
 
                                 // deadline so an unavailable block errors instead of hanging forever
                                 let timeout_fut = async move {
                                     match timeout {
-                                        Some(duration) => {
-                                            futures_timer::Delay::new(duration).await
-                                        }
+                                        Some(duration) => futures_timer::Delay::new(duration).await,
                                         None => futures::future::pending::<()>().await,
                                     }
                                 };
                                 futures::pin_mut!(timeout_fut);
 
-                                match futures::future::select(
-                                    block_fut,
-                                    futures::future::select(notified_fut, timeout_fut),
-                                )
-                                .await
-                                {
+                                match futures::future::select(rx, timeout_fut).await {
                                     Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
                                     Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
                                     Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
-                                    Either::Right((Either::Left(((), _)), _)) => {
-                                        Err::<_, Error>(anyhow::anyhow!("request for {cid} has been cancelled"))
-                                    }
-                                    Either::Right((Either::Right(((), _)), _)) => {
+                                    Either::Right(((), _)) => {
                                         Err::<_, Error>(anyhow::anyhow!("request for {cid} timed out"))
                                     }
                                 }
                             }
-                            .map_err(move |e| {
-                                // Although the request would eventually be canceled if timeout or canceled, we can still signal to swarm
-                                // about the block being unwanted for future changes.
-                                _ = events.try_send(RepoEvent::UnwantBlock(cid));
-                                e
-                            })
                             .boxed();
 
-                            notified.entry(cid).or_default().push(s2);
-
+                            wants.push(cid);
                             blocks.push_back(task);
                         }
 
                         events
                             .send(RepoEvent::WantBlock(
-                                Vec::from_iter(missing),
+                                wants,
                                 Vec::from_iter(providers),
                                 timeout,
-                                Some(notified),
                             ))
                             .await
                             .ok();
@@ -1187,10 +1194,9 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
                     }
                 }
                 let list = self.repo.inner.subscriptions.lock().remove(&cid);
-                if let Some(mut list) = list {
-                    for ch in list.drain(..) {
-                        let block = block.clone();
-                        let _ = ch.send(Ok(block));
+                if let Some(list) = list {
+                    for (_token, ch) in list {
+                        let _ = ch.send(Ok(block.clone()));
                     }
                 }
             }

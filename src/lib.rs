@@ -1681,7 +1681,7 @@ mod node {
         #[allow(clippy::type_complexity)]
         pub fn get_subscriptions(
             &self,
-        ) -> &parking_lot::Mutex<HashMap<Cid, Vec<oneshot::Sender<Result<Block, String>>>>>
+        ) -> &parking_lot::Mutex<HashMap<Cid, HashMap<u64, oneshot::Sender<Result<Block, String>>>>>
         {
             &self.ipfs.repo.inner.subscriptions
         }
