@@ -7,7 +7,7 @@ use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use parking_lot::{Mutex, RwLock};
@@ -17,12 +17,12 @@ use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};
-use tokio::sync::{Notify, RwLockReadGuard};
+use tokio::sync::RwLockReadGuard;
 use tracing::{Instrument, Span};
 
 #[macro_use]
@@ -84,6 +84,19 @@ pub trait BlockStore: Debug + Send + Sync {
     fn total_size(&self) -> impl Future<Output = Result<usize, Error>> + Send;
     /// Inserts a block in the blockstore.
     fn put(&self, block: &Block) -> impl Future<Output = Result<(Cid, BlockPut), Error>> + Send;
+    /// Inserts multiple blocks in one batch.
+    fn put_many(
+        &self,
+        blocks: &[Block],
+    ) -> impl Future<Output = Result<Vec<(Cid, BlockPut)>, Error>> + Send {
+        async move {
+            let mut out = Vec::with_capacity(blocks.len());
+            for block in blocks {
+                out.push(self.put(block).await?);
+            }
+            Ok(out)
+        }
+    }
     /// Removes a block from the blockstore.
     fn remove(&self, cid: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
     /// Remove multiple blocks from the blockstore
@@ -315,7 +328,32 @@ impl<C: Borrow<Cid>> PinKind<C> {
     }
 }
 
-type SubscriptionsMap = HashMap<Cid, Vec<futures::channel::oneshot::Sender<Result<Block, String>>>>;
+type SubscriptionsMap =
+    HashMap<Cid, HashMap<u64, futures::channel::oneshot::Sender<Result<Block, String>>>>;
+
+static SUBSCRIPTION_TOKEN: AtomicU64 = AtomicU64::new(0);
+
+struct WaiterGuard<S: RepoTypes> {
+    repo: Repo<S>,
+    events: Sender<RepoEvent>,
+    cid: Cid,
+    token: u64,
+}
+
+impl<S: RepoTypes> Drop for WaiterGuard<S> {
+    fn drop(&mut self) {
+        {
+            let mut map = self.repo.inner.subscriptions.lock();
+            if let Some(inner) = map.get_mut(&self.cid) {
+                inner.remove(&self.token);
+                if inner.is_empty() {
+                    map.remove(&self.cid);
+                }
+            }
+        }
+        let _ = self.events.try_send(RepoEvent::UnwantBlock(self.cid));
+    }
+}
 
 /// Represents the configuration of the Ipfs node, its backing blockstore and datastore.
 pub trait StorageTypes: RepoTypes {}
@@ -352,14 +390,10 @@ pub(crate) struct RepoInner<S: RepoTypes> {
 /// Events used to communicate to the swarm on repo changes.
 #[derive(Debug)]
 pub enum RepoEvent {
-    /// Signals a desired block.
-    WantBlock(
-        Vec<Cid>,
-        Vec<PeerId>,
-        Option<Duration>,
-        Option<HashMap<Cid, Vec<Arc<Notify>>>>,
-    ),
-    /// Signals a desired block is no longer wanted.
+    /// Signals desired blocks.
+    WantBlock(Vec<Cid>, Vec<PeerId>, Option<Duration>),
+    /// Signals that a waiter for the cid went away; the cid should be re-evaluated for cancellation
+    /// against the (authoritative) subscriptions map.
     UnwantBlock(Cid),
     /// Signals the posession of a new block.
     NewBlock(Block),
@@ -456,40 +490,64 @@ impl<S: RepoTypes> Repo<S> {
         }
         let block_migration = {
             async move {
+                let mut errors = 0usize;
                 let mut stream = self.list_blocks().await;
                 while let Some(cid) = stream.next().await {
                     match self.get_block_now(&cid).await {
-                        Ok(Some(block)) => match repo.inner.block_store.put(&block).await {
-                            Ok(_) => {}
-                            Err(e) => error!("Error migrating {cid}: {e}"),
-                        },
-                        Ok(None) => error!("{cid} doesnt exist"),
-                        Err(e) => error!("Error getting block {cid}: {e}"),
+                        Ok(Some(block)) => {
+                            if let Err(e) = repo.inner.block_store.put(&block).await {
+                                error!("Error migrating {cid}: {e}");
+                                errors += 1;
+                            }
+                        }
+                        Ok(None) => {
+                            error!("{cid} doesnt exist");
+                            errors += 1;
+                        }
+                        Err(e) => {
+                            error!("Error getting block {cid}: {e}");
+                            errors += 1;
+                        }
                     }
                 }
+                errors
             }
         };
 
         let data_migration = {
             async move {
+                let mut errors = 0usize;
                 let mut data_stream = self.data_store().iter().await;
                 while let Some((k, v)) = data_stream.next().await {
                     if let Err(e) = repo.data_store().put(&k, &v).await {
                         error!("Unable to migrate {k:?} into repo: {e}");
+                        errors += 1;
                     }
                 }
+                errors
             }
         };
 
         let pins_migration = {
             async move {
+                let mut errors = 0usize;
                 let mut stream = self.data_store().list(None).await;
-                while let Some(Ok((cid, pin_mode))) = stream.next().await {
+                while let Some(item) = stream.next().await {
+                    let (cid, pin_mode) = match item {
+                        Ok(pin) => pin,
+                        Err(e) => {
+                            error!("Error listing pins during migration: {e}");
+                            errors += 1;
+                            continue;
+                        }
+                    };
                     match pin_mode {
-                        PinMode::Direct => match repo.data_store().insert_direct_pin(&cid).await {
-                            Ok(_) => {}
-                            Err(e) => error!("Unable to migrate pin {cid}: {e}"),
-                        },
+                        PinMode::Direct => {
+                            if let Err(e) = repo.data_store().insert_direct_pin(&cid).await {
+                                error!("Unable to migrate pin {cid}: {e}");
+                                errors += 1;
+                            }
+                        }
                         PinMode::Indirect => {
                             //No need to track since we will be obtaining the reference from the pin that is recursive
                             continue;
@@ -504,6 +562,7 @@ impl<S: RepoTypes> Repo<S> {
                                 Ok(None) => continue,
                                 Err(e) => {
                                     error!("Block {cid} does not exist but is pinned: {e}");
+                                    errors += 1;
                                     continue;
                                 }
                             };
@@ -517,15 +576,25 @@ impl<S: RepoTypes> Repo<S> {
 
                             if let Err(e) = repo.insert_recursive_pin(&cid, st).await {
                                 error!("Error migrating pin {cid}: {e}");
+                                errors += 1;
                                 continue;
                             }
                         }
                     }
                 }
+                errors
             }
         };
 
-        futures::join!(block_migration, data_migration, pins_migration);
+        let (block_errors, data_errors, pin_errors) =
+            futures::join!(block_migration, data_migration, pins_migration);
+
+        let total = block_errors + data_errors + pin_errors;
+        if total > 0 {
+            anyhow::bail!(
+                "migration incomplete: {block_errors} block, {data_errors} datastore, {pin_errors} pin error(s); see logs"
+            );
+        }
 
         Ok(())
     }
@@ -597,6 +666,34 @@ impl<S: RepoTypes> Repo<S> {
     /// Puts a block into the block store.
     pub fn put_block(&self, block: &Block) -> RepoPutBlock<S> {
         RepoPutBlock::new(self, block).broadcast_on_new_block(true)
+    }
+
+    /// Puts multiple blocks into the block store in one batch, returning their cids in input order.
+    pub async fn put_blocks(&self, blocks: Vec<Block>) -> Result<Vec<Cid>, Error> {
+        if blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let _guard = self.inner.gclock.read().await;
+        let results = self.inner.block_store.put_many(&blocks).await?;
+
+        let mut cids = Vec::with_capacity(results.len());
+        for ((cid, res), block) in results.into_iter().zip(blocks.iter()) {
+            if let BlockPut::NewBlock = res {
+                if let Some(mut event) = self.repo_channel() {
+                    _ = event.send(RepoEvent::NewBlock(block.clone())).await;
+                }
+                let list = self.inner.subscriptions.lock().remove(&cid);
+                if let Some(list) = list {
+                    for (_token, ch) in list {
+                        let _ = ch.send(Ok(block.clone()));
+                    }
+                }
+            }
+            cids.push(cid);
+        }
+
+        Ok(cids)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
@@ -691,27 +788,40 @@ impl<S: RepoTypes> Repo<S> {
         Ok(removed)
     }
 
+    /// Collects the transitive references of `cid` (excluding `cid` itself). The accumulator doubles
+    /// as a visited set, so shared subtrees are walked once and any malformed cycle terminates.
     fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, BTreeSet<Cid>> {
+        async move {
+            let mut visited = BTreeSet::new();
+            visited.insert(cid);
+            self.collect_references(cid, &mut visited).await;
+            visited.remove(&cid);
+            visited
+        }
+        .boxed()
+    }
+
+    fn collect_references<'a>(
+        &'a self,
+        cid: Cid,
+        visited: &'a mut BTreeSet<Cid>,
+    ) -> BoxFuture<'a, ()> {
         async move {
             let block = match self.get_block_now(&cid).await {
                 Ok(Some(block)) => block,
-                _ => return BTreeSet::default(),
+                _ => return,
             };
 
             let mut references: BTreeSet<Cid> = BTreeSet::new();
             if block.references(&mut references).is_err() {
-                return BTreeSet::default();
+                return;
             }
 
-            let mut list = BTreeSet::new();
-
-            for cid in &references {
-                let mut inner_list = self.recursive_collections(*cid).await;
-                list.append(&mut inner_list);
+            for reference in references {
+                if visited.insert(reference) {
+                    self.collect_references(reference, visited).await;
+                }
             }
-
-            references.append(&mut list);
-            references
         }
         .boxed()
     }
@@ -1041,77 +1151,63 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                             }
                         };
 
-                        let mut notified: HashMap<Cid, Vec<_>> = HashMap::new();
-
                         let timeout = timeout.or(Some(Duration::from_secs(60)));
 
                         let mut blocks = FuturesOrdered::new();
+                        let mut wants = Vec::with_capacity(missing.len());
 
                         for cid in &missing {
                             let cid = *cid;
+                            let token = SUBSCRIPTION_TOKEN.fetch_add(1, Ordering::Relaxed);
                             let (tx, rx) = futures::channel::oneshot::channel();
                             repo.inner
                                 .subscriptions
                                 .lock()
                                 .entry(cid)
                                 .or_default()
-                                .push(tx);
+                                .insert(token, tx);
 
-                            let mut events = events.clone();
-                            let signal = Arc::new(Notify::new());
-                            let s2 = signal.clone();
+                            let guard = WaiterGuard {
+                                repo: repo.clone(),
+                                events: events.clone(),
+                                cid,
+                                token,
+                            };
+
                             let task = async move {
-                                let block_fut = rx;
-                                let notified_fut = signal.notified();
-                                futures::pin_mut!(notified_fut);
+                                // unregisters this waiter and emits UnwantBlock on every exit,
+                                // including this future being dropped before completion.
+                                let _guard = guard;
 
                                 // deadline so an unavailable block errors instead of hanging forever
                                 let timeout_fut = async move {
                                     match timeout {
-                                        Some(duration) => {
-                                            futures_timer::Delay::new(duration).await
-                                        }
+                                        Some(duration) => futures_timer::Delay::new(duration).await,
                                         None => futures::future::pending::<()>().await,
                                     }
                                 };
                                 futures::pin_mut!(timeout_fut);
 
-                                match futures::future::select(
-                                    block_fut,
-                                    futures::future::select(notified_fut, timeout_fut),
-                                )
-                                .await
-                                {
+                                match futures::future::select(rx, timeout_fut).await {
                                     Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
                                     Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
                                     Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
-                                    Either::Right((Either::Left(((), _)), _)) => {
-                                        Err::<_, Error>(anyhow::anyhow!("request for {cid} has been cancelled"))
-                                    }
-                                    Either::Right((Either::Right(((), _)), _)) => {
+                                    Either::Right(((), _)) => {
                                         Err::<_, Error>(anyhow::anyhow!("request for {cid} timed out"))
                                     }
                                 }
                             }
-                            .map_err(move |e| {
-                                // Although the request would eventually be canceled if timeout or canceled, we can still signal to swarm
-                                // about the block being unwanted for future changes.
-                                _ = events.try_send(RepoEvent::UnwantBlock(cid));
-                                e
-                            })
                             .boxed();
 
-                            notified.entry(cid).or_default().push(s2);
-
+                            wants.push(cid);
                             blocks.push_back(task);
                         }
 
                         events
                             .send(RepoEvent::WantBlock(
-                                Vec::from_iter(missing),
+                                wants,
                                 Vec::from_iter(providers),
                                 timeout,
-                                Some(notified),
                             ))
                             .await
                             .ok();
@@ -1187,10 +1283,9 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
                     }
                 }
                 let list = self.repo.inner.subscriptions.lock().remove(&cid);
-                if let Some(mut list) = list {
-                    for ch in list.drain(..) {
-                        let block = block.clone();
-                        let _ = ch.send(Ok(block));
+                if let Some(list) = list {
+                    for (_token, ch) in list {
+                        let _ = ch.send(Ok(block.clone()));
                     }
                 }
             }
@@ -1526,5 +1621,81 @@ impl<S: RepoTypes> IntoFuture for RepoRemovePin<S> {
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod repo_tests {
+    use super::*;
+    use ipld_core::codec::Codec;
+    use ipld_core::ipld::Ipld;
+    use multihash_codetable::{Code, MultihashDigest};
+
+    fn raw_block(data: &[u8]) -> Block {
+        let cid = Cid::new_v1(0x55, Code::Sha2_256.digest(data));
+        Block::new(cid, data.to_vec()).unwrap()
+    }
+
+    fn dag_cbor(ipld: &Ipld) -> Block {
+        let data = serde_ipld_dagcbor::codec::DagCborCodec::encode_to_vec(ipld).unwrap();
+        let cid = Cid::new_v1(0x71, Code::Sha2_256.digest(&data));
+        Block::new(cid, data).unwrap()
+    }
+
+    #[tokio::test]
+    async fn recursive_remove_walks_shared_subtree_once() {
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+
+        // diamond: root -> {a, b}, a -> shared, b -> shared
+        let shared = dag_cbor(&Ipld::String("shared".into()));
+        let a = dag_cbor(&Ipld::List(vec![Ipld::Integer(0), Ipld::Link(*shared.cid())]));
+        let b = dag_cbor(&Ipld::List(vec![Ipld::Integer(1), Ipld::Link(*shared.cid())]));
+        let root = dag_cbor(&Ipld::List(vec![Ipld::Link(*a.cid()), Ipld::Link(*b.cid())]));
+
+        for blk in [&shared, &a, &b, &root] {
+            repo.put_block(blk).await.unwrap();
+        }
+
+        let removed = repo.remove_block(*root.cid(), true).await.unwrap();
+
+        assert_eq!(removed.len(), 4, "expected root+a+b+shared once: {removed:?}");
+        for blk in [&shared, &a, &b, &root] {
+            assert!(
+                !repo.contains(blk.cid()).await.unwrap(),
+                "block still present: {}",
+                blk.cid()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn migrate_copies_blocks_and_pins() {
+        let src = Repo::new_memory();
+        src.init().await.unwrap();
+        let dst = Repo::new_memory();
+        dst.init().await.unwrap();
+
+        let direct = raw_block(b"direct pinned block");
+        let leaf = dag_cbor(&Ipld::String("leaf".into()));
+        let root = dag_cbor(&Ipld::List(vec![Ipld::Link(*leaf.cid())]));
+
+        for blk in [&direct, &leaf, &root] {
+            src.put_block(blk).await.unwrap();
+        }
+        src.pin(*direct.cid()).await.unwrap();
+        src.pin(*root.cid()).recursive().await.unwrap();
+
+        src.migrate(&dst).await.unwrap();
+
+        for blk in [&direct, &leaf, &root] {
+            assert!(dst.contains(blk.cid()).await.unwrap(), "missing block {}", blk.cid());
+        }
+        assert!(dst.is_pinned(direct.cid()).await.unwrap());
+        assert!(dst.is_pinned(root.cid()).await.unwrap());
+        assert!(
+            dst.is_pinned(leaf.cid()).await.unwrap(),
+            "leaf must be indirectly pinned after migrating the recursive pin"
+        );
     }
 }

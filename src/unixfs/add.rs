@@ -220,21 +220,19 @@ impl Stream for UnixfsAdd {
                             let mut total = 0;
                             while total < buffer.len() {
                                 let (blocks, consumed) = adder.push(&buffer[total..]);
+                                let mut to_put = Vec::new();
                                 for (cid, block) in blocks {
-                                    let block = match Block::new(cid, block) {
-                                        Ok(block) => block,
+                                    match Block::new(cid, block) {
+                                        Ok(block) => to_put.push(block),
                                         Err(e) => {
                                             yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                             return;
                                         }
-                                    };
-                                    let _cid = match repo.put_block(&block).await {
-                                        Ok(cid) => cid,
-                                        Err(e) => {
-                                            yield UnixfsStatus::FailedStatus { written, total_size, error: e };
-                                            return;
-                                        }
-                                    };
+                                    }
+                                }
+                                if let Err(e) = repo.put_blocks(to_put).await {
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e };
+                                    return;
                                 }
                                 total += consumed;
                                 written += consumed;
@@ -245,23 +243,22 @@ impl Stream for UnixfsAdd {
 
                         let blocks = adder.finish();
                         let mut last_cid = None;
+                        let mut to_put = Vec::new();
 
                         for (cid, block) in blocks {
-                            let block = match Block::new(cid, block) {
-                                Ok(block) => block,
+                            match Block::new(cid, block) {
+                                Ok(block) => to_put.push(block),
                                 Err(e) => {
                                     yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                                     return;
                                 }
-                            };
-                            let _cid = match repo.put_block(&block).await {
-                                Ok(cid) => cid,
-                                Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e };
-                                    return;
-                                }
-                            };
+                            }
                             last_cid = Some(cid);
+                        }
+
+                        if let Err(e) = repo.put_blocks(to_put).await {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: e };
+                            return;
                         }
 
                         let cid = match last_cid {
@@ -289,17 +286,17 @@ impl Stream for UnixfsAdd {
 
                                         let mut iter = tree.build();
                                         let mut cids = Vec::new();
+                                        let mut to_put = Vec::new();
 
                                         while let Some(node) = iter.next_borrowed() {
                                             //TODO: Determine best course to prevent additional allocation
                                             let node = node?;
                                             let cid = node.cid.to_owned();
-                                            let block = Block::new(cid, node.block.to_vec())?;
-
-                                            repo.put_block(&block).await?;
-
+                                            to_put.push(Block::new(cid, node.block.to_vec())?);
                                             cids.push(cid);
                                         }
+
+                                        repo.put_blocks(to_put).await?;
                                         let cid = cids.last().ok_or(anyhow::anyhow!("no cid available"))?;
                                         let path = IpfsPath::from(*cid).sub_path(&name)?;
 

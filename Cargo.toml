@@ -32,8 +32,6 @@ webrtc = ["connexa/webrtc"]
 websocket = ["connexa/websocket"]
 webtransport = ["connexa/webtransport"]
 
-test_go_interop = []
-test_js_interop = []
 
 [workspace.dependencies]
 anyhow = "1.0.100"

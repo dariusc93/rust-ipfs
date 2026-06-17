@@ -1,5 +1,3 @@
-pub mod interop;
-
 use rust_ipfs::Node;
 
 /// The way in which nodes are connected to each other; to be used with spawn_nodes.

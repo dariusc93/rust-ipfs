@@ -1650,10 +1650,7 @@ mod node {
                 uninit = uninit.set_span(span);
             }
 
-            let list = match addr {
-                Some(addr) => addr,
-                None => vec![Multiaddr::empty().with(Protocol::Memory(0))],
-            };
+            let list = addr.unwrap_or_else(|| vec![Multiaddr::empty().with(Protocol::Memory(0))]);
 
             let ipfs = uninit.start().await.unwrap();
 
@@ -1681,7 +1678,7 @@ mod node {
         #[allow(clippy::type_complexity)]
         pub fn get_subscriptions(
             &self,
-        ) -> &parking_lot::Mutex<HashMap<Cid, Vec<oneshot::Sender<Result<Block, String>>>>>
+        ) -> &parking_lot::Mutex<HashMap<Cid, HashMap<u64, oneshot::Sender<Result<Block, String>>>>>
         {
             &self.ipfs.repo.inner.subscriptions
         }

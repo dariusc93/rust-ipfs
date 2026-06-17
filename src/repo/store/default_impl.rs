@@ -145,6 +145,10 @@ impl BlockStore for DefaultStorage {
         self.blockstore.put(block).await
     }
 
+    async fn put_many(&self, blocks: &[Block]) -> Result<Vec<(Cid, BlockPut)>, Error> {
+        self.blockstore.put_many(blocks).await
+    }
+
     async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         self.blockstore.remove(cid).await
     }
