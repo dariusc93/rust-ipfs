@@ -147,7 +147,7 @@ impl Stream for UnixfsLs {
                         let cid = block.cid();
                         let root_name = cid.to_string();
 
-                        let mut walker = Walker::new(*cid, root_name);
+                        let mut walker = Walker::new_shallow(*cid, root_name);
                         let mut cache = None;
                         let mut root_directory = String::new();
 

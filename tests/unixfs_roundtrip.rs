@@ -84,6 +84,74 @@ async fn ls_roundtrip_multiblock() {
 }
 
 #[tokio::test]
+async fn ls_lists_only_current_directory() {
+    use rust_ipfs::unixfs::ll::dir::builder::{BufferingTreeBuilder, TreeOptions};
+    use rust_ipfs::Block;
+
+    let node = Node::new("ls_lists_only_current_directory").await;
+
+    let top = payload(40_000);
+    let nested = payload(2_000);
+    let nested_len = nested.len() as u64;
+    let top_cid = *add_multiblock(&node, &top).await.root().cid().expect("ipld root");
+    let nested_cid = *node
+        .add_unixfs(nested)
+        .await
+        .expect("add nested")
+        .root()
+        .cid()
+        .expect("ipld root");
+
+    // Build root/ { a.txt, sub/ { inner.txt } } and store the directory nodes; the file blocks are
+    // already in the repo from the adds above.
+    let mut opts = TreeOptions::default();
+    opts.wrap_with_directory();
+    let mut builder = BufferingTreeBuilder::new(opts);
+    builder
+        .put_link("a.txt", top_cid, top.len() as u64)
+        .expect("link a");
+    builder
+        .put_link("sub/inner.txt", nested_cid, nested_len)
+        .expect("link inner");
+
+    let mut root = None;
+    for tree_node in builder.build() {
+        let tree_node = tree_node.expect("tree node");
+        let block = Block::new(tree_node.cid, tree_node.block.to_vec()).expect("valid block");
+        node.repo().put_block(&block).await.expect("put dir block");
+        root = Some(tree_node.cid);
+    }
+    let root = root.expect("at least one directory node");
+
+    let entries = node.unixfs().ls(root).await.expect("ls walk succeeds");
+
+    let files: Vec<&str> = entries
+        .iter()
+        .filter_map(|e| match e {
+            rust_ipfs::unixfs::Entry::File { file, .. } => Some(file.as_str()),
+            _ => None,
+        })
+        .collect();
+    let dirs: Vec<&str> = entries
+        .iter()
+        .filter_map(|e| match e {
+            rust_ipfs::unixfs::Entry::Directory { path, .. } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(files.iter().any(|f| f.ends_with("a.txt")), "files: {files:?}");
+    assert!(dirs.iter().any(|d| d.ends_with("sub")), "dirs: {dirs:?}");
+    // The nested file lives under sub/ so a shallow ls of the root must not surface it.
+    assert!(
+        !files.iter().any(|f| f.ends_with("inner.txt")),
+        "inner.txt leaked into a shallow ls: {files:?}"
+    );
+
+    node.shutdown().await;
+}
+
+#[tokio::test]
 async fn cat_roundtrip_default_chunk() {
     let node = Node::new("cat_roundtrip_default_chunk").await;
     // Larger than one default 256 KiB leaf so the standard chunker also spans multiple blocks.

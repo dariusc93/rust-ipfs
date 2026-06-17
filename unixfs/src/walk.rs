@@ -26,6 +26,9 @@ pub struct Walker {
     // tried to recycle the names but that was consistently as fast and used more memory than just
     // cloning the strings
     should_continue: bool,
+    // When set, the walk lists only the root directory's immediate entries. it traverses HAMT shard
+    // structure to enumerate them but does not descend into subdirectories or file block trees.
+    shallow: bool,
 }
 
 /// Converts a link of specifically a Directory (and not a link of a HAMTShard).
@@ -87,7 +90,16 @@ fn convert_sharded_link(
 impl Walker {
     /// Returns a new instance of a walker, ready to start from the given `Cid`.
     pub fn new(cid: Cid, root_name: String) -> Walker {
-        // 1 == Path::ancestors().count() for an empty path
+        Self::with_shallow(cid, root_name, false)
+    }
+
+    /// Like [`Walker::new`] but lists only the root directory's immediate entries, with subdirectories
+    /// and files are reported but not descended into.
+    pub fn new_shallow(cid: Cid, root_name: String) -> Walker {
+        Self::with_shallow(cid, root_name, true)
+    }
+
+    fn with_shallow(cid: Cid, root_name: String, shallow: bool) -> Walker {
         let depth = if root_name.is_empty() { 1 } else { 2 };
         let next = Some((cid, root_name, depth));
 
@@ -96,6 +108,7 @@ impl Walker {
             next,
             pending: Vec::new(),
             should_continue: true,
+            shallow,
         }
     }
 
@@ -136,11 +149,13 @@ impl Walker {
         bytes: &'b [u8],
         cache: &mut Option<Cache>,
     ) -> Result<ContinuedWalk<'c>, Error> {
+        let shallow = self.shallow;
         let Self {
             current,
             next,
             pending,
             should_continue,
+            ..
         } = self;
 
         *should_continue = false;
@@ -212,19 +227,22 @@ impl Walker {
                 let (cid, name, depth) = next.take().expect("validated at new and earlier");
 
                 // depth + 1 because all entries below a directory are children of next, as in,
-                // deeper
-                pending.reserve(flat.links.len());
-                let links = flat
-                    .links
-                    .into_iter()
-                    .enumerate()
-                    .map(|(nth, link)| convert_link(depth + 1, nth, link))
-                    .rev();
+                // deeper. In a shallow walk only the root directory's entries are enumerated, so a
+                // subdirectory (current is Some) does not push its own children.
+                if current.is_none() || !shallow {
+                    pending.reserve(flat.links.len());
+                    let links = flat
+                        .links
+                        .into_iter()
+                        .enumerate()
+                        .map(|(nth, link)| convert_link(depth + 1, nth, link))
+                        .rev();
 
-                // replacing this with try_fold takes as many lines as the R: Try<Ok = B> cannot be
-                // deduced without specifying the Error
-                for link in links {
-                    pending.push(link?);
+                    // replacing this with try_fold takes as many lines as the R: Try<Ok = B> cannot
+                    // be deduced without specifying the Error
+                    for link in links {
+                        pending.push(link?);
+                    }
                 }
 
                 if let next_local @ Some(_) = pending.pop() {
@@ -249,20 +267,24 @@ impl Walker {
                 let (cid, name, depth) = next.take().expect("validated at start and this method");
 
                 // similar to directory, the depth is +1 for nested entries, but the sibling buckets
-                // are at depth
-                pending.reserve(flat.links.len());
-                let links = flat
-                    .links
-                    .into_iter()
-                    .enumerate()
-                    .map(|(nth, link)| convert_sharded_link(depth + 1, depth, nth, link))
-                    .rev();
+                // are at depth. A shallow walk still traverses this directory's own shard buckets
+                // (empty name) to enumerate its entries, but does not descend into a named entry
+                // that is itself a sharded subdirectory.
+                if current.is_none() || name.is_empty() || !shallow {
+                    pending.reserve(flat.links.len());
+                    let links = flat
+                        .links
+                        .into_iter()
+                        .enumerate()
+                        .map(|(nth, link)| convert_sharded_link(depth + 1, depth, nth, link))
+                        .rev();
 
-                // TODO: it might be worthwhile to lose the `rev` and sort the pushed links using
-                // the depth ascending. This should make sure we are first visiting the shortest
-                // path items.
-                for link in links {
-                    pending.push(link?);
+                    // TODO: it might be worthwhile to lose the `rev` and sort the pushed links using
+                    // the depth ascending. This should make sure we are first visiting the shortest
+                    // path items.
+                    for link in links {
+                        pending.push(link?);
+                    }
                 }
 
                 if let next_local @ Some(_) = pending.pop() {
@@ -293,6 +315,9 @@ impl Walker {
             UnixFsType::Raw | UnixFsType::File => {
                 let (bytes, file_size, metadata, step) =
                     IdleFileVisit::default().start_from_parsed(flat, cache)?;
+                // A shallow walk reports the file from its root block (size included) without
+                // descending into its leaf blocks.
+                let step = if shallow { None } else { step };
                 let (cid, name, depth) = next.take().expect("validated at new and earlier");
                 let file_continues = step.is_some();
 
@@ -1103,5 +1128,66 @@ mod tests {
         }
 
         ret
+    }
+
+    fn walk_shallow(root_name: &str, cid: &str) -> HashMap<PathBuf, usize> {
+        let mut ret = HashMap::new();
+
+        let blocks = FakeBlockstore::with_fixtures();
+
+        let mut cache = None;
+        let mut walker = Walker::new_shallow(
+            ipld_core::cid::Cid::try_from(cid).unwrap(),
+            root_name.to_string(),
+        );
+
+        while walker.should_continue() {
+            let (next, _) = walker.pending_links();
+            let block = blocks.get_by_cid(next);
+            let cw = walker.next(block, &mut cache).unwrap();
+            *ret.entry(PathBuf::from(cw.path())).or_insert(0) += 1;
+        }
+
+        ret
+    }
+
+    #[test]
+    fn shallow_lists_only_immediate_directory() {
+        // This root holds a single subdirectory; shallow reports the subdirectory but does not walk
+        // into its two files.
+        let counts = walk_shallow("", "QmPTotyhVnnfCu9R4qwR4cdhpi5ENaiP8ZJfdqsm8Dw2jB");
+
+        let mut expected = HashMap::new();
+        expected.insert(PathBuf::from(""), 1);
+        expected.insert(
+            PathBuf::from("QmVkvLsSEm2uJx1h5Fqukje8mMPYg393o5C2kMCkF2bBTA"),
+            1,
+        );
+
+        assert_eq!(counts, expected, "{counts:#?}");
+    }
+
+    #[test]
+    fn shallow_reports_files_without_descending() {
+        // The subdirectory itself: shallow yields one entry per file, not one per file block (the
+        // recursive walk reports each of these files 5 times).
+        let counts = walk_shallow("", "QmVkvLsSEm2uJx1h5Fqukje8mMPYg393o5C2kMCkF2bBTA");
+
+        let mut expected = HashMap::new();
+        expected.insert(PathBuf::from(""), 1);
+        expected.insert(PathBuf::from("foobar.balanced"), 1);
+        expected.insert(PathBuf::from("foobar.trickle"), 1);
+
+        assert_eq!(counts, expected, "{counts:#?}");
+    }
+
+    #[test]
+    fn shallow_enumerates_sharded_directory() {
+        // Every entry of this HAMT fixture is a single-block leaf, so shallow must still traverse
+        // the shard buckets and yield the exact same entry set the recursive walk does.
+        let shallow = walk_shallow("", "QmZbFPTnDBMWbQ6iBxQAhuhLz8Nu9XptYS96e7cuf5wvbk");
+        let full = walk_everything("", "QmZbFPTnDBMWbQ6iBxQAhuhLz8Nu9XptYS96e7cuf5wvbk");
+
+        assert_eq!(shallow, full, "shallow {shallow:#?}\nfull {full:#?}");
     }
 }
