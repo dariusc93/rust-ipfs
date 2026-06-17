@@ -2,6 +2,7 @@
 
 - feat: write-side CIDv1, raw leaves, HAMT directory sharding, symlinks, and mode/mtime metadata, byte-for-byte
   compatability improvements with go and js equivalents.
+- feat: Add Walker::new_shallow so we can walk directories without loading the entire tree.
 
 # 0.5.1
 
