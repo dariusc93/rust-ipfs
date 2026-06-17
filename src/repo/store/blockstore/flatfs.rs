@@ -137,59 +137,23 @@ impl FsBlockStoreInner {
         let target_path = block_path(self.path.clone(), block.cid());
         let cid = *block.cid();
 
-        let je = tokio::task::spawn_blocking(move || {
+        let put = tokio::task::spawn_blocking(move || {
             let sharded = target_path
                 .parent()
                 .expect("we already have at least the shard parent");
 
             std::fs::create_dir_all(sharded)?;
 
-            let target = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&target_path)?;
-
-            let temp_path = target_path.with_extension("tmp");
-
-            match write_through_tempfile(target, &target_path, temp_path, block.data()) {
-                Ok(()) => {
-                    trace!("successfully wrote the block");
-                    Ok::<_, io::Error>(Ok(block.data().len()))
-                }
-                Err(e) => {
-                    match std::fs::remove_file(&target_path) {
-                        Ok(_) => debug!("removed partially written {:?}", target_path),
-                        Err(removal) => warn!(
-                            "failed to remove partially written {:?}: {}",
-                            target_path, removal
-                        ),
-                    }
-                    Ok(Err(e))
-                }
-            }
+            write_block(&target_path, block.data())
         })
         .await
         .map_err(|e| {
             error!("blocking put task error: {}", e);
             e
-        })?;
+        })??;
 
-        match je {
-            Ok(Ok(written)) => {
-                trace!(bytes = written, "block writing succeeded");
-                Ok((cid, BlockPut::NewBlock))
-            }
-            Ok(Err(e)) => {
-                trace!("write failed but hopefully the target was removed");
-
-                Err(Error::new(e))
-            }
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-                trace!("block exist: {}", e);
-                Ok((cid, BlockPut::Existed))
-            }
-            Err(e) => Err(Error::new(e)),
-        }
+        trace!(?put, %cid, "block writing finished");
+        Ok((cid, put))
     }
 
     async fn size(&self, cids: &[Cid]) -> Option<usize> {
@@ -275,34 +239,59 @@ impl FsBlockStoreInner {
     }
 }
 
-fn write_through_tempfile(
-    target: std::fs::File,
-    target_path: impl AsRef<std::path::Path>,
-    temp_path: impl AsRef<std::path::Path>,
-    data: &[u8],
-) -> Result<(), std::io::Error> {
+/// Atomically publishes a block at `target_path`.
+///
+/// Note that the full block is written to a uniquely named sibling temp file and fsynced,
+/// then hard-linked into place. `hard_link` fails with `AlreadyExists` if the block is already
+/// present (so we can report, `Existed` and keep the put-once guarantee), and because the link only
+/// ever points at a fully written file, a crash can never leave a present-but-empty `.data` behind.
+/// The existence latch is the link itself, never a pre-created final file.
+fn write_block(target_path: &std::path::Path, data: &[u8]) -> Result<BlockPut, std::io::Error> {
     use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    let mut temp = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&temp_path)?;
+    // A per-process unique suffix so concurrent puts of the same cid never share a temp file.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut temp_name = target_path.as_os_str().to_owned();
+    temp_name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let temp_path = PathBuf::from(temp_name);
 
-    temp.write_all(data)?;
-    temp.flush()?;
+    let write_temp = || -> Result<(), std::io::Error> {
+        let mut temp = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temp_path)?;
+        temp.write_all(data)?;
+        temp.flush()?;
+        // safe default
+        temp.sync_all()
+    };
 
-    // safe default
-    temp.sync_all()?;
+    if let Err(e) = write_temp() {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(e);
+    }
 
-    drop(temp);
-    drop(target);
+    let put = match std::fs::hard_link(&temp_path, target_path) {
+        Ok(()) => BlockPut::NewBlock,
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => BlockPut::Existed,
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(e);
+        }
+    };
 
-    std::fs::rename(temp_path, target_path)?;
+    // The data now lives at target_path (or already did); drop the temp link either way.
+    let _ = std::fs::remove_file(&temp_path);
 
-    // FIXME: there should be a directory fsync here as well
-
-    Ok(())
+    // FIXME: a directory fsync here would make a freshly linked block durable across power loss
+    //        (currently a crash can lose the dir entry, leaving the block absent but re-fetchable).
+    Ok(put)
 }
 
 #[cfg(test)]
@@ -461,6 +450,44 @@ mod tests {
         }
 
         (writes, existing)
+    }
+
+    #[tokio::test]
+    async fn put_leaves_no_temp_and_full_block() {
+        let mut tmp = temp_dir();
+        tmp.push("put_no_temp");
+        std::fs::remove_dir_all(&tmp).ok();
+
+        let store = FsBlockStore::new(tmp.clone());
+        store.init().await.unwrap();
+
+        let data = b"hello durable block".to_vec();
+        let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
+        let block = Block::new(cid, data.clone()).unwrap();
+
+        assert_eq!(store.put(&block).await.unwrap().1, BlockPut::NewBlock);
+        // re-putting the same block must not clobber it and must report Existed.
+        assert_eq!(store.put(&block).await.unwrap().1, BlockPut::Existed);
+
+        // the block reads back intact, and only the canonical .data file remains (no .tmp litter).
+        assert_eq!(store.get(&cid).await.unwrap().unwrap(), block);
+        let mut files = Vec::new();
+        for shard in std::fs::read_dir(&tmp).unwrap() {
+            let shard = shard.unwrap().path();
+            if shard.is_dir() {
+                for f in std::fs::read_dir(&shard).unwrap() {
+                    files.push(f.unwrap().path());
+                }
+            }
+        }
+        assert_eq!(
+            files.len(),
+            1,
+            "expected only the .data block, got {files:?}"
+        );
+        assert_eq!(files[0].extension().and_then(|e| e.to_str()), Some("data"));
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[tokio::test]
