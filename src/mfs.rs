@@ -7,10 +7,10 @@ use anyhow::anyhow;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use ipld_core::cid::{Cid, Version};
-use multihash_codetable::Code;
+use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
 use rust_unixfs::dir::{describe, DirLink, NodeDescription};
-use rust_unixfs::file::adder::FileAdder;
+use rust_unixfs::file::adder::{parse_file_branch, rebuild_file_branch, FileAdder, FileBranchLink};
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::str::FromStr;
@@ -20,6 +20,7 @@ const ROOT_KEY: &[u8] = b"/mfs/root";
 
 const VERSION: Version = Version::V1;
 const HASHER: Code = Code::Sha2_256;
+const RAW_LEAF_CODEC: u64 = 0x55;
 
 /// A directory's immediate children. name to target Cid, cumulative dag size used as the link Tsize.
 type DirMap = BTreeMap<String, DirEntry>;
@@ -130,15 +131,30 @@ impl Mfs {
             return Err(anyhow!("cannot write to the root directory"));
         }
 
-        let existing = self.read_existing_file(&comps).await?;
+        let existing = self.resolve_file(&comps).await?;
         if existing.is_none() && !opts.create {
             return Err(anyhow!("'{path}' does not exist; pass create"));
         }
 
-        let mut content = if opts.truncate {
+        if let Some((cid, tsize, filesize)) = existing
+            && !opts.truncate
+            && opts.offset.saturating_add(data.len() as u64) <= filesize
+        {
+            let edited = {
+                let _gc = self.repo().gc_guard().await;
+                self.overwrite_subtree(cid, 0, data, opts.offset).await?
+            };
+            if let Some((new_cid, blocks)) = edited {
+                return self
+                    .set_entry(path, DirEntry { cid: new_cid, tsize }, blocks, opts.parents, true)
+                    .await;
+            }
+        }
+
+        let mut content = if opts.truncate || existing.is_none() {
             Vec::new()
         } else {
-            existing.unwrap_or_default()
+            self.read_existing_file(&comps).await?.unwrap_or_default()
         };
         let offset = opts.offset as usize;
         let end = offset + data.len();
@@ -551,6 +567,78 @@ impl Mfs {
         })
     }
 
+    async fn resolve_file(&self, comps: &[String]) -> Result<Option<(Cid, u64, u64)>, Error> {
+        let Some(root) = self.snapshot_root().await? else {
+            return Ok(None);
+        };
+        let _gc = self.repo().gc_guard().await;
+        let (cid, tsize) = match self.resolve_from(root, comps).await {
+            Ok(resolved) => resolved,
+            Err(_) => return Ok(None),
+        };
+        match self.classify(&cid, tsize).await? {
+            MfsKind::File { size } => Ok(Some((cid, tsize, size))),
+            MfsKind::Symlink => Ok(Some((cid, tsize, 0))),
+            MfsKind::Directory => Err(anyhow!("path is a directory")),
+        }
+    }
+
+    fn overwrite_subtree<'a>(
+        &'a self,
+        cid: Cid,
+        node_start: u64,
+        data: &'a [u8],
+        data_start: u64,
+    ) -> BoxFuture<'a, Result<Option<(Cid, Vec<Block>)>, Error>> {
+        async move {
+            let block = self.get_block(&cid).await?;
+
+            if let Some(branch) = parse_file_branch(block.data()) {
+                let mut blocks = Vec::new();
+                let mut links: Vec<FileBranchLink> = branch.links.clone();
+                let write_end = data_start + data.len() as u64;
+                let mut child_start = node_start;
+                for (i, link) in branch.links.iter().enumerate() {
+                    let child_end = child_start + link.blocksize;
+                    if child_end > data_start && child_start < write_end {
+                        match self
+                            .overwrite_subtree(link.cid, child_start, data, data_start)
+                            .await?
+                        {
+                            Some((new_cid, mut child_blocks)) => {
+                                links[i].cid = new_cid;
+                                blocks.append(&mut child_blocks);
+                            }
+                            None => return Ok(None),
+                        }
+                    }
+                    child_start = child_end;
+                }
+                let (new_cid, bytes) = rebuild_file_branch(branch.filesize, &links, VERSION, HASHER);
+                blocks.push(Block::new(new_cid, bytes)?);
+                return Ok(Some((new_cid, blocks)));
+            }
+
+            if !matches!(describe(block.data()), NodeDescription::Other) {
+                return Ok(None);
+            }
+
+            let leaf = block.data();
+            let ov_start = node_start.max(data_start);
+            let ov_end = (node_start + leaf.len() as u64).min(data_start + data.len() as u64);
+            if ov_start >= ov_end {
+                return Ok(Some((cid, Vec::new())));
+            }
+            let mut new_leaf = leaf.to_vec();
+            let dst = (ov_start - node_start) as usize..(ov_end - node_start) as usize;
+            let src = (ov_start - data_start) as usize..(ov_end - data_start) as usize;
+            new_leaf[dst].copy_from_slice(&data[src]);
+            let new_cid = Cid::new_v1(RAW_LEAF_CODEC, HASHER.digest(&new_leaf));
+            Ok(Some((new_cid, vec![Block::new(new_cid, new_leaf)?])))
+        }
+        .boxed()
+    }
+
     async fn read_existing_file(&self, comps: &[String]) -> Result<Option<Vec<u8>>, Error> {
         let Some(root) = self.snapshot_root().await? else {
             return Ok(None);
@@ -848,6 +936,72 @@ mod tests {
 
         data[off..off + patch.len()].copy_from_slice(patch);
         assert_eq!(mfs.read("/big").await.unwrap(), data);
+    }
+
+    #[tokio::test]
+    async fn overwrite_in_place_is_canonical_and_reuses_blocks() {
+        use futures::StreamExt as _;
+
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo.clone());
+
+        let mut content = vec![0u8; 4_000_000];
+        let mut x = 0x1234_5678u32;
+        for b in content.iter_mut() {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *b = (x >> 24) as u8;
+        }
+        mfs.write("/big", &content, false).await.unwrap();
+
+        let before = repo.list_blocks().await.collect::<Vec<_>>().await.len();
+        assert!(before > 8, "file should be many blocks, got {before}");
+
+        let patch = b"PATCHED-IN-PLACE";
+        let off = 1_500_000u64;
+        mfs.write_with(
+            "/big",
+            patch,
+            WriteOptions {
+                offset: off,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        content[off as usize..off as usize + patch.len()].copy_from_slice(patch);
+        let (expected_cid, _, _) = encode_file(&content).unwrap();
+        assert_eq!(
+            mfs.stat("/big").await.unwrap().cid,
+            expected_cid,
+            "editor must produce the canonical tree"
+        );
+        assert_eq!(mfs.read("/big").await.unwrap(), content);
+
+        let after = repo.list_blocks().await.collect::<Vec<_>>().await.len();
+        assert!(
+            after - before < 8,
+            "expected few new blocks (reuse), added {}",
+            after - before
+        );
+
+        let patch2 = b"CROSS-CHUNK-BOUNDARY";
+        let off2 = 262_144usize - 5;
+        mfs.write_with(
+            "/big",
+            patch2,
+            WriteOptions {
+                offset: off2 as u64,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        content[off2..off2 + patch2.len()].copy_from_slice(patch2);
+        let (expected2, _, _) = encode_file(&content).unwrap();
+        assert_eq!(mfs.stat("/big").await.unwrap().cid, expected2);
+        assert_eq!(mfs.read("/big").await.unwrap(), content);
     }
 
     #[tokio::test]

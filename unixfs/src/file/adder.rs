@@ -367,6 +367,69 @@ fn render_and_hash<M: MessageWrite>(node: &M, config: Config) -> (Cid, Vec<u8>) 
     (cid, out)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileBranchLink {
+    pub cid: Cid,
+    pub blocksize: u64,
+    pub tsize: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileBranch {
+    pub filesize: u64,
+    pub links: Vec<FileBranchLink>,
+}
+
+pub fn parse_file_branch(block: &[u8]) -> Option<FileBranch> {
+    let flat = FlatUnixFs::try_parse(block).ok()?;
+    if flat.data.Type != UnixFsType::File
+        || flat.links.is_empty()
+        || flat.links.len() != flat.data.blocksizes.len()
+        || flat.data.mode.is_some()
+        || flat.data.mtime.is_some()
+    {
+        return None;
+    }
+
+    let mut links = Vec::with_capacity(flat.links.len());
+    for (link, &blocksize) in flat.links.iter().zip(flat.data.blocksizes.iter()) {
+        let cid = Cid::try_from(link.Hash.as_deref()?).ok()?;
+        links.push(FileBranchLink {
+            cid,
+            blocksize,
+            tsize: link.Tsize.unwrap_or_default(),
+        });
+    }
+
+    Some(FileBranch {
+        filesize: flat.data.filesize.unwrap_or_default(),
+        links,
+    })
+}
+
+pub fn rebuild_file_branch(
+    filesize: u64,
+    links: &[FileBranchLink],
+    cid_version: Version,
+    hasher: Code,
+) -> (Cid, Vec<u8>) {
+    let config = Config {
+        cid_version,
+        raw_leaves: true,
+        hasher,
+    };
+    let links: Vec<Link> = links
+        .iter()
+        .map(|l| Link {
+            depth: 0,
+            target: l.cid,
+            total_size: l.tsize,
+            file_size: l.blocksize,
+        })
+        .collect();
+    render_and_hash(&LinkBlock { links: &links, filesize }, config)
+}
+
 /// Streaming dag-pb serializer for a file link block (a `File` node linking child blocks), avoiding
 /// the per-link byte-vector allocations of building intermediate `PBLink`s.
 struct LinkBlock<'a> {
@@ -684,10 +747,44 @@ impl BalancedCollector {
 
 #[cfg(test)]
 mod tests {
-    use super::{BalancedCollector, Chunker, FileAdder};
+    use super::{
+        parse_file_branch, rebuild_file_branch, BalancedCollector, Chunker, FileAdder,
+    };
     use crate::test_support::FakeBlockstore;
     use core::convert::TryFrom;
     use hex_literal::hex;
+
+    #[test]
+    fn rebuild_file_branch_matches_adder_root() {
+        use ipld_core::cid::Version;
+        use multihash_codetable::Code;
+        let content: &[u8] = b"the quick brown fox jumps over the lazy dog";
+        let blocks = FileAdder::builder()
+            .with_chunker(Chunker::Size(4))
+            .with_cid_version(Version::V1)
+            .build()
+            .collect_blocks(content, 0);
+        let (root_cid, root_block) = blocks.last().unwrap().clone();
+        let branch = parse_file_branch(&root_block).expect("multiblock root is a file branch");
+        let (rebuilt, _) =
+            rebuild_file_branch(branch.filesize, &branch.links, Version::V1, Code::Sha2_256);
+        assert_eq!(rebuilt, root_cid);
+    }
+
+    #[test]
+    fn parse_file_branch_rejects_metadata_root() {
+        use crate::Metadata;
+        use ipld_core::cid::Version;
+        let content: &[u8] = b"the quick brown fox jumps over the lazy dog";
+        let blocks = FileAdder::builder()
+            .with_chunker(Chunker::Size(4))
+            .with_cid_version(Version::V1)
+            .with_metadata(Metadata::default().with_mode(0o644))
+            .build()
+            .collect_blocks(content, 0);
+        let root_block = blocks.last().unwrap().1.clone();
+        assert!(parse_file_branch(&root_block).is_none());
+    }
     use ipld_core::cid::{Cid, Version};
 
     #[test]
