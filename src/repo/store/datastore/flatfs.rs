@@ -33,6 +33,8 @@ pub struct FsDataStore {
     lock: Arc<Semaphore>,
 
     ds_guard: Arc<RwLock<()>>,
+
+    pin_index: Arc<parking_lot::RwLock<HashMap<Cid, HashSet<Cid>>>>,
 }
 
 impl FsDataStore {
@@ -41,6 +43,7 @@ impl FsDataStore {
             path: root,
             ds_guard: Arc::default(),
             lock: Arc::new(Semaphore::new(1)),
+            pin_index: Arc::default(),
         }
     }
 
@@ -218,6 +221,20 @@ impl DataStore for FsDataStore {
         // Although `pins` directory is created when inserting a data, is it not created when there are any attempts at listing the pins (thus causing to fail)
         tokio::fs::create_dir_all(&self.path.join("pins")).await?;
         tokio::fs::create_dir_all(&self.path.join("data")).await?;
+
+        // disk is the source of truth; rebuild the indirect-pin reverse index from it once.
+        let mut index: HashMap<Cid, HashSet<Cid>> = HashMap::new();
+        let recursives = self.list_pinfiles().await.try_filter_map(|(cid, mode)| {
+            futures::future::ready(Ok((mode == PinMode::Recursive).then_some(cid)))
+        });
+        futures::pin_mut!(recursives);
+        while let Some(root) = TryStreamExt::try_next(&mut recursives).await? {
+            let (_, refs) = read_recursively_pinned(self.path.join("pins"), root).await?;
+            for r in refs {
+                index.entry(r).or_default().insert(root);
+            }
+        }
+        *self.pin_index.write() = index;
         Ok(())
     }
 
@@ -258,29 +275,12 @@ impl PinStore for FsDataStore {
             return Ok(true);
         }
 
-        let st = self.list_pinfiles().await.try_filter_map(|(cid, mode)| {
-            futures::future::ready(if mode == PinMode::Recursive {
-                Ok(Some(cid))
-            } else {
-                Ok(None)
-            })
-        });
-
-        futures::pin_mut!(st);
-
-        while let Some(recursive) = TryStreamExt::try_next(&mut st).await? {
-            // TODO: it might be much better to just deserialize the vec one by one and comparing while
-            // going
-            let (_, references) =
-                read_recursively_pinned(self.path.join("pins"), recursive).await?;
-
-            // if we always wrote down the cids in some order we might be able to binary search?
-            if references.into_iter().any(move |x| x == *cid) {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
+        // indirect: a reverse-index lookup rather than scanning every recursive pin file
+        Ok(self
+            .pin_index
+            .read()
+            .get(cid)
+            .is_some_and(|roots| !roots.is_empty()))
     }
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
@@ -325,13 +325,20 @@ impl PinStore for FsDataStore {
         let mut path = pin_path(self.path.join("pins"), target);
 
         let span = tracing::Span::current();
+        let index = self.pin_index.clone();
+        let target = *target;
 
         tokio::task::spawn_blocking(move || {
             let _permit = permit; // again move to the threadpool thread
             let _entered = span.enter();
 
             std::fs::create_dir_all(path.parent().expect("shard parent has to exist"))?;
+
+            // previous refs, if re-pinning, so the reverse index can drop stale entries
+            let old_refs = sync_read_recursive_refs(&path.with_extension("recursive"));
+
             let count = set.len();
+            let new_refs: Vec<Cid> = set.iter().copied().collect();
             let cids = set.into_iter().map(|cid| cid.to_string());
 
             path.set_extension("recursive_temp");
@@ -369,6 +376,19 @@ impl PinStore for FsDataStore {
                         path, e
                     );
                 }
+            }
+
+            let mut idx = index.write();
+            for r in old_refs {
+                if let Some(roots) = idx.get_mut(&r) {
+                    roots.remove(&target);
+                    if roots.is_empty() {
+                        idx.remove(&r);
+                    }
+                }
+            }
+            for r in new_refs {
+                idx.entry(r).or_default().insert(target);
             }
 
             Ok::<_, Error>(())
@@ -419,6 +439,8 @@ impl PinStore for FsDataStore {
         let mut path = pin_path(self.path.join("pins"), target);
 
         let span = tracing::Span::current();
+        let index = self.pin_index.clone();
+        let target = *target;
 
         tokio::task::spawn_blocking(move || {
             let _permit = permit; // move into threadpool thread
@@ -441,18 +463,34 @@ impl PinStore for FsDataStore {
                 Err(e) => return Err(Error::new(e)),
             }
 
+            // read the refs before removing so the reverse index can be reconciled
+            let refs = sync_read_recursive_refs(&path.with_extension("recursive"));
             path.set_extension("recursive");
 
+            let mut removed_recursive = false;
             match std::fs::remove_file(&path) {
                 Ok(_) => {
                     trace!("recursive pin removed");
                     any |= true;
+                    removed_recursive = true;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     // we may have removed only the direct pin, but if we cleaned out a direct pin
                     // this would have been a success
                 }
                 Err(e) => return Err(e.into()),
+            }
+
+            if removed_recursive {
+                let mut idx = index.write();
+                for r in refs {
+                    if let Some(roots) = idx.get_mut(&r) {
+                        roots.remove(&target);
+                        if roots.is_empty() {
+                            idx.remove(&r);
+                        }
+                    }
+                }
             }
 
             if !any {
@@ -473,7 +511,7 @@ impl PinStore for FsDataStore {
         // no locking, dirty reads are probably good enough until gc
         let cids = self.list_pinfiles().await;
 
-        let path = self.path.join("pins");
+        let pin_index = self.pin_index.clone();
 
         let requirement = PinModeRequirement::from(requirement);
 
@@ -489,8 +527,6 @@ impl PinStore for FsDataStore {
             // keep track of all returned not to give out duplicate cids
             let mut returned: HashSet<Cid> = HashSet::default();
 
-            // the set of recursive will be interesting after all others
-            let mut recursive: HashSet<Cid> = HashSet::default();
             let mut direct: HashSet<Cid> = HashSet::default();
 
             let collect_recursive_for_indirect = requirement.is_indirect_or_any();
@@ -502,9 +538,6 @@ impl PinStore for FsDataStore {
                 let matches = requirement.matches(&mode);
 
                 if mode == PinMode::Recursive {
-                    if collect_recursive_for_indirect {
-                        recursive.insert(cid);
-                    }
                     if matches && returned.insert(cid) {
                         // the recursive pins can always be returned right away since they have
                         // the highest priority in this listing or output
@@ -533,20 +566,11 @@ impl PinStore for FsDataStore {
                 return;
             }
 
-            // the threadpool passing adds probably some messaging latency, maybe run small
-            // amount in parallel?
-            let mut recursive = futures::stream::iter(recursive.into_iter().map(Ok))
-                .map_ok(move |cid| read_recursively_pinned(path.clone(), cid))
-                .try_buffer_unordered(4);
-
-            while let Some((_, next_batch)) = TryStreamExt::try_next(&mut recursive).await? {
-                for indirect in next_batch {
-                    if returned.insert(indirect) {
-                        yield (indirect, PinMode::Indirect);
-                    }
+            let indirect: Vec<Cid> = pin_index.read().keys().copied().collect();
+            for cid in indirect {
+                if returned.insert(cid) {
+                    yield (cid, PinMode::Indirect);
                 }
-
-                trace!(unique = returned.len(), "completed batch of indirect");
             }
         };
 
@@ -582,21 +606,21 @@ impl PinStore for FsDataStore {
                 for (i, cid) in ids.into_iter().enumerate() {
                     let mut path = pin_path(base.clone(), &cid);
 
-                    if let Some(mode) = sync_read_direct_or_recursive(&mut path) {
-                        if searched_suffix.matches(&mode) {
-                            response[i] = Some((
-                                cid,
-                                match mode {
-                                    PinMode::Direct => PinKind::Direct,
-                                    // FIXME: eech that recursive count is now out of place
-                                    PinMode::Recursive => PinKind::Recursive(0),
-                                    // FIXME: this is also quite unfortunate, should make an enum
-                                    // of two?
-                                    _ => unreachable!(),
-                                },
-                            ));
-                            continue;
-                        }
+                    if let Some(mode) = sync_read_direct_or_recursive(&mut path)
+                        && searched_suffix.matches(&mode)
+                    {
+                        response[i] = Some((
+                            cid,
+                            match mode {
+                                PinMode::Direct => PinKind::Direct,
+                                // FIXME: eech that recursive count is now out of place
+                                PinMode::Recursive => PinKind::Recursive(0),
+                                // FIXME: this is also quite unfortunate, should make an enum
+                                // of two?
+                                _ => unreachable!(),
+                            },
+                        ));
+                        continue;
                     }
 
                     if !gather_indirect {
@@ -625,40 +649,17 @@ impl PinStore for FsDataStore {
         if !remaining.is_empty() {
             assert!(gather_indirect);
 
-            trace!(
-                remaining = remaining.len(),
-                "query trying to find remaining indirect pins"
-            );
-
-            let recursives = self
-                .list_pinfiles()
-                .await
-                .try_filter_map(|(cid, mode)| {
-                    futures::future::ready(if mode == PinMode::Recursive {
-                        Ok(Some(cid))
-                    } else {
-                        Ok(None)
-                    })
-                })
-                .map_ok(|cid| read_recursively_pinned(self.path.join("pins"), cid))
-                .try_buffer_unordered(4);
-
-            futures::pin_mut!(recursives);
-
-            'out: while let Some((referring, references)) =
-                TryStreamExt::try_next(&mut recursives).await?
-            {
-                // FIXME: maybe binary search?
-                for cid in references {
-                    if let Some(index) = remaining.remove(&cid) {
-                        response[index] = Some((cid, PinKind::IndirectFrom(referring)));
-
-                        if remaining.is_empty() {
-                            break 'out;
-                        }
+            // reverse-index lookup; any cid still unresolved after this is genuinely not pinned
+            let idx = self.pin_index.read();
+            remaining.retain(
+                |cid, i| match idx.get(cid).and_then(|roots| roots.iter().next()) {
+                    Some(referring) => {
+                        response[*i] = Some((*cid, PinKind::IndirectFrom(*referring)));
+                        false
                     }
-                }
-            }
+                    None => true,
+                },
+            );
         }
 
         if let Some((cid, _)) = remaining.into_iter().next() {
@@ -746,6 +747,20 @@ async fn read_recursively_pinned(path: PathBuf, cid: Cid) -> Result<(Cid, Vec<Ci
 
     trace!(cid = %cid, count = found.len(), "read indirect pins");
     Ok((cid, found))
+}
+
+/// Reads a `<cid>.recursive` pin file's referenced cids, returning an empty Vec if the file is
+/// missing or unparseable (same tolerance as `read_recursively_pinned`).
+fn sync_read_recursive_refs(recursive_path: &Path) -> Vec<Cid> {
+    let Ok(contents) = std::fs::read(recursive_path) else {
+        return Vec::new();
+    };
+    let Ok(cids) = serde_json::from_slice::<Vec<&str>>(&contents) else {
+        return Vec::new();
+    };
+    cids.into_iter()
+        .filter_map(|s| Cid::try_from(s).ok())
+        .collect()
 }
 
 async fn read_direct_or_recursive(mut block_path: PathBuf) -> Result<Option<PinMode>, Error> {
@@ -895,5 +910,50 @@ mod test {
 
         let _ = std::fs::remove_dir_all(&dir);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn pin_index_rebuilds_on_init() {
+        use crate::repo::PinStore;
+        use futures::StreamExt;
+        use ipld_core::cid::Cid;
+        use std::convert::TryFrom;
+
+        let dir = std::env::temp_dir().join("rust_ipfs_pin_index_rebuild");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let root = Cid::try_from("QmX5S2xLu32K6WxWnyLeChQFbDHy79ULV9feJYH2Hy9bgp").unwrap();
+        let empty = Cid::try_from("QmbFMke1KXqnYyBBWxB74N4c5SBnJMVAiMNRcGu6x1AwQH").unwrap();
+
+        {
+            let store = FsDataStore::new(dir.clone());
+            store.init().await.unwrap();
+            store
+                .insert_recursive_pin(&root, futures::stream::iter(vec![Ok(empty)]).boxed())
+                .await
+                .unwrap();
+            assert!(store.is_pinned(&empty).await.unwrap());
+        }
+
+        // a fresh store on the same path must reconstruct the index from disk in init()
+        let store = FsDataStore::new(dir.clone());
+        store.init().await.unwrap();
+        assert!(
+            store.is_pinned(&empty).await.unwrap(),
+            "indirect pin lost across restart"
+        );
+        assert!(store.is_pinned(&root).await.unwrap());
+
+        // unpinning the root drops the indirect entry from the index
+        store
+            .remove_recursive_pin(&root, futures::stream::empty().boxed())
+            .await
+            .unwrap();
+        assert!(
+            !store.is_pinned(&empty).await.unwrap(),
+            "indirect survived unpin"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
