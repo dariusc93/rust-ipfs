@@ -68,29 +68,23 @@ impl FsDataStore {
 
     async fn write(&self, key: &[u8], val: &[u8]) -> std::io::Result<()> {
         let data_path = self.path.join("data");
-        if !data_path.is_dir() {
-            tokio::fs::create_dir_all(&data_path).await?;
-        }
-
-        let (path, key) = self
+        let (rel, key) = self
             .key(key)
             .ok_or::<std::io::Error>(std::io::ErrorKind::NotFound.into())?;
 
-        let path = data_path.join(path);
+        let dir = data_path.join(rel);
+        let final_path = dir.join(key);
+        let val = val.to_vec();
 
-        if !path.is_dir() {
-            tokio::fs::create_dir_all(&path).await?;
-        }
-
-        let path = path.join(key);
-
-        if path.is_dir() {
-            // The only reason why this would be a directory is if the key didnt exist, is invalid, or the item was
-            // actually a directory in which case we return an error here.
-            return Err(std::io::ErrorKind::Other.into());
-        }
-
-        tokio::fs::write(path, val).await
+        tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&dir)?;
+            if final_path.is_dir() {
+                return Err(std::io::Error::from(std::io::ErrorKind::Other));
+            }
+            write_atomic(&dir, &final_path, &val)
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 
     fn _contains(&self, key: &[u8]) -> bool {
@@ -171,6 +165,46 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
     };
 
     st.boxed()
+}
+
+fn write_atomic(dir: &Path, final_path: &Path, val: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut temp_name = final_path.as_os_str().to_owned();
+    temp_name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let temp_path = PathBuf::from(temp_name);
+
+    let res = (|| {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temp_path)?;
+        f.write_all(val)?;
+        f.flush()?;
+        f.sync_all()?;
+        std::fs::rename(&temp_path, final_path)
+    })();
+
+    match res {
+        Ok(()) => {
+            // best-effort: make the rename durable across power loss (no-op where unsupported).
+            if let Ok(d) = std::fs::File::open(dir) {
+                let _ = d.sync_all();
+            }
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
 }
 
 /// The column operations are all unimplemented pending at least downscoping of the
