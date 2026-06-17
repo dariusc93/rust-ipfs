@@ -31,6 +31,7 @@ mod context;
 pub mod dag;
 pub mod error;
 pub mod ipns;
+pub mod mfs;
 pub mod p2p;
 pub mod path;
 pub mod refs;
@@ -318,6 +319,11 @@ impl Ipfs {
     /// Returns an [`IpfsUnixfs`] for files operations
     pub fn unixfs(&self) -> IpfsUnixfs {
         IpfsUnixfs::new(self.clone())
+    }
+
+    /// Returns the node's mutable filesystem ([`crate::mfs::Mfs`]) handle.
+    pub fn mfs(&self) -> crate::mfs::Mfs {
+        crate::mfs::Mfs::new(self.repo.clone())
     }
 
     /// Returns a [`Ipns`] for ipns operations
