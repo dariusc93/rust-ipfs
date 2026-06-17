@@ -98,6 +98,25 @@ impl BlockStore for MemBlockStore {
         }
     }
 
+    async fn put_many(&self, blocks: &[Block]) -> Result<Vec<(Cid, BlockPut)>, Error> {
+        use std::collections::hash_map::Entry;
+
+        let inner = &mut *self.inner.write().await;
+        let mut out = Vec::with_capacity(blocks.len());
+        for block in blocks {
+            let cid = *block.cid();
+            let res = match inner.blocks.entry(cid) {
+                Entry::Occupied(_) => BlockPut::Existed,
+                Entry::Vacant(ve) => {
+                    ve.insert(block.inner_data().clone());
+                    BlockPut::NewBlock
+                }
+            };
+            out.push((cid, res));
+        }
+        Ok(out)
+    }
+
     async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
 

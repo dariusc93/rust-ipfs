@@ -84,6 +84,19 @@ pub trait BlockStore: Debug + Send + Sync {
     fn total_size(&self) -> impl Future<Output = Result<usize, Error>> + Send;
     /// Inserts a block in the blockstore.
     fn put(&self, block: &Block) -> impl Future<Output = Result<(Cid, BlockPut), Error>> + Send;
+    /// Inserts multiple blocks in one batch.
+    fn put_many(
+        &self,
+        blocks: &[Block],
+    ) -> impl Future<Output = Result<Vec<(Cid, BlockPut)>, Error>> + Send {
+        async move {
+            let mut out = Vec::with_capacity(blocks.len());
+            for block in blocks {
+                out.push(self.put(block).await?);
+            }
+            Ok(out)
+        }
+    }
     /// Removes a block from the blockstore.
     fn remove(&self, cid: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
     /// Remove multiple blocks from the blockstore
@@ -618,6 +631,34 @@ impl<S: RepoTypes> Repo<S> {
     /// Puts a block into the block store.
     pub fn put_block(&self, block: &Block) -> RepoPutBlock<S> {
         RepoPutBlock::new(self, block).broadcast_on_new_block(true)
+    }
+
+    /// Puts multiple blocks into the block store in one batch, returning their cids in input order.
+    pub async fn put_blocks(&self, blocks: Vec<Block>) -> Result<Vec<Cid>, Error> {
+        if blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let _guard = self.inner.gclock.read().await;
+        let results = self.inner.block_store.put_many(&blocks).await?;
+
+        let mut cids = Vec::with_capacity(results.len());
+        for ((cid, res), block) in results.into_iter().zip(blocks.iter()) {
+            if let BlockPut::NewBlock = res {
+                if let Some(mut event) = self.repo_channel() {
+                    _ = event.send(RepoEvent::NewBlock(block.clone())).await;
+                }
+                let list = self.inner.subscriptions.lock().remove(&cid);
+                if let Some(list) = list {
+                    for (_token, ch) in list {
+                        let _ = ch.send(Ok(block.clone()));
+                    }
+                }
+            }
+            cids.push(cid);
+        }
+
+        Ok(cids)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits

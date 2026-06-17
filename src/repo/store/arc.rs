@@ -29,6 +29,9 @@ impl<B: BlockStore> BlockStore for Arc<B> {
     async fn put(&self, block: &Block) -> Result<(Cid, BlockPut), Error> {
         (**self).put(block).await
     }
+    async fn put_many(&self, blocks: &[Block]) -> Result<Vec<(Cid, BlockPut)>, Error> {
+        (**self).put_many(blocks).await
+    }
     async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         (**self).remove(cid).await
     }

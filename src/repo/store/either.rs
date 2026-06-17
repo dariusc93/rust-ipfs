@@ -51,6 +51,13 @@ impl<L: BlockStore, R: BlockStore> BlockStore for Either<L, R> {
         }
     }
 
+    async fn put_many(&self, blocks: &[Block]) -> Result<Vec<(Cid, BlockPut)>, Error> {
+        match self {
+            Either::Left(blockstore) => blockstore.put_many(blocks).await,
+            Either::Right(blockstore) => blockstore.put_many(blocks).await,
+        }
+    }
+
     async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         match self {
             Either::Left(blockstore) => blockstore.remove(cid).await,

@@ -67,6 +67,11 @@ impl BlockStore for FsBlockStore {
         inner.put(block).await
     }
 
+    async fn put_many(&self, blocks: &[Block]) -> Result<Vec<(Cid, BlockPut)>, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.put_many(blocks).await
+    }
+
     async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.remove(cid).await
@@ -154,6 +159,33 @@ impl FsBlockStoreInner {
 
         trace!(?put, %cid, "block writing finished");
         Ok((cid, put))
+    }
+
+    async fn put_many(&mut self, blocks: &[Block]) -> Result<Vec<(Cid, BlockPut)>, Error> {
+        let path = self.path.clone();
+        let items: Vec<(Cid, Block)> = blocks.iter().map(|b| (*b.cid(), b.clone())).collect();
+
+        // one blocking task writes the whole batch, amortizing the threadpool round-trip
+        let out = tokio::task::spawn_blocking(move || {
+            let mut out = Vec::with_capacity(items.len());
+            for (cid, block) in items {
+                let target_path = block_path(path.clone(), &cid);
+                let sharded = target_path
+                    .parent()
+                    .expect("we already have at least the shard parent");
+                std::fs::create_dir_all(sharded)?;
+                let put = write_block(&target_path, block.data())?;
+                out.push((cid, put));
+            }
+            Ok::<_, Error>(out)
+        })
+        .await
+        .map_err(|e| {
+            error!("blocking put_many task error: {}", e);
+            e
+        })??;
+
+        Ok(out)
     }
 
     async fn size(&self, cids: &[Cid]) -> Option<usize> {
@@ -486,6 +518,42 @@ mod tests {
             "expected only the .data block, got {files:?}"
         );
         assert_eq!(files[0].extension().and_then(|e| e.to_str()), Some("data"));
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[tokio::test]
+    async fn put_many_batches_and_reports_per_block() {
+        let mut tmp = temp_dir();
+        tmp.push("put_many_batches");
+        std::fs::remove_dir_all(&tmp).ok();
+
+        let store = FsBlockStore::new(tmp.clone());
+        store.init().await.unwrap();
+
+        let make = |n: u8| {
+            let data = vec![n; 32];
+            let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
+            Block::new(cid, data).unwrap()
+        };
+        let blocks = vec![make(1), make(2), make(3)];
+
+        let res = store.put_many(&blocks).await.unwrap();
+        assert_eq!(res.len(), 3);
+        for (i, (cid, put)) in res.iter().enumerate() {
+            assert_eq!(cid, blocks[i].cid());
+            assert_eq!(*put, BlockPut::NewBlock);
+        }
+
+        // re-putting an existing block alongside a new one reports Existed then NewBlock, in order.
+        let second = vec![make(2), make(9)];
+        let res = store.put_many(&second).await.unwrap();
+        assert_eq!(res[0].1, BlockPut::Existed);
+        assert_eq!(res[1].1, BlockPut::NewBlock);
+
+        for b in blocks.iter().chain(second.iter()) {
+            assert_eq!(store.get(b.cid()).await.unwrap().unwrap(), *b);
+        }
 
         std::fs::remove_dir_all(&tmp).ok();
     }
