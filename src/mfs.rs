@@ -6,6 +6,7 @@ use crate::{Block, Error};
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures::future::BoxFuture;
+use futures::stream::BoxStream;
 use futures::{FutureExt, Stream, StreamExt};
 use ipld_core::cid::{Cid, Version};
 use multihash_codetable::{Code, MultihashDigest};
@@ -16,8 +17,11 @@ use rust_unixfs::file::adder::{
 };
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::future::IntoFuture;
 use std::path::Path;
+use std::pin::Pin;
 use std::str::FromStr;
+use std::task::{Context, Poll};
 
 /// Datastore key holding the current MFS root Cid.
 const ROOT_KEY: &[u8] = b"/mfs/root";
@@ -68,6 +72,46 @@ pub struct WriteOptions {
     pub create: bool,
     pub parents: bool,
     pub truncate: bool,
+}
+
+#[derive(Debug)]
+pub enum WriteStatus {
+    Progress { written: u64, total: Option<u64> },
+    Completed { cid: Cid },
+    Failed { error: Error },
+}
+
+pub struct MfsWrite {
+    inner: BoxStream<'static, WriteStatus>,
+}
+
+impl Stream for MfsWrite {
+    type Item = WriteStatus;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
+    }
+}
+
+impl IntoFuture for MfsWrite {
+    type Output = Result<Cid, Error>;
+    type IntoFuture = BoxFuture<'static, Result<Cid, Error>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move {
+            let mut stream = self.inner;
+            let mut cid = None;
+            while let Some(status) = stream.next().await {
+                match status {
+                    WriteStatus::Completed { cid: completed } => cid = Some(completed),
+                    WriteStatus::Failed { error } => return Err(error),
+                    WriteStatus::Progress { .. } => {}
+                }
+            }
+            cid.ok_or_else(|| anyhow!("streaming write produced no result"))
+        }
+        .boxed()
+    }
 }
 
 /// Handle to the node's mutable filesystem. Obtain it via [`crate::Ipfs::mfs`].
@@ -278,96 +322,163 @@ impl Mfs {
 
     #[cfg(not(target_arch = "wasm32"))]
     /// Write the whole content of `file` at `path`.
-    pub async fn write_from_file(
-        &self,
-        path: &str,
-        file: impl AsRef<Path>,
-        parents: bool,
-    ) -> Result<(), Error> {
-        let file = file.as_ref();
+    pub fn write_from_file(&self, path: &str, file: impl AsRef<Path>, parents: bool) -> MfsWrite {
+        let mfs = self.clone();
+        let path = path.to_string();
+        let file = file.as_ref().to_path_buf();
 
-        let meta = tokio::fs::metadata(file).await?;
+        let inner = async_stream::stream! {
+            let meta = match tokio::fs::metadata(&file).await {
+                Ok(meta) => meta,
+                Err(e) => {
+                    yield WriteStatus::Failed { error: e.into() };
+                    return;
+                }
+            };
+            if !meta.is_file() {
+                yield WriteStatus::Failed {
+                    error: std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("'{}' is not a valid file", file.display()),
+                    )
+                    .into(),
+                };
+                return;
+            }
+            if meta.len() > MAX_FILE_SIZE {
+                yield WriteStatus::Failed {
+                    error: std::io::Error::new(
+                        std::io::ErrorKind::FileTooLarge,
+                        format!("'{}' is too large", file.display()),
+                    )
+                    .into(),
+                };
+                return;
+            }
+            let opened = match tokio::fs::File::open(&file).await {
+                Ok(opened) => opened,
+                Err(e) => {
+                    yield WriteStatus::Failed { error: e.into() };
+                    return;
+                }
+            };
+            let reader = tokio_util::io::ReaderStream::new(opened).boxed();
+            for await status in mfs.write_progress(path, reader, parents, Some(meta.len())) {
+                yield status;
+            }
+        };
 
-        if !meta.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("'{}' is not a valid file", file.display()),
-            )
-            .into());
+        MfsWrite {
+            inner: inner.boxed(),
         }
-
-        if meta.len() > MAX_FILE_SIZE {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::FileTooLarge,
-                format!("'{}' is too large", file.display()),
-            )
-            .into());
-        }
-
-        let file = tokio::fs::File::open(file).await?;
-
-        let reader = tokio_util::io::ReaderStream::new(file);
-
-        self.write_stream(path, reader, parents).await
     }
 
     /// Writes the whole file at `path` from a byte stream without buffering the content, creating or
     /// replacing it.
-    pub async fn write_stream<S>(&self, path: &str, stream: S, parents: bool) -> Result<(), Error>
+    pub fn write_stream<S>(&self, path: &str, stream: S, parents: bool) -> MfsWrite
     where
-        S: Stream<Item = std::io::Result<Bytes>>,
+        S: Stream<Item = std::io::Result<Bytes>> + Send + 'static,
     {
-        let comps = split_path(path)?;
-        if comps.is_empty() {
-            return Err(anyhow!("cannot write to the root directory"));
+        let inner = self
+            .clone()
+            .write_progress(path.to_string(), stream.boxed(), parents, None);
+        MfsWrite {
+            inner: inner.boxed(),
         }
+    }
 
-        let mut adder = FileAdder::builder()
-            .with_cid_version(VERSION)
-            .with_hasher(HASHER)
-            .build();
-        let mut tsize = 0u64;
-        let mut total = 0u64;
-        let mut root = None;
+    fn write_progress(
+        self,
+        path: String,
+        mut stream: BoxStream<'static, std::io::Result<Bytes>>,
+        parents: bool,
+        total: Option<u64>,
+    ) -> impl Stream<Item = WriteStatus> {
+        async_stream::stream! {
+            let mut adder = FileAdder::builder()
+                .with_cid_version(VERSION)
+                .with_hasher(HASHER)
+                .build();
+            let mut tsize = 0u64;
+            let mut written = 0u64;
+            let mut root = None;
 
-        let mut store =
-            |blocks: &mut dyn Iterator<Item = (Cid, Vec<u8>)>| -> Result<Vec<Block>, Error> {
-                let mut batch = Vec::new();
-                for (cid, block) in blocks {
-                    tsize += block.len() as u64;
-                    root = Some(cid);
-                    batch.push(Block::new(cid, block)?);
+            while let Some(chunk) = stream.next().await {
+                let chunk = match chunk {
+                    Ok(chunk) => chunk,
+                    Err(e) => {
+                        yield WriteStatus::Failed { error: e.into() };
+                        return;
+                    }
+                };
+                let mut offset = 0;
+                while offset < chunk.len() {
+                    let (ready, consumed) = adder.push(&chunk[offset..]);
+                    let mut batch = Vec::new();
+                    for (cid, block) in ready {
+                        tsize += block.len() as u64;
+                        root = Some(cid);
+                        match Block::new(cid, block) {
+                            Ok(block) => batch.push(block),
+                            Err(e) => {
+                                yield WriteStatus::Failed { error: e.into() };
+                                return;
+                            }
+                        }
+                    }
+                    if !batch.is_empty()
+                        && let Err(e) = self.repo().put_blocks(batch).await
+                    {
+                        yield WriteStatus::Failed { error: e };
+                        return;
+                    }
+                    offset += consumed;
+                    written += consumed as u64;
+                    if written > MAX_FILE_SIZE {
+                        yield WriteStatus::Failed {
+                            error: anyhow!("write would exceed the MFS file size limit"),
+                        };
+                        return;
+                    }
                 }
-                Ok(batch)
-            };
+                yield WriteStatus::Progress { written, total };
+            }
 
-        futures::pin_mut!(stream);
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            let mut offset = 0;
-            while offset < chunk.len() {
-                let (mut ready, consumed) = adder.push(&chunk[offset..]);
-                let batch = store(&mut ready)?;
-                if !batch.is_empty() {
-                    self.repo().put_blocks(batch).await?;
-                }
-                offset += consumed;
-                total += consumed as u64;
-                if total > MAX_FILE_SIZE {
-                    return Err(anyhow!("write would exceed the MFS file size limit"));
+            let mut batch = Vec::new();
+            for (cid, block) in adder.finish() {
+                tsize += block.len() as u64;
+                root = Some(cid);
+                match Block::new(cid, block) {
+                    Ok(block) => batch.push(block),
+                    Err(e) => {
+                        yield WriteStatus::Failed { error: e.into() };
+                        return;
+                    }
                 }
             }
-        }
+            if !batch.is_empty()
+                && let Err(e) = self.repo().put_blocks(batch).await
+            {
+                yield WriteStatus::Failed { error: e };
+                return;
+            }
 
-        let mut finished = adder.finish();
-        let batch = store(&mut finished)?;
-        if !batch.is_empty() {
-            self.repo().put_blocks(batch).await?;
-        }
+            let cid = match root {
+                Some(cid) => cid,
+                None => {
+                    yield WriteStatus::Failed { error: anyhow!("file produced no blocks") };
+                    return;
+                }
+            };
 
-        let cid = root.ok_or_else(|| anyhow!("file produced no blocks"))?;
-        self.set_entry(path, DirEntry { cid, tsize }, Vec::new(), parents, true)
-            .await
+            match self
+                .set_entry(&path, DirEntry { cid, tsize }, Vec::new(), parents, true)
+                .await
+            {
+                Ok(()) => yield WriteStatus::Completed { cid },
+                Err(e) => yield WriteStatus::Failed { error: e },
+            }
+        }
     }
 
     /// Reads the whole content of the file at `path`.
@@ -1492,6 +1603,70 @@ mod tests {
         let empty = futures::stream::iter(Vec::<std::io::Result<bytes::Bytes>>::new());
         mfs.write_stream("/empty", empty, false).await.unwrap();
         assert_canonical(&mfs, "/empty", &[]).await;
+    }
+
+    #[tokio::test]
+    async fn write_stream_reports_progress() {
+        use futures::StreamExt as _;
+        let mfs = mfs().await;
+
+        let content = fill(700_000, 12);
+        let chunks: Vec<bytes::Bytes> = content
+            .chunks(50_000)
+            .map(bytes::Bytes::copy_from_slice)
+            .collect();
+        let stream = futures::stream::iter(chunks.into_iter().map(Ok::<_, std::io::Error>));
+
+        let mut write = mfs.write_stream("/big", stream, true);
+        let mut last = 0u64;
+        let mut completed = None;
+        while let Some(status) = write.next().await {
+            match status {
+                WriteStatus::Progress { written, total } => {
+                    assert!(written >= last);
+                    assert_eq!(total, None);
+                    last = written;
+                }
+                WriteStatus::Completed { cid } => completed = Some(cid),
+                WriteStatus::Failed { error } => panic!("write failed: {error}"),
+            }
+        }
+        let (expected, _, _) = encode_file(&content).unwrap();
+        assert_eq!(completed, Some(expected));
+        assert_eq!(last, content.len() as u64);
+        assert_canonical(&mfs, "/big", &content).await;
+    }
+
+    #[tokio::test]
+    async fn write_from_file_roundtrips_with_total() {
+        use futures::StreamExt as _;
+        let mfs = mfs().await;
+
+        let content = fill(400_000, 13);
+        let file = std::env::temp_dir().join("rust_ipfs_mfs_write_from_file_test.bin");
+        std::fs::write(&file, &content).unwrap();
+
+        let cid = mfs.write_from_file("/imported", &file, true).await.unwrap();
+        let (expected, _, _) = encode_file(&content).unwrap();
+        assert_eq!(cid, expected);
+        assert_canonical(&mfs, "/imported", &content).await;
+
+        let mut write = mfs.write_from_file("/imported2", &file, true);
+        let mut saw_total = false;
+        while let Some(status) = write.next().await {
+            if let WriteStatus::Progress { total, .. } = status {
+                assert_eq!(total, Some(content.len() as u64));
+                saw_total = true;
+            }
+        }
+        assert!(saw_total);
+
+        assert!(mfs
+            .write_from_file("/x", file.join("missing"), false)
+            .await
+            .is_err());
+
+        std::fs::remove_file(&file).ok();
     }
 
     #[tokio::test]
