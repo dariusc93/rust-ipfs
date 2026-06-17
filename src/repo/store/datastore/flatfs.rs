@@ -145,8 +145,6 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
                     yield item;
                 }
             } else {
-                // only canonical <key>.data files are entries; skip crash-leftover write temps
-                // (and anything else) so they never surface as corrupt key/value pairs.
                 if path.extension().and_then(|e| e.to_str()) != Some("data") {
                     continue;
                 }
@@ -832,6 +830,70 @@ mod test {
         let get = store.get(&key).await.unwrap_or_default();
         assert_eq!(get, None);
         drop(store);
+        Ok(())
+    }
+
+    fn count_temp_files(dir: &std::path::Path) -> usize {
+        let mut n = 0;
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    n += count_temp_files(&p);
+                } else if p.extension().and_then(|x| x.to_str()) == Some("tmp") {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    #[tokio::test]
+    async fn kv_put_is_atomic_and_leaves_no_temp() -> anyhow::Result<()> {
+        let dir = std::env::temp_dir().join("rust_ipfs_ds_atomic");
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = FsDataStore::new(dir.clone());
+        store.init().await?;
+
+        let key = b"ipns/seq".to_vec();
+        store.put(&key, b"v1").await?;
+        assert_eq!(store.get(&key).await?, Some(b"v1".to_vec()));
+
+        // overwriting renames a fresh temp over the live value (atomic, no torn write).
+        store.put(&key, b"v2-longer").await?;
+        assert_eq!(store.get(&key).await?, Some(b"v2-longer".to_vec()));
+
+        assert_eq!(
+            count_temp_files(&dir.join("data")),
+            0,
+            "write temps must be cleaned up"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn iter_skips_write_temps() -> anyhow::Result<()> {
+        use futures::StreamExt;
+
+        let dir = std::env::temp_dir().join("rust_ipfs_ds_iter_temp");
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = FsDataStore::new(dir.clone());
+        store.init().await?;
+
+        store.put(b"k", b"real").await?;
+
+        // simulate a crash-leftover write temp sitting next to the real value.
+        let data_dir = dir.join("data");
+        assert!(data_dir.join("k.data").is_file());
+        std::fs::write(data_dir.join("k.data.999.0.tmp"), b"garbage")?;
+
+        let items: Vec<(Vec<u8>, Vec<u8>)> = store.iter().await.collect().await;
+        assert_eq!(items.len(), 1, "iter must skip the .tmp file: {items:?}");
+        assert_eq!(items[0].1, b"real".to_vec());
+
+        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
 }
