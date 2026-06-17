@@ -48,6 +48,13 @@ async fn main() -> anyhow::Result<()> {
         String::from_utf8_lossy(&mfs.read("/docs/readme.txt").await?)
     );
 
+    println!("> read /docs/streamed.txt as a stream");
+    let stream = mfs.read_stream("/docs/streamed.txt");
+    futures::pin_mut!(stream);
+    while let Some(chunk) = stream.next().await {
+        print!("  chunk: {}", String::from_utf8_lossy(&chunk?));
+    }
+
     println!("> stat /docs/notes/todo.txt");
     let st = mfs.stat("/docs/notes/todo.txt").await?;
     println!("  cid={} size={} {:?}", st.cid, st.size, st.kind);

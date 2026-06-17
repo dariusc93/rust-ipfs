@@ -22,6 +22,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::task::{Context, Poll};
+use tokio::io::AsyncWriteExt;
 
 /// Datastore key holding the current MFS root Cid.
 const ROOT_KEY: &[u8] = b"/mfs/root";
@@ -109,6 +110,46 @@ impl IntoFuture for MfsWrite {
                 }
             }
             cid.ok_or_else(|| anyhow!("streaming write produced no result"))
+        }
+        .boxed()
+    }
+}
+
+#[derive(Debug)]
+pub enum ReadStatus {
+    Progress { written: u64, total: u64 },
+    Completed { written: u64 },
+    Failed { error: Error },
+}
+
+pub struct MfsRead {
+    inner: BoxStream<'static, ReadStatus>,
+}
+
+impl Stream for MfsRead {
+    type Item = ReadStatus;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
+    }
+}
+
+impl IntoFuture for MfsRead {
+    type Output = Result<u64, Error>;
+    type IntoFuture = BoxFuture<'static, Result<u64, Error>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        async move {
+            let mut stream = self.inner;
+            let mut written = 0;
+            while let Some(status) = stream.next().await {
+                match status {
+                    ReadStatus::Completed { written: total } => written = total,
+                    ReadStatus::Failed { error } => return Err(error),
+                    ReadStatus::Progress { .. } => {}
+                }
+            }
+            Ok(written)
         }
         .boxed()
     }
@@ -483,17 +524,123 @@ impl Mfs {
 
     /// Reads the whole content of the file at `path`.
     pub async fn read(&self, path: &str) -> Result<Vec<u8>, Error> {
-        let comps = split_path(path)?;
-        if comps.is_empty() {
-            return Err(anyhow!("cannot read the root directory"));
+        let stream = self.read_stream(path);
+        futures::pin_mut!(stream);
+        let mut out = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            out.extend_from_slice(&chunk?);
         }
-        let root = self
-            .snapshot_root()
-            .await?
-            .ok_or_else(|| anyhow!("MFS is empty"))?;
-        let _gc = self.repo().gc_guard().await;
-        let (cid, _) = self.resolve_from(root, &comps).await?;
-        self.read_file(&cid).await
+        Ok(out)
+    }
+
+    /// Streams the content of the file at `path` as it is read, without buffering the whole file.
+    pub fn read_stream(&self, path: &str) -> impl Stream<Item = Result<Bytes, Error>> {
+        let mfs = self.clone();
+        let path = path.to_string();
+
+        async_stream::try_stream! {
+            let comps = split_path(&path)?;
+            if comps.is_empty() {
+                Err::<(), _>(anyhow!("cannot read the root directory"))?;
+            }
+            let root = mfs
+                .snapshot_root()
+                .await?
+                .ok_or_else(|| anyhow!("MFS is empty"))?;
+            let cid = {
+                let _gc = mfs.repo().gc_guard().await;
+                mfs.resolve_from(root, &comps).await?.0
+            };
+
+            let block = mfs.get_block(&cid).await?;
+            match describe(block.data()) {
+                NodeDescription::Directory { .. } | NodeDescription::HamtShard { .. } => {
+                    Err::<(), _>(anyhow!("'{path}' is a directory"))?;
+                }
+                NodeDescription::Other => {
+                    yield Bytes::copy_from_slice(block.data());
+                }
+                _ => {
+                    let mut cache = None;
+                    let (content, _, _, mut step) =
+                        IdleFileVisit::default().start(block.data())?;
+                    if !content.is_empty() {
+                        yield Bytes::copy_from_slice(content);
+                    }
+                    while let Some(visit) = step {
+                        let next = *visit.pending_links().0;
+                        let block = mfs.get_block(&next).await?;
+                        let (content, next_step) = visit.continue_walk(block.data(), &mut cache)?;
+                        if !content.is_empty() {
+                            yield Bytes::copy_from_slice(content);
+                        }
+                        step = next_step;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reads the file at `path` and writes it to the local filesystem at `dest`, streaming through
+    /// without buffering. The returned [`MfsRead`] is both a progress [`Stream`] and a future
+    /// resolving to the number of bytes written.
+    pub fn read_to_file(&self, path: &str, dest: impl AsRef<Path>) -> MfsRead {
+        let mfs = self.clone();
+        let path = path.to_string();
+        let dest = dest.as_ref().to_path_buf();
+
+        let inner = async_stream::stream! {
+            let total = match mfs.stat(&path).await {
+                Ok(stat) => match stat.kind {
+                    MfsKind::File { size } => size,
+                    _ => {
+                        yield ReadStatus::Failed { error: anyhow!("'{path}' is not a file") };
+                        return;
+                    }
+                },
+                Err(e) => {
+                    yield ReadStatus::Failed { error: e };
+                    return;
+                }
+            };
+
+            let mut file = match tokio::fs::File::create(&dest).await {
+                Ok(file) => file,
+                Err(e) => {
+                    yield ReadStatus::Failed { error: e.into() };
+                    return;
+                }
+            };
+
+            let mut written = 0u64;
+            let stream = mfs.read_stream(&path);
+            futures::pin_mut!(stream);
+            while let Some(chunk) = stream.next().await {
+                let chunk = match chunk {
+                    Ok(chunk) => chunk,
+                    Err(e) => {
+                        yield ReadStatus::Failed { error: e };
+                        return;
+                    }
+                };
+                if let Err(e) = file.write_all(&chunk).await {
+                    yield ReadStatus::Failed { error: e.into() };
+                    return;
+                }
+                written += chunk.len() as u64;
+                yield ReadStatus::Progress { written, total };
+            }
+
+            if let Err(e) = file.flush().await {
+                yield ReadStatus::Failed { error: e.into() };
+                return;
+            }
+            yield ReadStatus::Completed { written };
+        };
+
+        MfsRead {
+            inner: inner.boxed(),
+        }
     }
 
     /// Removes the entry at `path`. A non-empty directory requires `recursive`.
@@ -1667,6 +1814,59 @@ mod tests {
             .is_err());
 
         std::fs::remove_file(&file).ok();
+    }
+
+    #[tokio::test]
+    async fn read_stream_roundtrips() {
+        use futures::StreamExt as _;
+        let mfs = mfs().await;
+        let content = fill(600_000, 21);
+        mfs.write("/f", &content, true).await.unwrap();
+
+        let stream = mfs.read_stream("/f");
+        futures::pin_mut!(stream);
+        let mut out = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            out.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(out, content);
+
+        mfs.mkdir("/d", false).await.unwrap();
+        let dir_stream = mfs.read_stream("/d");
+        futures::pin_mut!(dir_stream);
+        assert!(dir_stream.next().await.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn read_to_file_roundtrips_with_progress() {
+        use futures::StreamExt as _;
+        let mfs = mfs().await;
+        let content = fill(500_000, 22);
+        mfs.write("/f", &content, true).await.unwrap();
+
+        let dest = std::env::temp_dir().join("rust_ipfs_mfs_read_to_file_test.bin");
+        std::fs::remove_file(&dest).ok();
+
+        let written = mfs.read_to_file("/f", &dest).await.unwrap();
+        assert_eq!(written, content.len() as u64);
+        assert_eq!(std::fs::read(&dest).unwrap(), content);
+
+        let mut read = mfs.read_to_file("/f", &dest);
+        let mut last = 0u64;
+        while let Some(status) = read.next().await {
+            match status {
+                ReadStatus::Progress { written, total } => {
+                    assert!(written >= last);
+                    assert_eq!(total, content.len() as u64);
+                    last = written;
+                }
+                ReadStatus::Completed { written } => assert_eq!(written, content.len() as u64),
+                ReadStatus::Failed { error } => panic!("read failed: {error}"),
+            }
+        }
+        assert_eq!(last, content.len() as u64);
+
+        std::fs::remove_file(&dest).ok();
     }
 
     #[tokio::test]
