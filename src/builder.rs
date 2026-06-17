@@ -21,8 +21,9 @@ use connexa::prelude::swarm::SwarmEvent;
 #[cfg(feature = "pnet")]
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
-use futures::{StreamExt, TryStreamExt};
-use std::collections::{BTreeSet, HashMap};
+use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
+use ipld_core::cid::Cid;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::task::Poll;
@@ -691,8 +692,11 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             })
         }).unwrap_or(AbortableJoinHandle::empty());
 
+        let (discovery_tx, discovery_rx) = futures::channel::mpsc::channel::<Cid>(256);
+
         let mut context = context::IpfsContext::new(&repo);
         context.repo_events.replace(repo_events);
+        context.discovery_tx.replace(discovery_tx);
 
         let connexa = init
             .with_custom_behaviour_with_context((options, repo.clone()), |keys, (options, repo)| {
@@ -709,6 +713,16 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             })
             .set_context(context)
             .set_custom_task_callback(|swarm, _, context, event| context.handle_event(swarm, event))
+            .set_custom_event_callback(|_swarm, _, context, event| {
+                if let crate::p2p::BehaviourEvent::Bitswap(
+                    crate::p2p::bitswap::Event::NeedBlock { cid },
+                ) = event
+                {
+                    if let Some(tx) = context.discovery_tx.as_mut() {
+                        let _ = tx.try_send(cid);
+                    }
+                }
+            })
             .set_swarm_event_callback(move |swarm, _, event, context| {
                 if let Some(callback) = swarm_event.as_ref() {
                     callback(swarm, event);
@@ -764,12 +778,67 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             .build()
             .await?;
 
+        let discovery_guard = async_rt::task::spawn_abortable({
+            let connexa = connexa.clone();
+            async move {
+                let mut rx = discovery_rx;
+                let mut inflight: HashSet<Cid> = HashSet::new();
+                let mut lookups = FuturesUnordered::new();
+                loop {
+                    tokio::select! {
+                        maybe_cid = rx.next() => {
+                            let Some(cid) = maybe_cid else { break };
+                            if !inflight.insert(cid) {
+                                continue;
+                            }
+                            if lookups.len() >= 8 {
+                                inflight.remove(&cid);
+                                continue;
+                            }
+                            let connexa = connexa.clone();
+                            lookups.push(async move {
+                                if let Ok(mut providers) = connexa.dht().get_providers(cid).await {
+                                    let mut deadline =
+                                        futures_timer::Delay::new(Duration::from_secs(10));
+                                    let mut dialed = 0usize;
+                                    loop {
+                                        tokio::select! {
+                                            item = providers.next() => {
+                                                let Some(Ok(set)) = item else { break };
+                                                for peer in set {
+                                                    let opts = crate::DialOpts::peer_id(peer).build();
+                                                    let _ = connexa.swarm().dial(opts).await;
+                                                    dialed += 1;
+                                                    if dialed >= 8 {
+                                                        break;
+                                                    }
+                                                }
+                                                if dialed >= 8 {
+                                                    break;
+                                                }
+                                            }
+                                            _ = &mut deadline => break,
+                                        }
+                                    }
+                                }
+                                cid
+                            });
+                        }
+                        Some(cid) = lookups.next(), if !lookups.is_empty() => {
+                            inflight.remove(&cid);
+                        }
+                    }
+                }
+            }
+        });
+
         let ipfs = Ipfs {
             span: facade_span,
             repo,
             connexa,
             record_key_validator: Arc::new(record_key_validator),
             _gc_guard: gc_handle,
+            _discovery_guard: discovery_guard,
         };
 
         Ok(ipfs)

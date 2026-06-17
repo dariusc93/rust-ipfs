@@ -1,6 +1,7 @@
 # 0.16.0
 
 - update to connexa 0.5.
+- feat: rewritten bitswap logic and improve unixfs functionality.
 
 # 0.15.0
 - chore: cleanup of imports and duplicated code.

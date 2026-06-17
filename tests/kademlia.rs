@@ -147,11 +147,12 @@ async fn dht_popular_content_discovery() {
         .parse()
         .unwrap();
 
-    assert!(peer
-        .get_block(cid)
-        .timeout(Duration::from_secs(10))
-        .await
-        .is_ok());
+    assert!(
+        peer.get_block(cid)
+            .timeout(Duration::from_secs(10))
+            .await
+            .is_ok()
+    );
 }
 
 /// Check if Ipfs::{get_providers, provide} does its job.
@@ -175,15 +176,41 @@ async fn dht_providing() {
     // and the first node should be able to learn that the last one provides it
     let providers = nodes[0].get_providers(cid).await.unwrap().boxed();
 
-    assert!(providers
-        .take(1)
-        .filter_map(|result| async move { result.ok() })
-        .map(futures::stream::iter)
-        .flatten()
-        .collect::<Vec<_>>()
+    assert!(
+        providers
+            .take(1)
+            .filter_map(|result| async move { result.ok() })
+            .map(futures::stream::iter)
+            .flatten()
+            .collect::<Vec<_>>()
+            .await
+            .iter()
+            .any(|x| *x == nodes[last_index].id)
+    );
+}
+
+#[tokio::test]
+async fn bitswap_fetch_via_dht_discovery() {
+    const CHAIN_LEN: usize = 50;
+    let (nodes, foreign_node) = spawn_bootstrapped_nodes::<CHAIN_LEN>().await;
+    let last_index = CHAIN_LEN - if foreign_node.is_none() { 1 } else { 2 };
+
+    // the last node holds and provides a block; node 0 is not directly connected to it.
+    let data = b"phase-0 dht discovery\n".to_vec();
+    let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
+    nodes[last_index]
+        .put_block(&Block::new(cid, data.clone()).unwrap())
         .await
-        .iter()
-        .any(|x| *x == nodes[last_index].id));
+        .unwrap();
+    nodes[last_index].provide(cid).await.unwrap();
+
+    // node 0 must discover the provider via the DHT and fetch through bitswap.
+    let block = nodes[0]
+        .get_block(cid)
+        .timeout(Duration::from_secs(30))
+        .await
+        .expect("block should be fetched via DHT provider discovery");
+    assert_eq!(block.data(), data.as_slice());
 }
 
 /// Check if Ipfs::{get, put} does its job.
@@ -207,11 +234,13 @@ async fn dht_get_put() {
     pin_mut!(records);
 
     // assert_eq!(nodes[0].dht_get(key, quorum).await.unwrap(), vec![value]);
-    assert!(records
-        .by_ref()
-        .take(1)
-        .collect::<Vec<_>>()
-        .await
-        .iter()
-        .any(|x| x.value == value));
+    assert!(
+        records
+            .by_ref()
+            .take(1)
+            .collect::<Vec<_>>()
+            .await
+            .iter()
+            .any(|x| x.value == value)
+    );
 }

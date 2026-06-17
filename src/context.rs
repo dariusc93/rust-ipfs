@@ -1,6 +1,9 @@
 use anyhow::anyhow;
 use futures::{
-    channel::{mpsc::Receiver, oneshot},
+    channel::{
+        mpsc::{Receiver, Sender},
+        oneshot,
+    },
     FutureExt,
 };
 use pollable_map::optional::Optional;
@@ -33,6 +36,7 @@ pub struct IpfsContext {
     pub bootstraps: HashSet<Multiaddr>,
     pub find_peer_identify: HashMap<PeerId, Vec<oneshot::Sender<anyhow::Result<Info>>>>,
     pub relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
+    pub discovery_tx: Option<Sender<Cid>>,
 }
 
 impl Default for IpfsContext {
@@ -44,6 +48,7 @@ impl Default for IpfsContext {
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
             relay_listener: Default::default(),
+            discovery_tx: None,
         }
     }
 }
@@ -57,6 +62,7 @@ impl IpfsContext {
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
             relay_listener: Default::default(),
+            discovery_tx: None,
         }
     }
 }

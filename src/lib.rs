@@ -209,6 +209,7 @@ pub struct Ipfs {
     record_key_validator:
         Arc<HashMap<String, Box<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>>,
     _gc_guard: AbortableJoinHandle<()>,
+    _discovery_guard: AbortableJoinHandle<()>,
 }
 
 impl std::fmt::Debug for Ipfs {

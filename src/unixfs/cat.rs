@@ -227,16 +227,26 @@ impl Stream for UnixfsCat {
                             None => return,
                         };
 
-                        loop {
-                            // TODO: if it was possible, it would make sense to start downloading N of these
-                            // we could just create an FuturesUnordered which would drop the value right away. that
-                            // would probably always cost many unnecessary clones, but it would be nice to "shut"
-                            // the subscriber so that it will only resolve to a value but still keep the operation
-                            // going. Not that we have any "operation" concept of the Want yet.
-                            let (next, _) = visit.pending_links();
+                        let mut prefetcher = super::prefetch::BlockPrefetcher::new(
+                            repo,
+                            providers,
+                            local_only,
+                            timeout,
+                            super::prefetch::WINDOW,
+                        );
 
-                            let borrow = &repo;
-                            let block = borrow.get_block(next).providers(&providers).set_local(local_only).timeout(timeout).await.map_err(|e| TraversalFailed::Loading(*next, e))?;
+                        loop {
+                            let next = {
+                                let (next, rest) = visit.pending_links();
+                                let next = *next;
+                                prefetcher.want(std::iter::once(next).chain(rest.copied()));
+                                next
+                            };
+
+                            let block = prefetcher
+                                .get(next)
+                                .await
+                                .map_err(|e| TraversalFailed::Loading(next, e))?;
 
                             let (bytes, next_visit) = visit.continue_walk(block.data(), &mut cache).map_err(|e| TraversalFailed::Walking(*block.cid(), e))?;
 

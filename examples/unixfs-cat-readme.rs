@@ -17,7 +17,6 @@ async fn main() -> anyhow::Result<()> {
         .start()
         .await?;
     ipfs.default_bootstrap().await?;
-    ipfs.bootstrap().await?;
 
     let readme_bytes = ipfs
         .cat_unixfs(IpfsPath::from_str(

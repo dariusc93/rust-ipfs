@@ -1065,12 +1065,31 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                                 let notified_fut = signal.notified();
                                 futures::pin_mut!(notified_fut);
 
-                                match futures::future::select(block_fut, notified_fut).await {
+                                // deadline so an unavailable block errors instead of hanging forever
+                                let timeout_fut = async move {
+                                    match timeout {
+                                        Some(duration) => {
+                                            futures_timer::Delay::new(duration).await
+                                        }
+                                        None => futures::future::pending::<()>().await,
+                                    }
+                                };
+                                futures::pin_mut!(timeout_fut);
+
+                                match futures::future::select(
+                                    block_fut,
+                                    futures::future::select(notified_fut, timeout_fut),
+                                )
+                                .await
+                                {
                                     Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
                                     Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
                                     Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
-                                    Either::Right(((), _)) => {
+                                    Either::Right((Either::Left(((), _)), _)) => {
                                         Err::<_, Error>(anyhow::anyhow!("request for {cid} has been cancelled"))
+                                    }
+                                    Either::Right((Either::Right(((), _)), _)) => {
+                                        Err::<_, Error>(anyhow::anyhow!("request for {cid} timed out"))
                                     }
                                 }
                             }
