@@ -135,14 +135,16 @@ impl Mfs {
             return Err(anyhow!("cannot write to the root directory"));
         }
 
-        let existing = self.resolve_file(&comps).await?;
-        if existing.is_none() && !opts.create {
-            return Err(anyhow!("'{path}' does not exist; pass create"));
-        }
-
         let new_size = opts.offset.saturating_add(data.len() as u64);
         if new_size > MAX_FILE_SIZE {
             return Err(anyhow!("write would exceed the MFS file size limit"));
+        }
+
+        let mut guard = self.repo().inner.mfs_root.lock().await;
+
+        let existing = self.resolve_file_locked(&mut guard, &comps).await?;
+        if existing.is_none() && !opts.create {
+            return Err(anyhow!("'{path}' does not exist; pass create"));
         }
 
         if let Some((cid, tsize, filesize)) = existing
@@ -155,7 +157,14 @@ impl Mfs {
             };
             if let Some((new_cid, blocks)) = edited {
                 return self
-                    .set_entry(path, DirEntry { cid: new_cid, tsize }, blocks, opts.parents, true)
+                    .set_entry_locked(
+                        &mut guard,
+                        path,
+                        DirEntry { cid: new_cid, tsize },
+                        blocks,
+                        opts.parents,
+                        true,
+                    )
                     .await;
             }
         }
@@ -167,7 +176,8 @@ impl Mfs {
                 self.grow_file(cid, filesize, opts.offset, data).await?
         {
             return self
-                .set_entry(
+                .set_entry_locked(
+                    &mut guard,
                     path,
                     DirEntry {
                         cid: new_cid,
@@ -183,7 +193,9 @@ impl Mfs {
         let mut content = if opts.truncate || existing.is_none() {
             Vec::new()
         } else {
-            self.read_existing_file(&comps).await?.unwrap_or_default()
+            self.read_existing_file_locked(&mut guard, &comps)
+                .await?
+                .unwrap_or_default()
         };
         let offset = opts.offset as usize;
         let end = offset + data.len();
@@ -193,8 +205,15 @@ impl Mfs {
         content[offset..end].copy_from_slice(data);
 
         let (cid, tsize, blocks) = encode_file(&content)?;
-        self.set_entry(path, DirEntry { cid, tsize }, blocks, opts.parents, true)
-            .await
+        self.set_entry_locked(
+            &mut guard,
+            path,
+            DirEntry { cid, tsize },
+            blocks,
+            opts.parents,
+            true,
+        )
+        .await
     }
 
     /// Sets the file at `path` to exactly `size` bytes, truncating or zero-extending.
@@ -206,8 +225,10 @@ impl Mfs {
         if size > MAX_FILE_SIZE {
             return Err(anyhow!("truncate would exceed the MFS file size limit"));
         }
+
+        let mut guard = self.repo().inner.mfs_root.lock().await;
         let (file_cid, _, filesize) = self
-            .resolve_file(&comps)
+            .resolve_file_locked(&mut guard, &comps)
             .await?
             .ok_or_else(|| anyhow!("'{path}' does not exist"))?;
         if size == filesize {
@@ -216,27 +237,30 @@ impl Mfs {
 
         let boundary = (size.min(filesize) / CHUNK) * CHUNK;
         let read_end = size.min(filesize);
-        let _gc = self.repo().gc_guard().await;
-        let mut new_tail = if boundary < read_end {
-            self.read_file_range(&file_cid, boundary, read_end).await?
-        } else {
-            Vec::new()
+        let result = {
+            let _gc = self.repo().gc_guard().await;
+            let mut new_tail = if boundary < read_end {
+                self.read_file_range(&file_cid, boundary, read_end).await?
+            } else {
+                Vec::new()
+            };
+            new_tail.resize((size - boundary) as usize, 0);
+            self.rebuild_from_boundary(file_cid, filesize, boundary, new_tail)
+                .await?
         };
-        new_tail.resize((size - boundary) as usize, 0);
-        let result = self
-            .rebuild_from_boundary(file_cid, filesize, boundary, new_tail)
-            .await?;
-        drop(_gc);
 
         let (cid, tsize, blocks) = match result {
             Some(r) => r,
             None => {
-                let mut content = self.read_existing_file(&comps).await?.unwrap_or_default();
+                let mut content = self
+                    .read_existing_file_locked(&mut guard, &comps)
+                    .await?
+                    .unwrap_or_default();
                 content.resize(size as usize, 0);
                 encode_file(&content)?
             }
         };
-        self.set_entry(path, DirEntry { cid, tsize }, blocks, false, true)
+        self.set_entry_locked(&mut guard, path, DirEntry { cid, tsize }, blocks, false, true)
             .await
     }
 
@@ -403,13 +427,26 @@ impl Mfs {
         parents: bool,
         overwrite: bool,
     ) -> Result<(), Error> {
+        let mut guard = self.repo().inner.mfs_root.lock().await;
+        self.set_entry_locked(&mut guard, path, entry, entry_blocks, parents, overwrite)
+            .await
+    }
+
+    async fn set_entry_locked(
+        &self,
+        guard: &mut (bool, Option<Cid>),
+        path: &str,
+        entry: DirEntry,
+        entry_blocks: Vec<Block>,
+        parents: bool,
+        overwrite: bool,
+    ) -> Result<(), Error> {
         let comps = split_path(path)?;
         let Some((name, dirs)) = comps.split_last() else {
             return Err(anyhow!("cannot replace the root directory"));
         };
 
-        let mut guard = self.repo().inner.mfs_root.lock().await;
-        let (mut frames, names) = self.load_chain(&mut guard, dirs, parents).await?;
+        let (mut frames, names) = self.load_chain(guard, dirs, parents).await?;
 
         let parent = frames.last_mut().expect("root frame");
         if !overwrite && parent.contains_key(name) {
@@ -417,7 +454,7 @@ impl Mfs {
         }
         parent.insert(name.clone(), entry);
 
-        self.reencode_and_commit(&mut guard, frames, names, entry_blocks)
+        self.reencode_and_commit(guard, frames, names, entry_blocks)
             .await
     }
 
@@ -622,8 +659,12 @@ impl Mfs {
         })
     }
 
-    async fn resolve_file(&self, comps: &[String]) -> Result<Option<(Cid, u64, u64)>, Error> {
-        let Some(root) = self.snapshot_root().await? else {
+    async fn resolve_file_locked(
+        &self,
+        guard: &mut (bool, Option<Cid>),
+        comps: &[String],
+    ) -> Result<Option<(Cid, u64, u64)>, Error> {
+        let Some(root) = self.cached_root(guard).await? else {
             return Ok(None);
         };
         let _gc = self.repo().gc_guard().await;
@@ -842,8 +883,12 @@ impl Mfs {
             .await
     }
 
-    async fn read_existing_file(&self, comps: &[String]) -> Result<Option<Vec<u8>>, Error> {
-        let Some(root) = self.snapshot_root().await? else {
+    async fn read_existing_file_locked(
+        &self,
+        guard: &mut (bool, Option<Cid>),
+        comps: &[String],
+    ) -> Result<Option<Vec<u8>>, Error> {
+        let Some(root) = self.cached_root(guard).await? else {
             return Ok(None);
         };
         let _gc = self.repo().gc_guard().await;
@@ -1338,6 +1383,46 @@ mod tests {
         .await
         .unwrap();
         assert_canonical(&mfs, "/t", &grow).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_writes_to_same_file_dont_lose_updates() {
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo);
+        mfs.write("/f", &vec![0u8; 2000], true).await.unwrap();
+
+        let a = mfs.clone();
+        let b = mfs.clone();
+        let ha = tokio::spawn(async move {
+            a.write_with(
+                "/f",
+                &[1, 1, 1, 1],
+                WriteOptions {
+                    offset: 0,
+                    ..Default::default()
+                },
+            )
+            .await
+        });
+        let hb = tokio::spawn(async move {
+            b.write_with(
+                "/f",
+                &[2, 2, 2, 2],
+                WriteOptions {
+                    offset: 1000,
+                    ..Default::default()
+                },
+            )
+            .await
+        });
+        ha.await.unwrap().unwrap();
+        hb.await.unwrap().unwrap();
+
+        let content = mfs.read("/f").await.unwrap();
+        assert_eq!(&content[0..4], &[1, 1, 1, 1], "write A was lost");
+        assert_eq!(&content[1000..1004], &[2, 2, 2, 2], "write B was lost");
+        assert_eq!(content.len(), 2000);
     }
 
     #[tokio::test]
