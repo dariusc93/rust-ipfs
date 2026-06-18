@@ -385,6 +385,7 @@ pub(crate) struct RepoInner<S: RepoTypes> {
     pub(crate) subscriptions: Mutex<SubscriptionsMap>,
     lockfile: S::TLock,
     pub(crate) gclock: tokio::sync::RwLock<()>,
+    pub(crate) mfs_root: tokio::sync::Mutex<(bool, Option<Cid>)>,
 }
 
 /// Events used to communicate to the swarm on repo changes.
@@ -470,6 +471,7 @@ impl<S: RepoTypes> Repo<S> {
             lockfile,
             max_storage_size: Default::default(),
             gclock: Default::default(),
+            mfs_root: Default::default(),
         };
         Repo {
             inner: Arc::new(inner),

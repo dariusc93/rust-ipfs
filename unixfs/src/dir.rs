@@ -20,6 +20,84 @@ pub(crate) fn check_hamtshard_supported(
     Ok(flat)
 }
 
+/// A link inside a flat UnixFS directory: the entry name, its target [`Cid`], and the cumulative
+/// dag size (`Tsize`) recorded on the link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirLink {
+    /// Entry name.
+    pub name: String,
+    /// Target block.
+    pub target: Cid,
+    /// Cumulative dag size recorded on the link (the dag-pb Tsize).
+    pub tsize: u64,
+}
+
+/// A classified view of a dag-pb / UnixFS (or raw) block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeDescription {
+    /// A UnixFS file with its logical file size (`filesize`) when present.
+    File {
+        /// Logical file size.
+        size: u64,
+    },
+    /// A flat (non-sharded) UnixFS directory and its immediate links.
+    Directory {
+        /// Immediate child links.
+        links: Vec<DirLink>,
+    },
+    /// A HAMT-sharded directory and its raw shard links (names carry the 2-hex-char bucket prefix).
+    HamtShard {
+        /// Raw shard links.
+        links: Vec<DirLink>,
+    },
+    /// A UnixFS symlink.
+    Symlink,
+    /// A raw leaf (codec 0x55) or any block that is not a parseable UnixFS node.
+    Other,
+}
+
+/// Classifies a block by its UnixFS type, returning the immediate links for a flat directory.
+///
+/// Raw leaves and non-UnixFS dag-pb fall through to [`NodeDescription::Other`].
+pub fn describe(block: &[u8]) -> NodeDescription {
+    let flat = match FlatUnixFs::try_parse(block) {
+        Ok(flat) => flat,
+        Err(_) => return NodeDescription::Other,
+    };
+
+    match flat.data.Type {
+        UnixFsType::File | UnixFsType::Raw => NodeDescription::File {
+            size: flat.data.filesize.unwrap_or_default(),
+        },
+        UnixFsType::Symlink => NodeDescription::Symlink,
+        UnixFsType::Metadata => NodeDescription::Other,
+        UnixFsType::Directory => NodeDescription::Directory {
+            links: collect_links(&flat),
+        },
+        UnixFsType::HAMTShard => NodeDescription::HamtShard {
+            links: collect_links(&flat),
+        },
+    }
+}
+
+fn collect_links(flat: &FlatUnixFs<'_>) -> Vec<DirLink> {
+    let mut links = Vec::with_capacity(flat.links.len());
+    for link in &flat.links {
+        let Some(hash) = link.Hash.as_deref() else {
+            continue;
+        };
+        let Ok(target) = Cid::try_from(hash) else {
+            continue;
+        };
+        links.push(DirLink {
+            name: link.Name.as_deref().unwrap_or_default().to_owned(),
+            target,
+            tsize: link.Tsize.unwrap_or_default(),
+        });
+    }
+    links
+}
+
 /// Resolves a single path segment on `dag-pb` or UnixFS directories (normal, sharded).
 ///
 /// The third parameter can always be substituted with a None but when repeatedly resolving over
@@ -212,7 +290,6 @@ impl MultipleMatchingLinks {
 
 #[cfg(test)]
 mod tests {
-
     use super::{resolve, MaybeResolved};
     use crate::test_support::FakeBlockstore;
     use core::convert::TryFrom;

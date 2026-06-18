@@ -367,6 +367,114 @@ fn render_and_hash<M: MessageWrite>(node: &M, config: Config) -> (Cid, Vec<u8>) 
     (cid, out)
 }
 
+/// A child link of a UnixFS file branch node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileBranchLink {
+    /// Target block.
+    pub cid: Cid,
+    /// Content bytes this child covers (the UnixFS blocksize).
+    pub blocksize: u64,
+    /// Cumulative dag size of the child (the dag-pb link Tsize).
+    pub tsize: u64,
+}
+
+/// A decoded UnixFS file branch node (a `File` node with links).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileBranch {
+    /// Total content size of the subtree.
+    pub filesize: u64,
+    /// Immediate child links, in order.
+    pub links: Vec<FileBranchLink>,
+}
+
+/// Decodes a UnixFS file branch node, or `None` for a leaf, a non-file, or a metadata-carrying node.
+pub fn parse_file_branch(block: &[u8]) -> Option<FileBranch> {
+    let flat = FlatUnixFs::try_parse(block).ok()?;
+    if flat.data.Type != UnixFsType::File
+        || flat.links.is_empty()
+        || flat.links.len() != flat.data.blocksizes.len()
+        || flat.data.mode.is_some()
+        || flat.data.mtime.is_some()
+    {
+        return None;
+    }
+
+    let mut links = Vec::with_capacity(flat.links.len());
+    for (link, &blocksize) in flat.links.iter().zip(flat.data.blocksizes.iter()) {
+        let cid = Cid::try_from(link.Hash.as_deref()?).ok()?;
+        links.push(FileBranchLink {
+            cid,
+            blocksize,
+            tsize: link.Tsize.unwrap_or_default(),
+        });
+    }
+
+    Some(FileBranch {
+        filesize: flat.data.filesize.unwrap_or_default(),
+        links,
+    })
+}
+
+/// Renders a single file branch node from the given links, byte-identical to [`FileAdder`].
+pub fn rebuild_file_branch(
+    filesize: u64,
+    links: &[FileBranchLink],
+    cid_version: Version,
+    hasher: Code,
+) -> (Cid, Vec<u8>) {
+    let config = Config {
+        cid_version,
+        raw_leaves: true,
+        hasher,
+    };
+    let links: Vec<Link> = links
+        .iter()
+        .map(|l| Link {
+            depth: 0,
+            target: l.cid,
+            total_size: l.tsize,
+            file_size: l.blocksize,
+        })
+        .collect();
+    render_and_hash(&LinkBlock { links: &links, filesize }, config)
+}
+
+/// Builds a balanced file tree over the given leaf links, returning the root cid, its cumulative
+/// size, and the branch blocks (the leaves are not re-emitted). Byte-identical to [`FileAdder`].
+pub fn build_file_from_leaves(
+    leaves: &[FileBranchLink],
+    cid_version: Version,
+    hasher: Code,
+) -> (Cid, u64, Vec<(Cid, Vec<u8>)>) {
+    assert!(!leaves.is_empty(), "at least one leaf is required");
+    let config = Config {
+        cid_version,
+        raw_leaves: true,
+        hasher,
+    };
+    let mut collector = BalancedCollector::default();
+    let mut blocks = Vec::new();
+    for leaf in leaves {
+        let link = Link {
+            depth: 0,
+            target: leaf.cid,
+            total_size: leaf.tsize,
+            file_size: leaf.blocksize,
+        };
+        blocks.extend(collector.push_link(link, config));
+    }
+    blocks.extend(collector.finish(config));
+
+    match blocks.last() {
+        Some((cid, _)) => {
+            let leaf_tsize: u64 = leaves.iter().map(|l| l.tsize).sum();
+            let branch_tsize: u64 = blocks.iter().map(|(_, b)| b.len() as u64).sum();
+            (*cid, leaf_tsize + branch_tsize, blocks)
+        }
+        None => (leaves[0].cid, leaves[0].tsize, blocks),
+    }
+}
+
 /// Streaming dag-pb serializer for a file link block (a `File` node linking child blocks), avoiding
 /// the per-link byte-vector allocations of building intermediate `PBLink`s.
 struct LinkBlock<'a> {
@@ -684,10 +792,72 @@ impl BalancedCollector {
 
 #[cfg(test)]
 mod tests {
-    use super::{BalancedCollector, Chunker, FileAdder};
+    use super::{
+        parse_file_branch, rebuild_file_branch, BalancedCollector, Chunker, FileAdder,
+    };
     use crate::test_support::FakeBlockstore;
     use core::convert::TryFrom;
     use hex_literal::hex;
+
+    #[test]
+    fn rebuild_file_branch_matches_adder_root() {
+        use ipld_core::cid::Version;
+        use multihash_codetable::Code;
+        let content: &[u8] = b"the quick brown fox jumps over the lazy dog";
+        let blocks = FileAdder::builder()
+            .with_chunker(Chunker::Size(4))
+            .with_cid_version(Version::V1)
+            .build()
+            .collect_blocks(content, 0);
+        let (root_cid, root_block) = blocks.last().unwrap().clone();
+        let branch = parse_file_branch(&root_block).expect("multiblock root is a file branch");
+        let (rebuilt, _) =
+            rebuild_file_branch(branch.filesize, &branch.links, Version::V1, Code::Sha2_256);
+        assert_eq!(rebuilt, root_cid);
+    }
+
+    #[test]
+    fn build_file_from_leaves_matches_adder() {
+        use super::{build_file_from_leaves, FileBranchLink};
+        use ipld_core::cid::Version;
+        use multihash_codetable::Code;
+
+        let content: Vec<u8> = (0..1500u32).flat_map(|i| i.to_le_bytes()).collect();
+        let adder_root = FileAdder::builder()
+            .with_chunker(Chunker::Size(7))
+            .with_cid_version(Version::V1)
+            .build()
+            .collect_blocks(&content, 0)
+            .last()
+            .unwrap()
+            .0;
+
+        let leaves: Vec<FileBranchLink> = content
+            .chunks(7)
+            .map(|c| FileBranchLink {
+                cid: crate::pb::make_cid(Version::V1, Code::Sha2_256, 0x55, c),
+                blocksize: c.len() as u64,
+                tsize: c.len() as u64,
+            })
+            .collect();
+        let (root, _, _) = build_file_from_leaves(&leaves, Version::V1, Code::Sha2_256);
+        assert_eq!(root, adder_root);
+    }
+
+    #[test]
+    fn parse_file_branch_rejects_metadata_root() {
+        use crate::Metadata;
+        use ipld_core::cid::Version;
+        let content: &[u8] = b"the quick brown fox jumps over the lazy dog";
+        let blocks = FileAdder::builder()
+            .with_chunker(Chunker::Size(4))
+            .with_cid_version(Version::V1)
+            .with_metadata(Metadata::default().with_mode(0o644))
+            .build()
+            .collect_blocks(content, 0);
+        let root_block = blocks.last().unwrap().1.clone();
+        assert!(parse_file_branch(&root_block).is_none());
+    }
     use ipld_core::cid::{Cid, Version};
 
     #[test]
