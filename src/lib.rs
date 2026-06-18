@@ -44,10 +44,10 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use dag::{DagGet, DagPut};
 use futures::{
-    StreamExt,
-    channel::oneshot::{self, Sender as OneshotSender, channel as oneshot_channel},
+    channel::oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
     future::BoxFuture,
     stream::BoxStream,
+    StreamExt,
 };
 
 use p2p::{MultiaddrExt, PeerInfo};
@@ -76,13 +76,13 @@ pub use connexa::prelude::request_response::{
 pub use connexa::prelude::swarm::derive_prelude::{ConnectionId, ListenerId};
 pub use connexa::prelude::swarm::dial_opts::{DialOpts, PeerCondition};
 pub use connexa::prelude::{
-    ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol, identity::Keypair,
+    connection_limits::ConnectionLimits, gossipsub,
+    identify,
+    ping, swarm::{self, NetworkBehaviour}, GossipsubMessage,
+    Stream,
 };
 pub use connexa::prelude::{
-    GossipsubMessage, Stream,
-    connection_limits::ConnectionLimits,
-    gossipsub, identify, ping,
-    swarm::{self, NetworkBehaviour},
+    identity::Keypair, ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol,
 };
 pub use connexa::{behaviour::request_response::RequestResponseConfig, dummy};
 use ipld_core::cid::Cid;
@@ -1389,6 +1389,8 @@ impl Ipfs {
 
         // terminate task that handles GC
         self._gc_guard.abort();
+        // give back to the runtime to process anything in the background
+        async_rt::task::yield_now().await;
     }
 }
 
