@@ -321,8 +321,12 @@ fn write_block(target_path: &std::path::Path, data: &[u8]) -> Result<BlockPut, s
     // The data now lives at target_path (or already did); drop the temp link either way.
     let _ = std::fs::remove_file(&temp_path);
 
-    // FIXME: a directory fsync here would make a freshly linked block durable across power loss
-    //        (currently a crash can lose the dir entry, leaving the block absent but re-fetchable).
+    if matches!(put, BlockPut::NewBlock)
+        && let Some(dir) = target_path.parent()
+    {
+        let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    }
+
     Ok(put)
 }
 

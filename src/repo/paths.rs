@@ -67,10 +67,10 @@ pub fn filestem_to_pin_cid(file_stem: Option<&std::ffi::OsStr>) -> Option<Cid> {
 /// This function does not care how the key has been encoded, it is enough to have ASCII characters
 /// where the shard is selected.
 fn shard(path: &mut PathBuf, key: &str) {
-    let start = key.len() - 3;
-    let shard = &key[start..start + 2];
-    assert_eq!(key[start + 2..].len(), 1);
-    path.push(shard);
+    match key.len().checked_sub(3) {
+        Some(start) => path.push(&key[start..start + 2]),
+        None => path.push("_"),
+    }
     path.push(key);
 }
 

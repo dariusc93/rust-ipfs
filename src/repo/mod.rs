@@ -6,13 +6,13 @@ use core::fmt::Debug;
 use futures::channel::mpsc::{Receiver, Sender, channel};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
-use futures::stream::{self, BoxStream, FuturesOrdered};
+use futures::stream::{self, BoxStream, FuturesOrdered, FuturesUnordered};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
@@ -766,7 +766,7 @@ impl<S: RepoTypes> Repo<S> {
         let list = stream::iter(
             FuturesOrdered::from_iter(list.into_iter().map(|cid| async move { cid }))
                 .filter_map(|cid| async move {
-                    (!self.is_pinned(&cid).await.unwrap_or_default()).then_some(cid)
+                    matches!(self.is_pinned(&cid).await, Ok(false)).then_some(cid)
                 })
                 .collect::<Vec<Cid>>()
                 .await,
@@ -912,9 +912,9 @@ impl<S: RepoTypes> Repo<S> {
         let pins = repo
             .list_pins(None)
             .await
-            .filter_map(|result| futures::future::ready(result.map(|(cid, _)| cid).ok()))
-            .collect::<Vec<_>>()
-            .await;
+            .map_ok(|(cid, _)| cid)
+            .try_collect::<HashSet<Cid>>()
+            .await?;
 
         let stream = async_stream::stream! {
             for await cid in blocks {
@@ -1155,7 +1155,7 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
 
                         let timeout = timeout.or(Some(Duration::from_secs(60)));
 
-                        let mut blocks = FuturesOrdered::new();
+                        let blocks = FuturesUnordered::new();
                         let mut wants = Vec::with_capacity(missing.len());
 
                         for cid in &missing {
@@ -1202,7 +1202,7 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                             .boxed();
 
                             wants.push(cid);
-                            blocks.push_back(task);
+                            blocks.push(task);
                         }
 
                         events

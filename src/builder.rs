@@ -660,7 +660,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                                     .flatten()
                                     .unwrap_or_default();
 
-                                let unpinned_blocks = total_size - pinned_size;
+                                let unpinned_blocks = total_size.saturating_sub(pinned_size);
 
                                 tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
 
@@ -679,9 +679,18 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
 
                                 if cleanup {
                                     tracing::debug!("running cleanup of unpinned blocks");
-                                    let blocks = repo.cleanup().await.unwrap();
-                                    tracing::debug!(removed_blocks = blocks.len(), "blocks removed");
-                                    tracing::debug!("cleanup finished");
+                                    match repo.cleanup().await {
+                                        Ok(blocks) => {
+                                            tracing::debug!(
+                                                removed_blocks = blocks.len(),
+                                                "blocks removed"
+                                            );
+                                            tracing::debug!("cleanup finished");
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(error = %e, "gc cleanup failed");
+                                        }
+                                    }
                                 }
 
                                 interval.reset(time);

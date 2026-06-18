@@ -53,17 +53,26 @@ impl FsDataStore {
         let key = String::from_utf8_lossy(key);
         let mut key_segments = key.split('/').collect::<Vec<_>>();
 
-        let key_val = key_segments
-            .pop()
-            .map(PathBuf::from)
-            .map(|path| path.with_extension("data"))
-            .map(|path| path.to_string_lossy().to_string())?;
+        for (i, segment) in key_segments.iter().enumerate() {
+            if *segment == "."
+                || *segment == ".."
+                || segment.contains('\0')
+                || segment.contains('\\')
+            {
+                return None;
+            }
+            if segment.is_empty() && i != 0 {
+                return None;
+            }
+        }
+
+        let last = key_segments.pop().filter(|segment| !segment.is_empty())?;
+        let key_val = format!("{last}.data");
 
         let key_path_raw = key_segments.join("/");
-
-        let key_path = match key_path_raw.starts_with('/') {
-            true => key_path_raw[1..].to_string(),
-            false => key_path_raw,
+        let key_path = match key_path_raw.strip_prefix('/') {
+            Some(rest) => rest.to_string(),
+            None => key_path_raw,
         };
 
         Some((key_path, key_val))
@@ -102,12 +111,15 @@ impl FsDataStore {
 
     async fn delete(&self, key: &[u8]) -> std::io::Result<()> {
         let data_path = self.path.join("data");
-        let (path, key) = self
-            .key(key)
-            .ok_or::<std::io::Error>(std::io::ErrorKind::NotFound.into())?;
-        let path = data_path.join(path);
-        let path = path.join(key);
-        tokio::fs::remove_file(path).await
+        let Some((path, key)) = self.key(key) else {
+            return Ok(());
+        };
+        let path = data_path.join(path).join(key);
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     async fn read(&self, key: &[u8]) -> std::io::Result<Option<Vec<u8>>> {
@@ -159,7 +171,7 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
                     continue;
                 }
 
-                let Some(key) = raw_key.get(0..raw_key.len() - 5) else {
+                let Some(key) = raw_key.strip_suffix(".data") else {
                     continue;
                 };
 
@@ -831,7 +843,7 @@ mod test {
         assert!(!contains);
         let get = store.get(&key).await.unwrap_or_default();
         assert_eq!(get, None);
-        assert!(store.remove(&key).await.is_err());
+        store.remove(&key).await?;
 
         store.put(&key, &value).await?;
         let contains = store.contains(&key).await?;
@@ -845,6 +857,44 @@ mod test {
         let get = store.get(&key).await.unwrap_or_default();
         assert_eq!(get, None);
         drop(store);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn kv_dotted_keys_and_traversal() -> anyhow::Result<()> {
+        use futures::StreamExt;
+        let tmp = std::env::temp_dir().join(format!("rust_ipfs_kv_dots_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = FsDataStore::new(tmp.clone());
+        store.init().await?;
+
+        store.put(b"/ns/a.b", &[1]).await?;
+        store.put(b"/ns/a.c", &[2]).await?;
+        assert_eq!(store.get(b"/ns/a.b").await?, Some(vec![1]));
+        assert_eq!(
+            store.get(b"/ns/a.c").await?,
+            Some(vec![2]),
+            "keys differing only after a dot must not collide"
+        );
+
+        assert!(
+            store.put(b"/ns/../escape", &[3]).await.is_err(),
+            "a traversal key must be rejected"
+        );
+
+        let mut found = std::collections::HashMap::new();
+        let mut stream = store.iter().await;
+        while let Some((k, v)) = stream.next().await {
+            found.insert(k, v);
+        }
+        assert_eq!(
+            found.get(b"/ns/a.b".as_slice()),
+            Some(&vec![1]),
+            "iter must round-trip the exact key bytes"
+        );
+
+        drop(store);
+        let _ = std::fs::remove_dir_all(&tmp);
         Ok(())
     }
 

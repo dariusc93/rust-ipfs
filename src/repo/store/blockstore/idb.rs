@@ -156,7 +156,7 @@ impl BlockStore for IdbBlockStore {
 
                 transaction.await?;
 
-                Ok((size > 0).then_some(size))
+                Ok(Some(size))
             }
             .await
             .map_err(|e: Box<dyn std::error::Error>| anyhow::anyhow!("{e}"));

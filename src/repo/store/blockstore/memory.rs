@@ -65,11 +65,9 @@ impl BlockStore for MemBlockStore {
     async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error> {
         let inner = &*self.inner.read().await;
         Ok(Some(
-            inner
-                .blocks
-                .iter()
-                .filter(|(id, _)| cid.contains(id))
-                .map(|(_, b)| b.len())
+            cid.iter()
+                .filter_map(|c| inner.blocks.get(c))
+                .map(|b| b.len())
                 .sum(),
         ))
     }
