@@ -18,10 +18,12 @@ use rust_unixfs::file::adder::{
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::future::IntoFuture;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::task::{Context, Poll};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
 /// Datastore key holding the current MFS root Cid.
@@ -640,6 +642,7 @@ impl Mfs {
     /// Reads the file at `path` and writes it to the local filesystem at `dest`, streaming through
     /// without buffering. The returned [`MfsRead`] is both a progress [`Stream`] and a future
     /// resolving to the number of bytes written.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn read_to_file(&self, path: &str, dest: impl AsRef<Path>) -> MfsRead {
         let mfs = self.clone();
         let path = path.to_string();
