@@ -21,10 +21,10 @@ const TICK: Duration = Duration::from_millis(100);
 pub struct WantEntry {
     pub want_type: RequestType,
     pub priority: i32,
+    pub has_provider: bool,
     deadline: Option<Instant>,
     discovery_interval: Duration,
     last_discovery: Option<Instant>,
-    has_provider: bool,
 }
 
 #[derive(Default)]

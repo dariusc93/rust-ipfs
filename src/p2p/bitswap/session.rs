@@ -16,6 +16,7 @@ use crate::Block;
 use crate::repo::{DefaultStorage, Repo};
 
 const MAX_INFLIGHT_SERVES: usize = 32;
+const SERVE_BATCH_LIMIT: usize = 1 << 20;
 
 #[derive(Debug)]
 pub enum PeerSessionEvent {
@@ -115,6 +116,9 @@ impl PeerSession {
             }
             let desired = entry.want_type;
             if self.sent.get(cid) == Some(&desired) {
+                continue;
+            }
+            if desired == RequestType::Have && entry.has_provider {
                 continue;
             }
             let request = match desired {
@@ -241,7 +245,7 @@ impl PeerSession {
     }
 }
 
-fn serve_response(request: &BitswapRequest, block: Option<Block>) -> Option<BitswapMessage> {
+fn serve_response(request: &BitswapRequest, block: Option<Block>) -> Option<(Cid, BitswapResponse)> {
     let response = match (request.ty, block) {
         (RequestType::Have, Some(_)) => BitswapResponse::Have(true),
         (RequestType::Block, Some(block)) => {
@@ -250,7 +254,14 @@ fn serve_response(request: &BitswapRequest, block: Option<Block>) -> Option<Bits
         (_, None) if request.send_dont_have => BitswapResponse::Have(false),
         (_, None) => return None,
     };
-    Some(BitswapMessage::new(false).add_response(request.cid, response))
+    Some((request.cid, response))
+}
+
+fn response_size(response: &BitswapResponse) -> usize {
+    match response {
+        BitswapResponse::Block(data) => data.len() + 64,
+        BitswapResponse::Have(_) => 64,
+    }
 }
 
 impl Stream for PeerSession {
@@ -260,6 +271,8 @@ impl Stream for PeerSession {
         let this = self.get_mut();
 
         this.drain_serves();
+        let mut batch: Vec<(Cid, BitswapResponse)> = Vec::new();
+        let mut batch_size = 0;
         while let Poll::Ready(Some((request, block))) = this.serving.poll_next_unpin(cx) {
             if request.ty == RequestType::Block
                 && let Some(block) = &block
@@ -267,10 +280,23 @@ impl Stream for PeerSession {
                 this.ledger.blocks_sent += 1;
                 this.ledger.bytes_sent += block.data().len() as u64;
             }
-            if let Some(message) = serve_response(&request, block) {
-                this.outbound.push_back(PeerSessionEvent::Send(message));
+            if let Some((cid, response)) = serve_response(&request, block) {
+                let size = response_size(&response);
+                if !batch.is_empty() && batch_size + size > SERVE_BATCH_LIMIT {
+                    this.outbound.push_back(PeerSessionEvent::Send(
+                        BitswapMessage::new(false).set_responses(std::mem::take(&mut batch)),
+                    ));
+                    batch_size = 0;
+                }
+                batch.push((cid, response));
+                batch_size += size;
             }
             this.drain_serves();
+        }
+        if !batch.is_empty() {
+            this.outbound.push_back(PeerSessionEvent::Send(
+                BitswapMessage::new(false).set_responses(batch),
+            ));
         }
 
         while let Poll::Ready(Some(cid)) = this.storing.poll_next_unpin(cx) {
@@ -283,5 +309,67 @@ impl Stream for PeerSession {
 
         this.waker = Some(cx.waker().clone());
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use multihash_codetable::{Code, MultihashDigest};
+
+    fn test_cid() -> Cid {
+        Cid::new_v1(0x55, Code::Sha2_256.digest(b"sync gate"))
+    }
+
+    #[tokio::test]
+    async fn sync_gates_want_have_when_provider_known() {
+        let repo = Repo::new_memory();
+        let cid = test_cid();
+
+        let wantlist = Wantlist::default();
+        wantlist.want(cid, RequestType::Have, 1, None);
+        let mut session = PeerSession::new(wantlist, repo.clone());
+        assert!(
+            matches!(session.next().await, Some(PeerSessionEvent::Send(_))),
+            "an unprovided want should be solicited"
+        );
+
+        let wantlist = Wantlist::default();
+        wantlist.want(cid, RequestType::Have, 1, None);
+        wantlist.note_have(&cid);
+        let mut session = PeerSession::new(wantlist, repo);
+        let polled = futures::poll!(std::pin::pin!(session.next()));
+        assert!(
+            polled.is_pending(),
+            "a want with a known provider must not be re-solicited"
+        );
+    }
+
+    #[tokio::test]
+    async fn serves_coalesce_into_fewer_messages() {
+        let repo = Repo::new_memory();
+        let mut cids = Vec::new();
+        for i in 0..8u32 {
+            let data = format!("batch block {i}").into_bytes();
+            let cid = Cid::new_v1(0x55, Code::Sha2_256.digest(&data));
+            repo.put_block(&Block::new_unchecked(cid, data)).await.unwrap();
+            cids.push(cid);
+        }
+
+        let mut session = PeerSession::new(Wantlist::default(), repo);
+        let requests = cids.iter().map(|cid| BitswapRequest::block(*cid)).collect();
+        session.on_message(BitswapMessage::new(false).set_requests(requests));
+
+        let mut messages = 0;
+        let mut served = 0;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+        while let Ok(Some(event)) = tokio::time::timeout_at(deadline, session.next()).await {
+            if let PeerSessionEvent::Send(message) = event {
+                messages += 1;
+                served += message.responses.len();
+            }
+        }
+        assert_eq!(served, 8, "all requested blocks served");
+        assert!(messages < 8, "serves should coalesce, got {messages} messages");
     }
 }
