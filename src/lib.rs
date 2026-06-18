@@ -229,6 +229,7 @@ enum IpfsEvent {
     /// Node supported protocol
     Protocol(OneshotSender<Vec<String>>),
     GetBitswapPeers(Channel<BoxFuture<'static, Vec<PeerId>>>),
+    BitswapStats(Channel<BoxFuture<'static, crate::p2p::bitswap::BitswapStats>>),
     WantList(Option<PeerId>, Channel<BoxFuture<'static, Vec<Cid>>>),
 
     FindPeerIdentity(PeerId, Channel<ReceiverChannel<identify::Info>>),
@@ -1353,6 +1354,16 @@ impl Ipfs {
 
         self.connexa
             .send_custom_event(IpfsEvent::GetBitswapPeers(tx))
+            .await?;
+
+        Ok(rx.await??.await)
+    }
+
+    pub async fn bitswap_stats(&self) -> Result<crate::p2p::bitswap::BitswapStats, Error> {
+        let (tx, rx) = oneshot_channel();
+
+        self.connexa
+            .send_custom_event(IpfsEvent::BitswapStats(tx))
             .await?;
 
         Ok(rx.await??.await)

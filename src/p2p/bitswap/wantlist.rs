@@ -21,10 +21,10 @@ const TICK: Duration = Duration::from_millis(100);
 pub struct WantEntry {
     pub want_type: RequestType,
     pub priority: i32,
+    pub has_provider: bool,
     deadline: Option<Instant>,
     discovery_interval: Duration,
     last_discovery: Option<Instant>,
-    has_provider: bool,
 }
 
 #[derive(Default)]
@@ -79,6 +79,13 @@ impl Wantlist {
     pub fn note_have(&self, cid: &Cid) {
         if let Some(entry) = self.inner.write().wants.get_mut(cid) {
             entry.has_provider = true;
+        }
+    }
+
+    pub fn rearm_discovery(&self, cid: &Cid) {
+        if let Some(entry) = self.inner.write().wants.get_mut(cid) {
+            entry.has_provider = false;
+            entry.last_discovery = None;
         }
     }
 

@@ -151,7 +151,22 @@ impl IpfsContext {
                 let _ = ret.send(Ok(futures::future::ready(list).boxed()));
             }
             IpfsEvent::GetBitswapPeers(ret) => {
-                let _ = ret.send(Ok(futures::future::ready(vec![]).boxed()));
+                let peers = self
+                    .custom_behaviour(swarm)
+                    .bitswap
+                    .as_ref()
+                    .map(|bitswap| bitswap.peers())
+                    .unwrap_or_default();
+                let _ = ret.send(Ok(futures::future::ready(peers).boxed()));
+            }
+            IpfsEvent::BitswapStats(ret) => {
+                let stats = self
+                    .custom_behaviour(swarm)
+                    .bitswap
+                    .as_ref()
+                    .map(|bitswap| bitswap.stats())
+                    .unwrap_or_default();
+                let _ = ret.send(Ok(futures::future::ready(stats).boxed()));
             }
             IpfsEvent::FindPeerIdentity(peer_id, ret) => {
                 let locally_known = self.custom_behaviour(swarm).peerbook.get_peer_info(peer_id);
