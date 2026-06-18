@@ -1,10 +1,10 @@
 use std::{collections::BTreeSet, rc::Rc, str::FromStr, sync::OnceLock};
 
 use crate::{
-    Error, PinKind, PinMode,
-    repo::{DataStore, PinModeRequirement, PinStore, References},
+    repo::{DataStore, PinModeRequirement, PinStore, References}, Error, PinKind,
+    PinMode,
 };
-use futures::{SinkExt, StreamExt, TryStreamExt, channel::oneshot, stream::BoxStream};
+use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use idb::{
     Database, DatabaseEvent, Factory, ObjectStore, ObjectStoreParams, Transaction, TransactionMode,
 };
@@ -44,185 +44,140 @@ impl IdbDataStore {
 
 impl DataStore for IdbDataStore {
     async fn init(&self) -> Result<(), Error> {
-        let factory = self.factory.clone();
-        let namespace = self.namespace.clone();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let mut request = factory.open(&namespace, None)?;
+        SendWrapper::new(async move {
+            let mut request = self.factory.open(&self.namespace, None)?;
 
-                request.on_upgrade_needed(|event| {
-                    let db = event.database().unwrap();
-                    db.create_object_store("datastore", ObjectStoreParams::new())
-                        .unwrap();
-                    db.create_object_store("pinstore", ObjectStoreParams::new())
-                        .unwrap();
-                });
+            request.on_upgrade_needed(|event| {
+                let db = event.database().unwrap();
+                db.create_object_store("datastore", ObjectStoreParams::new())
+                    .unwrap();
+                db.create_object_store("pinstore", ObjectStoreParams::new())
+                    .unwrap();
+            });
 
-                let database = request.await?;
-                Ok::<_, Box<dyn std::error::Error>>(SendWrapper::new(Rc::new(database)))
-            }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
-            _ = tx.send(res);
-        });
+            let database = request.await?;
 
-        let db = rx.await??;
-        self.database.get_or_init(|| db);
-        Ok(())
+            self.database
+                .get_or_init(|| SendWrapper::new(Rc::new(database)));
+            Ok(())
+        })
+        .await
+        .map_err(|e: Box<dyn std::error::Error>| anyhow::anyhow!("{e}"))
     }
 
     /// Checks if a key is present in the datastore.
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
-        let database = self.get_db().to_owned();
-        let key = key.to_owned();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction =
-                    database.transaction(&["datastore"], TransactionMode::ReadOnly)?;
+        SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["datastore"], TransactionMode::ReadOnly)?;
 
-                let store = transaction.object_store("datastore")?;
+            let store = transaction.object_store("datastore")?;
 
-                let key = serde_wasm_bindgen::to_value(&key)?;
+            let key = serde_wasm_bindgen::to_value(&key)?;
 
-                let val = store.get(key)?.await?;
-                transaction.await?;
-                Ok::<_, Box<dyn std::error::Error>>(val.is_some())
-            }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
-
-            _ = tx.send(res);
-        });
-
-        rx.await?
+            let val = store.get(key)?.await?;
+            transaction.await?;
+            Ok::<_, Box<dyn std::error::Error>>(val.is_some())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     /// Returns the value associated with a key from the datastore.
     async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        let database = self.get_db().to_owned();
-        let key = key.to_owned();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction =
-                    database.transaction(&["datastore"], TransactionMode::ReadOnly)?;
+        SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["datastore"], TransactionMode::ReadOnly)?;
 
-                let store = transaction.object_store("datastore")?;
+            let store = transaction.object_store("datastore")?;
 
-                let key = serde_wasm_bindgen::to_value(&key)?;
+            let key = serde_wasm_bindgen::to_value(&key)?;
 
-                let block = store.get(key)?.await.map(|val| {
-                    val.and_then(|val| {
-                        let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
-                        Some(bytes)
-                    })
-                })?;
+            let block = store.get(key)?.await.map(|val| {
+                val.and_then(|val| {
+                    let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
+                    Some(bytes)
+                })
+            })?;
 
-                transaction.await?;
-                Ok::<_, Box<dyn std::error::Error>>(block)
-            }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
-
-            _ = tx.send(res);
-        });
-
-        rx.await?
+            transaction.await?;
+            Ok::<_, Box<dyn std::error::Error>>(block)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     /// Puts the value under the key in the datastore.
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
-        let database = self.get_db().to_owned();
-        let key = key.to_owned();
-        let value = value.to_owned();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction =
-                    database.transaction(&["datastore"], TransactionMode::ReadWrite)?;
+        SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["datastore"], TransactionMode::ReadWrite)?;
 
-                let store = transaction.object_store("datastore")?;
+            let store = transaction.object_store("datastore")?;
 
-                let key = serde_wasm_bindgen::to_value(&key)?;
-                let val = serde_wasm_bindgen::to_value(&value)?;
+            let key = serde_wasm_bindgen::to_value(&key)?;
+            let val = serde_wasm_bindgen::to_value(&value)?;
 
-                store.put(&val, Some(&key))?.await?;
+            store.put(&val, Some(&key))?.await?;
 
-                transaction.commit()?.await?;
+            transaction.commit()?.await?;
 
-                Ok::<_, Box<dyn std::error::Error>>(())
-            }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
-
-            _ = tx.send(res);
-        });
-
-        rx.await?
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     /// Removes a key-value pair from the datastore.
     async fn remove(&self, key: &[u8]) -> Result<(), Error> {
-        let database = self.get_db().to_owned();
-        let key = key.to_owned();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction =
-                    database.transaction(&["datastore"], TransactionMode::ReadWrite)?;
+        SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["datastore"], TransactionMode::ReadWrite)?;
 
-                let store = transaction.object_store("datastore")?;
+            let store = transaction.object_store("datastore")?;
 
-                let key = serde_wasm_bindgen::to_value(&key)?;
+            let key = serde_wasm_bindgen::to_value(&key)?;
 
-                store.delete(key)?.await?;
+            store.delete(key)?.await?;
 
-                transaction.commit()?.await?;
+            transaction.commit()?.await?;
 
-                Ok::<_, Box<dyn std::error::Error>>(())
-            }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
-
-            _ = tx.send(res);
-        });
-
-        rx.await?
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     async fn iter(&self) -> BoxStream<'static, (Vec<u8>, Vec<u8>)> {
         let database = self.get_db().clone();
-        let (mut tx, rx) = futures::channel::mpsc::channel(10);
-        wasm_bindgen_futures::spawn_local(async move {
-            let transaction = database
-                .transaction(&["datastore"], TransactionMode::ReadOnly)
-                .unwrap();
-            let store = transaction.object_store("datastore").unwrap();
-            let key_res = store
-                .get_all_keys(None, None)
-                .unwrap()
-                .await
-                .unwrap()
-                .into_iter()
-                .filter_map(|val| serde_wasm_bindgen::from_value::<Vec<u8>>(val).ok())
-                .collect::<Vec<_>>();
+        SendWrapper::new(async_stream::stream! {
+            let Ok(transaction) = database.transaction(&["datastore"], TransactionMode::ReadOnly)
+            else {
+                return;
+            };
+            let Ok(store) = transaction.object_store("datastore") else {
+                return;
+            };
+            let Ok(key_request) = store.get_all_keys(None, None) else {
+                return;
+            };
+            let Ok(value_request) = store.get_all(None, None) else {
+                return;
+            };
+            let keys = key_request.await.unwrap_or_default();
+            let values = value_request.await.unwrap_or_default();
 
-            let res = store
-                .get_all(None, None)
-                .unwrap()
-                .await
-                .unwrap()
-                .into_iter()
-                .filter_map(|val| serde_wasm_bindgen::from_value::<Vec<u8>>(val).ok())
-                .collect::<Vec<_>>();
-
-            for kv in key_res.into_iter().zip(res) {
-                _ = tx.send(kv).await;
+            for (raw_key, raw_value) in keys.into_iter().zip(values) {
+                let (Ok(key), Ok(value)) = (
+                    serde_wasm_bindgen::from_value::<Vec<u8>>(raw_key),
+                    serde_wasm_bindgen::from_value::<Vec<u8>>(raw_value),
+                ) else {
+                    continue;
+                };
+                yield (key, value);
             }
-        });
-        rx.boxed()
+        })
+        .boxed()
     }
 }
 
@@ -231,72 +186,56 @@ impl DataStore for IdbDataStore {
 
 impl PinStore for IdbDataStore {
     async fn is_pinned(&self, cid: &Cid) -> Result<bool, Error> {
-        let cid = cid.to_owned();
-        let database = self.get_db().to_owned();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction = database.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
+        SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
 
-                let store = transaction.object_store("pinstore")?;
+            let store = transaction.object_store("pinstore")?;
 
-                let key = JsValue::from_str(&cid.to_string());
+            let key = JsValue::from_str(&cid.to_string());
 
-                let val = store.get(key)?.await?;
-                transaction.await?;
-                Ok::<_, Box<dyn std::error::Error>>(val.is_some())
-            }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
-
-            _ = tx.send(res);
-        });
-
-        rx.await?
+            let val = store.get(key)?.await?;
+            transaction.await?;
+            Ok::<_, Box<dyn std::error::Error>>(val.is_some())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let target = target.to_owned();
-        let db = self.get_db().to_owned();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
+        SendWrapper::new(async move {
+            let db = self.get_db();
+            let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-                let store = transaction.object_store("pinstore")?;
+            let store = transaction.object_store("pinstore")?;
 
-                let already_pinned = get_pinned_mode(&transaction, &store, &target).await?;
+            let already_pinned = get_pinned_mode(&transaction, &store, target).await?;
 
-                match already_pinned {
-                    Some((PinMode::Direct, _)) => return Ok(()),
-                    Some((PinMode::Recursive, _)) => {
-                        let r = || Err(anyhow::anyhow!("already pinned recursively"));
-                        r()?;
-                    }
-                    Some((PinMode::Indirect, key)) => {
-                        // TODO: I think the direct should live alongside the indirect?
-                        let key = serde_wasm_bindgen::to_value(&key)?;
-                        store.delete(key)?.await?;
-                    }
-                    None => {}
+            match already_pinned {
+                Some((PinMode::Direct, _)) => return Ok(()),
+                Some((PinMode::Recursive, _)) => {
+                    let r = || Err(anyhow::anyhow!("already pinned recursively"));
+                    r()?;
                 }
-
-                let direct_key = get_pin_key(&target, &PinMode::Direct);
-                let key = serde_wasm_bindgen::to_value(&direct_key).unwrap();
-                let val = serde_wasm_bindgen::to_value(direct_value()).unwrap();
-
-                store.put(&val, Some(&key))?.await?;
-                transaction.commit()?.await?;
-
-                Ok::<_, Box<dyn std::error::Error>>(())
+                Some((PinMode::Indirect, key)) => {
+                    // TODO: I think the direct should live alongside the indirect?
+                    let key = serde_wasm_bindgen::to_value(&key)?;
+                    store.delete(key)?.await?;
+                }
+                None => {}
             }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
 
-            _ = tx.send(res)
-        });
+            let direct_key = get_pin_key(target, &PinMode::Direct);
+            let key = serde_wasm_bindgen::to_value(&direct_key).unwrap();
+            let val = serde_wasm_bindgen::to_value(direct_value()).unwrap();
 
-        rx.await?
+            store.put(&val, Some(&key))?.await?;
+            transaction.commit()?.await?;
+
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     async fn insert_recursive_pin(
@@ -304,99 +243,80 @@ impl PinStore for IdbDataStore {
         target: &Cid,
         referenced: References<'_>,
     ) -> Result<(), Error> {
-        // since the transaction can be retried multiple times, we need to collect these and keep
-        // iterating it until there is no conflict.
-        let set = referenced.try_collect::<BTreeSet<_>>().await?;
+        SendWrapper::new(async move {
+            // since the transaction can be retried multiple times, we need to collect these and keep
+            // iterating it until there is no conflict.
+            let set = referenced.try_collect::<BTreeSet<_>>().await?;
 
-        let target = target.to_owned();
-        let db = self.get_db().to_owned();
-        let (tx, rx) = oneshot::channel();
+            // the transaction is not infallible but there is no additional error we return
+            let db = self.get_db();
+            let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-        // the transaction is not infallible but there is no additional error we return
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
+            let store = transaction.object_store("pinstore")?;
 
-                let store = transaction.object_store("pinstore")?;
+            let already_pinned = get_pinned_mode(&transaction, &store, target).await?;
 
-                let already_pinned = get_pinned_mode(&transaction, &store, &target).await?;
-
-                match already_pinned {
-                    Some((PinMode::Recursive, _)) => return Ok(()),
-                    Some((PinMode::Direct, key)) | Some((PinMode::Indirect, key)) => {
-                        // FIXME: this is probably another lapse in tests that both direct and
-                        // indirect can be removed when inserting recursive?
-                        let key = serde_wasm_bindgen::to_value(&key)?;
-                        store.delete(key)?.await?;
-                    }
-                    None => {}
+            match already_pinned {
+                Some((PinMode::Recursive, _)) => return Ok(()),
+                Some((PinMode::Direct, key)) | Some((PinMode::Indirect, key)) => {
+                    // FIXME: this is probably another lapse in tests that both direct and
+                    // indirect can be removed when inserting recursive?
+                    let key = serde_wasm_bindgen::to_value(&key)?;
+                    store.delete(key)?.await?;
                 }
-
-                let recursive_key = get_pin_key(&target, &PinMode::Recursive);
-                let key = serde_wasm_bindgen::to_value(&recursive_key)?;
-                let val = serde_wasm_bindgen::to_value(recursive_value())?;
-                store.put(&val, Some(&key))?.await?;
-
-                let target_value = indirect_value(&target);
-
-                // cannot use into_iter here as the transactions are retryable
-                for cid in set.iter() {
-                    let indirect_key = get_pin_key(cid, &PinMode::Indirect);
-
-                    if get_pinned_mode(&transaction, &store, cid).await?.is_some() {
-                        // TODO: quite costly to do the get_pinned_mode here
-                        continue;
-                    }
-
-                    let indirect_key = serde_wasm_bindgen::to_value(&indirect_key)?;
-                    let target_value = serde_wasm_bindgen::to_value(&target_value)?;
-                    store.put(&target_value, Some(&indirect_key))?.await?;
-                }
-
-                transaction.commit()?.await?;
-                Ok::<_, Box<dyn std::error::Error>>(())
+                None => {}
             }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
 
-            _ = tx.send(res);
-        });
+            let recursive_key = get_pin_key(target, &PinMode::Recursive);
+            let key = serde_wasm_bindgen::to_value(&recursive_key)?;
+            let val = serde_wasm_bindgen::to_value(recursive_value())?;
+            store.put(&val, Some(&key))?.await?;
 
-        rx.await?
+            let target_value = indirect_value(target);
+
+            // cannot use into_iter here as the transactions are retryable
+            for cid in set.iter() {
+                let indirect_key = get_pin_key(cid, &PinMode::Indirect);
+
+                if get_pinned_mode(&transaction, &store, cid).await?.is_some() {
+                    // TODO: quite costly to do the get_pinned_mode here
+                    continue;
+                }
+
+                let indirect_key = serde_wasm_bindgen::to_value(&indirect_key)?;
+                let target_value = serde_wasm_bindgen::to_value(&target_value)?;
+                store.put(&target_value, Some(&indirect_key))?.await?;
+            }
+
+            transaction.commit()?.await?;
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     async fn remove_direct_pin(&self, target: &Cid) -> Result<(), Error> {
-        let target = target.to_owned();
-        let db = self.get_db().to_owned();
+        SendWrapper::new(async move {
+            let db = self.get_db();
+            let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-        let (tx, rx) = oneshot::channel();
+            let store = transaction.object_store("pinstore")?;
 
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
-
-                let store = transaction.object_store("pinstore")?;
-
-                if is_not_pinned_or_pinned_indirectly(&transaction, &store, &target).await? {
-                    let r = || Err(anyhow::anyhow!("not pinned or pinned indirectly"));
-                    r()?;
-                }
-
-                let key = get_pin_key(&target, &PinMode::Direct);
-                let key = serde_wasm_bindgen::to_value(&key)?;
-
-                store.delete(key)?.await?;
-
-                transaction.commit()?.await?;
-                Ok::<_, Box<dyn std::error::Error>>(())
+            if is_not_pinned_or_pinned_indirectly(&transaction, &store, target).await? {
+                let r = || Err(anyhow::anyhow!("not pinned or pinned indirectly"));
+                r()?;
             }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
 
-            _ = tx.send(res)
-        });
+            let key = get_pin_key(target, &PinMode::Direct);
+            let key = serde_wasm_bindgen::to_value(&key)?;
 
-        rx.await?
+            store.delete(key)?.await?;
+
+            transaction.commit()?.await?;
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     async fn remove_recursive_pin(
@@ -404,55 +324,45 @@ impl PinStore for IdbDataStore {
         target: &Cid,
         referenced: References<'_>,
     ) -> Result<(), Error> {
-        // TODO: is this "in the same transaction" as the batch which is created?
-        let set = referenced.try_collect::<BTreeSet<_>>().await?;
+        SendWrapper::new(async move {
+            // TODO: is this "in the same transaction" as the batch which is created?
+            let set = referenced.try_collect::<BTreeSet<_>>().await?;
+            let db = self.get_db();
+            let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
 
-        let target = target.to_owned();
-        let db = self.get_db().to_owned();
-        let (tx, rx) = oneshot::channel();
+            let store = transaction.object_store("pinstore")?;
 
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadWrite)?;
-
-                let store = transaction.object_store("pinstore")?;
-
-                if is_not_pinned_or_pinned_indirectly(&transaction, &store, &target).await? {
-                    let r = || Err(anyhow::anyhow!("not pinned or pinned indirectly"));
-                    r()?;
-                }
-
-                let key = get_pin_key(&target, &PinMode::Recursive);
-                let key = serde_wasm_bindgen::to_value(&key)?;
-
-                store.delete(key)?.await?;
-
-                for cid in &set {
-                    let already_pinned = get_pinned_mode(&transaction, &store, cid).await?;
-
-                    match already_pinned {
-                        Some((PinMode::Recursive, _)) | Some((PinMode::Direct, _)) => continue, // this should be unreachable
-                        Some((PinMode::Indirect, key)) => {
-                            // FIXME: not really sure of this but it might be that recursive removed
-                            // the others...?
-                            let key = serde_wasm_bindgen::to_value(&key)?;
-                            store.delete(key)?.await?;
-                        }
-                        None => {}
-                    }
-                }
-
-                transaction.commit()?.await?;
-
-                Ok::<_, Box<dyn std::error::Error>>(())
+            if is_not_pinned_or_pinned_indirectly(&transaction, &store, target).await? {
+                let r = || Err(anyhow::anyhow!("not pinned or pinned indirectly"));
+                r()?;
             }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
 
-            _ = tx.send(res);
-        });
+            let key = get_pin_key(target, &PinMode::Recursive);
+            let key = serde_wasm_bindgen::to_value(&key)?;
 
-        rx.await?
+            store.delete(key)?.await?;
+
+            for cid in &set {
+                let already_pinned = get_pinned_mode(&transaction, &store, cid).await?;
+
+                match already_pinned {
+                    Some((PinMode::Recursive, _)) | Some((PinMode::Direct, _)) => continue, // this should be unreachable
+                    Some((PinMode::Indirect, key)) => {
+                        // FIXME: not really sure of this but it might be that recursive removed
+                        // the others...?
+                        let key = serde_wasm_bindgen::to_value(&key)?;
+                        store.delete(key)?.await?;
+                    }
+                    None => {}
+                }
+            }
+
+            transaction.commit()?.await?;
+
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     async fn list(
@@ -460,22 +370,24 @@ impl PinStore for IdbDataStore {
         requirement: Option<PinMode>,
     ) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
         let db = self.get_db().to_owned();
-
-        let (mut tx, rx) = futures::channel::mpsc::channel(1);
         let requirement = PinModeRequirement::from(requirement);
 
-        wasm_bindgen_futures::spawn_local(async move {
-            let transaction = db
-                .transaction(&["pinstore"], TransactionMode::ReadOnly)
-                .unwrap();
-            let store = transaction.object_store("pinstore").unwrap();
-
-            let res = store.get_all_keys(None, None).unwrap().await.unwrap();
+        SendWrapper::new(async_stream::stream! {
+            let Ok(transaction) = db.transaction(&["pinstore"], TransactionMode::ReadOnly) else {
+                return;
+            };
+            let Ok(store) = transaction.object_store("pinstore") else {
+                return;
+            };
+            let Ok(request) = store.get_all_keys(None, None) else {
+                return;
+            };
+            let res = request.await.unwrap_or_default();
 
             for k in res.into_iter().filter_map(|val| val.as_string()) {
                 let k = k.as_bytes();
                 if !k.starts_with(b"pin.") || k.len() < 7 {
-                    let _ = tx.send(Err(anyhow::anyhow!("invalid pin: {:?}", k))).await;
+                    yield Err(anyhow::anyhow!("invalid pin: {:?}", k));
                     return;
                 }
 
@@ -484,9 +396,7 @@ impl PinStore for IdbDataStore {
                     b'r' => PinMode::Recursive,
                     b'i' => PinMode::Indirect,
                     x => {
-                        _ = tx
-                            .send(Err(anyhow::anyhow!("invalid pinmode: {}", x as char)))
-                            .await;
+                        yield Err(anyhow::anyhow!("invalid pinmode: {}", x as char));
                         return;
                     }
                 };
@@ -500,12 +410,11 @@ impl PinStore for IdbDataStore {
                         .map_err(|e| e.context("failed to read pin:".to_string()))
                         .map(move |cid| (cid, mode));
 
-                    _ = tx.send(cid).await;
+                    yield cid;
                 }
             }
-        });
-
-        rx.boxed()
+        })
+        .boxed()
     }
 
     async fn query(
@@ -515,66 +424,59 @@ impl PinStore for IdbDataStore {
     ) -> Result<Vec<(Cid, PinKind<Cid>)>, Error> {
         let requirement = PinModeRequirement::from(requirement);
 
-        let db = self.get_db().to_owned();
-        let (tx, rx) = oneshot::channel();
-        wasm_bindgen_futures::spawn_local(async move {
-            let res = async {
-                let transaction = db.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
+        SendWrapper::new(async move {
+            let db = self.get_db();
+            let transaction = db.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
 
-                let store = transaction.object_store("pinstore")?;
+            let store = transaction.object_store("pinstore")?;
 
-                let mut modes = Vec::with_capacity(ids.len());
+            let mut modes = Vec::with_capacity(ids.len());
 
-                for id in ids.iter() {
-                    let mode_and_key = get_pinned_mode(&transaction, &store, id).await?;
+            for id in ids.iter() {
+                let mode_and_key = get_pinned_mode(&transaction, &store, id).await?;
 
-                    let matched = match mode_and_key {
-                        Some((pin_mode, key)) if requirement.matches(&pin_mode) => match pin_mode {
-                            PinMode::Direct => Some(PinKind::Direct),
-                            PinMode::Recursive => Some(PinKind::Recursive(0)),
-                            PinMode::Indirect => {
-                                let key = serde_wasm_bindgen::to_value(&key)?;
-                                store
-                                    .get(key)?
-                                    .await?
-                                    .and_then(|root| {
-                                        serde_wasm_bindgen::from_value::<Vec<u8>>(root).ok()
-                                    })
-                                    .map(|root| {
-                                        cid_from_indirect_value(&root)
-                                            .map(PinKind::IndirectFrom)
-                                            .map_err(|e| {
-                                                e.context(format!(
-                                                    "failed to read indirect pin source: {:?}",
-                                                    String::from_utf8_lossy(root.as_ref()).as_ref(),
-                                                ))
-                                            })
-                                    })
-                                    .transpose()?
-                            }
-                        },
-                        Some(_) | None => None,
-                    };
+                let matched = match mode_and_key {
+                    Some((pin_mode, key)) if requirement.matches(&pin_mode) => match pin_mode {
+                        PinMode::Direct => Some(PinKind::Direct),
+                        PinMode::Recursive => Some(PinKind::Recursive(0)),
+                        PinMode::Indirect => {
+                            let key = serde_wasm_bindgen::to_value(&key)?;
+                            store
+                                .get(key)?
+                                .await?
+                                .and_then(|root| {
+                                    serde_wasm_bindgen::from_value::<Vec<u8>>(root).ok()
+                                })
+                                .map(|root| {
+                                    cid_from_indirect_value(&root)
+                                        .map(PinKind::IndirectFrom)
+                                        .map_err(|e| {
+                                            e.context(format!(
+                                                "failed to read indirect pin source: {:?}",
+                                                String::from_utf8_lossy(root.as_ref()).as_ref(),
+                                            ))
+                                        })
+                                })
+                                .transpose()?
+                        }
+                    },
+                    Some(_) | None => None,
+                };
 
-                    // this might be None, or Some(PinKind); it's important there are as many cids
-                    // as there are modes
-                    modes.push(matched);
-                }
-
-                Ok::<_, Box<dyn std::error::Error>>(
-                    ids.into_iter()
-                        .zip(modes.into_iter())
-                        .filter_map(|(cid, mode)| mode.map(move |mode| (cid, mode)))
-                        .collect::<Vec<_>>(),
-                )
+                // this might be None, or Some(PinKind); it's important there are as many cids
+                // as there are modes
+                modes.push(matched);
             }
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"));
 
-            _ = tx.send(res);
-        });
-
-        rx.await?
+            Ok::<_, Box<dyn std::error::Error>>(
+                ids.into_iter()
+                    .zip(modes.into_iter())
+                    .filter_map(|(cid, mode)| mode.map(move |mode| (cid, mode)))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 }
 

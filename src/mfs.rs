@@ -1096,7 +1096,7 @@ impl Mfs {
         Ok((cid, tsize))
     }
 
-    /// Loads a flat directory's children. Errors on a HAMT shard (phase 1) or a non-directory.
+    /// Loads a directory's children, flattening a HAMT shard if present. Errors on a non-directory.
     async fn load_dir(&self, cid: &Cid) -> Result<DirMap, Error> {
         let block = self.get_block(cid).await?;
         match describe(block.data()) {
