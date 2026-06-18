@@ -1,11 +1,11 @@
 use super::IpldDag;
 use crate::{Block, Error};
 use anyhow::anyhow;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::future::BoxFuture;
 use futures::io::{AsyncRead, AsyncReadExt, BufReader};
 use futures::stream::BoxStream;
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use ipld_core::cid::Cid;
 use ipld_core::codec::Codec;
 use ipld_core::ipld::Ipld;
@@ -50,12 +50,13 @@ impl IpldDag {
     /// Imports a CAR archive from `reader`, storing every block and returning the archive roots.
     pub fn import<R>(&self, reader: R) -> CarImport<R>
     where
-        R: AsyncRead + Unpin + 'static,
+        R: AsyncRead + Unpin + Send + 'static,
     {
         CarImport {
             dag: self.clone(),
-            reader,
+            reader: Some(reader),
             pin: false,
+            inner: None,
         }
     }
 }
@@ -108,17 +109,17 @@ impl Stream for CarExport {
 }
 
 impl IntoFuture for CarExport {
-    type Output = Result<Vec<u8>, Error>;
-    type IntoFuture = BoxFuture<'static, Result<Vec<u8>, Error>>;
+    type Output = Result<Bytes, Error>;
+    type IntoFuture = BoxFuture<'static, Result<Bytes, Error>>;
 
     fn into_future(self) -> Self::IntoFuture {
         async move {
             let mut stream = export_stream(self.dag, self.roots, self.fetch);
-            let mut out = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                out.extend_from_slice(&chunk?);
+            let mut out = BytesMut::new();
+            while let Some(chunk) = stream.try_next().await? {
+                out.extend_from_slice(&chunk);
             }
-            Ok(out)
+            Ok(out.freeze())
         }
         .boxed()
     }
@@ -181,24 +182,50 @@ async fn export_block(dag: &IpldDag, cid: Cid, fetch: bool) -> Result<Block, Err
     }
 }
 
+#[derive(Debug)]
+pub enum ImportStatus {
+    Progress { blocks: usize, bytes: u64 },
+    Completed { roots: Vec<Cid>, blocks: usize },
+    Failed { error: Error },
+}
+
 pub struct CarImport<R> {
     dag: IpldDag,
-    reader: R,
+    reader: Option<R>,
     pin: bool,
+    inner: Option<BoxStream<'static, ImportStatus>>,
 }
 
 impl<R> CarImport<R>
 where
-    R: AsyncRead + Unpin + 'static,
+    R: AsyncRead + Unpin + Send + 'static,
 {
     /// Recursively pins each root after a successful import.
     pub fn pin_roots(mut self) -> Self {
         self.pin = true;
         self
     }
+
+    fn stream(&mut self) -> &mut BoxStream<'static, ImportStatus> {
+        if self.inner.is_none() {
+            let reader = self.reader.take().expect("CarImport already consumed");
+            self.inner = Some(import_status_stream(self.dag.clone(), reader, self.pin).boxed());
+        }
+        self.inner.as_mut().expect("just initialized")
+    }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+impl<R> Stream for CarImport<R>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    type Item = ImportStatus;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut().stream().poll_next_unpin(cx)
+    }
+}
+
 impl<R> IntoFuture for CarImport<R>
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -207,62 +234,135 @@ where
     type IntoFuture = BoxFuture<'static, Result<Vec<Cid>, Error>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let CarImport { dag, reader, pin } = self;
-        async move { import_car(dag, reader, pin).await }.boxed()
+        let CarImport {
+            dag, reader, pin, ..
+        } = self;
+        let reader = reader.expect("CarImport already consumed");
+        async move {
+            let stream = import_status_stream(dag, reader, pin);
+            futures::pin_mut!(stream);
+            let mut roots = None;
+            while let Some(status) = stream.next().await {
+                match status {
+                    ImportStatus::Completed { roots: done, .. } => roots = Some(done),
+                    ImportStatus::Failed { error } => return Err(error),
+                    ImportStatus::Progress { .. } => {}
+                }
+            }
+            roots.ok_or_else(|| anyhow!("import produced no result"))
+        }
+        .boxed()
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-impl<R> IntoFuture for CarImport<R>
-where
-    R: AsyncRead + Unpin + 'static,
-{
-    type Output = Result<Vec<Cid>, Error>;
-    type IntoFuture = futures::future::LocalBoxFuture<'static, Result<Vec<Cid>, Error>>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        let CarImport { dag, reader, pin } = self;
-        async move { import_car(dag, reader, pin).await }.boxed_local()
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[allow(dead_code)]
-fn _import_accepts_non_send_reader<R: AsyncRead + Unpin + 'static>(
-    dag: &IpldDag,
-    reader: R,
-) -> futures::future::LocalBoxFuture<'static, Result<Vec<Cid>, Error>> {
-    dag.import(reader).into_future()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-fn _import_future_is_send<R: AsyncRead + Unpin + Send + 'static>(dag: &IpldDag, reader: R) {
-    fn assert_send<T: Send>(_: &T) {}
-    assert_send(&dag.import(reader).into_future());
-}
-
-async fn import_car<R>(dag: IpldDag, reader: R, pin: bool) -> Result<Vec<Cid>, Error>
+fn import_status_stream<R>(dag: IpldDag, reader: R, pin: bool) -> impl Stream<Item = ImportStatus>
 where
     R: AsyncRead + Unpin,
 {
-    let mut reader = BufReader::new(reader);
+    async_stream::stream! {
+        let mut reader = BufReader::new(reader);
+        let (roots, limit) = match read_car_header(&mut reader).await {
+            Ok(value) => value,
+            Err(error) => {
+                yield ImportStatus::Failed { error };
+                return;
+            }
+        };
 
-    let header = read_frame(&mut reader, MAX_HEADER_LEN)
+        let mut block_reader = (&mut reader).take(limit);
+        let mut batch = Vec::with_capacity(IMPORT_BATCH);
+        let mut blocks = 0usize;
+        let mut bytes = 0u64;
+
+        loop {
+            let body = match read_frame(&mut block_reader, MAX_SECTION_LEN).await {
+                Ok(Some(body)) => body,
+                Ok(None) => break,
+                Err(error) => {
+                    yield ImportStatus::Failed { error };
+                    return;
+                }
+            };
+            let mut cursor = std::io::Cursor::new(&body[..]);
+            let cid = match Cid::read_bytes(&mut cursor) {
+                Ok(cid) => cid,
+                Err(e) => {
+                    yield ImportStatus::Failed { error: anyhow!("malformed cid in CAR: {e}") };
+                    return;
+                }
+            };
+            let data = body[cursor.position() as usize..].to_vec();
+            let block = match make_block(cid, data) {
+                Ok(block) => block,
+                Err(error) => {
+                    yield ImportStatus::Failed { error };
+                    return;
+                }
+            };
+            blocks += 1;
+            bytes += body.len() as u64;
+            batch.push(block);
+            if batch.len() >= IMPORT_BATCH {
+                if let Err(error) = dag.repo.put_blocks(std::mem::take(&mut batch)).await {
+                    yield ImportStatus::Failed { error };
+                    return;
+                }
+                yield ImportStatus::Progress { blocks, bytes };
+            }
+        }
+
+        if !batch.is_empty()
+            && let Err(error) = dag.repo.put_blocks(batch).await
+        {
+            yield ImportStatus::Failed { error };
+            return;
+        }
+
+        if limit != u64::MAX && block_reader.limit() != 0 {
+            yield ImportStatus::Failed {
+                error: anyhow!("CARv2: inner archive shorter than its declared data size"),
+            };
+            return;
+        }
+
+        if pin {
+            for root in &roots {
+                match dag.repo.is_pinned(root).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        if let Err(error) = dag.repo.pin(*root).recursive().local().await {
+                            yield ImportStatus::Failed { error };
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        yield ImportStatus::Failed { error };
+                        return;
+                    }
+                }
+            }
+        }
+
+        yield ImportStatus::Progress { blocks, bytes };
+        yield ImportStatus::Completed { roots, blocks };
+    }
+}
+
+async fn read_car_header<R>(reader: &mut BufReader<R>) -> Result<(Vec<Cid>, u64), Error>
+where
+    R: AsyncRead + Unpin,
+{
+    let header = read_frame(reader, MAX_HEADER_LEN)
         .await?
         .ok_or_else(|| anyhow!("empty CAR: no header"))?;
 
-    let roots = match parse_header(&header)? {
-        Header::V1 { roots } => {
-            read_blocks(&dag, &mut reader).await?;
-            roots
-        }
+    match parse_header(&header)? {
+        Header::V1 { roots } => Ok((roots, u64::MAX)),
         Header::V2Pragma => {
-            // the pragma is a fixed 11 bytes; require it verbatim so the `consumed` offset is exact
             if header != CAR_V2_PRAGMA[1..] {
                 return Err(anyhow!("non-canonical CARv2 pragma"));
             }
-            let v2 = read_exact_vec(&mut reader, V2_HEADER_LEN).await?;
+            let v2 = read_exact_vec(reader, V2_HEADER_LEN).await?;
             let data_offset = u64::from_le_bytes(v2[16..24].try_into().expect("8 bytes"));
             let data_size = u64::from_le_bytes(v2[24..32].try_into().expect("8 bytes"));
             let consumed = (CAR_V2_PRAGMA.len() + V2_HEADER_LEN) as u64;
@@ -271,9 +371,8 @@ where
                     "malformed CARv2: data offset {data_offset} precedes the header"
                 ));
             }
-            skip(&mut reader, data_offset - consumed).await?;
-
-            let mut inner = (&mut reader).take(data_size);
+            skip(reader, data_offset - consumed).await?;
+            let mut inner = (&mut *reader).take(data_size);
             let inner_header = read_frame(&mut inner, MAX_HEADER_LEN)
                 .await?
                 .ok_or_else(|| anyhow!("CARv2: empty inner archive"))?;
@@ -281,47 +380,9 @@ where
                 Header::V1 { roots } => roots,
                 Header::V2Pragma => return Err(anyhow!("nested CARv2 is not supported")),
             };
-            read_blocks(&dag, &mut inner).await?;
-            if inner.limit() != 0 {
-                return Err(anyhow!(
-                    "CARv2: inner archive shorter than its declared data size"
-                ));
-            }
-            roots
-        }
-    };
-
-    if pin {
-        // recursive but local-only: pin exactly what was imported, never fetch missing children.
-        // the guard keeps re-importing the same archive idempotent (a recursive re-pin errors).
-        for root in &roots {
-            if !dag.repo.is_pinned(root).await? {
-                dag.repo.pin(*root).recursive().local().await?;
-            }
+            Ok((roots, inner.limit()))
         }
     }
-
-    Ok(roots)
-}
-
-async fn read_blocks<R>(dag: &IpldDag, reader: &mut R) -> Result<(), Error>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut batch = Vec::with_capacity(IMPORT_BATCH);
-    while let Some(body) = read_frame(reader, MAX_SECTION_LEN).await? {
-        let mut cursor = std::io::Cursor::new(&body[..]);
-        let cid = Cid::read_bytes(&mut cursor).map_err(|e| anyhow!("malformed cid in CAR: {e}"))?;
-        let data = body[cursor.position() as usize..].to_vec();
-        batch.push(make_block(cid, data)?);
-        if batch.len() >= IMPORT_BATCH {
-            dag.repo.put_blocks(std::mem::take(&mut batch)).await?;
-        }
-    }
-    if !batch.is_empty() {
-        dag.repo.put_blocks(batch).await?;
-    }
-    Ok(())
 }
 
 /// Builds a block from a CAR section. Blocks whose multihash this build can recompute are verified
@@ -580,7 +641,7 @@ mod tests {
     async fn import_rejects_a_corrupt_block() {
         let (_repo, dag) = new_dag().await;
         let (root, _) = sample_dag(&dag).await;
-        let mut car = dag.export(root).await.unwrap();
+        let mut car = dag.export(root).await.unwrap().to_vec();
         // flip a byte in the last block's payload so its cid no longer matches its data
         *car.last_mut().unwrap() ^= 0xff;
 
@@ -659,5 +720,45 @@ mod tests {
             .await
             .unwrap();
         assert!(dest_repo.is_pinned(&root).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn import_reports_progress() {
+        let (_repo, dag) = new_dag().await;
+        let mut links = BTreeMap::new();
+        for i in 0..300u32 {
+            let leaf = dag.put_dag(format!("leaf {i}")).await.unwrap();
+            links.insert(format!("l{i:03}"), Ipld::Link(leaf));
+        }
+        let root = dag.put_dag(Ipld::Map(links)).await.unwrap();
+        let car = dag.export(root).await.unwrap();
+
+        let (dest_repo, dest) = new_dag().await;
+        let mut import = dest.import(futures::io::Cursor::new(car));
+        let mut last = 0usize;
+        let mut progress_events = 0usize;
+        let mut completed = None;
+        while let Some(status) = import.next().await {
+            match status {
+                ImportStatus::Progress { blocks, bytes } => {
+                    assert!(blocks >= last);
+                    assert!(bytes > 0);
+                    last = blocks;
+                    progress_events += 1;
+                }
+                ImportStatus::Completed { roots, blocks } => completed = Some((roots, blocks)),
+                ImportStatus::Failed { error } => panic!("import failed: {error}"),
+            }
+        }
+
+        let (roots, blocks) = completed.unwrap();
+        assert_eq!(roots, vec![root]);
+        assert_eq!(blocks, 301);
+        assert_eq!(last, 301);
+        assert!(
+            progress_events >= 2,
+            "batched flush plus a final progress, got {progress_events}"
+        );
+        assert!(dest_repo.contains(&root).await.unwrap());
     }
 }
