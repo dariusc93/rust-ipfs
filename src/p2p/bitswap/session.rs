@@ -15,35 +15,40 @@ use super::wantlist::Wantlist;
 use crate::Block;
 use crate::repo::{DefaultStorage, Repo};
 
+const MAX_INFLIGHT_SERVES: usize = 32;
+
 #[derive(Debug)]
 pub enum PeerSessionEvent {
     /// Deliver this message to the peer through its handler.
     Send(BitswapMessage),
+    Have(Cid),
     /// A wanted block arrived and is stored; the behaviour cancels the want.
     Stored(Cid),
     /// The peer does not have this cid.
     DontHave(Cid),
 }
 
-enum RepoOp {
-    Stored(Cid),
-    Serve {
-        request: BitswapRequest,
-        block: Option<Block>,
-    },
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Ledger {
+    pub blocks_sent: u64,
+    pub bytes_sent: u64,
+    pub blocks_recv: u64,
+    pub bytes_recv: u64,
 }
 
 pub struct PeerSession {
     wantlist: Wantlist,
     repo: Repo<DefaultStorage>,
-    /// cids this peer has signalled HAVE for.
-    has: HashSet<Cid>,
     /// wants already sent to this peer, with the request type last sent.
     sent: HashMap<Cid, RequestType>,
     /// cids this peer has requested from us, with the request type they asked for.
     peer_wants: HashMap<Cid, RequestType>,
     outbound: VecDeque<PeerSessionEvent>,
-    pending: FuturesUnordered<BoxFuture<'static, RepoOp>>,
+    serve_backlog: VecDeque<BitswapRequest>,
+    backlog_set: HashSet<Cid>,
+    serving: FuturesUnordered<BoxFuture<'static, (BitswapRequest, Option<Block>)>>,
+    storing: FuturesUnordered<BoxFuture<'static, Cid>>,
+    ledger: Ledger,
     waker: Option<Waker>,
 }
 
@@ -52,11 +57,14 @@ impl PeerSession {
         let mut session = Self {
             wantlist,
             repo,
-            has: HashSet::new(),
             sent: HashMap::new(),
             peer_wants: HashMap::new(),
             outbound: VecDeque::new(),
-            pending: FuturesUnordered::new(),
+            serve_backlog: VecDeque::new(),
+            backlog_set: HashSet::new(),
+            serving: FuturesUnordered::new(),
+            storing: FuturesUnordered::new(),
+            ledger: Ledger::default(),
             waker: None,
         };
         session.sync();
@@ -66,6 +74,22 @@ impl PeerSession {
     /// cids this peer is currently asking us for.
     pub fn peer_wantlist(&self) -> Vec<Cid> {
         self.peer_wants.keys().copied().collect()
+    }
+
+    pub fn ledger(&self) -> Ledger {
+        self.ledger
+    }
+
+    pub fn request_block(&mut self, cid: Cid) -> Option<BitswapMessage> {
+        if self.sent.get(&cid) == Some(&RequestType::Block) {
+            return None;
+        }
+        self.sent.insert(cid, RequestType::Block);
+        Some(BitswapMessage::new(false).add_request(BitswapRequest::block(cid).send_dont_have(true)))
+    }
+
+    pub fn reset_block(&mut self, cid: Cid) {
+        self.sent.remove(&cid);
     }
 
     fn wake(&mut self) {
@@ -86,11 +110,10 @@ impl PeerSession {
         let mut requests = Vec::new();
 
         for (cid, entry) in &entries {
-            let desired = if self.has.contains(cid) {
-                RequestType::Block
-            } else {
-                entry.want_type
-            };
+            if self.sent.get(cid) == Some(&RequestType::Block) {
+                continue;
+            }
+            let desired = entry.want_type;
             if self.sent.get(cid) == Some(&desired) {
                 continue;
             }
@@ -113,7 +136,6 @@ impl PeerSession {
         for cid in canceled {
             requests.push(BitswapRequest::cancel(cid));
             self.sent.remove(&cid);
-            self.has.remove(&cid);
         }
 
         if !requests.is_empty() {
@@ -131,44 +153,35 @@ impl PeerSession {
                 continue;
             }
             self.peer_wants.insert(cid, request.ty);
-            let repo = self.repo.clone();
-            self.pending.push(
-                async move {
-                    let block = repo.get_block_now(cid).await.ok().flatten();
-                    RepoOp::Serve { request, block }
-                }
-                .boxed(),
-            );
+            self.enqueue_serve(request);
         }
 
         for (cid, response) in message.responses {
             match response {
                 BitswapResponse::Have(true) => {
-                    self.has.insert(cid);
                     self.wantlist.note_have(&cid);
-                    if self.wantlist.contains(&cid)
-                        && self.sent.get(&cid) != Some(&RequestType::Block)
-                    {
-                        self.sent.insert(cid, RequestType::Block);
-                        self.queue(PeerSessionEvent::Send(
-                            BitswapMessage::new(false).add_request(BitswapRequest::block(cid)),
-                        ));
+                    if self.wantlist.contains(&cid) {
+                        self.queue(PeerSessionEvent::Have(cid));
                     }
                 }
                 BitswapResponse::Have(false) => {
-                    self.has.remove(&cid);
+                    self.sent.remove(&cid);
                     self.queue(PeerSessionEvent::DontHave(cid));
                 }
                 BitswapResponse::Block(data) => {
                     self.sent.remove(&cid);
-                    self.has.remove(&cid);
+                    if !self.wantlist.contains(&cid) {
+                        continue;
+                    }
+                    self.ledger.blocks_recv += 1;
+                    self.ledger.bytes_recv += data.len() as u64;
                     match Block::new(cid, data) {
                         Ok(block) => {
                             let repo = self.repo.clone();
-                            self.pending.push(
+                            self.storing.push(
                                 async move {
                                     let _ = repo.put_block(&block).await;
-                                    RepoOp::Stored(cid)
+                                    cid
                                 }
                                 .boxed(),
                             );
@@ -179,7 +192,36 @@ impl PeerSession {
             }
         }
 
+        self.drain_serves();
         self.wake();
+    }
+
+    fn enqueue_serve(&mut self, request: BitswapRequest) {
+        if self.backlog_set.insert(request.cid) {
+            self.serve_backlog.push_back(request);
+        }
+    }
+
+    fn drain_serves(&mut self) {
+        while self.serving.len() < MAX_INFLIGHT_SERVES {
+            let Some(mut request) = self.serve_backlog.pop_front() else {
+                break;
+            };
+            self.backlog_set.remove(&request.cid);
+            let Some(&ty) = self.peer_wants.get(&request.cid) else {
+                continue;
+            };
+            request.ty = ty;
+            let cid = request.cid;
+            let repo = self.repo.clone();
+            self.serving.push(
+                async move {
+                    let block = repo.get_block_now(cid).await.ok().flatten();
+                    (request, block)
+                }
+                .boxed(),
+            );
+        }
     }
 
     /// Re-serve cids this peer previously asked for, now that we may hold them.
@@ -192,15 +234,9 @@ impl PeerSession {
                 RequestType::Have => BitswapRequest::have(*cid),
                 RequestType::Block => BitswapRequest::block(*cid),
             };
-            let repo = self.repo.clone();
-            self.pending.push(
-                async move {
-                    let block = repo.get_block_now(request.cid).await.ok().flatten();
-                    RepoOp::Serve { request, block }
-                }
-                .boxed(),
-            );
+            self.enqueue_serve(request);
         }
+        self.drain_serves();
         self.wake();
     }
 }
@@ -223,15 +259,22 @@ impl Stream for PeerSession {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        while let Poll::Ready(Some(op)) = this.pending.poll_next_unpin(cx) {
-            match op {
-                RepoOp::Stored(cid) => this.outbound.push_back(PeerSessionEvent::Stored(cid)),
-                RepoOp::Serve { request, block } => {
-                    if let Some(message) = serve_response(&request, block) {
-                        this.outbound.push_back(PeerSessionEvent::Send(message));
-                    }
-                }
+        this.drain_serves();
+        while let Poll::Ready(Some((request, block))) = this.serving.poll_next_unpin(cx) {
+            if request.ty == RequestType::Block
+                && let Some(block) = &block
+            {
+                this.ledger.blocks_sent += 1;
+                this.ledger.bytes_sent += block.data().len() as u64;
             }
+            if let Some(message) = serve_response(&request, block) {
+                this.outbound.push_back(PeerSessionEvent::Send(message));
+            }
+            this.drain_serves();
+        }
+
+        while let Poll::Ready(Some(cid)) = this.storing.poll_next_unpin(cx) {
+            this.outbound.push_back(PeerSessionEvent::Stored(cid));
         }
 
         if let Some(event) = this.outbound.pop_front() {

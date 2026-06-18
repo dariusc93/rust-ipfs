@@ -9,7 +9,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt::Debug,
     task::{Context, Poll, Waker},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use connexa::prelude::{
@@ -22,7 +22,8 @@ use connexa::prelude::{
     transport::Endpoint,
     transport::transport::PortUse,
 };
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
+use futures_timer::Delay;
 use ipld_core::cid::Cid;
 
 use pollable_map::stream::StreamMap;
@@ -47,12 +48,22 @@ use crate::repo::Repo;
 
 const CAP_THRESHOLD: usize = 100;
 const DEFAULT_PRIORITY: i32 = 1;
+const BLOCK_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const BLOCK_TIMER_TICK: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 pub enum Event {
     NeedBlock { cid: Cid },
     BlockRetrieved { cid: Cid },
     CancelBlock { cid: Cid },
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BitswapStats {
+    pub blocks_sent: u64,
+    pub bytes_sent: u64,
+    pub blocks_received: u64,
+    pub bytes_received: u64,
 }
 
 pub struct Behaviour {
@@ -63,6 +74,9 @@ pub struct Behaviour {
     wantlist: Wantlist,
     driver: WantlistDriver,
     sessions: StreamMap<PeerId, PeerSession>,
+    candidates: HashMap<Cid, VecDeque<PeerId>>,
+    block_inflight: HashMap<Cid, (PeerId, Instant)>,
+    block_timer: Delay,
     waker: Option<Waker>,
 }
 
@@ -77,6 +91,9 @@ impl Behaviour {
             driver: WantlistDriver::new(wantlist.clone()),
             wantlist,
             sessions: StreamMap::new(),
+            candidates: HashMap::new(),
+            block_inflight: HashMap::new(),
+            block_timer: Delay::new(BLOCK_TIMER_TICK),
             waker: None,
         }
     }
@@ -146,6 +163,8 @@ impl Behaviour {
             return;
         }
 
+        self.candidates.remove(&cid);
+        self.block_inflight.remove(&cid);
         for session in self.sessions.values_mut() {
             session.sync();
         }
@@ -167,6 +186,105 @@ impl Behaviour {
         }
 
         self.wake();
+    }
+
+    pub fn peers(&self) -> Vec<PeerId> {
+        self.sessions.keys().copied().collect()
+    }
+
+    pub fn stats(&self) -> BitswapStats {
+        let mut stats = BitswapStats::default();
+        for session in self.sessions.values() {
+            let ledger = session.ledger();
+            stats.blocks_sent += ledger.blocks_sent;
+            stats.bytes_sent += ledger.bytes_sent;
+            stats.blocks_received += ledger.blocks_recv;
+            stats.bytes_received += ledger.bytes_recv;
+        }
+        stats
+    }
+
+    fn on_have(&mut self, peer: PeerId, cid: Cid) {
+        if !self.wantlist.contains(&cid) {
+            return;
+        }
+        if self.block_inflight.get(&cid).map(|(p, _)| *p) == Some(peer) {
+            return;
+        }
+        let queue = self.candidates.entry(cid).or_default();
+        if !queue.contains(&peer) {
+            queue.push_back(peer);
+        }
+        if !self.block_inflight.contains_key(&cid) {
+            self.choose_block_source(cid);
+        }
+    }
+
+    fn on_dont_have(&mut self, peer: PeerId, cid: Cid) {
+        if let Some(queue) = self.candidates.get_mut(&cid) {
+            queue.retain(|p| *p != peer);
+        }
+        if self.block_inflight.get(&cid).map(|(p, _)| *p) == Some(peer) {
+            self.block_inflight.remove(&cid);
+            self.choose_block_source(cid);
+        }
+    }
+
+    fn choose_block_source(&mut self, cid: Cid) {
+        while let Some(peer) = self.candidates.get_mut(&cid).and_then(|q| q.pop_front()) {
+            let Some(session) = self.sessions.get_mut(&peer) else {
+                continue;
+            };
+            let Some(message) = session.request_block(cid) else {
+                continue;
+            };
+            self.block_inflight.insert(cid, (peer, Instant::now()));
+            self.events.push_back(ToSwarm::NotifyHandler {
+                peer_id: peer,
+                handler: NotifyHandler::Any,
+                event: handler::FromBehaviour::Send(message),
+            });
+            self.wake();
+            return;
+        }
+        self.candidates.remove(&cid);
+        self.block_inflight.remove(&cid);
+        if self.wantlist.contains(&cid) {
+            self.wantlist.rearm_discovery(&cid);
+        }
+    }
+
+    fn failover_stale(&mut self) {
+        let now = Instant::now();
+        let stale: Vec<(Cid, PeerId)> = self
+            .block_inflight
+            .iter()
+            .filter(|(_, (_, requested))| now.duration_since(*requested) >= BLOCK_REQUEST_TIMEOUT)
+            .map(|(cid, (peer, _))| (*cid, *peer))
+            .collect();
+        for (cid, peer) in stale {
+            self.block_inflight.remove(&cid);
+            if let Some(session) = self.sessions.get_mut(&peer) {
+                session.reset_block(cid);
+            }
+            self.choose_block_source(cid);
+        }
+    }
+
+    fn on_peer_gone(&mut self, peer: PeerId) {
+        for queue in self.candidates.values_mut() {
+            queue.retain(|p| *p != peer);
+        }
+        let affected: Vec<Cid> = self
+            .block_inflight
+            .iter()
+            .filter(|(_, (p, _))| *p == peer)
+            .map(|(cid, _)| *cid)
+            .collect();
+        for cid in affected {
+            self.block_inflight.remove(&cid);
+            self.choose_block_source(cid);
+        }
     }
 
     fn wake(&mut self) {
@@ -218,6 +336,7 @@ impl Behaviour {
         if remaining_established == 0 {
             self.sessions.remove(&peer_id);
             self.unsupported.remove(&peer_id);
+            self.on_peer_gone(peer_id);
         }
     }
 }
@@ -284,9 +403,11 @@ impl NetworkBehaviour for Behaviour {
             handler::ToBehaviour::Unsupported => {
                 self.unsupported.insert(peer_id);
                 self.sessions.remove(&peer_id);
+                self.on_peer_gone(peer_id);
             }
             handler::ToBehaviour::Failed => {
                 self.sessions.remove(&peer_id);
+                self.on_peer_gone(peer_id);
             }
         }
     }
@@ -312,6 +433,8 @@ impl NetworkBehaviour for Behaviour {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
                 WantlistEvent::Expired(cid) => {
+                    self.candidates.remove(&cid);
+                    self.block_inflight.remove(&cid);
                     for session in self.sessions.values_mut() {
                         session.sync();
                     }
@@ -334,15 +457,27 @@ impl NetworkBehaviour for Behaviour {
                         event: handler::FromBehaviour::Send(message),
                     });
                 }
+                PeerSessionEvent::Have(cid) => self.on_have(peer_id, cid),
+                PeerSessionEvent::DontHave(cid) => self.on_dont_have(peer_id, cid),
                 PeerSessionEvent::Stored(cid) => {
+                    self.candidates.remove(&cid);
+                    self.block_inflight.remove(&cid);
                     self.wantlist.cancel(&cid);
                     for session in self.sessions.values_mut() {
                         session.sync();
                     }
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
                 }
-                PeerSessionEvent::DontHave(_cid) => {}
             }
+        }
+
+        while let Poll::Ready(()) = self.block_timer.poll_unpin(ctx) {
+            self.block_timer.reset(BLOCK_TIMER_TICK);
+            self.failover_stale();
+        }
+
+        if let Some(event) = self.events.pop_front() {
+            return Poll::Ready(event);
         }
 
         self.waker = Some(ctx.waker().clone());
@@ -751,6 +886,140 @@ mod test {
 
         let list = swarm1.behaviour().bitswap.peer_wantlist(peer2);
         assert_eq!(list[0], cid);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn single_block_fetch_across_seeders() -> anyhow::Result<()> {
+        let (peer_a, addr_a, mut swarm_a, repo_a) = build_swarm().await;
+        let (peer_b, addr_b, mut swarm_b, repo_b) = build_swarm().await;
+        let (_, _, mut swarm_f, repo_f) = build_swarm().await;
+
+        let block = create_block();
+        let cid = *block.cid();
+        repo_a.put_block(&block).await?;
+        repo_b.put_block(&block).await?;
+
+        swarm_f.dial(DialOpts::peer_id(peer_a).addresses(vec![addr_a]).build())?;
+        swarm_f.dial(DialOpts::peer_id(peer_b).addresses(vec![addr_b]).build())?;
+
+        let mut connected = std::collections::HashSet::new();
+        while connected.len() < 2 {
+            tokio::select! {
+                _ = swarm_a.next() => {}
+                _ = swarm_b.next() => {}
+                e = swarm_f.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = e {
+                        connected.insert(peer_id);
+                    }
+                }
+            }
+        }
+
+        swarm_f.behaviour_mut().bitswap.get(&cid, &[], None);
+
+        loop {
+            tokio::select! {
+                _ = swarm_a.next() => {}
+                _ = swarm_b.next() => {}
+                _ = swarm_f.next() => {}
+                Ok(true) = repo_f.contains(&cid) => break,
+            }
+        }
+
+        let settle = tokio::time::sleep(Duration::from_millis(300));
+        tokio::pin!(settle);
+        loop {
+            tokio::select! {
+                _ = swarm_a.next() => {}
+                _ = swarm_b.next() => {}
+                _ = swarm_f.next() => {}
+                _ = &mut settle => break,
+            }
+        }
+
+        let sent = swarm_a.behaviour().bitswap.stats().blocks_sent
+            + swarm_b.behaviour().bitswap.stats().blocks_sent;
+        assert_eq!(sent, 1, "exactly one seeder should send the block");
+        assert_eq!(swarm_f.behaviour().bitswap.stats().blocks_received, 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ledger_counts_transfers() -> anyhow::Result<()> {
+        let (peer_a, addr_a, mut swarm_a, repo_a) = build_swarm().await;
+        let (_, _, mut swarm_f, repo_f) = build_swarm().await;
+
+        let block = create_block();
+        let cid = *block.cid();
+        let len = block.data().len() as u64;
+        repo_a.put_block(&block).await?;
+
+        swarm_f.dial(DialOpts::peer_id(peer_a).addresses(vec![addr_a]).build())?;
+        wait_on_connection(&mut swarm_f, &mut swarm_a, peer_a).await;
+
+        swarm_f.behaviour_mut().bitswap.get(&cid, &[], None);
+
+        loop {
+            tokio::select! {
+                _ = swarm_a.next() => {}
+                _ = swarm_f.next() => {}
+                Ok(true) = repo_f.contains(&cid) => break,
+            }
+        }
+
+        let seeder = swarm_a.behaviour().bitswap.stats();
+        assert_eq!(seeder.blocks_sent, 1);
+        assert_eq!(seeder.bytes_sent, len);
+
+        let fetcher = swarm_f.behaviour().bitswap.stats();
+        assert_eq!(fetcher.blocks_received, 1);
+        assert_eq!(fetcher.bytes_received, len);
+        assert!(!swarm_f.behaviour().bitswap.peers().is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fetch_succeeds_when_one_peer_lacks_block() -> anyhow::Result<()> {
+        let (peer_a, addr_a, mut swarm_a, _repo_a) = build_swarm().await;
+        let (peer_b, addr_b, mut swarm_b, repo_b) = build_swarm().await;
+        let (_, _, mut swarm_f, repo_f) = build_swarm().await;
+
+        let block = create_block();
+        let cid = *block.cid();
+        repo_b.put_block(&block).await?;
+
+        swarm_f.dial(DialOpts::peer_id(peer_a).addresses(vec![addr_a]).build())?;
+        swarm_f.dial(DialOpts::peer_id(peer_b).addresses(vec![addr_b]).build())?;
+
+        let mut connected = std::collections::HashSet::new();
+        while connected.len() < 2 {
+            tokio::select! {
+                _ = swarm_a.next() => {}
+                _ = swarm_b.next() => {}
+                e = swarm_f.select_next_some() => {
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = e {
+                        connected.insert(peer_id);
+                    }
+                }
+            }
+        }
+
+        swarm_f.behaviour_mut().bitswap.get(&cid, &[], None);
+
+        loop {
+            tokio::select! {
+                _ = swarm_a.next() => {}
+                _ = swarm_b.next() => {}
+                _ = swarm_f.next() => {}
+                Ok(true) = repo_f.contains(&cid) => break,
+            }
+        }
+
+        assert_eq!(swarm_b.behaviour().bitswap.stats().blocks_sent, 1);
 
         Ok(())
     }

@@ -82,6 +82,13 @@ impl Wantlist {
         }
     }
 
+    pub fn rearm_discovery(&self, cid: &Cid) {
+        if let Some(entry) = self.inner.write().wants.get_mut(cid) {
+            entry.has_provider = false;
+            entry.last_discovery = None;
+        }
+    }
+
     /// Returns `(cids needing provider discovery, expired cids)`, removing the expired wants and
     /// stamping the discovery time of the returned cids.
     fn poll_due(&self) -> (Vec<Cid>, Vec<Cid>) {
