@@ -779,7 +779,7 @@ dependencies = [
  "pollable-map",
  "rand 0.8.6",
  "rcgen 0.14.8",
- "rlimit",
+ "rlimit 0.10.2",
  "send_wrapper",
  "serde",
  "serde-wasm-bindgen",
@@ -4164,6 +4164,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlimit"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f35ee2729c56bb610f6dba436bf78135f728b7373bdffae2ec815b2d3eb98cc3"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "rtcp"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4244,7 +4253,7 @@ dependencies = [
  "quick-protobuf-codec",
  "rand 0.9.4",
  "rcgen 0.13.2",
- "rlimit",
+ "rlimit 0.11.0",
  "rust-ipns",
  "rust-unixfs",
  "rustyline-async",
