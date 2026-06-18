@@ -91,15 +91,112 @@ pub async fn resolve<'a>(
 }
 
 #[cfg(target_arch = "wasm32")]
+const TXT_RECORD: u16 = 16;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(serde::Deserialize)]
+struct DohResponse {
+    #[serde(rename = "Answer", default)]
+    answer: Vec<DohAnswer>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(serde::Deserialize)]
+struct DohAnswer {
+    #[serde(rename = "type")]
+    kind: u16,
+    data: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unquote(value: &str) -> &str {
+    let value = value.trim();
+    value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .unwrap_or(value)
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn resolve<'a>(
-    _: DnsResolver,
+    resolver: DnsResolver,
     domain: &str,
-    _: impl Iterator<Item = &'a str>,
+    path: impl Iterator<Item = &'a str>,
 ) -> Result<IpfsPath, Error> {
+    use send_wrapper::SendWrapper;
+    use std::str::FromStr;
+
     let span = tracing::trace_span!("dnslink", %domain);
-    async move { anyhow::bail!("failed to resolve {domain}: unimplemented") }
-        .instrument(span)
-        .await
+
+    let endpoint = match resolver {
+        DnsResolver::Google => "https://dns.google/resolve",
+        DnsResolver::Cloudflare | DnsResolver::Local => "https://cloudflare-dns.com/dns-query",
+        DnsResolver::None => {
+            return Err(anyhow::anyhow!("no DNS resolver configured for {domain}"));
+        }
+    };
+
+    let subpath = path.collect::<Vec<_>>();
+
+    let prefixed = (!domain.starts_with("_dnslink.")).then(|| format!("_dnslink.{domain}"));
+    let candidates = std::iter::once(domain.to_string()).chain(prefixed);
+
+    SendWrapper::new(
+        async move {
+            for name in candidates {
+                let url = format!("{endpoint}?name={name}&type=TXT");
+
+                let resp = match gloo_net::http::Request::get(&url)
+                    .header("Accept", "application/dns-json")
+                    .send()
+                    .await
+                {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        tracing::debug!("resolving dnslink of {name:?} failed: {e}");
+                        continue;
+                    }
+                };
+
+                let doh = match resp.json::<DohResponse>().await {
+                    Ok(doh) => doh,
+                    Err(e) => {
+                        tracing::debug!("decoding dnslink of {name:?} failed: {e}");
+                        continue;
+                    }
+                };
+
+                for answer in doh.answer {
+                    if answer.kind != TXT_RECORD {
+                        continue;
+                    }
+
+                    let Some(link) = unquote(&answer.data).strip_prefix("dnslink=") else {
+                        continue;
+                    };
+
+                    let resolved = IpfsPath::from_str(link).and_then(|mut internal_path| {
+                        internal_path
+                            .path
+                            .push_split(subpath.iter().copied())
+                            .map_err(|_| crate::path::IpfsPathError::InvalidPath(link.to_string()))?;
+                        Ok(internal_path)
+                    });
+
+                    if let Ok(resolved) = resolved {
+                        tracing::trace!("dnslink found for {name:?}");
+                        return Ok(resolved);
+                    }
+                }
+
+                tracing::trace!("zero dnslink TXT records found for {name:?}");
+            }
+
+            Err(anyhow::anyhow!("failed to resolve {domain:?}"))
+        }
+        .instrument(span),
+    )
+    .await
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 - feat: rewritten bitswap logic and improve unixfs functionality.
 - feat: Implemented MFS/Files api
 - feat: add CARv1 and CARv2 (read-only) support.
+- feat: implement ipns resolver for wasm32 target.
 
 # 0.15.0
 
