@@ -10,8 +10,8 @@ use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use ipld_core::cid::Cid;
 
-use crate::repo::{DefaultStorage, Repo};
 use crate::Block;
+use crate::repo::{DefaultStorage, Repo};
 
 pub(crate) const WINDOW: usize = 16;
 

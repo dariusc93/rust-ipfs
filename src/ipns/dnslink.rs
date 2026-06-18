@@ -11,8 +11,8 @@ pub async fn resolve<'a>(
     domain: &str,
     mut path: impl Iterator<Item = &'a str>,
 ) -> Result<IpfsPath, Error> {
-    use hickory_resolver::name_server::TokioConnectionProvider;
     use hickory_resolver::Resolver;
+    use hickory_resolver::name_server::TokioConnectionProvider;
     use std::borrow::Cow;
     use std::str::FromStr;
 

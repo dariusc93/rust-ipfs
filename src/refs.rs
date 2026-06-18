@@ -371,7 +371,7 @@ fn dagpb_links(ipld: Ipld) -> Vec<(Option<String>, Cid)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ipld_links, iplds_refs, Edge};
+    use super::{Edge, ipld_links, iplds_refs};
     use crate::{Block, Node};
     use futures::stream::TryStreamExt;
     use hex_literal::hex;

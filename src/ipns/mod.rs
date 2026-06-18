@@ -3,9 +3,9 @@
 use futures_timeout::TimeoutExt;
 use std::borrow::Borrow;
 
+use crate::Ipfs;
 use crate::path::{IpfsPath, PathRoot};
 use crate::repo::DataStore;
-use crate::Ipfs;
 
 #[cfg(feature = "dns")]
 mod dnslink;

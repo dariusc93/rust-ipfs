@@ -1,9 +1,9 @@
 use connexa::prelude::PeerId;
 use either::Either;
 use futures::{
+    FutureExt, Stream, StreamExt,
     future::BoxFuture,
     stream::{BoxStream, FusedStream},
-    FutureExt, Stream, StreamExt,
 };
 use ipld_core::cid::Cid;
 use rust_unixfs::walk::{ContinuedWalk, Walker};
@@ -13,9 +13,9 @@ use std::{task::Poll, time::Duration};
 use tracing::{Instrument, Span};
 
 use crate::{
+    Ipfs, IpfsPath,
     dag::IpldDag,
     repo::{DefaultStorage, Repo},
-    Ipfs, IpfsPath,
 };
 
 #[derive(Debug)]

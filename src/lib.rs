@@ -44,10 +44,10 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use dag::{DagGet, DagPut};
 use futures::{
-    channel::oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
+    StreamExt,
+    channel::oneshot::{self, Sender as OneshotSender, channel as oneshot_channel},
     future::BoxFuture,
     stream::BoxStream,
-    StreamExt,
 };
 
 use p2p::{MultiaddrExt, PeerInfo};
@@ -76,13 +76,13 @@ pub use connexa::prelude::request_response::{
 pub use connexa::prelude::swarm::derive_prelude::{ConnectionId, ListenerId};
 pub use connexa::prelude::swarm::dial_opts::{DialOpts, PeerCondition};
 pub use connexa::prelude::{
-    connection_limits::ConnectionLimits, gossipsub,
-    identify,
-    ping, swarm::{self, NetworkBehaviour}, GossipsubMessage,
-    Stream,
+    ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol, identity::Keypair,
 };
 pub use connexa::prelude::{
-    identity::Keypair, ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol,
+    GossipsubMessage, Stream,
+    connection_limits::ConnectionLimits,
+    gossipsub, identify, ping,
+    swarm::{self, NetworkBehaviour},
 };
 pub use connexa::{behaviour::request_response::RequestResponseConfig, dummy};
 use ipld_core::cid::Cid;

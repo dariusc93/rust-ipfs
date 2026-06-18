@@ -3,13 +3,13 @@ use std::collections::hash_map::Entry;
 use std::time::Duration;
 
 use connexa::prelude::{
+    Multiaddr, PeerId,
     identify::Info,
     swarm::{
-        self, behaviour::ConnectionEstablished, ConnectionClosed, ConnectionDenied, ConnectionId,
-        FromSwarm, NetworkBehaviour, THandler, THandlerInEvent, ToSwarm,
+        self, ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour,
+        THandler, THandlerInEvent, ToSwarm, behaviour::ConnectionEstablished,
     },
-    transport::{transport::PortUse, Endpoint},
-    Multiaddr, PeerId,
+    transport::{Endpoint, transport::PortUse},
 };
 
 use std::collections::{HashMap, VecDeque};

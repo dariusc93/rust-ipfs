@@ -11,9 +11,9 @@ use futures::{FutureExt, Stream, StreamExt};
 use ipld_core::cid::{Cid, Version};
 use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::dir::builder::{BufferingTreeBuilder, TreeOptions};
-use rust_unixfs::dir::{describe, DirLink, NodeDescription};
+use rust_unixfs::dir::{DirLink, NodeDescription, describe};
 use rust_unixfs::file::adder::{
-    build_file_from_leaves, parse_file_branch, rebuild_file_branch, FileAdder, FileBranchLink,
+    FileAdder, FileBranchLink, build_file_from_leaves, parse_file_branch, rebuild_file_branch,
 };
 use rust_unixfs::file::visit::IdleFileVisit;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -1122,7 +1122,7 @@ impl Mfs {
     }
 
     async fn resolve_name(&self, dir_cid: Cid, name: &str) -> Result<Option<Cid>, Error> {
-        use rust_unixfs::dir::{resolve, MaybeResolved};
+        use rust_unixfs::dir::{MaybeResolved, resolve};
 
         let block = self.repo().get_block(dir_cid).await?;
         let mut cache = None;

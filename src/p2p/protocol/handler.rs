@@ -1,10 +1,10 @@
 use connexa::prelude::{
+    StreamProtocol,
     swarm::{
-        handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
-        SupportedProtocols,
+        ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, SupportedProtocols,
+        handler::ConnectionEvent,
     },
     transport::upgrade::DeniedUpgrade,
-    StreamProtocol,
 };
 
 use std::{

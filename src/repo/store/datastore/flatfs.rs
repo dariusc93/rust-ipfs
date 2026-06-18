@@ -3,8 +3,8 @@ use crate::error::Error;
 use crate::repo::paths::{filestem_to_pin_cid, pin_path};
 use crate::repo::{DataStore, PinKind, PinMode, PinModeRequirement, PinStore, References};
 use core::convert::TryFrom;
-use futures::stream::{BoxStream, TryStreamExt};
 use futures::StreamExt;
+use futures::stream::{BoxStream, TryStreamExt};
 use ipld_core::cid::Cid;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -788,7 +788,7 @@ fn sync_write_recursive_pin(
     count: usize,
     cids: impl Iterator<Item = String>,
 ) -> Result<(), Error> {
-    use serde::{ser::SerializeSeq, Serializer};
+    use serde::{Serializer, ser::SerializeSeq};
     use std::io::{BufWriter, Write};
     let writer = BufWriter::new(file);
 
@@ -816,7 +816,7 @@ crate::pinstore_interface_tests!(
 
 #[cfg(test)]
 mod test {
-    use crate::repo::{datastore::flatfs::FsDataStore, DataStore};
+    use crate::repo::{DataStore, datastore::flatfs::FsDataStore};
 
     #[tokio::test]
     async fn test_kv_datastore() -> anyhow::Result<()> {

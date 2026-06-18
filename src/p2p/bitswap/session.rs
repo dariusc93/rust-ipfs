@@ -12,8 +12,8 @@ use ipld_core::cid::Cid;
 
 use super::message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType};
 use super::wantlist::Wantlist;
-use crate::repo::{DefaultStorage, Repo};
 use crate::Block;
+use crate::repo::{DefaultStorage, Repo};
 
 #[derive(Debug)]
 pub enum PeerSessionEvent {

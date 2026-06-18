@@ -1,10 +1,10 @@
 use connexa::prelude::{
+    Multiaddr, PeerId, StreamProtocol,
     swarm::{
         self, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, THandler,
         THandlerInEvent, ToSwarm,
     },
-    transport::{transport::PortUse, Endpoint},
-    Multiaddr, PeerId, StreamProtocol,
+    transport::{Endpoint, transport::PortUse},
 };
 
 use std::convert::Infallible;

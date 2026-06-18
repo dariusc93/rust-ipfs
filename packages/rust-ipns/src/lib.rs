@@ -1,10 +1,9 @@
 use bytes::Bytes;
 use chrono::DateTime;
-use ipld_core::ipld::Ipld;
-use std::collections::BTreeMap;
 use chrono::FixedOffset;
 use chrono::SecondsFormat;
 use chrono::Utc;
+use ipld_core::ipld::Ipld;
 use libp2p_identity::PeerId;
 use libp2p_identity::PublicKey;
 use libp2p_identity::{DecodingError, Keypair, SigningError};
@@ -12,6 +11,7 @@ use quick_protobuf::MessageWrite;
 use quick_protobuf::Writer;
 use quick_protobuf::{BytesReader, MessageRead};
 use serde::{Deserialize, Serialize, Serializer};
+use std::collections::BTreeMap;
 
 mod generate;
 

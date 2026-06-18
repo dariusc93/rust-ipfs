@@ -1,9 +1,9 @@
 //! Storage implementation(s) backing the [`crate::Ipfs`].
-use crate::error::Error;
 use crate::Block;
+use crate::error::Error;
 use connexa::prelude::identity::PeerId;
 use core::fmt::Debug;
-use futures::channel::mpsc::{channel, Receiver, Sender};
+use futures::channel::mpsc::{Receiver, Sender, channel};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
 use futures::stream::{self, BoxStream, FuturesOrdered};
@@ -17,8 +17,8 @@ use std::future::{Future, IntoFuture};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};
@@ -30,7 +30,7 @@ use tracing::{Instrument, Span};
 mod common_tests;
 
 pub use store::{
-    blockstore, datastore, default_impl::keystore::DefaultKeystore, default_impl::DefaultStorage,
+    blockstore, datastore, default_impl::DefaultStorage, default_impl::keystore::DefaultKeystore,
 };
 
 pub mod lock;
@@ -1651,9 +1651,18 @@ mod repo_tests {
 
         // diamond: root -> {a, b}, a -> shared, b -> shared
         let shared = dag_cbor(&Ipld::String("shared".into()));
-        let a = dag_cbor(&Ipld::List(vec![Ipld::Integer(0), Ipld::Link(*shared.cid())]));
-        let b = dag_cbor(&Ipld::List(vec![Ipld::Integer(1), Ipld::Link(*shared.cid())]));
-        let root = dag_cbor(&Ipld::List(vec![Ipld::Link(*a.cid()), Ipld::Link(*b.cid())]));
+        let a = dag_cbor(&Ipld::List(vec![
+            Ipld::Integer(0),
+            Ipld::Link(*shared.cid()),
+        ]));
+        let b = dag_cbor(&Ipld::List(vec![
+            Ipld::Integer(1),
+            Ipld::Link(*shared.cid()),
+        ]));
+        let root = dag_cbor(&Ipld::List(vec![
+            Ipld::Link(*a.cid()),
+            Ipld::Link(*b.cid()),
+        ]));
 
         for blk in [&shared, &a, &b, &root] {
             repo.put_block(blk).await.unwrap();
@@ -1661,7 +1670,11 @@ mod repo_tests {
 
         let removed = repo.remove_block(*root.cid(), true).await.unwrap();
 
-        assert_eq!(removed.len(), 4, "expected root+a+b+shared once: {removed:?}");
+        assert_eq!(
+            removed.len(),
+            4,
+            "expected root+a+b+shared once: {removed:?}"
+        );
         for blk in [&shared, &a, &b, &root] {
             assert!(
                 !repo.contains(blk.cid()).await.unwrap(),
@@ -1691,7 +1704,11 @@ mod repo_tests {
         src.migrate(&dst).await.unwrap();
 
         for blk in [&direct, &leaf, &root] {
-            assert!(dst.contains(blk.cid()).await.unwrap(), "missing block {}", blk.cid());
+            assert!(
+                dst.contains(blk.cid()).await.unwrap(),
+                "missing block {}",
+                blk.cid()
+            );
         }
         assert!(dst.is_pinned(direct.cid()).await.unwrap());
         assert!(dst.is_pinned(root.cid()).await.unwrap());

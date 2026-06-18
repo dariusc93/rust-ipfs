@@ -5,13 +5,13 @@ use futures::StreamExt;
 use futures_timer::Delay;
 
 use connexa::prelude::{
-    swarm::{
-        self, behaviour::ConnectionEstablished, dial_opts::DialOpts, AddressChange,
-        ConnectionClosed, ConnectionDenied, ConnectionId, DialError, DialFailure, FromSwarm,
-        NetworkBehaviour, NewExternalAddrOfPeer, THandler, THandlerInEvent, ToSwarm,
-    },
-    transport::{transport::PortUse, ConnectedPoint, Endpoint},
     Multiaddr, PeerId, Protocol,
+    swarm::{
+        self, AddressChange, ConnectionClosed, ConnectionDenied, ConnectionId, DialError,
+        DialFailure, FromSwarm, NetworkBehaviour, NewExternalAddrOfPeer, THandler, THandlerInEvent,
+        ToSwarm, behaviour::ConnectionEstablished, dial_opts::DialOpts,
+    },
+    transport::{ConnectedPoint, Endpoint, transport::PortUse},
 };
 
 use pollable_map::futures::FutureMap;
@@ -20,7 +20,7 @@ use std::fmt::Debug;
 use std::task::Waker;
 use std::time::Duration;
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     task::{Context, Poll},
 };
 
@@ -453,8 +453,8 @@ mod test {
     use std::time::Duration;
 
     use connexa::prelude::{
-        swarm::{dial_opts::DialOpts, Swarm, SwarmBuilder, SwarmEvent},
         Multiaddr, PeerId,
+        swarm::{Swarm, SwarmBuilder, SwarmEvent, dial_opts::DialOpts},
     };
     use futures::{FutureExt, StreamExt};
 

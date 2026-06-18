@@ -6,21 +6,21 @@ mod session;
 mod wantlist;
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt::Debug,
     task::{Context, Poll, Waker},
     time::Duration,
 };
 
 use connexa::prelude::{
-    swarm::{
-        behaviour::ConnectionEstablished, dial_opts::DialOpts, ConnectionClosed, ConnectionDenied,
-        ConnectionId, FromSwarm, NetworkBehaviour, NotifyHandler, THandler, THandlerInEvent,
-        THandlerOutEvent, ToSwarm,
-    },
-    transport::transport::PortUse,
-    transport::Endpoint,
     Multiaddr, PeerId,
+    swarm::{
+        ConnectionClosed, ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour,
+        NotifyHandler, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
+        behaviour::ConnectionEstablished, dial_opts::DialOpts,
+    },
+    transport::Endpoint,
+    transport::transport::PortUse,
 };
 use futures::StreamExt;
 use ipld_core::cid::Cid;
@@ -31,8 +31,8 @@ mod bitswap_pb {
     pub use super::pb::bitswap_pb::Message;
     pub mod message {
         use super::super::pb::bitswap_pb::mod_Message as message;
-        pub use message::mod_Wantlist as wantlist;
         pub use message::Wantlist;
+        pub use message::mod_Wantlist as wantlist;
         pub use message::{Block, BlockPresence, BlockPresenceType};
     }
 }
@@ -357,20 +357,20 @@ mod test {
 
     use crate::{block::BlockCodec, repo::DefaultStorage};
     use connexa::prelude::{
-        swarm::{dial_opts::DialOpts, NetworkBehaviour, Swarm, SwarmBuilder, SwarmEvent},
+        Multiaddr, PeerId,
+        swarm::{NetworkBehaviour, Swarm, SwarmBuilder, SwarmEvent, dial_opts::DialOpts},
         transport::{
             noise,
             transport::{MemoryTransport, Transport},
             upgrade::Version,
             yamux,
         },
-        Multiaddr, PeerId,
     };
     use futures::StreamExt;
     use ipld_core::cid::Cid;
     use multihash_codetable::{Code, MultihashDigest};
 
-    use crate::{repo::Repo, Block};
+    use crate::{Block, repo::Repo};
 
     fn create_block() -> Block {
         let data = b"hello block\n".to_vec();

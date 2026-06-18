@@ -436,7 +436,13 @@ pub fn rebuild_file_branch(
             file_size: l.blocksize,
         })
         .collect();
-    render_and_hash(&LinkBlock { links: &links, filesize }, config)
+    render_and_hash(
+        &LinkBlock {
+            links: &links,
+            filesize,
+        },
+        config,
+    )
 }
 
 /// Builds a balanced file tree over the given leaf links, returning the root cid, its cumulative
@@ -792,9 +798,7 @@ impl BalancedCollector {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        parse_file_branch, rebuild_file_branch, BalancedCollector, Chunker, FileAdder,
-    };
+    use super::{parse_file_branch, rebuild_file_branch, BalancedCollector, Chunker, FileAdder};
     use crate::test_support::FakeBlockstore;
     use core::convert::TryFrom;
     use hex_literal::hex;

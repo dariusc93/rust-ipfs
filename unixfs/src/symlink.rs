@@ -118,7 +118,8 @@ mod tests {
         use ipld_core::cid::Version;
 
         let md = Metadata::new(Some(0o120777), Some((1_700_000_000, 0)));
-        let (_cid, block) = symlink_block("b", &md, Version::V0, multihash_codetable::Code::Sha2_256);
+        let (_cid, block) =
+            symlink_block("b", &md, Version::V0, multihash_codetable::Code::Sha2_256);
 
         let parsed = crate::pb::FlatUnixFs::try_parse(&block).unwrap();
         assert_eq!(parsed.data.mode, Some(0o120777));

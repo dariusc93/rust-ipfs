@@ -8,21 +8,21 @@ use crate::repo::Repo;
 use crate::{Block, Ipfs};
 use bytes::Bytes;
 use connexa::prelude::PeerId;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use ipld_core::cid::{Cid, Version};
 use ipld_core::codec::Codec;
 use ipld_core::ipld::Ipld;
 use ipld_core::serde::{from_ipld, to_ipld};
 use multihash_codetable::{Code, MultihashDigest};
 use rust_unixfs::{
-    dagpb::{wrap_node_data, NodeData},
+    MaybeResolved,
+    dagpb::{NodeData, wrap_node_data},
     dir::{Cache, ShardedLookup},
     resolve,
-    MaybeResolved,
 };
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::error::Error as StdError;

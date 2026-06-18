@@ -1,7 +1,7 @@
 use rust_ipfs::Ipfs;
 
-use rust_ipfs::builder::IpfsBuilder;
 use rust_ipfs::Keypair;
+use rust_ipfs::builder::IpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

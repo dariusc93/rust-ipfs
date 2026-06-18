@@ -201,9 +201,9 @@ impl ConnectionHandler for Handler {
         }
 
         if let Some(message) = received {
-            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(ToBehaviour::Message(
-                message,
-            )));
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                ToBehaviour::Message(message),
+            ));
         }
 
         Poll::Pending

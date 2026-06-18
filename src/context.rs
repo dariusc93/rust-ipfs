@@ -1,17 +1,17 @@
 use anyhow::anyhow;
 use futures::{
+    FutureExt,
     channel::{
         mpsc::{Receiver, Sender},
         oneshot,
     },
-    FutureExt,
 };
 use pollable_map::optional::Optional;
 
-use crate::{p2p, p2p::MultiaddrExt, Channel};
+use crate::{Channel, p2p, p2p::MultiaddrExt};
 
 use crate::repo::{Repo, RepoEvent};
-use crate::{config::BOOTSTRAP_NODES, IpfsEvent};
+use crate::{IpfsEvent, config::BOOTSTRAP_NODES};
 
 use ipld_core::cid::Cid;
 use std::collections::{HashMap, HashSet};
@@ -19,8 +19,8 @@ use std::fmt::Debug;
 
 use crate::repo::DefaultStorage;
 
-use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use connexa::behaviour::Behaviour as ConnexaBehaviour;
+use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use connexa::prelude::identify::Info;
 use connexa::prelude::swarm::{NetworkBehaviour, Swarm};
 use connexa::prelude::{Multiaddr, PeerId};

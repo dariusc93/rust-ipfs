@@ -12,9 +12,9 @@ use ipld_core::cid::Cid;
 
 use connexa::prelude::dht::Record;
 use connexa::prelude::identity::{Keypair, PublicKey};
-use connexa::prelude::swarm::behaviour::toggle::Toggle;
 use connexa::prelude::swarm::NetworkBehaviour;
-use connexa::prelude::{identify, relay, Multiaddr, PeerId};
+use connexa::prelude::swarm::behaviour::toggle::Toggle;
+use connexa::prelude::{Multiaddr, PeerId, identify, relay};
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 use std::time::Duration;

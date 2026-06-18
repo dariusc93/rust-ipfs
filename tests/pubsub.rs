@@ -1,5 +1,5 @@
-use connexa::prelude::gossipsub::{IdentTopic, IntoGossipsubTopic, TopicHash};
 use connexa::prelude::GossipsubEvent;
+use connexa::prelude::gossipsub::{IdentTopic, IntoGossipsubTopic, TopicHash};
 use futures::future::pending;
 use futures::stream::{BoxStream, StreamExt};
 use futures::{Stream, TryFutureExt};
@@ -10,7 +10,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 mod common;
-use common::{spawn_nodes, Topology};
+use common::{Topology, spawn_nodes};
 
 #[tokio::test]
 async fn subscribe_only_once() {
@@ -383,7 +383,7 @@ impl Stream for PubsubStream {
                             data: message.data.to_vec(),
                             sequence_number: message.sequence_number,
                             topic: self.topic.clone(),
-                        }))
+                        }));
                     }
                     _ => continue,
                 },
@@ -392,4 +392,3 @@ impl Stream for PubsubStream {
         }
     }
 }
-

@@ -1,5 +1,5 @@
 mod common;
-use common::{spawn_nodes, Topology};
+use common::{Topology, spawn_nodes};
 
 // these tests are here instead of being under common/mod.rs so that they wont be executed as part
 // of every `test/` case which includes `mod common;`.

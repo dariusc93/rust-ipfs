@@ -44,9 +44,7 @@ impl Wantlist {
             want_type,
             priority,
             deadline: timeout.map(|d| now + d),
-            discovery_interval: timeout
-                .map(|d| d / 2)
-                .unwrap_or(DEFAULT_DISCOVERY_INTERVAL),
+            discovery_interval: timeout.map(|d| d / 2).unwrap_or(DEFAULT_DISCOVERY_INTERVAL),
             last_discovery: None,
             has_provider: false,
         });
@@ -147,7 +145,8 @@ impl Stream for WantlistDriver {
         while let Poll::Ready(()) = this.tick.poll_unpin(cx) {
             this.tick.reset(TICK);
             let (need, expired) = this.wantlist.poll_due();
-            this.queue.extend(expired.into_iter().map(WantlistEvent::Expired));
+            this.queue
+                .extend(expired.into_iter().map(WantlistEvent::Expired));
             this.queue
                 .extend(need.into_iter().map(WantlistEvent::NeedProviders));
             if let Some(event) = this.queue.pop_front() {

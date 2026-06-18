@@ -1,22 +1,22 @@
 //! P2P handling for IPFS nodes.
 
+use crate::IpfsOptions;
 use crate::repo::DefaultStorage;
 use crate::repo::Repo;
-use crate::IpfsOptions;
 use connexa::behaviour::peer_store::store::memory::MemoryStore;
 
 pub use behaviour::Behaviour;
 pub use behaviour::IdentifyConfiguration;
 pub use behaviour::{RateLimit, RelayConfig};
+use connexa::prelude::Multiaddr;
+use connexa::prelude::PeerId;
+use connexa::prelude::StreamProtocol;
 use connexa::prelude::gossipsub::ValidationMode;
 use connexa::prelude::identify::Info as IdentifyInfo;
 use connexa::prelude::identity::Keypair;
 use connexa::prelude::identity::PublicKey;
 use connexa::prelude::swarm::NetworkBehaviour;
 use connexa::prelude::swarm::Swarm;
-use connexa::prelude::Multiaddr;
-use connexa::prelude::PeerId;
-use connexa::prelude::StreamProtocol;
 
 pub(crate) mod addr;
 pub(crate) mod addressbook;

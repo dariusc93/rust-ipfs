@@ -64,4 +64,3 @@ impl MessageWrite for NamedLeafAsPBLink<'_> {
         Ok(())
     }
 }
-

@@ -1,21 +1,21 @@
 use std::task::{Context, Poll};
 
 use crate::{
-    repo::{DefaultStorage, Repo},
     Block,
+    repo::{DefaultStorage, Repo},
 };
 use bytes::Bytes;
 use either::Either;
 #[allow(unused_imports)]
 use futures::{
+    FutureExt, Stream, StreamExt, TryFutureExt,
     future::BoxFuture,
     stream::{BoxStream, FusedStream},
-    FutureExt, Stream, StreamExt, TryFutureExt,
 };
 use ipld_core::cid::Version;
 use multihash_codetable::Code;
-use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 use rust_unixfs::Metadata;
+use rust_unixfs::file::adder::{Chunker, FileAdderBuilder};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::pin::Pin;

@@ -4,8 +4,8 @@ use clap::Parser;
 use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{Ipfs, Multiaddr};
 
-use rust_ipfs::builder::IpfsBuilder;
 use rust_ipfs::Keypair;
+use rust_ipfs::builder::IpfsBuilder;
 
 #[derive(Debug, Parser)]
 #[clap(name = "relay-client")]

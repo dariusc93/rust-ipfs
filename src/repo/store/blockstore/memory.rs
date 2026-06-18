@@ -1,9 +1,9 @@
 //! Volatile memory backed repo
+use crate::Block;
 use crate::error::Error;
 use crate::repo::{BlockPut, BlockStore};
-use crate::Block;
-use futures::stream::{self, BoxStream};
 use futures::StreamExt;
+use futures::stream::{self, BoxStream};
 use ipld_core::cid::Cid;
 use tokio::sync::RwLock;
 
@@ -150,8 +150,8 @@ impl BlockStore for MemBlockStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::BlockCodec;
     use crate::Block;
+    use crate::block::BlockCodec;
     use multihash_codetable::{Code, MultihashDigest};
 
     #[tokio::test]

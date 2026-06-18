@@ -1,9 +1,9 @@
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use ipld_core::ipld;
-    use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
     use rust_ipfs::Ipfs;
     use rust_ipfs::IpfsPath;
+    use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
     // tracing_subscriber::fmt::init();
 
     // Initialize the repo and start a daemon

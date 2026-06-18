@@ -8,7 +8,7 @@ async fn main() -> anyhow::Result<()> {
     use clap::Parser;
     use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
     use rand::RngCore;
-    use rust_ipfs::{builder::DefaultIpfsBuilder as IpfsBuilder, p2p::MultiaddrExt, Ipfs, Keypair};
+    use rust_ipfs::{Ipfs, Keypair, builder::DefaultIpfsBuilder as IpfsBuilder, p2p::MultiaddrExt};
 
     #[derive(Debug, Parser)]
     #[clap(name = "stream")]

@@ -1,6 +1,6 @@
 use futures::TryFutureExt;
-use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::Multiaddr;
+use rust_ipfs::p2p::MultiaddrExt;
 
 #[tokio::test]
 async fn multiple_consecutive_ephemeral_listening_addresses() {

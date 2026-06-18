@@ -1,7 +1,7 @@
+use crate::Block;
 use crate::error::Error;
 use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
-use crate::Block;
 use futures::stream::{self, BoxStream};
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use ipld_core::cid::Cid;
@@ -329,8 +329,8 @@ fn write_block(target_path: &std::path::Path, data: &[u8]) -> Result<BlockPut, s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::BlockCodec;
     use crate::Block;
+    use crate::block::BlockCodec;
     use hex_literal::hex;
     use ipld_core::cid::Cid;
     use multihash_codetable::{Code, MultihashDigest};

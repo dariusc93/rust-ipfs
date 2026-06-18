@@ -9,9 +9,9 @@ async fn main() -> anyhow::Result<()> {
     use std::str::FromStr;
 
     use clap::Parser;
-    use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
     use rust_ipfs::Ipfs;
     use rust_ipfs::IpfsPath;
+    use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 
     tracing_subscriber::fmt::init();
 

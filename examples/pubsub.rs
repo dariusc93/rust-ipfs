@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::{FutureExt, StreamExt};
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair, Multiaddr};
+use rust_ipfs::{Ipfs, Keypair, Multiaddr, builder::IpfsBuilder};
 
 use connexa::prelude::{ConnexaSwarmEvent, GossipsubEvent};
 use pollable_map::stream::StreamMap;

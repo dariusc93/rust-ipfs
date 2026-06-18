@@ -1,5 +1,5 @@
-use rust_ipfs::unixfs::ll::file::adder::Chunker;
 use rust_ipfs::Node;
+use rust_ipfs::unixfs::ll::file::adder::Chunker;
 
 /// Deterministic, non-repeating payload so a wrong-order reassembly is detectable.
 fn payload(len: usize) -> Vec<u8> {
@@ -85,15 +85,19 @@ async fn ls_roundtrip_multiblock() {
 
 #[tokio::test]
 async fn ls_lists_only_current_directory() {
-    use rust_ipfs::unixfs::ll::dir::builder::{BufferingTreeBuilder, TreeOptions};
     use rust_ipfs::Block;
+    use rust_ipfs::unixfs::ll::dir::builder::{BufferingTreeBuilder, TreeOptions};
 
     let node = Node::new("ls_lists_only_current_directory").await;
 
     let top = payload(40_000);
     let nested = payload(2_000);
     let nested_len = nested.len() as u64;
-    let top_cid = *add_multiblock(&node, &top).await.root().cid().expect("ipld root");
+    let top_cid = *add_multiblock(&node, &top)
+        .await
+        .root()
+        .cid()
+        .expect("ipld root");
     let nested_cid = *node
         .add_unixfs(nested)
         .await
@@ -140,7 +144,10 @@ async fn ls_lists_only_current_directory() {
         })
         .collect();
 
-    assert!(files.iter().any(|f| f.ends_with("a.txt")), "files: {files:?}");
+    assert!(
+        files.iter().any(|f| f.ends_with("a.txt")),
+        "files: {files:?}"
+    );
     assert!(dirs.iter().any(|d| d.ends_with("sub")), "dirs: {dirs:?}");
     // The nested file lives under sub/ so a shallow ls of the root must not surface it.
     assert!(

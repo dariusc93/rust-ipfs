@@ -4,7 +4,7 @@ use std::task::{Context, Poll};
 use connexa::prelude::transport::upgrade::DeniedUpgrade;
 
 use connexa::prelude::swarm::{
-    handler::ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
+    ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol, handler::ConnectionEvent,
 };
 
 #[derive(Default, Debug)]

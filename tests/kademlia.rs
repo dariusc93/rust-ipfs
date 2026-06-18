@@ -1,12 +1,12 @@
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use ipld_core::cid::Cid;
 use multihash_codetable::{Code, MultihashDigest};
-use rust_ipfs::{p2p::MultiaddrExt, Block, Multiaddr, Node, Protocol, Quorum};
+use rust_ipfs::{Block, Multiaddr, Node, Protocol, Quorum, p2p::MultiaddrExt};
 
 use std::time::Duration;
 
 mod common;
-use common::{spawn_nodes, Topology};
+use common::{Topology, spawn_nodes};
 use rust_ipfs::block::BlockCodec;
 
 fn strip_peer_id(mut addr: Multiaddr) -> Multiaddr {
