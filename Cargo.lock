@@ -1617,10 +1617,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "wasip2",
  "wasip3",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2795,7 +2797,7 @@ dependencies = [
  "env_logger",
  "futures",
  "futures-timer",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "libp2p",
  "rand 0.9.4",
  "tokio",
@@ -4235,7 +4237,7 @@ dependencies = [
  "futures",
  "futures-timeout",
  "futures-timer",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "hex-literal",
  "hickory-resolver",
  "idb",
@@ -4285,7 +4287,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "ipld-core",
  "libp2p-identity",
  "multihash",
