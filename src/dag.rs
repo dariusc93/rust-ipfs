@@ -32,6 +32,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
+pub mod car;
+
 #[derive(Debug, Error)]
 pub enum ResolveError {
     /// Loading of the block on the path failed

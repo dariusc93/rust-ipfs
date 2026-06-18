@@ -3,6 +3,7 @@
 - update to connexa 0.5.
 - feat: rewritten bitswap logic and improve unixfs functionality.
 - feat: Implemented MFS/Files api
+- feat: add CARv1 and CARv2 (read-only) support.
 
 # 0.15.0
 
