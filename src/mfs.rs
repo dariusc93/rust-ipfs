@@ -56,6 +56,8 @@ pub struct MfsEntry {
     pub name: String,
     pub cid: Cid,
     pub kind: MfsKind,
+    /// Logical size: file size for files, cumulative dag size for directories.
+    pub size: u64,
 }
 
 /// The result of `stat`.
@@ -65,6 +67,28 @@ pub struct MfsStat {
     pub kind: MfsKind,
     /// Logical size: file size for files, cumulative dag size (link Tsize) for directories.
     pub size: u64,
+    /// Total size of the entry's whole dag, including all descendant blocks.
+    pub cumulative_size: u64,
+    /// Number of links in the entry's root node.
+    pub blocks: usize,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MfsError {
+    #[error("'{0}' does not exist")]
+    NotFound(String),
+    #[error("'{0}' is a directory")]
+    IsDirectory(String),
+    #[error("'{0}' already exists")]
+    AlreadyExists(String),
+    #[error("'{0}' is a non-empty directory; pass recursive")]
+    NotEmpty(String),
+    #[error("'{0}' is a symlink")]
+    IsSymlink(String),
+    #[error("the write would exceed the MFS file size limit")]
+    FileSizeLimit,
+    #[error("the root directory cannot be modified")]
+    RootImmutable,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -219,19 +243,19 @@ impl Mfs {
     ) -> Result<(), Error> {
         let comps = split_path(path)?;
         if comps.is_empty() {
-            return Err(anyhow!("cannot write to the root directory"));
+            return Err(MfsError::RootImmutable.into());
         }
 
         let new_size = opts.offset.saturating_add(data.len() as u64);
         if new_size > MAX_FILE_SIZE {
-            return Err(anyhow!("write would exceed the MFS file size limit"));
+            return Err(MfsError::FileSizeLimit.into());
         }
 
         let mut guard = self.repo().inner.mfs_root.lock().await;
 
         let existing = self.resolve_file_locked(&mut guard, &comps).await?;
         if existing.is_none() && !opts.create {
-            return Err(anyhow!("'{path}' does not exist; pass create"));
+            return Err(MfsError::NotFound(path.to_string()).into());
         }
 
         if let Some((cid, tsize, filesize)) = existing
@@ -310,17 +334,17 @@ impl Mfs {
     pub async fn truncate(&self, path: &str, size: u64) -> Result<(), Error> {
         let comps = split_path(path)?;
         if comps.is_empty() {
-            return Err(anyhow!("cannot truncate the root directory"));
+            return Err(MfsError::RootImmutable.into());
         }
         if size > MAX_FILE_SIZE {
-            return Err(anyhow!("truncate would exceed the MFS file size limit"));
+            return Err(MfsError::FileSizeLimit.into());
         }
 
         let mut guard = self.repo().inner.mfs_root.lock().await;
         let (file_cid, _, filesize) = self
             .resolve_file_locked(&mut guard, &comps)
             .await?
-            .ok_or_else(|| anyhow!("'{path}' does not exist"))?;
+            .ok_or_else(|| MfsError::NotFound(path.to_string()))?;
         if size == filesize {
             return Ok(());
         }
@@ -476,9 +500,7 @@ impl Mfs {
                     offset += consumed;
                     written += consumed as u64;
                     if written > MAX_FILE_SIZE {
-                        yield WriteStatus::Failed {
-                            error: anyhow!("write would exceed the MFS file size limit"),
-                        };
+                        yield WriteStatus::Failed { error: MfsError::FileSizeLimit.into() };
                         return;
                     }
                 }
@@ -524,7 +546,17 @@ impl Mfs {
 
     /// Reads the whole content of the file at `path`.
     pub async fn read(&self, path: &str) -> Result<Vec<u8>, Error> {
-        let stream = self.read_stream(path);
+        self.read_range(path, 0, None).await
+    }
+
+    /// Reads `count` bytes (or to EOF if `None`) of the file at `path`, starting at `offset`.
+    pub async fn read_range(
+        &self,
+        path: &str,
+        offset: u64,
+        count: Option<u64>,
+    ) -> Result<Vec<u8>, Error> {
+        let stream = self.read_stream_range(path, offset, count);
         futures::pin_mut!(stream);
         let mut out = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -535,8 +567,20 @@ impl Mfs {
 
     /// Streams the content of the file at `path` as it is read, without buffering the whole file.
     pub fn read_stream(&self, path: &str) -> impl Stream<Item = Result<Bytes, Error>> {
+        self.read_stream_range(path, 0, None)
+    }
+
+    /// Streams `count` bytes (or to EOF if `None`) of the file at `path`, starting at `offset`,
+    /// reading only the blocks that overlap the range.
+    pub fn read_stream_range(
+        &self,
+        path: &str,
+        offset: u64,
+        count: Option<u64>,
+    ) -> impl Stream<Item = Result<Bytes, Error>> {
         let mfs = self.clone();
         let path = path.to_string();
+        let end = count.map_or(u64::MAX, |c| offset.saturating_add(c));
 
         async_stream::try_stream! {
             let comps = split_path(&path)?;
@@ -555,15 +599,27 @@ impl Mfs {
             let block = mfs.get_block(&cid).await?;
             match describe(block.data()) {
                 NodeDescription::Directory { .. } | NodeDescription::HamtShard { .. } => {
-                    Err::<(), _>(anyhow!("'{path}' is a directory"))?;
+                    Err::<(), _>(MfsError::IsDirectory(path.clone()))?;
+                }
+                NodeDescription::Symlink => {
+                    Err::<(), _>(MfsError::IsSymlink(path.clone()))?;
                 }
                 NodeDescription::Other => {
-                    yield Bytes::copy_from_slice(block.data());
+                    let leaf = block.data();
+                    let start = (offset as usize).min(leaf.len());
+                    let stop = match count {
+                        Some(c) => start.saturating_add(c as usize).min(leaf.len()),
+                        None => leaf.len(),
+                    };
+                    if start < stop {
+                        yield Bytes::copy_from_slice(&leaf[start..stop]);
+                    }
                 }
                 _ => {
                     let mut cache = None;
-                    let (content, _, _, mut step) =
-                        IdleFileVisit::default().start(block.data())?;
+                    let (content, _, _, mut step) = IdleFileVisit::default()
+                        .with_target_range(offset..end)
+                        .start(block.data())?;
                     if !content.is_empty() {
                         yield Bytes::copy_from_slice(content);
                     }
@@ -645,26 +701,38 @@ impl Mfs {
 
     /// Removes the entry at `path`. A non-empty directory requires `recursive`.
     pub async fn rm(&self, path: &str, recursive: bool) -> Result<(), Error> {
+        self.rm_inner(path, recursive, false).await
+    }
+
+    /// Removes the entry at `path` if present, succeeding when it is already absent.
+    pub async fn rm_force(&self, path: &str, recursive: bool) -> Result<(), Error> {
+        self.rm_inner(path, recursive, true).await
+    }
+
+    async fn rm_inner(&self, path: &str, recursive: bool, force: bool) -> Result<(), Error> {
         let comps = split_path(path)?;
         let Some((name, dirs)) = comps.split_last() else {
-            return Err(anyhow!("cannot remove the root directory"));
+            return Err(MfsError::RootImmutable.into());
         };
 
         let mut guard = self.repo().inner.mfs_root.lock().await;
-        let (mut frames, names) = self.load_chain(&mut guard, dirs, false).await?;
+        let (mut frames, names) = match self.load_chain(&mut guard, dirs, false).await {
+            Ok(chain) => chain,
+            Err(e) if force && is_not_found(&e) => return Ok(()),
+            Err(e) => return Err(e),
+        };
 
-        let entry = frames
-            .last()
-            .expect("root frame")
-            .get(name)
-            .copied()
-            .ok_or_else(|| anyhow!("path not found: {path}"))?;
+        let entry = match frames.last().expect("root frame").get(name).copied() {
+            Some(entry) => entry,
+            None if force => return Ok(()),
+            None => return Err(MfsError::NotFound(path.to_string()).into()),
+        };
 
         if !recursive
             && let Ok(map) = self.load_dir(&entry.cid).await
             && !map.is_empty()
         {
-            return Err(anyhow!("'{path}' is a non-empty directory; pass recursive"));
+            return Err(MfsError::NotEmpty(path.to_string()).into());
         }
 
         frames.last_mut().expect("root frame").remove(name);
@@ -690,7 +758,8 @@ impl Mfs {
             self.resolve(&from_comps).await?
         };
 
-        self.set_entry(to, DirEntry { cid, tsize }, Vec::new(), parents, false)
+        let (dest, _) = self.resolve_dest(to, from).await?;
+        self.set_entry(&dest, DirEntry { cid, tsize }, Vec::new(), parents, false)
             .await
     }
 
@@ -699,16 +768,31 @@ impl Mfs {
     pub async fn mv(&self, from: &str, to: &str, parents: bool) -> Result<(), Error> {
         let from_comps = split_path(from)?;
         if from_comps.is_empty() {
-            return Err(anyhow!("cannot move the root directory"));
+            return Err(MfsError::RootImmutable.into());
         }
         let (cid, tsize) = self.resolve(&from_comps).await?;
+        let (dest, into_dir) = self.resolve_dest(to, from).await?;
+        let dest_comps = split_path(&dest)?;
+        if dest_comps == from_comps {
+            return Ok(());
+        }
+        if dest_comps.len() > from_comps.len() && dest_comps[..from_comps.len()] == from_comps[..] {
+            return Err(anyhow!("cannot move '{from}' into its own subdirectory"));
+        }
         // link at the destination first (safe to fail), then unlink the source
-        self.set_entry(to, DirEntry { cid, tsize }, Vec::new(), parents, true)
-            .await?;
+        self.set_entry(
+            &dest,
+            DirEntry { cid, tsize },
+            Vec::new(),
+            parents,
+            !into_dir,
+        )
+        .await?;
         self.rm(from, true).await
     }
 
-    /// Lists the immediate entries of the directory at `path` (`/` for the root).
+    /// Lists the immediate entries of the directory at `path` (`/` for the root). A file path lists
+    /// the single file itself, matching `ipfs files ls`.
     pub async fn ls(&self, path: &str) -> Result<Vec<MfsEntry>, Error> {
         let comps = split_path(path)?;
         let Some(root) = self.snapshot_root().await? else {
@@ -719,8 +803,27 @@ impl Mfs {
         };
 
         let _gc = self.repo().gc_guard().await;
-        let (cid, _) = self.resolve_from(root, &comps).await?;
-        let map = self.load_dir(&cid).await?;
+        let (cid, tsize) = self.resolve_from(root, &comps).await?;
+        let block = self.get_block(&cid).await?;
+
+        let map = match describe(block.data()) {
+            NodeDescription::Directory { links } => links_to_map(links),
+            NodeDescription::HamtShard { links } => {
+                let mut map = DirMap::new();
+                self.collect_shard(links, &mut map).await?;
+                map
+            }
+            _ => {
+                let name = comps.last().cloned().unwrap_or_default();
+                let kind = self.classify(&cid, tsize).await?;
+                return Ok(vec![MfsEntry {
+                    name,
+                    cid,
+                    kind,
+                    size: entry_size(kind, tsize),
+                }]);
+            }
+        };
 
         let mut out = Vec::with_capacity(map.len());
         for (name, entry) in map {
@@ -729,6 +832,7 @@ impl Mfs {
                 name,
                 cid: entry.cid,
                 kind,
+                size: entry_size(kind, entry.tsize),
             });
         }
         Ok(out)
@@ -744,6 +848,8 @@ impl Mfs {
                     cid,
                     kind: MfsKind::Directory,
                     size: tsize,
+                    cumulative_size: tsize,
+                    blocks: 0,
                 });
             }
             return Err(anyhow!("MFS is empty"));
@@ -751,15 +857,74 @@ impl Mfs {
 
         let _gc = self.repo().gc_guard().await;
         let (cid, tsize) = self.resolve_from(root, &comps).await?;
-        let kind = self.classify(&cid, tsize).await?;
-        let size = match kind {
-            MfsKind::File { size } => size,
-            MfsKind::Directory | MfsKind::Symlink => tsize,
+        let block = self.get_block(&cid).await?;
+        let (kind, blocks, link_tsize) = match describe(block.data()) {
+            NodeDescription::Directory { links } | NodeDescription::HamtShard { links } => {
+                let sum = links.iter().map(|l| l.tsize).sum();
+                (MfsKind::Directory, links.len(), sum)
+            }
+            NodeDescription::Symlink => (MfsKind::Symlink, 0, 0),
+            NodeDescription::File { size } => (
+                MfsKind::File { size },
+                parse_file_branch(block.data()).map_or(0, |b| b.links.len()),
+                0,
+            ),
+            NodeDescription::Other => (
+                MfsKind::File {
+                    size: block.data().len() as u64,
+                },
+                0,
+                0,
+            ),
         };
-        Ok(MfsStat { cid, kind, size })
+
+        // the root carries no parent link, so reconstruct its Tsize the way a parent would store
+        // it (block + summed child Tsizes), consistent with what every non-root dir reports
+        let cumulative_size = if comps.is_empty() {
+            block.data().len() as u64 + link_tsize
+        } else {
+            tsize
+        };
+        Ok(MfsStat {
+            cid,
+            kind,
+            size: entry_size(kind, cumulative_size),
+            cumulative_size,
+            blocks,
+        })
     }
 
-    // --- internals -------------------------------------------------------------------------------
+    /// Returns whether anything exists at `path`.
+    pub async fn exists(&self, path: &str) -> Result<bool, Error> {
+        let comps = split_path(path)?;
+        Ok(self.resolve_kind(&comps).await?.is_some())
+    }
+
+    /// Resolves a path to its kind, or `None` if nothing is there. The root is always a directory.
+    async fn resolve_kind(&self, comps: &[String]) -> Result<Option<MfsKind>, Error> {
+        let Some(root) = self.snapshot_root().await? else {
+            return Ok(comps.is_empty().then_some(MfsKind::Directory));
+        };
+        let _gc = self.repo().gc_guard().await;
+        match self.resolve_from(root, comps).await {
+            Ok((cid, tsize)) => Ok(Some(self.classify(&cid, tsize).await?)),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Resolves the destination path for `cp`/`mv`. When `to` ends in `/` or names an existing
+    /// directory, the source basename is appended (so `cp /a/f /dir` lands at `/dir/f`).
+    async fn resolve_dest(&self, to: &str, source: &str) -> Result<(String, bool), Error> {
+        let trailing = to.ends_with('/');
+        let mut comps = split_path(to)?;
+        let into_dir =
+            trailing || matches!(self.resolve_kind(&comps).await?, Some(MfsKind::Directory));
+        if into_dir {
+            let name = base_name(source).ok_or_else(|| anyhow!("cp/mv source has no name"))?;
+            comps.push(name.to_string());
+        }
+        Ok((format!("/{}", comps.join("/")), into_dir))
+    }
 
     /// Loads the current root Cid, reading the datastore on first access. The cache distinguishes
     /// "not loaded yet" (`bool == false`) from "loaded, no root" (`None`).
@@ -807,14 +972,14 @@ impl Mfs {
     ) -> Result<(), Error> {
         let comps = split_path(path)?;
         let Some((name, dirs)) = comps.split_last() else {
-            return Err(anyhow!("cannot replace the root directory"));
+            return Err(MfsError::RootImmutable.into());
         };
 
         let (mut frames, names) = self.load_chain(guard, dirs, parents).await?;
 
         let parent = frames.last_mut().expect("root frame");
         if !overwrite && parent.contains_key(name) {
-            return Err(anyhow!("'{path}' already exists"));
+            return Err(MfsError::AlreadyExists(path.to_string()).into());
         }
         parent.insert(name.clone(), entry);
 
@@ -843,7 +1008,7 @@ impl Mfs {
             let next = match frames.last().expect("non-empty").get(comp).copied() {
                 Some(entry) => self.load_dir(&entry.cid).await?,
                 None if create => DirMap::new(),
-                None => return Err(anyhow!("directory '{comp}' does not exist")),
+                None => return Err(MfsError::NotFound(comp.clone()).into()),
             };
             names.push(comp.clone());
             frames.push(next);
@@ -1049,8 +1214,10 @@ impl Mfs {
         };
         match self.classify(&cid, tsize).await? {
             MfsKind::File { size } => Ok(Some((cid, tsize, size))),
-            MfsKind::Symlink => Ok(Some((cid, tsize, 0))),
-            MfsKind::Directory => Err(anyhow!("path is a directory")),
+            MfsKind::Symlink => Err(MfsError::IsSymlink(format!("/{}", comps.join("/"))).into()),
+            MfsKind::Directory => {
+                Err(MfsError::IsDirectory(format!("/{}", comps.join("/"))).into())
+            }
         }
     }
 
@@ -1275,8 +1442,14 @@ impl Mfs {
             Ok(resolved) => resolved,
             Err(_) => return Ok(None),
         };
-        if matches!(self.classify(&cid, tsize).await?, MfsKind::Directory) {
-            return Err(anyhow!("path is a directory"));
+        match self.classify(&cid, tsize).await? {
+            MfsKind::Directory => {
+                return Err(MfsError::IsDirectory(format!("/{}", comps.join("/"))).into());
+            }
+            MfsKind::Symlink => {
+                return Err(MfsError::IsSymlink(format!("/{}", comps.join("/"))).into());
+            }
+            MfsKind::File { .. } => {}
         }
         Ok(Some(self.read_file(&cid).await?))
     }
@@ -1326,6 +1499,23 @@ fn split_path(path: &str) -> Result<Vec<String>, Error> {
         }
     }
     Ok(comps)
+}
+
+/// The logical size reported for a listing/stat entry: a file's own size, else the cumulative size.
+fn entry_size(kind: MfsKind, cumulative: u64) -> u64 {
+    match kind {
+        MfsKind::File { size } => size,
+        MfsKind::Directory | MfsKind::Symlink => cumulative,
+    }
+}
+
+/// The last non-empty path segment, mirroring `path.Base` (works for MFS and `/ipfs` paths).
+fn base_name(path: &str) -> Option<&str> {
+    path.rsplit('/').find(|s| !s.is_empty())
+}
+
+fn is_not_found(err: &Error) -> bool {
+    matches!(err.downcast_ref::<MfsError>(), Some(MfsError::NotFound(_)))
 }
 
 fn is_shard_prefix(name: &str) -> bool {
@@ -1808,10 +1998,11 @@ mod tests {
         }
         assert!(saw_total);
 
-        assert!(mfs
-            .write_from_file("/x", file.join("missing"), false)
-            .await
-            .is_err());
+        assert!(
+            mfs.write_from_file("/x", file.join("missing"), false)
+                .await
+                .is_err()
+        );
 
         std::fs::remove_file(&file).ok();
     }
@@ -2201,5 +2392,386 @@ mod tests {
         let entries = reopened.ls("/").await.unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "keep");
+    }
+
+    #[tokio::test]
+    async fn read_range_partial() {
+        let mfs = mfs().await;
+        let content = fill(600_000, 41);
+        mfs.write("/f", &content, true).await.unwrap();
+
+        assert_eq!(
+            mfs.read_range("/f", 100, Some(50)).await.unwrap(),
+            content[100..150]
+        );
+        assert_eq!(
+            mfs.read_range("/f", 261_000, Some(2000)).await.unwrap(),
+            content[261_000..263_000],
+            "range crossing a chunk boundary"
+        );
+        assert_eq!(
+            mfs.read_range("/f", 590_000, None).await.unwrap(),
+            content[590_000..]
+        );
+        assert_eq!(mfs.read_range("/f", 0, None).await.unwrap(), content);
+        assert_eq!(
+            mfs.read_range("/f", 599_990, Some(1000)).await.unwrap(),
+            content[599_990..],
+            "count past EOF clamps"
+        );
+        assert!(
+            mfs.read_range("/f", 600_000, Some(10))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            mfs.read_range("/f", 10_000_000, Some(5))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        mfs.write("/s", b"hello", true).await.unwrap();
+        assert_eq!(mfs.read_range("/s", 1, Some(3)).await.unwrap(), b"ell");
+        assert_eq!(mfs.read_range("/s", 2, None).await.unwrap(), b"llo");
+        assert!(mfs.read_range("/s", 9, Some(1)).await.unwrap().is_empty());
+
+        let stream = mfs.read_stream_range("/f", 1000, Some(500));
+        futures::pin_mut!(stream);
+        let mut out = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            out.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(out, content[1000..1500]);
+    }
+
+    #[tokio::test]
+    async fn cp_mv_into_existing_directory() {
+        let mfs = mfs().await;
+        mfs.write("/src/file.txt", b"hi", true).await.unwrap();
+
+        mfs.mkdir("/dst", false).await.unwrap();
+        mfs.cp("/src/file.txt", "/dst", false).await.unwrap();
+        assert_eq!(mfs.read("/dst/file.txt").await.unwrap(), b"hi");
+
+        mfs.mkdir("/d2", false).await.unwrap();
+        mfs.cp("/src/file.txt", "/d2/", false).await.unwrap();
+        assert_eq!(
+            mfs.read("/d2/file.txt").await.unwrap(),
+            b"hi",
+            "trailing slash targets the dir"
+        );
+
+        mfs.mkdir("/dst3", false).await.unwrap();
+        mfs.mv("/src/file.txt", "/dst3", false).await.unwrap();
+        assert_eq!(mfs.read("/dst3/file.txt").await.unwrap(), b"hi");
+        assert!(!mfs.exists("/src/file.txt").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn cp_onto_existing_errors_mv_replaces() {
+        let mfs = mfs().await;
+        mfs.write("/a.txt", b"aaa", true).await.unwrap();
+        mfs.write("/b.txt", b"bbb", true).await.unwrap();
+
+        let err = mfs.cp("/a.txt", "/b.txt", false).await.unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<MfsError>(),
+            Some(MfsError::AlreadyExists(_))
+        ));
+        assert_eq!(mfs.read("/b.txt").await.unwrap(), b"bbb");
+
+        mfs.mv("/a.txt", "/b.txt", false).await.unwrap();
+        assert_eq!(mfs.read("/b.txt").await.unwrap(), b"aaa");
+        assert!(!mfs.exists("/a.txt").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn mv_self_and_descendant_are_guarded() {
+        let mfs = mfs().await;
+        mfs.write("/d/f.txt", b"data", true).await.unwrap();
+
+        mfs.mv("/d/f.txt", "/d/f.txt", false).await.unwrap();
+        assert_eq!(
+            mfs.read("/d/f.txt").await.unwrap(),
+            b"data",
+            "self-move must not destroy"
+        );
+
+        mfs.mv("/d/f.txt", "/d", false).await.unwrap();
+        assert_eq!(
+            mfs.read("/d/f.txt").await.unwrap(),
+            b"data",
+            "move into own parent is a no-op"
+        );
+
+        mfs.mkdir("/d/sub", true).await.unwrap();
+        assert!(
+            mfs.mv("/d", "/d/sub/inner", false).await.is_err(),
+            "into own descendant"
+        );
+        assert_eq!(
+            mfs.read("/d/f.txt").await.unwrap(),
+            b"data",
+            "subtree preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn rm_force_is_idempotent() {
+        let mfs = mfs().await;
+        mfs.write("/x.txt", b"x", true).await.unwrap();
+
+        mfs.rm_force("/x.txt", false).await.unwrap();
+        assert!(!mfs.exists("/x.txt").await.unwrap());
+        mfs.rm_force("/x.txt", false).await.unwrap();
+        mfs.rm_force("/never/existed", false).await.unwrap();
+        assert!(
+            mfs.rm("/x.txt", false).await.is_err(),
+            "plain rm still errors on missing"
+        );
+
+        mfs.write("/dir/child", b"c", true).await.unwrap();
+        assert!(
+            mfs.rm_force("/dir", false).await.is_err(),
+            "non-empty still needs recursive"
+        );
+        mfs.rm_force("/dir", true).await.unwrap();
+        assert!(!mfs.exists("/dir").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn ls_on_file_lists_itself() {
+        let mfs = mfs().await;
+        mfs.write("/docs/f.txt", b"hello", true).await.unwrap();
+
+        let entries = mfs.ls("/docs/f.txt").await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "f.txt");
+        assert_eq!(entries[0].kind, MfsKind::File { size: 5 });
+        assert_eq!(entries[0].size, 5);
+    }
+
+    #[tokio::test]
+    async fn exists_reports_presence() {
+        let mfs = mfs().await;
+        mfs.mkdir("/a/b", true).await.unwrap();
+        mfs.write("/a/f.txt", b"x", true).await.unwrap();
+
+        assert!(mfs.exists("/").await.unwrap());
+        assert!(mfs.exists("/a").await.unwrap());
+        assert!(mfs.exists("/a/b").await.unwrap());
+        assert!(mfs.exists("/a/f.txt").await.unwrap());
+        assert!(!mfs.exists("/a/nope").await.unwrap());
+        assert!(!mfs.exists("/nope/deep").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn stat_reports_cumulative_and_blocks() {
+        let mfs = mfs().await;
+        let content = fill(600_000, 51);
+        mfs.write("/big.bin", &content, true).await.unwrap();
+
+        let root = mfs.stat("/").await.unwrap();
+        assert_eq!(root.kind, MfsKind::Directory);
+        assert!(root.size > 0, "root size must reflect its contents, not 0");
+        assert_eq!(root.size, root.cumulative_size);
+
+        let st = mfs.stat("/big.bin").await.unwrap();
+        assert_eq!(st.kind, MfsKind::File { size: 600_000 });
+        assert!(st.cumulative_size > st.size, "dag carries link overhead");
+        assert!(
+            st.blocks > 1,
+            "a multiblock file has multiple leaf links, got {}",
+            st.blocks
+        );
+
+        mfs.write("/s", b"hi", true).await.unwrap();
+        assert_eq!(
+            mfs.stat("/s").await.unwrap().blocks,
+            0,
+            "a raw leaf has no links"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_stream_error_mid_stream_leaves_path_untouched() {
+        use futures::StreamExt as _;
+        let mfs = mfs().await;
+
+        let chunks: Vec<std::io::Result<bytes::Bytes>> = vec![
+            Ok(bytes::Bytes::from_static(b"good")),
+            Err(std::io::Error::other("boom")),
+        ];
+        let mut write = mfs.write_stream("/partial", futures::stream::iter(chunks), false);
+        let mut failed = 0;
+        let mut completed = false;
+        while let Some(status) = write.next().await {
+            match status {
+                WriteStatus::Failed { .. } => failed += 1,
+                WriteStatus::Completed { .. } => completed = true,
+                WriteStatus::Progress { .. } => {}
+            }
+        }
+        assert_eq!(failed, 1);
+        assert!(!completed);
+        assert!(
+            !mfs.exists("/partial").await.unwrap(),
+            "failed write must not create the path"
+        );
+
+        let chunks2: Vec<std::io::Result<bytes::Bytes>> = vec![
+            Ok(bytes::Bytes::from_static(b"x")),
+            Err(std::io::Error::other("boom")),
+        ];
+        assert!(
+            mfs.write_stream("/partial2", futures::stream::iter(chunks2), false)
+                .await
+                .is_err()
+        );
+        assert!(!mfs.exists("/partial2").await.unwrap());
+    }
+
+    fn encode_file_bf(data: &[u8], bf: usize) -> (Cid, Vec<Block>) {
+        use rust_unixfs::file::adder::BalancedCollector;
+        let mut adder = FileAdder::builder()
+            .with_cid_version(VERSION)
+            .with_hasher(HASHER)
+            .with_collector(BalancedCollector::with_branching_factor(bf))
+            .build();
+        let mut blocks = Vec::new();
+        let mut root = None;
+        let mut off = 0;
+        while off < data.len() {
+            let (ready, consumed) = adder.push(&data[off..]);
+            for (cid, block) in ready {
+                root = Some(cid);
+                blocks.push(Block::new(cid, block).unwrap());
+            }
+            off += consumed;
+        }
+        for (cid, block) in adder.finish() {
+            root = Some(cid);
+            blocks.push(Block::new(cid, block).unwrap());
+        }
+        (root.unwrap(), blocks)
+    }
+
+    #[tokio::test]
+    async fn deep_tree_editor_overwrites_and_grows() {
+        let repo = Repo::new_memory();
+        repo.init().await.unwrap();
+        let mfs = Mfs::new(repo.clone());
+
+        let bf = 4;
+        let content = fill(20 * CHUNK as usize, 31);
+        let (root, blocks) = encode_file_bf(&content, bf);
+        repo.put_blocks(blocks).await.unwrap();
+        mfs.cp(&format!("/ipfs/{root}"), "/deep", true)
+            .await
+            .unwrap();
+
+        let block = mfs.get_block(&root).await.unwrap();
+        let branch = parse_file_branch(block.data()).expect("root is a file branch");
+        let child = mfs.get_block(&branch.links[0].cid).await.unwrap();
+        assert!(
+            parse_file_branch(child.data()).is_some(),
+            "tree must be deeper than two levels to exercise the recursive editor"
+        );
+
+        let patch = b"DEEP-OVERWRITE-PATCH";
+        let off = 7 * CHUNK as usize + 100;
+        mfs.write_with(
+            "/deep",
+            patch,
+            WriteOptions {
+                offset: off as u64,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let mut expected = content.clone();
+        expected[off..off + patch.len()].copy_from_slice(patch);
+        let (exp_root, _) = encode_file_bf(&expected, bf);
+        assert_eq!(
+            mfs.stat("/deep").await.unwrap().cid,
+            exp_root,
+            "overwrite preserves the deep structure canonically"
+        );
+        assert_eq!(mfs.read("/deep").await.unwrap(), expected);
+
+        let app = fill(50_000, 32);
+        mfs.write_with(
+            "/deep",
+            &app,
+            WriteOptions {
+                offset: expected.len() as u64,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        expected.extend_from_slice(&app);
+        assert_canonical(&mfs, "/deep", &expected).await;
+    }
+
+    #[tokio::test]
+    async fn mv_into_dir_does_not_clobber_colliding_entry() {
+        let mfs = mfs().await;
+        mfs.write("/a/x/keep", b"src", true).await.unwrap();
+        mfs.write("/b/x/old", b"victim", true).await.unwrap();
+
+        let err = mfs.mv("/a/x", "/b", false).await.unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<MfsError>(),
+            Some(MfsError::AlreadyExists(_))
+        ));
+        assert_eq!(
+            mfs.read("/b/x/old").await.unwrap(),
+            b"victim",
+            "destination subtree survives"
+        );
+        assert_eq!(
+            mfs.read("/a/x/keep").await.unwrap(),
+            b"src",
+            "source preserved on failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn mv_missing_source_errors() {
+        let mfs = mfs().await;
+        mfs.mkdir("/d", false).await.unwrap();
+        assert!(
+            mfs.mv("/d/missing", "/d", false).await.is_err(),
+            "no false success via no-op guard"
+        );
+        assert!(mfs.mv("/nope", "/nope", false).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rm_force_propagates_structural_errors() {
+        let mfs = mfs().await;
+        mfs.write("/a", b"file", true).await.unwrap();
+        // /a is a file, so /a/b treats a file as an intermediate directory, a real error, not absence
+        assert!(mfs.rm_force("/a/b", false).await.is_err());
+        assert_eq!(mfs.read("/a").await.unwrap(), b"file");
+    }
+
+    #[tokio::test]
+    async fn root_cumulative_size_is_monotonic() {
+        let mfs = mfs().await;
+        let big = fill(600_000, 61);
+        mfs.write("/dir/a", &big, true).await.unwrap();
+        mfs.cp("/dir/a", "/dir/b", false).await.unwrap();
+
+        let root = mfs.stat("/").await.unwrap().cumulative_size;
+        let dir = mfs.stat("/dir").await.unwrap().cumulative_size;
+        assert!(
+            root >= dir,
+            "root cumulative {root} must be >= its child dir {dir}"
+        );
     }
 }
