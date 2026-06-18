@@ -1,17 +1,14 @@
 use futures::StreamExt;
-use rust_ipfs::Ipfs;
 use rust_ipfs::builder::DefaultIpfsBuilder;
 use rust_ipfs::mfs::{MfsKind, WriteOptions};
 use rust_ipfs::unixfs::UnixfsStatus;
+use rust_ipfs::Ipfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let ipfs: Ipfs = DefaultIpfsBuilder::new()
-        .enable_memory_transport()
-        .start()
-        .await?;
+    let ipfs: Ipfs = DefaultIpfsBuilder::new().start().await?;
 
     let mfs = ipfs.mfs();
 
