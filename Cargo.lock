@@ -4275,7 +4275,6 @@ dependencies = [
  "indexmap",
  "ipld-core",
  "ipld-dagpb",
- "libp2p-relay-manager",
  "multibase",
  "multihash",
  "multihash-codetable",

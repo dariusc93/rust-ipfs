@@ -241,13 +241,6 @@ enum IpfsEvent {
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(Channel<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
-
-    AddRelay(PeerId, Multiaddr, Channel<()>),
-    RemoveRelay(PeerId, Multiaddr, Channel<()>),
-    EnableRelay(Option<PeerId>, Channel<()>),
-    DisableRelay(PeerId, Channel<()>),
-    ListRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
-    ListActiveRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1068,97 +1061,49 @@ impl Ipfs {
             .map_err(Into::into)
     }
 
-    /// Add relay address
-    pub async fn add_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::AddRelay(peer_id, addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    /// Add static relay peer
+    pub async fn add_static_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<bool, Error> {
+        self.connexa
+            .relay()
+            .add_static_relay(peer_id, addr)
+            .await
+            .map_err(Into::into)
     }
 
-    /// Remove relay address
-    pub async fn remove_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::RemoveRelay(peer_id, addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    /// Remove static relay peer
+    pub async fn remove_static_relay(&self, peer_id: PeerId) -> Result<bool, Error> {
+        self.connexa
+            .relay()
+            .remove_static_relay(peer_id)
+            .await
+            .map_err(Into::into)
     }
 
-    /// List all relays. if `active` is true, it will list all active relays
-    pub async fn list_relays(&self, active: bool) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            match active {
-                true => {
-                    self.connexa
-                        .send_custom_event(IpfsEvent::ListActiveRelays(tx))
-                        .await?
-                }
-                false => {
-                    self.connexa
-                        .send_custom_event(IpfsEvent::ListRelays(tx))
-                        .await?
-                }
-            };
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    /// List all static relays.
+    pub async fn list_static_relays(&self) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
+        self.connexa
+            .relay()
+            .list_static_relays()
+            .await
+            .map_err(Into::into)
     }
 
+    /// Enables autorelay
     pub async fn enable_autorelay(&self) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
+        self.connexa
+            .relay()
+            .enable_auto_relay()
+            .await
+            .map_err(Into::into)
     }
 
+    /// Disables autorelay
     pub async fn disable_autorelay(&self) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
-    }
-
-    /// Enable use of a relay. If `peer_id` is `None`, it will select a relay at random to use, if one have been added
-    pub async fn enable_relay(&self, peer_id: impl Into<Option<PeerId>>) -> Result<(), Error> {
-        async move {
-            let peer_id = peer_id.into();
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::EnableRelay(peer_id, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Disable the use of a selected relay.
-    pub async fn disable_relay(&self, peer_id: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::DisableRelay(peer_id, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .relay()
+            .enable_auto_relay()
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn rendezvous_register_namespace(

@@ -1,19 +1,18 @@
 use crate::context::IpfsContext;
 use crate::p2p::{
-    AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig, TSwarm,
-    create_create_behaviour,
+    create_create_behaviour, AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig,
+    TSwarm,
 };
 use crate::repo::{DefaultKeystore, DefaultStorage, GCConfig, GCTrigger, Repo};
 use crate::{
-    ConnectionLimits, FDLimit, Ipfs, IpfsEvent, IpfsOptions, Keypair, Multiaddr, NetworkBehaviour,
-    RecordKey, RepoProvider, TSwarmEvent, TSwarmEventFn, context, ipns_to_dht_key, p2p, to_dht_key,
+    context, ipns_to_dht_key, p2p, to_dht_key, ConnectionLimits, FDLimit, Ipfs, IpfsEvent,
+    IpfsOptions, Keypair, Multiaddr, NetworkBehaviour, RecordKey, RepoProvider, TSwarmEvent, TSwarmEventFn,
 };
 use anyhow::Error;
 use async_rt::AbortableJoinHandle;
 use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use connexa::behaviour::request_response::RequestResponseConfig;
 use connexa::builder::{ConnexaBuilder, FileDescLimit, IntoKeypair};
-use connexa::dummy;
 use connexa::keystore::Keychain;
 use connexa::prelude::identify::Event;
 use connexa::prelude::swarm::SwarmEvent;
@@ -21,7 +20,8 @@ use connexa::prelude::swarm::SwarmEvent;
 #[cfg(feature = "pnet")]
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
-use futures::{StreamExt, TryStreamExt, stream::FuturesUnordered};
+use connexa::{behaviour, dummy};
+use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use ipld_core::cid::Cid;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::Infallible;
@@ -191,6 +191,21 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 self.init = self.init.with_dcutr();
             }
         }
+        self
+    }
+
+    /// Enable autorelay
+    pub fn with_autorelay(mut self) -> Self {
+        self.init = self.init.with_autorelay();
+        self
+    }
+
+    /// Enable autorelay with configuration option
+    pub fn with_autorelay_with_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(behaviour::autorelay::Config) -> behaviour::autorelay::Config + 'static,
+    {
+        self.init = self.init.with_autorelay_with_config(f);
         self
     }
 

@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::{FutureExt, StreamExt};
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{Ipfs, Keypair, Multiaddr, builder::IpfsBuilder};
+use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair, Multiaddr};
 
 use connexa::prelude::{ConnexaSwarmEvent, GossipsubEvent};
 use pollable_map::stream::StreamMap;
@@ -59,6 +59,8 @@ async fn main() -> anyhow::Result<()> {
             }
         })
         .with_default()
+        .with_relay(true)
+        .with_autorelay()
         .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?);
 
@@ -78,28 +80,11 @@ async fn main() -> anyhow::Result<()> {
 
     if opt.bootstrap {
         ipfs.default_bootstrap().await?;
-        if let Err(_e) = ipfs.bootstrap().await {}
     }
 
     let cancel = Arc::new(Notify::new());
     if opt.use_relay {
-        let bootstrap_nodes = ipfs.get_bootstraps().await.expect("Bootstrap exist");
-        let addrs = opt
-            .relay_addrs
-            .iter()
-            .chain(bootstrap_nodes.iter())
-            .cloned();
-
-        for mut addr in addrs {
-            let peer_id = addr
-                .extract_peer_id()
-                .expect("Bootstrap to contain peer id");
-            ipfs.add_relay(peer_id, addr).await?;
-        }
-
-        if let Err(e) = ipfs.enable_relay(None).await {
-            writeln!(stdout, "> Error selecting a relay: {e}")?;
-        }
+        ipfs.enable_autorelay().await?;
     }
 
     let mut st = ipfs.connection_events().await?;

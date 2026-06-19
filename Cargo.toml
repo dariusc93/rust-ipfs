@@ -108,7 +108,6 @@ futures.workspace = true
 indexmap.workspace = true
 ipld-core.workspace = true
 ipld-dagpb.workspace = true
-libp2p-relay-manager = { workspace = true }
 multibase.workspace = true
 multihash.workspace = true
 multihash-codetable.workspace = true
