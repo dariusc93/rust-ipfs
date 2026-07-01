@@ -12,9 +12,9 @@ use ipld_core::cid::Cid;
 
 use connexa::prelude::dht::Record;
 use connexa::prelude::identity::{Keypair, PublicKey};
-use connexa::prelude::swarm::NetworkBehaviour;
 use connexa::prelude::swarm::behaviour::toggle::Toggle;
-use connexa::prelude::{Multiaddr, PeerId, identify, relay};
+use connexa::prelude::swarm::NetworkBehaviour;
+use connexa::prelude::{identify, relay, Multiaddr, PeerId};
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -28,9 +28,6 @@ where
     <C as NetworkBehaviour>::ToSwarm: Debug + Send,
 {
     pub addressbook: addressbook::Behaviour,
-
-    // networking
-    pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
 
     pub bitswap: Toggle<super::bitswap::Behaviour>,
 
@@ -239,11 +236,6 @@ where
             .then(|| super::bitswap::Behaviour::new(repo))
             .into();
 
-        let relay_manager = protocols
-            .relay
-            .then(|| libp2p_relay_manager::Behaviour::default())
-            .into();
-
         let peerbook = peerbook::Behaviour::default();
 
         let addressbook = addressbook::Behaviour::with_config(options.addr_config);
@@ -253,7 +245,6 @@ where
 
         let mut behaviour = Behaviour {
             bitswap,
-            relay_manager,
             peerbook,
             addressbook,
             protocol,
