@@ -236,7 +236,7 @@ where
 
         let bitswap = protocols
             .bitswap
-            .then(|| super::bitswap::Behaviour::new(repo))
+            .then(|| super::bitswap::Behaviour::new(repo, super::bitswap::Config::default()))
             .into();
 
         let relay_manager = protocols
