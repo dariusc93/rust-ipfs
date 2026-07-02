@@ -15,8 +15,8 @@ use parking_lot::Mutex;
 
 use super::message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType};
 use super::wantlist::Wantlist;
-use crate::Block;
 use crate::repo::{DefaultStorage, Repo};
+use crate::Block;
 
 const MAX_INFLIGHT_SERVES: usize = 32;
 const SERVE_BATCH_LIMIT: usize = 1 << 20;
@@ -175,7 +175,9 @@ impl PeerSession {
             return None;
         }
         self.sent.insert(cid, RequestType::Block);
-        Some(BitswapMessage::new(false).add_request(BitswapRequest::block(cid).send_dont_have(true)))
+        Some(
+            BitswapMessage::new(false).add_request(BitswapRequest::block(cid).send_dont_have(true)),
+        )
     }
 
     pub fn reset_block(&mut self, cid: Cid) {
@@ -196,7 +198,7 @@ impl PeerSession {
     /// Reconcile what we have sent this peer against the shared wantlist, queueing wants and cancels.
     pub fn sync(&mut self) {
         let entries = self.wantlist.entries();
-        let wanted: HashSet<Cid> = entries.iter().map(|(cid, _)| *cid).collect();
+        let wanted: HashSet<_> = entries.iter().map(|(cid, _)| *cid).collect();
         let mut requests = Vec::new();
 
         for (cid, entry) in &entries {
@@ -239,6 +241,21 @@ impl PeerSession {
     }
 
     pub fn on_message(&mut self, message: BitswapMessage) {
+        if message.full {
+            let keep: HashSet<_> = message
+                .requests
+                .iter()
+                .filter(|request| !request.cancel)
+                .map(|request| request.cid)
+                .collect();
+            self.peer_wants.retain(|cid, _| keep.contains(cid));
+            self.backlog_set.retain(|cid| keep.contains(cid));
+            self.serve_backlog = std::mem::take(&mut self.serve_backlog)
+                .into_iter()
+                .filter(|queued| keep.contains(&queued.request.cid))
+                .collect();
+        }
+
         for request in message.requests {
             let cid = request.cid;
             if request.cancel {
@@ -339,7 +356,10 @@ impl PeerSession {
     }
 }
 
-fn serve_response(request: &BitswapRequest, block: Option<Block>) -> Option<(Cid, BitswapResponse)> {
+fn serve_response(
+    request: &BitswapRequest,
+    block: Option<Block>,
+) -> Option<(Cid, BitswapResponse)> {
     let response = match (request.ty, block) {
         (RequestType::Have, Some(_)) => BitswapResponse::Have(true),
         (RequestType::Block, Some(block)) => {
@@ -467,7 +487,9 @@ mod tests {
         for i in 0..8u32 {
             let data = format!("batch block {i}").into_bytes();
             let cid = Cid::new_v1(0x55, Code::Sha2_256.digest(&data));
-            repo.put_block(&Block::new_unchecked(cid, data)).await.unwrap();
+            repo.put_block(&Block::new_unchecked(cid, data))
+                .await
+                .unwrap();
             cids.push(cid);
         }
 
@@ -485,7 +507,10 @@ mod tests {
             }
         }
         assert_eq!(served, 8, "all requested blocks served");
-        assert!(messages < 8, "serves should coalesce, got {messages} messages");
+        assert!(
+            messages < 8,
+            "serves should coalesce, got {messages} messages"
+        );
     }
 
     #[test]
@@ -530,7 +555,9 @@ mod tests {
         for i in 0..8u32 {
             let data = format!("cap block {i}").into_bytes();
             let cid = Cid::new_v1(0x55, Code::Sha2_256.digest(&data));
-            repo.put_block(&Block::new_unchecked(cid, data)).await.unwrap();
+            repo.put_block(&Block::new_unchecked(cid, data))
+                .await
+                .unwrap();
             cids.push(cid);
         }
 
@@ -551,7 +578,11 @@ mod tests {
                 _ => break,
             }
         }
-        assert_eq!(served.len(), 8, "all blocks served even under a serve budget of 1");
+        assert_eq!(
+            served.len(),
+            8,
+            "all blocks served even under a serve budget of 1"
+        );
     }
 
     #[test]
@@ -575,6 +606,31 @@ mod tests {
             popped,
             vec![(10, 2), (5, 0), (5, 3), (1, 1)],
             "highest priority admitted first, FIFO (lowest seq) among equal priority"
+        );
+    }
+
+    #[test]
+    fn full_wantlist_prunes_withdrawn_wants() {
+        let repo = Repo::new_memory();
+        let mut session = PeerSession::new(Wantlist::default(), repo, ServeBudget::new(1024));
+        let x = Cid::new_v1(0x55, Code::Sha2_256.digest(b"full x"));
+        let y = Cid::new_v1(0x55, Code::Sha2_256.digest(b"full y"));
+
+        session.on_message(
+            BitswapMessage::new(false)
+                .set_requests(vec![BitswapRequest::block(x), BitswapRequest::block(y)]),
+        );
+        let mut before = session.peer_wantlist();
+        before.sort();
+        let mut expected = vec![x, y];
+        expected.sort();
+        assert_eq!(before, expected, "both wants recorded");
+
+        session.on_message(BitswapMessage::new(true).set_requests(vec![BitswapRequest::block(x)]));
+        assert_eq!(
+            session.peer_wantlist(),
+            vec![x],
+            "a full wantlist prunes the withdrawn want"
         );
     }
 }
