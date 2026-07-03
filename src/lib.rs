@@ -127,6 +127,8 @@ struct IpfsOptions {
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
+    pub bitswap_config: Box<dyn Fn(p2p::bitswap::Config) -> p2p::bitswap::Config>,
+
     /// Address book configuration
     pub addr_config: AddressBookConfig,
 
@@ -172,6 +174,7 @@ impl Default for IpfsOptions {
             #[cfg(target_arch = "wasm32")]
             namespace: None,
             bootstrap: Default::default(),
+            bitswap_config: Box::new(|config| config),
             addr_config: Default::default(),
             provider: Default::default(),
             listening_addrs: vec![],
