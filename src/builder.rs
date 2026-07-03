@@ -36,6 +36,7 @@ use tracing_futures::Instrument;
 pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
     init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore, DefaultKeystore>,
     options: IpfsOptions,
+
     repo_handle: Repo<DefaultStorage>,
     swarm_event: Option<TSwarmEventFn<C>>,
     record_key_validator:
@@ -171,6 +172,16 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     /// Enables bitswap
     pub fn with_bitswap(mut self) -> Self {
         self.options.protocols.bitswap = true;
+        self
+    }
+
+    /// Enables bitswap with explicit configuration
+    pub fn with_bitswap_config<F>(mut self, f: F) -> Self
+    where
+        F: Fn(p2p::bitswap::Config) -> p2p::bitswap::Config + 'static,
+    {
+        self.options.protocols.bitswap = true;
+        self.options.bitswap_config = Box::new(f);
         self
     }
 

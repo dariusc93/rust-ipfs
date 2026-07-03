@@ -5,6 +5,7 @@
 - feat: Implemented MFS/Files api
 - feat: add CARv1 and CARv2 (read-only) support.
 - feat: implement ipns resolver for wasm32 target.
+- chore: implement some bitswap optimizations.
 
 # 0.15.0
 

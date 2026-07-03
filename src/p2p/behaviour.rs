@@ -12,9 +12,9 @@ use ipld_core::cid::Cid;
 
 use connexa::prelude::dht::Record;
 use connexa::prelude::identity::{Keypair, PublicKey};
-use connexa::prelude::swarm::NetworkBehaviour;
 use connexa::prelude::swarm::behaviour::toggle::Toggle;
-use connexa::prelude::{Multiaddr, PeerId, identify, relay};
+use connexa::prelude::swarm::NetworkBehaviour;
+use connexa::prelude::{identify, relay, Multiaddr, PeerId};
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -236,7 +236,10 @@ where
 
         let bitswap = protocols
             .bitswap
-            .then(|| super::bitswap::Behaviour::new(repo))
+            .then(|| {
+                let config = (options.bitswap_config)(super::bitswap::Config::default());
+                super::bitswap::Behaviour::new(repo, config)
+            })
             .into();
 
         let relay_manager = protocols
