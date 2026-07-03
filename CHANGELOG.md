@@ -6,6 +6,7 @@
 - feat: add CARv1 and CARv2 (read-only) support.
 - feat: implement ipns resolver for wasm32 target.
 - chore: implement some bitswap optimizations.
+- feat: add remote pinning support.
 
 # 0.15.0
 

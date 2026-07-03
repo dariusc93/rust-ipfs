@@ -34,6 +34,8 @@ pub mod ipns;
 pub mod mfs;
 pub mod p2p;
 pub mod path;
+#[cfg(feature = "pinning")]
+pub mod pinning;
 pub mod refs;
 pub mod repo;
 pub mod unixfs;
@@ -333,6 +335,16 @@ impl Ipfs {
     /// Returns a [`Ipns`] for ipns operations
     pub fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
+    }
+
+    /// Returns a client for a remote pinning service at `endpoint` authenticated with `token`.
+    #[cfg(feature = "pinning")]
+    pub fn remote_pinning(
+        &self,
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+    ) -> crate::pinning::RemotePinningService {
+        crate::pinning::RemotePinningService::new(self.clone(), endpoint, token)
     }
 
     /// Puts a block into the ipfs repo.
