@@ -11,7 +11,7 @@ version = "0.16.0"
 
 [features]
 default = ["full"]
-full = ["stream", "dns", "tls", "noise", "tcp", "quic", "rsa", "ed25519", "secp256k1", "ecdsa", "websocket", "upnp"]
+full = ["stream", "dns", "tls", "noise", "tcp", "quic", "rsa", "ed25519", "secp256k1", "ecdsa", "websocket", "upnp", "pinning"]
 
 rsa = ["connexa/rsa", "rust-ipns/rsa"]
 ed25519 = ["connexa/ed25519", "rust-ipns/ed25519"]
@@ -168,6 +168,10 @@ rand = { workspace = true }
 tempfile = "3.17.1"
 
 clap = { workspace = true }
+
+[[example]]
+name = "remote_pinning"
+required-features = ["pinning"]
 
 [profile.dev.build-override]
 debug = true
