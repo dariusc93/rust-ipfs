@@ -1,9 +1,17 @@
-use std::collections::HashMap;
-
+use connexa::prelude::MultiaddrExt;
 use ipld_core::cid::Cid;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 use crate::{Error, Ipfs};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Origin {
+    #[allow(dead_code)]
+    All,
+    #[default]
+    Public,
+}
 
 #[derive(Clone)]
 pub struct RemotePinningService {
@@ -11,6 +19,7 @@ pub struct RemotePinningService {
     client: reqwest::Client,
     endpoint: String,
     token: String,
+    origin: Origin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +83,7 @@ impl RemotePinningService {
             client: reqwest::Client::new(),
             endpoint,
             token: token.into(),
+            origin: Origin::default(),
         }
     }
 
@@ -177,13 +187,43 @@ impl RemotePinningService {
 
     async fn local_origins(&self) -> Vec<String> {
         let peer_id = self.ipfs.keypair().public().to_peer_id();
-        self.ipfs
-            .listening_addresses()
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|addr| format!("{addr}/p2p/{peer_id}"))
-            .collect()
+        let addresses = match self.origin {
+            Origin::Public => self
+                .ipfs
+                .external_addresses()
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|addr| addr.is_public())
+                .map(|addr| addr.clone().with_p2p(peer_id).unwrap_or(addr))
+                .collect::<HashSet<_>>(),
+            Origin::All => {
+                let listening = self
+                    .ipfs
+                    .listening_addresses()
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|addr| addr.clone().with_p2p(peer_id).unwrap_or(addr))
+                    .collect::<HashSet<_>>();
+
+                let external = self
+                    .ipfs
+                    .external_addresses()
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|addr| addr.clone().with_p2p(peer_id).unwrap_or(addr))
+                    .collect::<HashSet<_>>();
+
+                listening
+                    .into_iter()
+                    .chain(external)
+                    .collect::<HashSet<_>>()
+            }
+        };
+
+        Vec::from_iter(addresses.into_iter().map(|addr| addr.to_string()))
     }
 }
 
