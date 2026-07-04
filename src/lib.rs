@@ -39,9 +39,9 @@ pub mod path;
 #[cfg(feature = "pinning")]
 pub mod pinning;
 pub mod refs;
+pub mod repo;
 #[cfg(feature = "routing")]
 mod routing;
-pub mod repo;
 pub mod unixfs;
 
 pub use block::Block;
@@ -971,7 +971,7 @@ impl Ipfs {
             .map_err(Into::into)
     }
 
-    pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnexaSwarmEvent>, Error> {
+    pub async fn swarm_events(&self) -> Result<BoxStream<'static, ConnexaSwarmEvent>, Error> {
         self.connexa.swarm().listener().await.map_err(Into::into)
     }
 

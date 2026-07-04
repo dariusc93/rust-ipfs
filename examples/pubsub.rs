@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
         ipfs.enable_autorelay().await?;
     }
 
-    let mut st = ipfs.connection_events().await?;
+    let mut st = ipfs.swarm_events().await?;
 
     let mut listener_st = StreamMap::new();
 

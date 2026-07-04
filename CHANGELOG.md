@@ -9,6 +9,7 @@
 - feat: add remote pinning support.
 - feat: implement trustless gateway retrieval.
 - feat: implement delegated routing.
+- refactor: rename Ipfs::connection_events to Ipfs::swarm_events
 
 # 0.15.0
 

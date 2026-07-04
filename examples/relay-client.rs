@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
         ipfs.connect(addr).await?;
     }
 
-    let mut events = ipfs.connection_events().await?;
+    let mut events = ipfs.swarm_events().await?;
 
     while let Some(event) = events.next().await {
         match event {
