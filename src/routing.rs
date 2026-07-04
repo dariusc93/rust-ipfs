@@ -72,9 +72,9 @@ struct ProvidersResponse {
 #[derive(Deserialize)]
 struct ProviderRecord {
     #[serde(rename = "ID")]
-    id: Option<String>,
+    id: Option<PeerId>,
     #[serde(rename = "Addrs", default)]
-    addrs: Vec<String>,
+    addrs: Vec<Multiaddr>,
 }
 
 pub(crate) async fn run(
@@ -161,11 +161,7 @@ async fn lookup_and_dial(
 
         let mut dialed = 0usize;
         for record in body.providers {
-            let Some(peer) = record
-                .id
-                .as_deref()
-                .and_then(|id| id.parse::<PeerId>().ok())
-            else {
+            let Some(peer) = record.id else {
                 continue;
             };
             // Note: a router is untrusted so only dial publicly routable addresses (never loopback/private
@@ -174,9 +170,9 @@ async fn lookup_and_dial(
             let addrs: Vec<Multiaddr> = record
                 .addrs
                 .iter()
-                .filter_map(|addr| addr.parse::<Multiaddr>().ok())
-                .filter(|addr| addr.is_public())
+                .filter(|&addr| addr.is_public())
                 .take(MAX_ADDRS_PER_RECORD)
+                .cloned()
                 .collect();
             if addrs.is_empty() {
                 continue;
@@ -243,7 +239,7 @@ mod tests {
         assert_eq!(body.providers.len(), 2);
         assert_eq!(
             body.providers[0].addrs,
-            vec!["/ip4/1.2.3.4/tcp/4001".to_string()]
+            vec!["/ip4/1.2.3.4/tcp/4001".parse::<Multiaddr>().unwrap()]
         );
         assert!(body.providers[1].addrs.is_empty());
     }
