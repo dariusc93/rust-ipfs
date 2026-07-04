@@ -312,8 +312,11 @@ impl Behaviour {
         if self.unsupported.contains(&peer_id) || self.sessions.contains_key(&peer_id) {
             return;
         }
-        let session =
-            PeerSession::new(self.wantlist.clone(), self.store.clone(), self.budget.clone());
+        let session = PeerSession::new(
+            self.wantlist.clone(),
+            self.store.clone(),
+            self.budget.clone(),
+        );
         self.sessions.insert(peer_id, session);
         self.wake();
     }

@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use futures::StreamExt;
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use parking_lot::RwLock;
@@ -14,8 +14,8 @@ use connexa::handle::Connexa;
 use connexa::prelude::swarm::dial_opts::DialOpts;
 use connexa::prelude::{Multiaddr, MultiaddrExt, PeerId};
 
-use crate::repo::DefaultKeystore;
 use crate::IpfsEvent;
+use crate::repo::DefaultKeystore;
 
 type IpfsConnexa = Connexa<IpfsEvent, DefaultKeystore>;
 

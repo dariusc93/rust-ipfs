@@ -1,8 +1,8 @@
 use futures::StreamExt;
+use rust_ipfs::Ipfs;
 use rust_ipfs::builder::DefaultIpfsBuilder;
 use rust_ipfs::mfs::{MfsKind, WriteOptions};
 use rust_ipfs::unixfs::UnixfsStatus;
-use rust_ipfs::Ipfs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

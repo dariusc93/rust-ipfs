@@ -3,15 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use futures::StreamExt;
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use parking_lot::RwLock;
 
-use crate::repo::{DefaultStorage, Repo};
 use crate::Block;
+use crate::repo::{DefaultStorage, Repo};
 
 const DEFAULT_GATEWAYS: &[&str] = &["https://trustless-gateway.link", "https://ipfs.io"];
 const MAX_INFLIGHT: usize = 16;

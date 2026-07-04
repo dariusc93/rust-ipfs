@@ -15,8 +15,8 @@ use parking_lot::Mutex;
 
 use super::message::{BitswapMessage, BitswapRequest, BitswapResponse, RequestType};
 use super::wantlist::Wantlist;
-use crate::repo::{DefaultStorage, Repo};
 use crate::Block;
+use crate::repo::{DefaultStorage, Repo};
 
 const MAX_INFLIGHT_SERVES: usize = 32;
 const SERVE_BATCH_LIMIT: usize = 1 << 20;

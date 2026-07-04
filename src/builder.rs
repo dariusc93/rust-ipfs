@@ -1,12 +1,12 @@
 use crate::context::IpfsContext;
 use crate::p2p::{
-    create_create_behaviour, AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig,
-    TSwarm,
+    AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig, TSwarm,
+    create_create_behaviour,
 };
 use crate::repo::{DefaultKeystore, DefaultStorage, GCConfig, GCTrigger, Repo};
 use crate::{
-    context, ipns_to_dht_key, p2p, to_dht_key, ConnectionLimits, FDLimit, Ipfs, IpfsEvent,
-    IpfsOptions, Keypair, Multiaddr, NetworkBehaviour, RecordKey, RepoProvider, TSwarmEvent, TSwarmEventFn,
+    ConnectionLimits, FDLimit, Ipfs, IpfsEvent, IpfsOptions, Keypair, Multiaddr, NetworkBehaviour,
+    RecordKey, RepoProvider, TSwarmEvent, TSwarmEventFn, context, ipns_to_dht_key, p2p, to_dht_key,
 };
 use anyhow::Error;
 use async_rt::AbortableJoinHandle;
@@ -21,7 +21,7 @@ use connexa::prelude::swarm::SwarmEvent;
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
 use connexa::{behaviour, dummy};
-use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, stream::FuturesUnordered};
 use ipld_core::cid::Cid;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::Infallible;

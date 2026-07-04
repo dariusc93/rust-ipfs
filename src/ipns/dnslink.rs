@@ -179,7 +179,9 @@ pub async fn resolve<'a>(
                         internal_path
                             .path
                             .push_split(subpath.iter().copied())
-                            .map_err(|_| crate::path::IpfsPathError::InvalidPath(link.to_string()))?;
+                            .map_err(|_| {
+                                crate::path::IpfsPathError::InvalidPath(link.to_string())
+                            })?;
                         Ok(internal_path)
                     });
 
