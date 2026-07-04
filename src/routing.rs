@@ -231,8 +231,8 @@ mod tests {
     fn parses_providers_response() {
         let json = r#"{
             "Providers": [
-                { "Schema": "peer", "ID": "12D3KooWABCDEFGH", "Addrs": ["/ip4/1.2.3.4/tcp/4001"] },
-                { "Schema": "peer", "ID": "12D3KooWIJKLMNOP" }
+                { "Schema": "peer", "ID": "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN", "Addrs": ["/ip4/1.2.3.4/tcp/4001"] },
+                { "Schema": "peer", "ID": "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN" }
             ]
         }"#;
         let body: ProvidersResponse = serde_json::from_str(json).unwrap();
