@@ -180,6 +180,9 @@ async fn read_capped(response: reqwest::Response) -> Option<Bytes> {
 
     #[cfg(target_arch = "wasm32")]
     {
+        if response.content_length().is_none() {
+            return None;
+        }
         let bytes = response.bytes().await.ok()?;
         (bytes.len() <= MAX_BLOCK_SIZE).then_some(bytes)
     }
