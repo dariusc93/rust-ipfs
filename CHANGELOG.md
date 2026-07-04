@@ -8,6 +8,7 @@
 - chore: implement some bitswap optimizations.
 - feat: add remote pinning support.
 - feat: implement trustless gateway retrieval.
+- feat: implement delegated routing.
 
 # 0.15.0
 

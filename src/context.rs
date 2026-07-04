@@ -35,6 +35,7 @@ pub struct IpfsContext {
     pub relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
     pub discovery_tx: Option<Sender<Cid>>,
     pub gateway_tx: Option<Sender<Cid>>,
+    pub router_tx: Option<Sender<Cid>>,
 }
 
 impl Default for IpfsContext {
@@ -47,6 +48,7 @@ impl Default for IpfsContext {
             relay_listener: Default::default(),
             discovery_tx: None,
             gateway_tx: None,
+            router_tx: None,
         }
     }
 }
@@ -61,6 +63,7 @@ impl IpfsContext {
             relay_listener: Default::default(),
             discovery_tx: None,
             gateway_tx: None,
+            router_tx: None,
         }
     }
 }
