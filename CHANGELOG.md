@@ -7,6 +7,7 @@
 - feat: implement ipns resolver for wasm32 target.
 - chore: implement some bitswap optimizations.
 - feat: add remote pinning support.
+- feat: implement trustless gateway retrieval.
 
 # 0.15.0
 
