@@ -1176,7 +1176,7 @@ impl Ipfs {
     pub async fn disable_autorelay(&self) -> Result<(), Error> {
         self.connexa
             .relay()
-            .enable_auto_relay()
+            .disable_auto_relay()
             .await
             .map_err(Into::into)
     }
