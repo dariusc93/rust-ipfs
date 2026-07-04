@@ -230,6 +230,7 @@ async fn read_capped(response: reqwest::Response) -> Option<bytes::Bytes> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn parses_providers_response() {
         let json = r#"{
