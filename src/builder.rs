@@ -13,7 +13,6 @@ use async_rt::AbortableJoinHandle;
 use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use connexa::behaviour::request_response::RequestResponseConfig;
 use connexa::builder::{ConnexaBuilder, FileDescLimit, IntoKeypair};
-use connexa::dummy;
 use connexa::keystore::Keychain;
 use connexa::prelude::identify::Event;
 use connexa::prelude::swarm::SwarmEvent;
@@ -21,6 +20,7 @@ use connexa::prelude::swarm::SwarmEvent;
 #[cfg(feature = "pnet")]
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
+use connexa::{behaviour, dummy};
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use ipld_core::cid::Cid;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -222,6 +222,21 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 self.init = self.init.with_dcutr();
             }
         }
+        self
+    }
+
+    /// Enable autorelay
+    pub fn with_autorelay(mut self) -> Self {
+        self.init = self.init.with_autorelay();
+        self
+    }
+
+    /// Enable autorelay with configuration option
+    pub fn with_autorelay_with_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(behaviour::autorelay::Config) -> behaviour::autorelay::Config + 'static,
+    {
+        self.init = self.init.with_autorelay_with_config(f);
         self
     }
 

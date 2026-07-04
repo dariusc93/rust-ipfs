@@ -29,9 +29,6 @@ where
 {
     pub addressbook: addressbook::Behaviour,
 
-    // networking
-    pub relay_manager: Toggle<libp2p_relay_manager::Behaviour>,
-
     pub bitswap: Toggle<super::bitswap::Behaviour>,
 
     // custom behaviours
@@ -242,11 +239,6 @@ where
             })
             .into();
 
-        let relay_manager = protocols
-            .relay
-            .then(|| libp2p_relay_manager::Behaviour::default())
-            .into();
-
         let peerbook = peerbook::Behaviour::default();
 
         let addressbook = addressbook::Behaviour::with_config(options.addr_config);
@@ -256,7 +248,6 @@ where
 
         let mut behaviour = Behaviour {
             bitswap,
-            relay_manager,
             peerbook,
             addressbook,
             protocol,

@@ -1,17 +1,17 @@
 use anyhow::anyhow;
 use futures::{
-    FutureExt,
     channel::{
         mpsc::{Receiver, Sender},
         oneshot,
     },
+    FutureExt,
 };
 use pollable_map::optional::Optional;
 
-use crate::{Channel, p2p, p2p::MultiaddrExt};
+use crate::{p2p, p2p::MultiaddrExt};
 
 use crate::repo::{Repo, RepoEvent};
-use crate::{IpfsEvent, config::BOOTSTRAP_NODES};
+use crate::{config::BOOTSTRAP_NODES, IpfsEvent};
 
 use ipld_core::cid::Cid;
 use std::collections::{HashMap, HashSet};
@@ -19,8 +19,8 @@ use std::fmt::Debug;
 
 use crate::repo::DefaultStorage;
 
-use connexa::behaviour::Behaviour as ConnexaBehaviour;
 use connexa::behaviour::peer_store::store::memory::MemoryStore;
+use connexa::behaviour::Behaviour as ConnexaBehaviour;
 use connexa::prelude::identify::Info;
 use connexa::prelude::swarm::{NetworkBehaviour, Swarm};
 use connexa::prelude::{Multiaddr, PeerId};
@@ -32,7 +32,6 @@ pub struct IpfsContext {
     pub repo: Repo<DefaultStorage>,
     pub bootstraps: HashSet<Multiaddr>,
     pub find_peer_identify: HashMap<PeerId, Vec<oneshot::Sender<anyhow::Result<Info>>>>,
-    pub relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
     pub discovery_tx: Option<Sender<Cid>>,
     pub gateway_tx: Option<Sender<Cid>>,
     pub router_tx: Option<Sender<Cid>>,
@@ -45,7 +44,6 @@ impl Default for IpfsContext {
             repo: Repo::new_memory(),
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
-            relay_listener: Default::default(),
             discovery_tx: None,
             gateway_tx: None,
             router_tx: None,
@@ -60,7 +58,6 @@ impl IpfsContext {
             repo: repo.clone(),
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
-            relay_listener: Default::default(),
             discovery_tx: None,
             gateway_tx: None,
             router_tx: None,
@@ -303,83 +300,6 @@ impl IpfsContext {
                 }
 
                 let _ = ret.send(Ok(rets));
-            }
-            IpfsEvent::AddRelay(peer_id, addr, tx) => {
-                let Some(relay) = self.custom_behaviour(swarm).relay_manager.as_mut() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
-                    return;
-                };
-
-                relay.add_address(peer_id, addr);
-
-                let _ = tx.send(Ok(()));
-            }
-            IpfsEvent::RemoveRelay(peer_id, addr, tx) => {
-                let Some(relay) = self.custom_behaviour(swarm).relay_manager.as_mut() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
-                    return;
-                };
-
-                relay.remove_address(peer_id, addr);
-
-                let _ = tx.send(Ok(()));
-            }
-            IpfsEvent::EnableRelay(Some(peer_id), tx) => {
-                let Some(relay) = self.custom_behaviour(swarm).relay_manager.as_mut() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
-                    return;
-                };
-
-                relay.select(peer_id);
-
-                self.relay_listener.entry(peer_id).or_default().push(tx);
-            }
-            IpfsEvent::EnableRelay(None, tx) => {
-                let Some(relay) = self.custom_behaviour(swarm).relay_manager.as_mut() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
-                    return;
-                };
-
-                let Some(peer_id) = relay.random_select() else {
-                    let _ = tx.send(Err(anyhow::anyhow!(
-                        "No relay was selected or was unavailable"
-                    )));
-                    return;
-                };
-
-                self.relay_listener.entry(peer_id).or_default().push(tx);
-            }
-            IpfsEvent::DisableRelay(peer_id, tx) => {
-                let Some(relay) = self.custom_behaviour(swarm).relay_manager.as_mut() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
-                    return;
-                };
-                relay.disable_relay(peer_id);
-
-                let _ = tx.send(Ok(()));
-            }
-            IpfsEvent::ListRelays(tx) => {
-                let Some(relay) = self.custom_behaviour(swarm).relay_manager.as_ref() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
-                    return;
-                };
-
-                let list = relay
-                    .list_relays()
-                    .map(|(peer_id, addrs)| (*peer_id, addrs.clone()))
-                    .collect();
-
-                let _ = tx.send(Ok(list));
-            }
-            IpfsEvent::ListActiveRelays(tx) => {
-                let Some(relay) = self.custom_behaviour(swarm).relay_manager.as_ref() else {
-                    let _ = tx.send(Err(anyhow::anyhow!("Relay is not enabled")));
-                    return;
-                };
-
-                let list = relay.list_active_relays();
-
-                let _ = tx.send(Ok(list));
             }
         }
     }
