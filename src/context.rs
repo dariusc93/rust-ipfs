@@ -391,6 +391,11 @@ impl IpfsContext {
         match event {
             RepoEvent::WantBlock(cids, peers, timeout) => {
                 let Some(bs) = custom.bitswap.as_mut() else {
+                    if let Some(tx) = self.gateway_tx.as_mut() {
+                        for cid in cids {
+                            let _ = tx.try_send(cid);
+                        }
+                    }
                     return;
                 };
                 bs.gets(cids, &peers, timeout);
