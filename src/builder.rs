@@ -1,12 +1,12 @@
 use crate::context::IpfsContext;
 use crate::p2p::{
-    AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig, TSwarm,
-    create_create_behaviour,
+    create_create_behaviour, AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig,
+    TSwarm,
 };
 use crate::repo::{DefaultKeystore, DefaultStorage, GCConfig, GCTrigger, Repo};
 use crate::{
-    ConnectionLimits, FDLimit, Ipfs, IpfsEvent, IpfsOptions, Keypair, Multiaddr, NetworkBehaviour,
-    RecordKey, RepoProvider, TSwarmEvent, TSwarmEventFn, context, ipns_to_dht_key, p2p, to_dht_key,
+    context, ipns_to_dht_key, p2p, to_dht_key, ConnectionLimits, FDLimit, Ipfs, IpfsEvent,
+    IpfsOptions, Keypair, Multiaddr, NetworkBehaviour, RecordKey, RepoProvider, TSwarmEvent, TSwarmEventFn,
 };
 use anyhow::Error;
 use async_rt::AbortableJoinHandle;
@@ -21,7 +21,7 @@ use connexa::prelude::swarm::SwarmEvent;
 #[cfg(feature = "pnet")]
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
-use futures::{StreamExt, TryStreamExt, stream::FuturesUnordered};
+use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use ipld_core::cid::Cid;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::Infallible;
@@ -182,6 +182,16 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     {
         self.options.protocols.bitswap = true;
         self.options.bitswap_config = Box::new(f);
+        self
+    }
+
+    /// Enables trustless HTTP gateway retrieval.
+    #[cfg(feature = "gateway")]
+    pub fn enable_gateway_retrieval(
+        mut self,
+        gateways: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.options.gateway = Some(gateways.into_iter().map(Into::into).collect());
         self
     }
 
@@ -718,6 +728,22 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         context.repo_events.replace(repo_events);
         context.discovery_tx.replace(discovery_tx);
 
+        #[cfg(feature = "gateway")]
+        let (gateways, gateway_guard) = match options.gateway.take() {
+            Some(config) => {
+                let gateways = crate::gateway::GatewayList::new(config);
+                let (gateway_tx, gateway_rx) = futures::channel::mpsc::channel::<Cid>(256);
+                context.gateway_tx.replace(gateway_tx);
+                let guard = async_rt::task::spawn_abortable({
+                    let repo = repo.clone();
+                    let gateways = gateways.clone();
+                    async move { crate::gateway::run(gateway_rx, repo, gateways).await }
+                });
+                (Some(gateways), guard)
+            }
+            None => (None, AbortableJoinHandle::empty()),
+        };
+
         let connexa = init
             .with_custom_behaviour_with_context((options, repo.clone()), |keys, (options, repo)| {
                 let custom_behaviour = match custom_behaviour {
@@ -739,6 +765,9 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 ) = event
                 {
                     if let Some(tx) = context.discovery_tx.as_mut() {
+                        let _ = tx.try_send(cid);
+                    }
+                    if let Some(tx) = context.gateway_tx.as_mut() {
                         let _ = tx.try_send(cid);
                     }
                 }
@@ -859,6 +888,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             record_key_validator: Arc::new(record_key_validator),
             _gc_guard: gc_handle,
             _discovery_guard: discovery_guard,
+            #[cfg(feature = "gateway")]
+            gateways,
+            #[cfg(feature = "gateway")]
+            _gateway_guard: gateway_guard,
         };
 
         Ok(ipfs)

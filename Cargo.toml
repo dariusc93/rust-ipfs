@@ -11,7 +11,7 @@ version = "0.16.0"
 
 [features]
 default = ["full"]
-full = ["stream", "dns", "tls", "noise", "tcp", "quic", "rsa", "ed25519", "secp256k1", "ecdsa", "websocket", "upnp", "pinning"]
+full = ["stream", "dns", "tls", "noise", "tcp", "quic", "rsa", "ed25519", "secp256k1", "ecdsa", "websocket", "upnp", "pinning", "gateway"]
 
 rsa = ["connexa/rsa", "rust-ipns/rsa"]
 ed25519 = ["connexa/ed25519", "rust-ipns/ed25519"]
@@ -33,6 +33,7 @@ websocket = ["connexa/websocket"]
 webtransport = ["connexa/webtransport"]
 
 pinning = ["dep:reqwest"]
+gateway = ["dep:reqwest"]
 
 
 [workspace.dependencies]
@@ -172,6 +173,10 @@ clap = { workspace = true }
 [[example]]
 name = "remote_pinning"
 required-features = ["pinning"]
+
+[[example]]
+name = "gateway_retrieval"
+required-features = ["gateway"]
 
 [profile.dev.build-override]
 debug = true

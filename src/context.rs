@@ -34,6 +34,7 @@ pub struct IpfsContext {
     pub find_peer_identify: HashMap<PeerId, Vec<oneshot::Sender<anyhow::Result<Info>>>>,
     pub relay_listener: HashMap<PeerId, Vec<Channel<()>>>,
     pub discovery_tx: Option<Sender<Cid>>,
+    pub gateway_tx: Option<Sender<Cid>>,
 }
 
 impl Default for IpfsContext {
@@ -45,6 +46,7 @@ impl Default for IpfsContext {
             find_peer_identify: Default::default(),
             relay_listener: Default::default(),
             discovery_tx: None,
+            gateway_tx: None,
         }
     }
 }
@@ -58,6 +60,7 @@ impl IpfsContext {
             find_peer_identify: Default::default(),
             relay_listener: Default::default(),
             discovery_tx: None,
+            gateway_tx: None,
         }
     }
 }
@@ -388,6 +391,11 @@ impl IpfsContext {
         match event {
             RepoEvent::WantBlock(cids, peers, timeout) => {
                 let Some(bs) = custom.bitswap.as_mut() else {
+                    if let Some(tx) = self.gateway_tx.as_mut() {
+                        for cid in cids {
+                            let _ = tx.try_send(cid);
+                        }
+                    }
                     return;
                 };
                 bs.gets(cids, &peers, timeout);

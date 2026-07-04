@@ -30,6 +30,8 @@ pub mod config;
 mod context;
 pub mod dag;
 pub mod error;
+#[cfg(feature = "gateway")]
+mod gateway;
 pub mod ipns;
 pub mod mfs;
 pub mod p2p;
@@ -137,6 +139,10 @@ struct IpfsOptions {
     /// Repo Provider option
     pub provider: RepoProvider,
 
+    /// Trustless HTTP gateways used as a retrieval fallback.
+    #[cfg(feature = "gateway")]
+    pub gateway: Option<Vec<String>>,
+
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
     /// All futures returned by `Ipfs`, background task actions and swarm actions are instrumented
@@ -179,6 +185,8 @@ impl Default for IpfsOptions {
             bitswap_config: Box::new(|config| config),
             addr_config: Default::default(),
             provider: Default::default(),
+            #[cfg(feature = "gateway")]
+            gateway: None,
             listening_addrs: vec![],
             span: None,
             protocols: Default::default(),
@@ -216,6 +224,10 @@ pub struct Ipfs {
         Arc<HashMap<String, Box<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>>,
     _gc_guard: AbortableJoinHandle<()>,
     _discovery_guard: AbortableJoinHandle<()>,
+    #[cfg(feature = "gateway")]
+    gateways: Option<gateway::GatewayList>,
+    #[cfg(feature = "gateway")]
+    _gateway_guard: AbortableJoinHandle<()>,
 }
 
 impl std::fmt::Debug for Ipfs {
@@ -345,6 +357,24 @@ impl Ipfs {
         token: impl Into<String>,
     ) -> crate::pinning::RemotePinningService {
         crate::pinning::RemotePinningService::new(self.clone(), endpoint, token)
+    }
+
+    /// Adds a trustless gateway to the retrieval list.
+    #[cfg(feature = "gateway")]
+    pub fn add_gateway(&self, url: &str) -> bool {
+        self.gateways.as_ref().is_some_and(|g| g.add(url))
+    }
+
+    /// Removes a trustless gateway from the retrieval list.
+    #[cfg(feature = "gateway")]
+    pub fn remove_gateway(&self, url: &str) -> bool {
+        self.gateways.as_ref().is_some_and(|g| g.remove(url))
+    }
+
+    /// Lists the trustless gateways currently used for retrieval.
+    #[cfg(feature = "gateway")]
+    pub fn list_gateways(&self) -> Vec<String> {
+        self.gateways.as_ref().map(|g| g.list()).unwrap_or_default()
     }
 
     /// Puts a block into the ipfs repo.
