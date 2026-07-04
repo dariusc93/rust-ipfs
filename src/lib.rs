@@ -30,11 +30,17 @@ pub mod config;
 mod context;
 pub mod dag;
 pub mod error;
+#[cfg(feature = "gateway")]
+mod gateway;
 pub mod ipns;
 pub mod mfs;
 pub mod p2p;
 pub mod path;
+#[cfg(feature = "pinning")]
+pub mod pinning;
 pub mod refs;
+#[cfg(feature = "routing")]
+mod routing;
 pub mod repo;
 pub mod unixfs;
 
@@ -127,11 +133,21 @@ struct IpfsOptions {
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
+    pub bitswap_config: Box<dyn Fn(p2p::bitswap::Config) -> p2p::bitswap::Config>,
+
     /// Address book configuration
     pub addr_config: AddressBookConfig,
 
     /// Repo Provider option
     pub provider: RepoProvider,
+
+    /// Trustless HTTP gateways used as a retrieval fallback.
+    #[cfg(feature = "gateway")]
+    pub gateway: Option<Vec<String>>,
+
+    /// Delegated routing V1 HTTP endpoints used for provider discovery.
+    #[cfg(feature = "routing")]
+    pub router: Option<Vec<String>>,
 
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
@@ -172,8 +188,13 @@ impl Default for IpfsOptions {
             #[cfg(target_arch = "wasm32")]
             namespace: None,
             bootstrap: Default::default(),
+            bitswap_config: Box::new(|config| config),
             addr_config: Default::default(),
             provider: Default::default(),
+            #[cfg(feature = "gateway")]
+            gateway: None,
+            #[cfg(feature = "routing")]
+            router: None,
             listening_addrs: vec![],
             span: None,
             protocols: Default::default(),
@@ -211,6 +232,14 @@ pub struct Ipfs {
         Arc<HashMap<String, Box<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>>,
     _gc_guard: AbortableJoinHandle<()>,
     _discovery_guard: AbortableJoinHandle<()>,
+    #[cfg(feature = "gateway")]
+    gateways: Option<gateway::GatewayList>,
+    #[cfg(feature = "gateway")]
+    _gateway_guard: AbortableJoinHandle<()>,
+    #[cfg(feature = "routing")]
+    routers: Option<routing::RouterList>,
+    #[cfg(feature = "routing")]
+    _routing_guard: AbortableJoinHandle<()>,
 }
 
 impl std::fmt::Debug for Ipfs {
@@ -323,6 +352,52 @@ impl Ipfs {
     /// Returns a [`Ipns`] for ipns operations
     pub fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
+    }
+
+    /// Returns a client for a remote pinning service at `endpoint` authenticated with `token`.
+    #[cfg(feature = "pinning")]
+    pub fn remote_pinning(
+        &self,
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+    ) -> crate::pinning::RemotePinningService {
+        crate::pinning::RemotePinningService::new(self.clone(), endpoint, token)
+    }
+
+    /// Adds a trustless gateway to the retrieval list.
+    #[cfg(feature = "gateway")]
+    pub fn add_gateway(&self, url: &str) -> bool {
+        self.gateways.as_ref().is_some_and(|g| g.add(url))
+    }
+
+    /// Removes a trustless gateway from the retrieval list.
+    #[cfg(feature = "gateway")]
+    pub fn remove_gateway(&self, url: &str) -> bool {
+        self.gateways.as_ref().is_some_and(|g| g.remove(url))
+    }
+
+    /// Lists the trustless gateways currently used for retrieval.
+    #[cfg(feature = "gateway")]
+    pub fn list_gateways(&self) -> Vec<String> {
+        self.gateways.as_ref().map(|g| g.list()).unwrap_or_default()
+    }
+
+    /// Adds a delegated routing endpoint used for provider discovery.
+    #[cfg(feature = "routing")]
+    pub fn add_router(&self, url: &str) -> bool {
+        self.routers.as_ref().is_some_and(|r| r.add(url))
+    }
+
+    /// Removes a delegated routing endpoint.
+    #[cfg(feature = "routing")]
+    pub fn remove_router(&self, url: &str) -> bool {
+        self.routers.as_ref().is_some_and(|r| r.remove(url))
+    }
+
+    /// Lists the delegated routing endpoints currently used for provider discovery.
+    #[cfg(feature = "routing")]
+    pub fn list_routers(&self) -> Vec<String> {
+        self.routers.as_ref().map(|r| r.list()).unwrap_or_default()
     }
 
     /// Puts a block into the ipfs repo.

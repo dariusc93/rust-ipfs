@@ -233,7 +233,10 @@ where
 
         let bitswap = protocols
             .bitswap
-            .then(|| super::bitswap::Behaviour::new(repo))
+            .then(|| {
+                let config = (options.bitswap_config)(super::bitswap::Config::default());
+                super::bitswap::Behaviour::new(repo, config)
+            })
             .into();
 
         let peerbook = peerbook::Behaviour::default();

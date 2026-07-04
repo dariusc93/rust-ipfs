@@ -33,6 +33,8 @@ pub struct IpfsContext {
     pub bootstraps: HashSet<Multiaddr>,
     pub find_peer_identify: HashMap<PeerId, Vec<oneshot::Sender<anyhow::Result<Info>>>>,
     pub discovery_tx: Option<Sender<Cid>>,
+    pub gateway_tx: Option<Sender<Cid>>,
+    pub router_tx: Option<Sender<Cid>>,
 }
 
 impl Default for IpfsContext {
@@ -43,6 +45,8 @@ impl Default for IpfsContext {
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
             discovery_tx: None,
+            gateway_tx: None,
+            router_tx: None,
         }
     }
 }
@@ -55,6 +59,8 @@ impl IpfsContext {
             bootstraps: Default::default(),
             find_peer_identify: Default::default(),
             discovery_tx: None,
+            gateway_tx: None,
+            router_tx: None,
         }
     }
 }
@@ -308,6 +314,11 @@ impl IpfsContext {
         match event {
             RepoEvent::WantBlock(cids, peers, timeout) => {
                 let Some(bs) = custom.bitswap.as_mut() else {
+                    if let Some(tx) = self.gateway_tx.as_mut() {
+                        for cid in cids {
+                            let _ = tx.try_send(cid);
+                        }
+                    }
                     return;
                 };
                 bs.gets(cids, &peers, timeout);
