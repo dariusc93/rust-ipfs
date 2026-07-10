@@ -1,6 +1,6 @@
-use connexa::prelude::swarm::SwarmEvent;
-use rust_ipfs::Ipfs;
 use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
+use rust_ipfs::prelude::swarm::SwarmEvent;
+use rust_ipfs::Ipfs;
 use std::time::Duration;
 
 #[tokio::main]

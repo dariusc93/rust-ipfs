@@ -1,10 +1,10 @@
 use clap::Parser;
 use futures::{FutureExt, StreamExt};
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{Ipfs, Keypair, Multiaddr, builder::IpfsBuilder};
+use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair, Multiaddr};
 
-use connexa::prelude::{ConnexaSwarmEvent, GossipsubEvent};
 use pollable_map::stream::StreamMap;
+use rust_ipfs::prelude::{ConnexaSwarmEvent, GossipsubEvent};
 use rustyline_async::Readline;
 use std::time::Duration;
 use std::{io::Write, sync::Arc};
@@ -266,13 +266,13 @@ async fn topic_discovery(ipfs: Ipfs, topic: String) -> anyhow::Result<()> {
 }
 
 mod ext_behaviour {
-    use connexa::dummy::DummyHandler;
-    use connexa::prelude::swarm::derive_prelude::PortUse;
-    use connexa::prelude::swarm::{
+    use rust_ipfs::dummy::DummyHandler;
+    use rust_ipfs::prelude::swarm::derive_prelude::PortUse;
+    use rust_ipfs::prelude::swarm::{
         ConnectionDenied, FromSwarm, NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent,
         ToSwarm,
     };
-    use connexa::prelude::transport::Endpoint;
+    use rust_ipfs::prelude::transport::Endpoint;
     use rust_ipfs::{ConnectionId, Multiaddr, NetworkBehaviour, PeerId, Protocol};
     use rustyline_async::SharedWriter;
     use std::convert::Infallible;

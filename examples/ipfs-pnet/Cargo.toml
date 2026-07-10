@@ -1,0 +1,13 @@
+[package]
+name = "ipfs-pnet"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rust-ipfs = { path = "../..", features = ["pnet"] }
+anyhow.workspace = true
+clap.workspace = true
+rand.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing-subscriber.workspace = true

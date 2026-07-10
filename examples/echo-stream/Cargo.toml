@@ -1,0 +1,16 @@
+[package]
+name = "echo-stream"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rust-ipfs = { path = "../..", features = ["stream"] }
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+bytes.workspace = true
+rand.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true

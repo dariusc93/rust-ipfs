@@ -76,6 +76,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rlimit = "0.11.0"
 rust-ipns = { version = "0.9.0", path = "packages/rust-ipns", default-features = false }
 rust-unixfs = { version = "0.6.0", path = "unixfs" }
+rustyline-async = "0.4.6"
 send_wrapper = "0.6.0"
 serde = { version = "1.0.228" }
 serde_ipld_dagcbor = "0.6.3"
@@ -87,6 +88,7 @@ simple_x509 = "=1.1.0"
 thiserror = { version = "2.0.12" }
 tracing = { version = "0.1.41" }
 tracing-futures = { features = ["futures-03"], version = "0.2.5" }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 tokio = { default-features = false, version = "1.52.3" }
 tokio-stream = { default-features = false, version = "0.1.18" }
@@ -163,24 +165,9 @@ wasm-bindgen-futures.workspace = true
 [dev-dependencies]
 hex-literal = { default-features = false, version = "1.0.0" }
 tokio = { features = ["full"], workspace = true }
-rustyline-async = { version = "0.4.6" }
-tracing-subscriber = { features = ["env-filter"], version = "0.3.19" }
+tracing-subscriber.workspace = true
 rand = { workspace = true }
 tempfile = "3.17.1"
-
-clap = { workspace = true }
-
-[[example]]
-name = "remote_pinning"
-required-features = ["pinning"]
-
-[[example]]
-name = "gateway_retrieval"
-required-features = ["gateway"]
-
-[[example]]
-name = "delegated_routing"
-required-features = ["routing"]
 
 [profile.dev.build-override]
 debug = true

@@ -23,13 +23,13 @@ async fn main() -> anyhow::Result<()> {
 }
 
 mod ext_behaviour {
-    use connexa::dummy::DummyHandler;
-    use connexa::prelude::swarm::derive_prelude::PortUse;
-    use connexa::prelude::swarm::{
+    use rust_ipfs::dummy::DummyHandler;
+    use rust_ipfs::prelude::swarm::derive_prelude::PortUse;
+    use rust_ipfs::prelude::swarm::{
         ConnectionDenied, FromSwarm, NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent,
         ToSwarm,
     };
-    use connexa::prelude::transport::Endpoint;
+    use rust_ipfs::prelude::transport::Endpoint;
     use rust_ipfs::{ConnectionId, Multiaddr, NetworkBehaviour, PeerId};
     use std::convert::Infallible;
     use std::task::{Context, Poll};

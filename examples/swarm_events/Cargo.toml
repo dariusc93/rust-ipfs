@@ -1,0 +1,11 @@
+[package]
+name = "swarm_events"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rust-ipfs = { path = "../.." }
+anyhow.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing-subscriber.workspace = true

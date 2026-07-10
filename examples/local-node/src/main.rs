@@ -1,59 +1,26 @@
-/// you can provide a PSK as an argument
-/// example: cargo run --example 8ab6e6aeb73353791b88c3c73e3d9a5111273e6d89edcbfb8be783f1e595617b
-///
-/// or create a random one without providing any argument
-/// example: cargo run --example ipfs-pnet
-#[cfg(feature = "pnet")]
+use rust_ipfs::Ipfs;
+
+use rust_ipfs::builder::IpfsBuilder;
+use rust_ipfs::Keypair;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    use clap::Parser;
-    use connexa::prelude::transport::pnet::PreSharedKey;
-    use rand::Rng;
-    use rust_ipfs::{Ipfs, Keypair, builder::IpfsBuilder};
-    use std::str::FromStr;
-
-    #[derive(Debug, Parser)]
-    #[clap(name = "ipfs-pnet")]
-    struct Opt {
-        #[clap(required = false)]
-        psk: Option<String>,
-    }
-    fn generate_psk() -> PreSharedKey {
-        let mut key_bytes = [0u8; 32];
-        rand::thread_rng().fill(&mut key_bytes);
-        PreSharedKey::new(key_bytes)
-    }
-
     tracing_subscriber::fmt::init();
 
     let keypair = Keypair::generate_ed25519();
     let local_peer_id = keypair.public().to_peer_id();
 
-    let opt = Opt::parse();
-    let psk = {
-        match opt.psk {
-            Some(psk) => {
-                let formatted_psk = format!("/key/swarm/psk/1.0.0/\n/base16/\n{}", psk);
-                match PreSharedKey::from_str(&formatted_psk) {
-                    Ok(psk) => psk,
-                    Err(_) => {
-                        println!("Invalid PSK , generating a random PSK");
-                        generate_psk()
-                    }
-                }
-            }
-            None => generate_psk(),
-        }
-    };
-    println!("PSK: {:?}", psk);
-
     // Initialize the repo and start a daemon
     let ipfs: Ipfs = IpfsBuilder::with_keypair(&keypair)?
         .with_default()
+        .enable_tcp()
         .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
         .with_mdns()
-        .enable_pnet(psk)
+        .with_relay(true)
+        .with_relay_server(Default::default())
+        .with_upnp()
         .with_custom_behaviour(move |_| Ok(ext_behaviour::Behaviour::new(local_peer_id)))
+        .fd_limit(rust_ipfs::FDLimit::Max)
         .start()
         .await?;
 
@@ -62,20 +29,19 @@ async fn main() -> anyhow::Result<()> {
 
     // Used to wait until the process is terminated instead of creating a loop
     tokio::signal::ctrl_c().await?;
+
     ipfs.exit_daemon().await;
     Ok(())
 }
 
-#[cfg(feature = "pnet")]
 mod ext_behaviour {
-    use connexa::dummy::DummyHandler;
-    use connexa::prelude::swarm::derive_prelude::PortUse;
-    use connexa::prelude::swarm::{
+    use rust_ipfs::dummy::DummyHandler;
+    use rust_ipfs::prelude::swarm::derive_prelude::PortUse;
+    use rust_ipfs::prelude::swarm::{
         ConnectionDenied, FromSwarm, NewListenAddr, THandler, THandlerInEvent, THandlerOutEvent,
         ToSwarm,
     };
-    use connexa::prelude::transport::Endpoint;
-
+    use rust_ipfs::prelude::transport::Endpoint;
     use rust_ipfs::{ConnectionId, Multiaddr, NetworkBehaviour, PeerId};
     use std::convert::Infallible;
     use std::{
@@ -143,11 +109,10 @@ mod ext_behaviour {
 
         fn on_connection_handler_event(
             &mut self,
-            peerid: PeerId,
+            _: PeerId,
             _: ConnectionId,
             _: THandlerOutEvent<Self>,
         ) {
-            println!("Connection established with {peerid}");
         }
 
         fn on_swarm_event(&mut self, event: FromSwarm) {
@@ -170,9 +135,4 @@ mod ext_behaviour {
             Poll::Pending
         }
     }
-}
-
-#[cfg(not(feature = "pnet"))]
-fn main() {
-    panic!("This example requires the `pnet` feature");
 }

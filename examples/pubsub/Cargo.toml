@@ -1,0 +1,15 @@
+[package]
+name = "pubsub"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rust-ipfs = { path = "../.." }
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+pollable-map.workspace = true
+rustyline-async.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing-subscriber.workspace = true

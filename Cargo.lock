@@ -496,6 +496,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "block_exchange"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ipld-core",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1069,6 +1080,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom_behaviour"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "dag_creation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1092,6 +1123,19 @@ checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
  "syn",
+]
+
+[[package]]
+name = "delegated_routing"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "ipld-core",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1224,6 +1268,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "echo-stream"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "futures",
+ "rand 0.9.4",
+ "rust-ipfs",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ed25519"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1353,6 +1412,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
+name = "fetch_and_cat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "futures",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ff"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1367,6 +1439,18 @@ name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+
+[[package]]
+name = "files"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "filetime"
@@ -1559,6 +1643,19 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "gateway_retrieval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "ipld-core",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2239,6 +2336,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipfs-pnet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rand 0.9.4",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ipld-core"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2266,6 +2375,28 @@ name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
+
+[[package]]
+name = "ipns-publish"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ipld-core",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "ipns-resolve"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -3169,6 +3300,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
+name = "local-node"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3882,6 +4023,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pubsub"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "pollable-map",
+ "rust-ipfs",
+ "rustyline-async",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "quick-protobuf"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4167,6 +4322,62 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "relay-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "remote_pinning"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rendezvous_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "repo_dag"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "request-response"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4317,7 +4528,6 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
- "clap",
  "connexa",
  "either",
  "fs2",
@@ -4346,7 +4556,6 @@ dependencies = [
  "rlimit 0.11.0",
  "rust-ipns",
  "rust-unixfs",
- "rustyline-async",
  "send_wrapper",
  "serde",
  "serde-wasm-bindgen",
@@ -4958,6 +5167,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "swarm_events"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5467,6 +5686,40 @@ checksum = "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea"
 dependencies = [
  "crypto-common 0.1.7",
  "subtle",
+]
+
+[[package]]
+name = "unixfs-add"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "unixfs-cat-readme"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "unixfs_get"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "rust-ipfs",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
