@@ -10,6 +10,7 @@ use futures::stream::{self, BoxStream, FuturesOrdered, FuturesUnordered};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
+use other_error::ArcError;
 use parking_lot::{Mutex, RwLock};
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -328,8 +329,10 @@ impl<C: Borrow<Cid>> PinKind<C> {
     }
 }
 
-type SubscriptionsMap =
-    HashMap<Cid, HashMap<u64, futures::channel::oneshot::Sender<Result<Block, String>>>>;
+type SubscriptionsMap = HashMap<
+    Cid,
+    HashMap<u64, futures::channel::oneshot::Sender<Result<Block, ArcError<connexa::error::Error>>>>,
+>;
 
 static SUBSCRIPTION_TOKEN: AtomicU64 = AtomicU64::new(0);
 
@@ -608,6 +611,16 @@ impl<S: RepoTypes> Repo<S> {
         *event_guard = Some(sender);
         self.set_online();
         receiver
+    }
+
+    pub(crate) fn notify_block_store_failed(&self, cid: Cid, error: connexa::error::Error) {
+        let waiters = self.inner.subscriptions.lock().remove(&cid);
+        let error = ArcError::from(error);
+        if let Some(waiters) = waiters {
+            for (_token, waiter) in waiters {
+                let _ = waiter.send(Err(error.clone()));
+            }
+        }
     }
 
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
@@ -1192,7 +1205,7 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
 
                                 match futures::future::select(rx, timeout_fut).await {
                                     Either::Left((Ok(Ok(block)), _)) => Ok::<_, Error>(block),
-                                    Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(anyhow::anyhow!("{e}")),
+                                    Either::Left((Ok(Err(e)), _)) => Err::<_, Error>(e.into()),
                                     Either::Left((Err(e), _)) => Err::<_, Error>(e.into()),
                                     Either::Right(((), _)) => {
                                         Err::<_, Error>(anyhow::anyhow!("request for {cid} timed out"))
@@ -1642,6 +1655,27 @@ mod repo_tests {
         let data = serde_ipld_dagcbor::codec::DagCborCodec::encode_to_vec(ipld).unwrap();
         let cid = Cid::new_v1(0x71, Code::Sha2_256.digest(&data));
         Block::new(cid, data).unwrap()
+    }
+
+    #[tokio::test]
+    async fn block_store_failure_notifies_all_waiters() {
+        let repo = Repo::new_memory();
+        let cid = *raw_block(b"failed block").cid();
+        let (first_tx, first_rx) = futures::channel::oneshot::channel();
+        let (second_tx, second_rx) = futures::channel::oneshot::channel();
+
+        repo.inner
+            .subscriptions
+            .lock()
+            .entry(cid)
+            .or_default()
+            .extend([(1, first_tx), (2, second_tx)]);
+
+        repo.notify_block_store_failed(cid, std::io::Error::other("disk full").into());
+
+        assert_eq!(first_rx.await.unwrap().unwrap_err().to_string(), "disk full");
+        assert_eq!(second_rx.await.unwrap().unwrap_err().to_string(), "disk full");
+        assert!(!repo.inner.subscriptions.lock().contains_key(&cid));
     }
 
     #[tokio::test]

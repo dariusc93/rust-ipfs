@@ -4546,6 +4546,7 @@ dependencies = [
  "multihash",
  "multihash-codetable",
  "multihash-derive",
+ "other-error",
  "parking_lot",
  "pollable-map",
  "quick-protobuf",

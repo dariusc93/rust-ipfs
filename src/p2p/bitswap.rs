@@ -487,6 +487,16 @@ impl NetworkBehaviour for Behaviour {
                     }
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
                 }
+                PeerSessionEvent::StoreFailed { cid, error } => {
+                    self.candidates.remove(&cid);
+                    self.block_inflight.remove(&cid);
+                    self.wantlist.cancel(&cid);
+                    for session in self.sessions.values_mut() {
+                        session.sync();
+                    }
+                    tracing::error!(%cid, %error, "unable to store block from bitswap");
+                    self.store.notify_block_store_failed(cid, error);
+                }
             }
         }
 
