@@ -623,6 +623,14 @@ impl<S: RepoTypes> Repo<S> {
         }
     }
 
+    pub(crate) fn is_block_wanted(&self, cid: &Cid) -> bool {
+        self.inner
+            .subscriptions
+            .lock()
+            .get(cid)
+            .is_some_and(|waiters| !waiters.is_empty())
+    }
+
     /// Shutdowns the repo, cancelling any pending subscriptions; Likely going away after some
     /// refactoring, see notes on [`crate::Ipfs::exit_daemon`].
     pub fn shutdown(&self) {
@@ -1673,8 +1681,14 @@ mod repo_tests {
 
         repo.notify_block_store_failed(cid, std::io::Error::other("disk full").into());
 
-        assert_eq!(first_rx.await.unwrap().unwrap_err().to_string(), "disk full");
-        assert_eq!(second_rx.await.unwrap().unwrap_err().to_string(), "disk full");
+        assert_eq!(
+            first_rx.await.unwrap().unwrap_err().to_string(),
+            "disk full"
+        );
+        assert_eq!(
+            second_rx.await.unwrap().unwrap_err().to_string(),
+            "disk full"
+        );
         assert!(!repo.inner.subscriptions.lock().contains_key(&cid));
     }
 

@@ -73,13 +73,12 @@ pub(crate) async fn run(
 
     loop {
         tokio::select! {
-            maybe_cid = rx.next() => {
+            maybe_cid = rx.next(), if fetches.len() < MAX_INFLIGHT => {
                 let Some(cid) = maybe_cid else { break };
-                if !inflight.insert(cid) {
+                if !repo.is_block_wanted(&cid) {
                     continue;
                 }
-                if fetches.len() >= MAX_INFLIGHT {
-                    inflight.remove(&cid);
+                if !inflight.insert(cid) {
                     continue;
                 }
                 fetches.push(boxed_fetch(client.clone(), gateways.list(), cid, repo.clone()));

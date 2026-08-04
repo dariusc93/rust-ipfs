@@ -797,15 +797,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                     crate::p2p::bitswap::Event::NeedBlock { cid },
                 ) = event
                 {
-                    if let Some(tx) = context.discovery_tx.as_mut() {
-                        let _ = tx.try_send(cid);
-                    }
-                    if let Some(tx) = context.gateway_tx.as_mut() {
-                        let _ = tx.try_send(cid);
-                    }
-                    if let Some(tx) = context.router_tx.as_mut() {
-                        let _ = tx.try_send(cid);
-                    }
+                    context.enqueue_retrieval(cid);
                 }
             })
             .set_swarm_event_callback(move |swarm, _, event, context| {
@@ -839,6 +831,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 while let Poll::Ready(Some(event)) = context.repo_events.poll_next_unpin(cx) {
                     context.handle_repo_event(custom, event);
                 }
+                context.flush_retrieval_queues(cx);
                 Poll::Pending
             })
             .set_preload(|_, swarm, _, _| {
@@ -865,19 +858,19 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
 
         let discovery_guard = async_rt::task::spawn_abortable({
             let connexa = connexa.clone();
+            let repo = repo.clone();
             async move {
                 let mut rx = discovery_rx;
                 let mut inflight: HashSet<Cid> = HashSet::new();
                 let mut lookups = FuturesUnordered::new();
                 loop {
                     tokio::select! {
-                        maybe_cid = rx.next() => {
+                        maybe_cid = rx.next(), if lookups.len() < 8 => {
                             let Some(cid) = maybe_cid else { break };
-                            if !inflight.insert(cid) {
+                            if !repo.is_block_wanted(&cid) {
                                 continue;
                             }
-                            if lookups.len() >= 8 {
-                                inflight.remove(&cid);
+                            if !inflight.insert(cid) {
                                 continue;
                             }
                             let connexa = connexa.clone();
@@ -923,7 +916,8 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 let guard = async_rt::task::spawn_abortable({
                     let connexa = connexa.clone();
                     let routers = routers.clone();
-                    async move { crate::routing::run(router_rx, connexa, routers).await }
+                    let repo = repo.clone();
+                    async move { crate::routing::run(router_rx, connexa, routers, repo).await }
                 });
                 (Some(routers), guard)
             }

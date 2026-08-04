@@ -1,11 +1,12 @@
 use anyhow::anyhow;
 use futures::{
-    FutureExt,
+    FutureExt, SinkExt,
     channel::{
         mpsc::{Receiver, Sender},
         oneshot,
     },
 };
+use indexmap::IndexSet;
 use pollable_map::optional::Optional;
 
 use crate::{p2p, p2p::MultiaddrExt};
@@ -16,6 +17,7 @@ use crate::{IpfsEvent, config::BOOTSTRAP_NODES};
 use ipld_core::cid::Cid;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::task::{Context as TaskContext, Poll};
 
 use crate::repo::DefaultStorage;
 
@@ -35,6 +37,9 @@ pub struct IpfsContext {
     pub discovery_tx: Option<Sender<Cid>>,
     pub gateway_tx: Option<Sender<Cid>>,
     pub router_tx: Option<Sender<Cid>>,
+    pending_discovery: IndexSet<Cid>,
+    pending_gateway: IndexSet<Cid>,
+    pending_router: IndexSet<Cid>,
 }
 
 impl Default for IpfsContext {
@@ -47,6 +52,9 @@ impl Default for IpfsContext {
             discovery_tx: None,
             gateway_tx: None,
             router_tx: None,
+            pending_discovery: Default::default(),
+            pending_gateway: Default::default(),
+            pending_router: Default::default(),
         }
     }
 }
@@ -61,6 +69,65 @@ impl IpfsContext {
             discovery_tx: None,
             gateway_tx: None,
             router_tx: None,
+            pending_discovery: Default::default(),
+            pending_gateway: Default::default(),
+            pending_router: Default::default(),
+        }
+    }
+
+    pub(crate) fn enqueue_retrieval(&mut self, cid: Cid) {
+        if self.discovery_tx.is_some() {
+            self.pending_discovery.insert(cid);
+        }
+        if self.gateway_tx.is_some() {
+            self.pending_gateway.insert(cid);
+        }
+        if self.router_tx.is_some() {
+            self.pending_router.insert(cid);
+        }
+    }
+
+    fn enqueue_gateway_retrieval(&mut self, cid: Cid) {
+        if self.gateway_tx.is_some() {
+            self.pending_gateway.insert(cid);
+        }
+    }
+
+    fn cancel_pending_retrieval(&mut self, cid: &Cid) {
+        self.pending_discovery.shift_remove(cid);
+        self.pending_gateway.shift_remove(cid);
+        self.pending_router.shift_remove(cid);
+    }
+
+    pub(crate) fn flush_retrieval_queues(&mut self, cx: &mut TaskContext<'_>) {
+        Self::flush_queue(cx, &mut self.discovery_tx, &mut self.pending_discovery);
+        Self::flush_queue(cx, &mut self.gateway_tx, &mut self.pending_gateway);
+        Self::flush_queue(cx, &mut self.router_tx, &mut self.pending_router);
+    }
+
+    fn flush_queue(
+        cx: &mut TaskContext<'_>,
+        sender: &mut Option<Sender<Cid>>,
+        pending: &mut IndexSet<Cid>,
+    ) {
+        let Some(sender) = sender.as_mut() else {
+            pending.clear();
+            return;
+        };
+
+        while !pending.is_empty() {
+            match sender.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    let cid = *pending.get_index(0).expect("pending queue is not empty");
+                    if sender.start_send_unpin(cid).is_ok() {
+                        pending.shift_remove_index(0);
+                    } else {
+                        return;
+                    }
+                }
+                Poll::Ready(Err(_)) => return,
+                Poll::Pending => return,
+            }
         }
     }
 }
@@ -314,19 +381,14 @@ impl IpfsContext {
         match event {
             RepoEvent::WantBlock(cids, peers, timeout) => {
                 let Some(bs) = custom.bitswap.as_mut() else {
-                    if let Some(tx) = self.gateway_tx.as_mut() {
-                        for cid in cids {
-                            let _ = tx.try_send(cid);
-                        }
+                    for cid in cids {
+                        self.enqueue_gateway_retrieval(cid);
                     }
                     return;
                 };
                 bs.gets(cids, &peers, timeout);
             }
             RepoEvent::UnwantBlock(cid) => {
-                let Some(bs) = custom.bitswap.as_mut() else {
-                    return;
-                };
                 // The repo subscriptions map is the source of truth: the departing waiter removed
                 // itself under lock before emitting this event, so a still-present (non-empty) entry
                 // means another waiter (or a fresh one) holds the cid. Cancel only when none remain.
@@ -338,10 +400,14 @@ impl IpfsContext {
                     .get(&cid)
                     .is_some_and(|waiters| !waiters.is_empty());
                 if !still_wanted {
-                    bs.cancel(cid);
+                    self.cancel_pending_retrieval(&cid);
+                    if let Some(bs) = custom.bitswap.as_mut() {
+                        bs.cancel(cid);
+                    }
                 }
             }
             RepoEvent::NewBlock(block) => {
+                self.cancel_pending_retrieval(block.cid());
                 let Some(bs) = custom.bitswap.as_mut() else {
                     return;
                 };
@@ -349,5 +415,63 @@ impl IpfsContext {
             }
             RepoEvent::RemovedBlock(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::{FutureExt, StreamExt, task::noop_waker};
+    use multihash_codetable::{Code, MultihashDigest};
+
+    #[test]
+    fn retrieval_queue_preserves_work_across_channel_backpressure() {
+        let repo = Repo::new_memory();
+        let mut context = IpfsContext::new(&repo);
+        let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+        context.discovery_tx = Some(sender);
+
+        let cids = (0_u16..300)
+            .map(|value| Cid::new_v1(0x55, Code::Sha2_256.digest(&value.to_le_bytes())))
+            .collect::<Vec<_>>();
+        for cid in &cids {
+            context.enqueue_retrieval(*cid);
+            context.enqueue_retrieval(*cid);
+        }
+
+        let cancelled = cids[150];
+        context.cancel_pending_retrieval(&cancelled);
+
+        let waker = noop_waker();
+        let mut task_context = TaskContext::from_waker(&waker);
+        let mut received = IndexSet::new();
+
+        for _ in 0..cids.len() {
+            context.flush_retrieval_queues(&mut task_context);
+            while let Some(Some(cid)) = receiver.next().now_or_never() {
+                assert!(
+                    received.insert(cid),
+                    "queued cid was delivered more than once"
+                );
+            }
+            if context.pending_discovery.is_empty() {
+                break;
+            }
+        }
+
+        context.flush_retrieval_queues(&mut task_context);
+        while let Some(Some(cid)) = receiver.next().now_or_never() {
+            assert!(
+                received.insert(cid),
+                "queued cid was delivered more than once"
+            );
+        }
+
+        let expected = cids
+            .into_iter()
+            .filter(|cid| *cid != cancelled)
+            .collect::<IndexSet<_>>();
+        assert_eq!(received, expected);
+        assert!(context.pending_discovery.is_empty());
     }
 }
