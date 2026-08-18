@@ -13,7 +13,6 @@ use async_rt::AbortableJoinHandle;
 use connexa::behaviour::peer_store::store::memory::MemoryStore;
 use connexa::behaviour::request_response::RequestResponseConfig;
 use connexa::builder::{ConnexaBuilder, FileDescLimit, IntoKeypair};
-use connexa::dummy;
 use connexa::keystore::Keychain;
 use connexa::prelude::identify::Event;
 use connexa::prelude::swarm::SwarmEvent;
@@ -21,6 +20,7 @@ use connexa::prelude::swarm::SwarmEvent;
 #[cfg(feature = "pnet")]
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
+use connexa::{behaviour, dummy};
 use futures::{StreamExt, TryStreamExt, stream::FuturesUnordered};
 use ipld_core::cid::Cid;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -36,6 +36,7 @@ use tracing_futures::Instrument;
 pub struct IpfsBuilder<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> {
     init: ConnexaBuilder<p2p::Behaviour<C>, IpfsContext, IpfsEvent, MemoryStore, DefaultKeystore>,
     options: IpfsOptions,
+
     repo_handle: Repo<DefaultStorage>,
     swarm_event: Option<TSwarmEventFn<C>>,
     record_key_validator:
@@ -174,6 +175,36 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         self
     }
 
+    /// Enables bitswap with explicit configuration
+    pub fn with_bitswap_config<F>(mut self, f: F) -> Self
+    where
+        F: Fn(p2p::bitswap::Config) -> p2p::bitswap::Config + 'static,
+    {
+        self.options.protocols.bitswap = true;
+        self.options.bitswap_config = Box::new(f);
+        self
+    }
+
+    /// Enables trustless HTTP gateway retrieval.
+    #[cfg(feature = "gateway")]
+    pub fn enable_gateway_retrieval(
+        mut self,
+        gateways: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.options.gateway = Some(gateways.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Enables delegated routing V1 HTTP provider discovery.
+    #[cfg(feature = "routing")]
+    pub fn enable_delegated_routing(
+        mut self,
+        routers: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.options.router = Some(routers.into_iter().map(Into::into).collect());
+        self
+    }
+
     /// Enable mdns
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_mdns(mut self) -> Self {
@@ -191,6 +222,21 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 self.init = self.init.with_dcutr();
             }
         }
+        self
+    }
+
+    /// Enable autorelay
+    pub fn with_autorelay(mut self) -> Self {
+        self.init = self.init.with_autorelay();
+        self
+    }
+
+    /// Enable autorelay with configuration option
+    pub fn with_autorelay_with_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(behaviour::autorelay::Config) -> behaviour::autorelay::Config + 'static,
+    {
+        self.init = self.init.with_autorelay_with_config(f);
         self
     }
 
@@ -707,6 +753,30 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         context.repo_events.replace(repo_events);
         context.discovery_tx.replace(discovery_tx);
 
+        #[cfg(feature = "gateway")]
+        let (gateways, gateway_guard) = match options.gateway.take() {
+            Some(config) => {
+                let gateways = crate::gateway::GatewayList::new(config);
+                let (gateway_tx, gateway_rx) = futures::channel::mpsc::channel::<Cid>(256);
+                context.gateway_tx.replace(gateway_tx);
+                let guard = async_rt::task::spawn_abortable({
+                    let repo = repo.clone();
+                    let gateways = gateways.clone();
+                    async move { crate::gateway::run(gateway_rx, repo, gateways).await }
+                });
+                (Some(gateways), guard)
+            }
+            None => (None, AbortableJoinHandle::empty()),
+        };
+
+        #[cfg(feature = "routing")]
+        let routing_setup = options.router.take().map(|config| {
+            let routers = crate::routing::RouterList::new(config);
+            let (router_tx, router_rx) = futures::channel::mpsc::channel::<Cid>(256);
+            context.router_tx.replace(router_tx);
+            (routers, router_rx)
+        });
+
         let connexa = init
             .with_custom_behaviour_with_context((options, repo.clone()), |keys, (options, repo)| {
                 let custom_behaviour = match custom_behaviour {
@@ -728,6 +798,12 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 ) = event
                 {
                     if let Some(tx) = context.discovery_tx.as_mut() {
+                        let _ = tx.try_send(cid);
+                    }
+                    if let Some(tx) = context.gateway_tx.as_mut() {
+                        let _ = tx.try_send(cid);
+                    }
+                    if let Some(tx) = context.router_tx.as_mut() {
                         let _ = tx.try_send(cid);
                     }
                 }
@@ -841,6 +917,19 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             }
         });
 
+        #[cfg(feature = "routing")]
+        let (routers, routing_guard) = match routing_setup {
+            Some((routers, router_rx)) => {
+                let guard = async_rt::task::spawn_abortable({
+                    let connexa = connexa.clone();
+                    let routers = routers.clone();
+                    async move { crate::routing::run(router_rx, connexa, routers).await }
+                });
+                (Some(routers), guard)
+            }
+            None => (None, AbortableJoinHandle::empty()),
+        };
+
         let ipfs = Ipfs {
             span: facade_span,
             repo,
@@ -848,6 +937,14 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             record_key_validator: Arc::new(record_key_validator),
             _gc_guard: gc_handle,
             _discovery_guard: discovery_guard,
+            #[cfg(feature = "gateway")]
+            gateways,
+            #[cfg(feature = "gateway")]
+            _gateway_guard: gateway_guard,
+            #[cfg(feature = "routing")]
+            routers,
+            #[cfg(feature = "routing")]
+            _routing_guard: routing_guard,
         };
 
         Ok(ipfs)

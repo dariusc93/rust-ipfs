@@ -1,10 +1,10 @@
 use std::{rc::Rc, str::FromStr, sync::OnceLock};
 
 use crate::{
-    repo::{BlockPut, BlockStore}, Block,
-    Error,
+    Block, Error,
+    repo::{BlockPut, BlockStore},
 };
-use futures::{stream::BoxStream, StreamExt};
+use futures::{StreamExt, stream::BoxStream};
 use idb::{Database, DatabaseEvent, Factory, ObjectStoreParams, TransactionMode};
 use ipld_core::cid::Cid;
 use send_wrapper::SendWrapper;

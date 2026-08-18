@@ -5,6 +5,11 @@
 - feat: Implemented MFS/Files api
 - feat: add CARv1 and CARv2 (read-only) support.
 - feat: implement ipns resolver for wasm32 target.
+- chore: implement some bitswap optimizations.
+- feat: add remote pinning support.
+- feat: implement trustless gateway retrieval.
+- feat: implement delegated routing.
+- refactor: rename Ipfs::connection_events to Ipfs::swarm_events
 
 # 0.15.0
 

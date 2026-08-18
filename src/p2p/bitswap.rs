@@ -40,7 +40,7 @@ mod bitswap_pb {
 
 use self::{
     message::RequestType,
-    session::{PeerSession, PeerSessionEvent},
+    session::{PeerSession, PeerSessionEvent, ServeBudget},
     wantlist::{Wantlist, WantlistDriver, WantlistEvent},
 };
 use crate::repo::DefaultStorage;
@@ -66,6 +66,19 @@ pub struct BitswapStats {
     pub bytes_received: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    pub global_serve_limit: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            global_serve_limit: 1024,
+        }
+    }
+}
+
 pub struct Behaviour {
     events: VecDeque<ToSwarm<Event, THandlerInEvent<Self>>>,
     connections: HashMap<PeerId, HashSet<ConnectionId>>,
@@ -74,6 +87,7 @@ pub struct Behaviour {
     wantlist: Wantlist,
     driver: WantlistDriver,
     sessions: StreamMap<PeerId, PeerSession>,
+    budget: ServeBudget,
     candidates: HashMap<Cid, VecDeque<PeerId>>,
     block_inflight: HashMap<Cid, (PeerId, Instant)>,
     block_timer: Delay,
@@ -81,7 +95,7 @@ pub struct Behaviour {
 }
 
 impl Behaviour {
-    pub fn new(store: &Repo<DefaultStorage>) -> Self {
+    pub fn new(store: &Repo<DefaultStorage>, config: Config) -> Self {
         let wantlist = Wantlist::default();
         Self {
             events: VecDeque::new(),
@@ -91,6 +105,7 @@ impl Behaviour {
             driver: WantlistDriver::new(wantlist.clone()),
             wantlist,
             sessions: StreamMap::new(),
+            budget: ServeBudget::new(config.global_serve_limit),
             candidates: HashMap::new(),
             block_inflight: HashMap::new(),
             block_timer: Delay::new(BLOCK_TIMER_TICK),
@@ -297,7 +312,11 @@ impl Behaviour {
         if self.unsupported.contains(&peer_id) || self.sessions.contains_key(&peer_id) {
             return;
         }
-        let session = PeerSession::new(self.wantlist.clone(), self.store.clone());
+        let session = PeerSession::new(
+            self.wantlist.clone(),
+            self.store.clone(),
+            self.budget.clone(),
+        );
         self.sessions.insert(peer_id, session);
         self.wake();
     }
@@ -1039,7 +1058,7 @@ mod test {
             })
             .expect("")
             .with_behaviour(|_| Behaviour {
-                bitswap: super::Behaviour::new(&repo),
+                bitswap: super::Behaviour::new(&repo, super::Config::default()),
                 address_book: crate::p2p::addressbook::Behaviour::with_config(
                     crate::p2p::addressbook::Config {
                         store_on_connection: true,

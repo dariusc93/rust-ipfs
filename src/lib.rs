@@ -30,12 +30,18 @@ pub mod config;
 mod context;
 pub mod dag;
 pub mod error;
+#[cfg(feature = "gateway")]
+mod gateway;
 pub mod ipns;
 pub mod mfs;
 pub mod p2p;
 pub mod path;
+#[cfg(feature = "pinning")]
+pub mod pinning;
 pub mod refs;
 pub mod repo;
+#[cfg(feature = "routing")]
+mod routing;
 pub mod unixfs;
 
 pub use block::Block;
@@ -44,10 +50,10 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use dag::{DagGet, DagPut};
 use futures::{
-    channel::oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
+    StreamExt,
+    channel::oneshot::{self, Sender as OneshotSender, channel as oneshot_channel},
     future::BoxFuture,
     stream::BoxStream,
-    StreamExt,
 };
 
 use p2p::{MultiaddrExt, PeerInfo};
@@ -76,13 +82,13 @@ pub use connexa::prelude::request_response::{
 pub use connexa::prelude::swarm::derive_prelude::{ConnectionId, ListenerId};
 pub use connexa::prelude::swarm::dial_opts::{DialOpts, PeerCondition};
 pub use connexa::prelude::{
-    connection_limits::ConnectionLimits, gossipsub,
-    identify,
-    ping, swarm::{self, NetworkBehaviour}, GossipsubMessage,
-    Stream,
+    ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol, identity::Keypair,
 };
 pub use connexa::prelude::{
-    identity::Keypair, ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol,
+    GossipsubMessage, Stream,
+    connection_limits::ConnectionLimits,
+    gossipsub, identify, ping,
+    swarm::{self, NetworkBehaviour},
 };
 pub use connexa::{behaviour::request_response::RequestResponseConfig, dummy};
 use ipld_core::cid::Cid;
@@ -127,11 +133,21 @@ struct IpfsOptions {
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
 
+    pub bitswap_config: Box<dyn Fn(p2p::bitswap::Config) -> p2p::bitswap::Config>,
+
     /// Address book configuration
     pub addr_config: AddressBookConfig,
 
     /// Repo Provider option
     pub provider: RepoProvider,
+
+    /// Trustless HTTP gateways used as a retrieval fallback.
+    #[cfg(feature = "gateway")]
+    pub gateway: Option<Vec<String>>,
+
+    /// Delegated routing V1 HTTP endpoints used for provider discovery.
+    #[cfg(feature = "routing")]
+    pub router: Option<Vec<String>>,
 
     /// The span for tracing purposes, `None` value is converted to `tracing::trace_span!("ipfs")`.
     ///
@@ -172,8 +188,13 @@ impl Default for IpfsOptions {
             #[cfg(target_arch = "wasm32")]
             namespace: None,
             bootstrap: Default::default(),
+            bitswap_config: Box::new(|config| config),
             addr_config: Default::default(),
             provider: Default::default(),
+            #[cfg(feature = "gateway")]
+            gateway: None,
+            #[cfg(feature = "routing")]
+            router: None,
             listening_addrs: vec![],
             span: None,
             protocols: Default::default(),
@@ -211,6 +232,14 @@ pub struct Ipfs {
         Arc<HashMap<String, Box<dyn Fn(&str) -> anyhow::Result<RecordKey> + Sync + Send>>>,
     _gc_guard: AbortableJoinHandle<()>,
     _discovery_guard: AbortableJoinHandle<()>,
+    #[cfg(feature = "gateway")]
+    gateways: Option<gateway::GatewayList>,
+    #[cfg(feature = "gateway")]
+    _gateway_guard: AbortableJoinHandle<()>,
+    #[cfg(feature = "routing")]
+    routers: Option<routing::RouterList>,
+    #[cfg(feature = "routing")]
+    _routing_guard: AbortableJoinHandle<()>,
 }
 
 impl std::fmt::Debug for Ipfs {
@@ -241,13 +270,6 @@ enum IpfsEvent {
     RemoveBootstrapper(Multiaddr, Channel<Multiaddr>),
     ClearBootstrappers(Channel<Vec<Multiaddr>>),
     DefaultBootstrap(Channel<Vec<Multiaddr>>),
-
-    AddRelay(PeerId, Multiaddr, Channel<()>),
-    RemoveRelay(PeerId, Multiaddr, Channel<()>),
-    EnableRelay(Option<PeerId>, Channel<()>),
-    DisableRelay(PeerId, Channel<()>),
-    ListRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
-    ListActiveRelays(Channel<Vec<(PeerId, Vec<Multiaddr>)>>),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -330,6 +352,52 @@ impl Ipfs {
     /// Returns a [`Ipns`] for ipns operations
     pub fn ipns(&self) -> Ipns {
         Ipns::new(self.clone())
+    }
+
+    /// Returns a client for a remote pinning service at `endpoint` authenticated with `token`.
+    #[cfg(feature = "pinning")]
+    pub fn remote_pinning(
+        &self,
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+    ) -> crate::pinning::RemotePinningService {
+        crate::pinning::RemotePinningService::new(self.clone(), endpoint, token)
+    }
+
+    /// Adds a trustless gateway to the retrieval list.
+    #[cfg(feature = "gateway")]
+    pub fn add_gateway(&self, url: &str) -> bool {
+        self.gateways.as_ref().is_some_and(|g| g.add(url))
+    }
+
+    /// Removes a trustless gateway from the retrieval list.
+    #[cfg(feature = "gateway")]
+    pub fn remove_gateway(&self, url: &str) -> bool {
+        self.gateways.as_ref().is_some_and(|g| g.remove(url))
+    }
+
+    /// Lists the trustless gateways currently used for retrieval.
+    #[cfg(feature = "gateway")]
+    pub fn list_gateways(&self) -> Vec<String> {
+        self.gateways.as_ref().map(|g| g.list()).unwrap_or_default()
+    }
+
+    /// Adds a delegated routing endpoint used for provider discovery.
+    #[cfg(feature = "routing")]
+    pub fn add_router(&self, url: &str) -> bool {
+        self.routers.as_ref().is_some_and(|r| r.add(url))
+    }
+
+    /// Removes a delegated routing endpoint.
+    #[cfg(feature = "routing")]
+    pub fn remove_router(&self, url: &str) -> bool {
+        self.routers.as_ref().is_some_and(|r| r.remove(url))
+    }
+
+    /// Lists the delegated routing endpoints currently used for provider discovery.
+    #[cfg(feature = "routing")]
+    pub fn list_routers(&self) -> Vec<String> {
+        self.routers.as_ref().map(|r| r.list()).unwrap_or_default()
     }
 
     /// Puts a block into the ipfs repo.
@@ -903,7 +971,7 @@ impl Ipfs {
             .map_err(Into::into)
     }
 
-    pub async fn connection_events(&self) -> Result<BoxStream<'static, ConnexaSwarmEvent>, Error> {
+    pub async fn swarm_events(&self) -> Result<BoxStream<'static, ConnexaSwarmEvent>, Error> {
         self.connexa.swarm().listener().await.map_err(Into::into)
     }
 
@@ -1068,97 +1136,49 @@ impl Ipfs {
             .map_err(Into::into)
     }
 
-    /// Add relay address
-    pub async fn add_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::AddRelay(peer_id, addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    /// Add static relay peer
+    pub async fn add_static_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<bool, Error> {
+        self.connexa
+            .relay()
+            .add_static_relay(peer_id, addr)
+            .await
+            .map_err(Into::into)
     }
 
-    /// Remove relay address
-    pub async fn remove_relay(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::RemoveRelay(peer_id, addr, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    /// Remove static relay peer
+    pub async fn remove_static_relay(&self, peer_id: PeerId) -> Result<bool, Error> {
+        self.connexa
+            .relay()
+            .remove_static_relay(peer_id)
+            .await
+            .map_err(Into::into)
     }
 
-    /// List all relays. if `active` is true, it will list all active relays
-    pub async fn list_relays(&self, active: bool) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            match active {
-                true => {
-                    self.connexa
-                        .send_custom_event(IpfsEvent::ListActiveRelays(tx))
-                        .await?
-                }
-                false => {
-                    self.connexa
-                        .send_custom_event(IpfsEvent::ListRelays(tx))
-                        .await?
-                }
-            };
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+    /// List all static relays.
+    pub async fn list_static_relays(&self) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Error> {
+        self.connexa
+            .relay()
+            .list_static_relays()
+            .await
+            .map_err(Into::into)
     }
 
+    /// Enables autorelay
     pub async fn enable_autorelay(&self) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
+        self.connexa
+            .relay()
+            .enable_auto_relay()
+            .await
+            .map_err(Into::into)
     }
 
+    /// Disables autorelay
     pub async fn disable_autorelay(&self) -> Result<(), Error> {
-        Err(anyhow::anyhow!("Unimplemented"))
-    }
-
-    /// Enable use of a relay. If `peer_id` is `None`, it will select a relay at random to use, if one have been added
-    pub async fn enable_relay(&self, peer_id: impl Into<Option<PeerId>>) -> Result<(), Error> {
-        async move {
-            let peer_id = peer_id.into();
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::EnableRelay(peer_id, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
-    }
-
-    /// Disable the use of a selected relay.
-    pub async fn disable_relay(&self, peer_id: PeerId) -> Result<(), Error> {
-        async move {
-            let (tx, rx) = oneshot_channel();
-
-            self.connexa
-                .send_custom_event(IpfsEvent::DisableRelay(peer_id, tx))
-                .await?;
-
-            rx.await?
-        }
-        .instrument(self.span.clone())
-        .await
+        self.connexa
+            .relay()
+            .disable_auto_relay()
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn rendezvous_register_namespace(
