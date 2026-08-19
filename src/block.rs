@@ -15,33 +15,45 @@ pub struct Block {
     data: Bytes,
 }
 impl Block {
+    /// Create a new block with the given cid and bytes.
     pub fn new(cid: Cid, data: impl Into<Bytes>) -> std::io::Result<Self> {
         let block = Self::new_unchecked(cid, data);
         block.verify()?;
         Ok(block)
     }
 
+    /// Create a new block with the given cid and bytes without verifying the data.
     pub fn new_unchecked(cid: Cid, data: impl Into<Bytes>) -> Self {
         let data = data.into();
         Self { cid, data }
     }
 
+    /// Returns the length of the data in the block.
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Returns the cid of the block.
     pub fn cid(&self) -> &Cid {
         &self.cid
     }
 
+    /// Returns the data of the block.
     pub fn data(&self) -> &[u8] {
         &self.data
     }
 
+    /// Returns the inner data of the block.
     pub fn inner_data(&self) -> &Bytes {
         &self.data
     }
 
+    /// Returns the inner data of the block
     pub fn into_inner(self) -> (Cid, Bytes) {
         (self.cid, self.data)
     }
 
+    /// Verify the block.
     pub fn verify(&self) -> std::io::Result<()> {
         let hash = Code::try_from(self.cid.hash().code())
             .map_err(std::io::Error::other)?
@@ -54,6 +66,7 @@ impl Block {
         Ok(())
     }
 
+    /// Convert the block to IPLD.
     pub fn to_ipld(&self) -> std::io::Result<Ipld> {
         let codec = BlockCodec::try_from(self.cid.codec())?;
         let ipld = match codec {
@@ -71,6 +84,7 @@ impl Block {
         Ok(ipld)
     }
 
+    /// Returns the references of the block.
     pub fn references(&self, set: &mut impl Extend<Cid>) -> std::io::Result<()> {
         let ipld = self.to_ipld()?;
         ipld.references(set);
