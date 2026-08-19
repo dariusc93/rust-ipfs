@@ -6,9 +6,8 @@
 use clap::Parser;
 use rand::Rng;
 use rust_ipfs::prelude::transport::pnet::PreSharedKey;
-use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair};
+use rust_ipfs::{Ipfs, Keypair, builder::IpfsBuilder};
 use std::str::FromStr;
-
 
 #[derive(Debug, Parser)]
 #[clap(name = "ipfs-pnet")]
