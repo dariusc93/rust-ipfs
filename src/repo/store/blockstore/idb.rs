@@ -1,10 +1,10 @@
 use std::{rc::Rc, str::FromStr, sync::OnceLock};
 
 use crate::{
-    Block, Error,
-    repo::{BlockPut, BlockStore},
+    repo::{BlockPut, BlockStore}, Block,
+    Error,
 };
-use futures::{StreamExt, stream::BoxStream};
+use futures::{stream::BoxStream, StreamExt};
 use idb::{Database, DatabaseEvent, Factory, ObjectStoreParams, TransactionMode};
 use ipld_core::cid::Cid;
 use send_wrapper::SendWrapper;
@@ -117,7 +117,7 @@ impl BlockStore for IdbBlockStore {
                 let block_size = store.get(cid_val)?.await.map(|val| {
                     val.and_then(|val| {
                         let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
-                        Block::new(*cid, bytes).map(|block| block.data().len()).ok()
+                        Block::new(*cid, bytes).map(|block| block.len()).ok()
                     })
                 })?;
 
