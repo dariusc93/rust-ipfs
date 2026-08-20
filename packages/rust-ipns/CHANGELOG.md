@@ -1,5 +1,6 @@
 # 0.10.0
 
+- fix: accept V2-only IPNS records and read signed V2 fields. [PR 503](https://github.com/dariusc93/rust-ipfs/pull/503)
 - refactor: use prost for handling protobuf.
 - refactor: update libp2p to 0.57.
 

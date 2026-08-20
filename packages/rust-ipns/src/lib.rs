@@ -178,10 +178,12 @@ impl From<ValidityType> for i32 {
 
 #[derive(Clone, Debug)]
 pub struct Record {
+    // Preserve the exact signed bytes and cache their parsed semantic fields.
     data: Option<Bytes>,
+    signed_data: Option<Data>,
 
     value: Option<Bytes>,
-    validity_type: ValidityType,
+    validity_type: Option<i32>,
     validity: Option<Bytes>,
     sequence: Option<u64>,
     ttl: Option<u64>,
@@ -192,22 +194,30 @@ pub struct Record {
     signature_v2: Option<Bytes>,
 }
 
-impl From<generate::ipns_pb::IpnsEntry> for Record {
-    fn from(entry: generate::ipns_pb::IpnsEntry) -> Self {
-        Record {
+impl TryFrom<generate::ipns_pb::IpnsEntry> for Record {
+    type Error = Error;
+
+    fn try_from(entry: generate::ipns_pb::IpnsEntry) -> Result<Self, Self::Error> {
+        let signed_data = entry
+            .data
+            .as_ref()
+            .filter(|data| !data.is_empty())
+            .map(|data| serde_ipld_dagcbor::from_slice(data))
+            .transpose()
+            .map_err(|e| Error::Cbor(Box::new(e)))?;
+
+        Ok(Record {
             data: entry.data,
+            signed_data,
             value: entry.value,
-            validity_type: entry
-                .validity_type
-                .and_then(|v| ValidityType::try_from(v).ok())
-                .unwrap_or(ValidityType::EOL),
+            validity_type: entry.validity_type,
             validity: entry.validity,
             sequence: entry.sequence,
             ttl: entry.ttl,
             public_key: entry.pub_key,
             signature_v1: entry.signature_v1,
             signature_v2: entry.signature_v2,
-        }
+        })
     }
 }
 
@@ -215,7 +225,7 @@ impl From<Record> for generate::ipns_pb::IpnsEntry {
     fn from(record: Record) -> Self {
         generate::ipns_pb::IpnsEntry {
             validity: record.validity,
-            validity_type: Some(record.validity_type.into()),
+            validity_type: record.validity_type,
             value: record.value,
             signature_v1: record.signature_v1,
             signature_v2: record.signature_v2,
@@ -231,7 +241,7 @@ impl From<&Record> for generate::ipns_pb::IpnsEntry {
     fn from(record: &Record) -> Self {
         generate::ipns_pb::IpnsEntry {
             validity: record.validity.clone(),
-            validity_type: Some(record.validity_type.into()),
+            validity_type: record.validity_type,
             value: record.value.clone(),
             signature_v1: record.signature_v1.clone(),
             signature_v2: record.signature_v2.clone(),
@@ -379,8 +389,9 @@ impl Record {
 
         Ok(Record {
             data: Some(data),
+            signed_data: Some(document),
             value: Some(value),
-            validity_type,
+            validity_type: Some(validity_type.into()),
             validity: Some(validity.into()),
             sequence: Some(seq),
             ttl: Some(ttl),
@@ -398,8 +409,7 @@ impl Record {
         }
         let entry: generate::ipns_pb::IpnsEntry = prost::Message::decode(data)?;
 
-        let record = entry.into();
-        Ok(record)
+        entry.try_into()
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, Error> {
@@ -411,21 +421,34 @@ impl Record {
 
 impl Record {
     pub fn sequence(&self) -> u64 {
-        self.sequence.unwrap_or_default()
+        self.signed_data
+            .as_ref()
+            .map_or_else(|| self.sequence.unwrap_or_default(), Data::sequence)
     }
 
     pub fn validity_type(&self) -> ValidityType {
-        self.validity_type
+        self.signed_data.as_ref().map_or_else(
+            || {
+                ValidityType::try_from(self.validity_type.unwrap_or_default())
+                    .unwrap_or(ValidityType::EOL)
+            },
+            Data::validity_type,
+        )
     }
 
     pub fn validity(&self) -> Result<DateTime<FixedOffset>, Error> {
-        let validity_bytes = self.validity.as_deref().unwrap_or_default();
+        let validity_bytes = self.signed_data.as_ref().map_or_else(
+            || self.validity.as_deref().unwrap_or_default(),
+            Data::validity,
+        );
         let time = String::from_utf8_lossy(validity_bytes);
         Ok(chrono::DateTime::parse_from_rfc3339(&time)?)
     }
 
     pub fn ttl(&self) -> u64 {
-        self.ttl.unwrap_or_default()
+        self.signed_data
+            .as_ref()
+            .map_or_else(|| self.ttl.unwrap_or_default(), Data::ttl)
     }
 
     pub fn signature_v1(&self) -> &[u8] {
@@ -451,28 +474,14 @@ impl Record {
     }
 
     pub fn data(&self) -> Result<Data, Error> {
-        let Some(data) = self.data.as_ref() else {
-            return Err(Error::EmptyData);
-        };
-
-        let data: Data =
-            serde_ipld_dagcbor::from_slice(data).map_err(|e| Error::Cbor(Box::new(e)))?;
-
-        if data.value != self.value.as_deref().unwrap_or_default()
-            || data.validity != self.validity.as_deref().unwrap_or_default()
-            || data.validity_type != self.validity_type
-            || data.sequence != self.sequence()
-            || data.ttl != self.ttl()
-        {
-            return Err(Error::DataMismatch);
-        }
-
-        Ok(data)
+        self.signed_data.clone().ok_or(Error::EmptyData)
     }
 
-    /// The raw IPNS value.
+    /// The signed V2 value, or the legacy value when signed data is absent.
     pub fn value(&self) -> &[u8] {
-        self.value.as_deref().unwrap_or_default()
+        self.signed_data
+            .as_ref()
+            .map_or_else(|| self.value.as_deref().unwrap_or_default(), Data::value)
     }
 
     pub fn verify_signature(&self, peer_id: PeerId) -> Result<(), Error> {
@@ -507,7 +516,7 @@ impl Record {
             return Err(Error::NameMismatch);
         }
 
-        self.data()?;
+        let data = self.signed_data.as_ref().ok_or(Error::EmptyData)?;
 
         let data_bytes = self.data.as_deref().unwrap_or_default();
 
@@ -519,6 +528,17 @@ impl Record {
 
         if !public_key.verify(&signature_v2, self.signature_v2()) {
             return Err(Error::InvalidSignature);
+        }
+
+        // V2-only records omit legacy copies. Reconcile hybrid records only.
+        if (self.has_signature_v1() || !self.value.as_deref().unwrap_or_default().is_empty())
+            && (data.value != self.value.as_deref().unwrap_or_default()
+                || data.validity != self.validity.as_deref().unwrap_or_default()
+                || i32::from(data.validity_type) != self.validity_type.unwrap_or_default()
+                || data.sequence != self.sequence.unwrap_or_default()
+                || data.ttl != self.ttl.unwrap_or_default())
+        {
+            return Err(Error::DataMismatch);
         }
 
         Ok(())
@@ -545,7 +565,7 @@ impl Record {
         match self
             .has_signature_v2()
             .cmp(&other.has_signature_v2())
-            .then_with(|| self.sequence.cmp(&other.sequence))
+            .then_with(|| self.sequence().cmp(&other.sequence()))
         {
             Ordering::Equal => Ok(self.validity()?.cmp(&other.validity()?)),
             ord => Ok(ord),
@@ -692,6 +712,60 @@ mod tests {
         // V2 presence outranks both sequence and the later validity
         assert_eq!(with_v2.compare(&v1_only).unwrap(), Ordering::Greater);
         assert_eq!(v1_only.compare(&with_v2).unwrap(), Ordering::Less);
+    }
+
+    #[test]
+    fn v2_only_comparison_uses_signed_sequence_and_validity() {
+        use std::cmp::Ordering;
+
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let eol = Utc::now() + Duration::hours(24);
+        let v2_only = |sequence, eol| {
+            let mut record = Record::new(
+                &kp,
+                b"/ipfs/bafkqaaa",
+                eol,
+                sequence,
+                std::time::Duration::ZERO,
+            )
+            .unwrap();
+            record.value = None;
+            record.validity_type = None;
+            record.validity = None;
+            record.sequence = None;
+            record.ttl = None;
+            record.signature_v1 = None;
+            let decoded = Record::decode(record.encode().unwrap()).unwrap();
+            decoded.verify(peer).unwrap();
+            decoded
+        };
+
+        let record = v2_only(42, eol);
+        let newer = v2_only(43, eol - Duration::hours(1));
+        let later = v2_only(42, eol + Duration::hours(1));
+        assert_eq!(newer.compare(&record).unwrap(), Ordering::Greater);
+        assert_eq!(later.compare(&record).unwrap(), Ordering::Greater);
+    }
+
+    #[test]
+    fn hybrid_legacy_mismatches_are_rejected() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        for field in 0..5 {
+            let mut record = record_for(&kp, 24);
+            match field {
+                0 => record.value = Some(Bytes::from_static(b"/ipfs/other")),
+                1 => record.validity_type = Some(1),
+                2 => record.validity = Some(Bytes::from_static(b"2100-01-01T00:00:00Z")),
+                3 => record.sequence = Some(1),
+                4 => record.ttl = Some(1),
+                _ => unreachable!(),
+            }
+            let decoded = Record::decode(record.encode().unwrap()).unwrap();
+            assert_eq!(decoded.value(), b"/ipfs/bafkqaaa");
+            assert!(matches!(decoded.verify(peer), Err(Error::DataMismatch)));
+        }
     }
 
     #[test]
