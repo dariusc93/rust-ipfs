@@ -1,4 +1,8 @@
 // Automatically generated rust module for 'ipns_pb.proto' file
+//
+// MANUAL PATCH: pb-rs currently does not preserve proto3 optional scalar presence here.
+// The Option<T> changes below are required for correct IPNS V2-only/hybrid semantics.
+// Re-apply this patch after regenerating this file with the current generator.
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -19,10 +23,12 @@ use std::borrow::Cow;
 pub struct IpnsEntry<'a> {
     pub value: Cow<'a, [u8]>,
     pub signatureV1: Cow<'a, [u8]>,
-    pub validityType: ipns_pb::mod_IpnsEntry::ValidityType,
+    // MANUAL: keep these proto3 optional scalars as Option<T> so absence remains distinct
+    // from an encoded zero value when rust-ipns validates and re-encodes IPNS records.
+    pub validityType: Option<i32>,
     pub validity: Cow<'a, [u8]>,
-    pub sequence: u64,
-    pub ttl: u64,
+    pub sequence: Option<u64>,
+    pub ttl: Option<u64>,
     pub pubKey: Cow<'a, [u8]>,
     pub signatureV2: Cow<'a, [u8]>,
     pub data: Cow<'a, [u8]>,
@@ -35,10 +41,10 @@ impl<'a> MessageRead<'a> for IpnsEntry<'a> {
             match r.next_tag(bytes) {
                 Ok(10) => msg.value = r.read_bytes(bytes).map(Cow::Borrowed)?,
                 Ok(18) => msg.signatureV1 = r.read_bytes(bytes).map(Cow::Borrowed)?,
-                Ok(24) => msg.validityType = r.read_enum(bytes)?,
+                Ok(24) => msg.validityType = Some(r.read_enum(bytes)?),
                 Ok(34) => msg.validity = r.read_bytes(bytes).map(Cow::Borrowed)?,
-                Ok(40) => msg.sequence = r.read_uint64(bytes)?,
-                Ok(48) => msg.ttl = r.read_uint64(bytes)?,
+                Ok(40) => msg.sequence = Some(r.read_uint64(bytes)?),
+                Ok(48) => msg.ttl = Some(r.read_uint64(bytes)?),
                 Ok(58) => msg.pubKey = r.read_bytes(bytes).map(Cow::Borrowed)?,
                 Ok(66) => msg.signatureV2 = r.read_bytes(bytes).map(Cow::Borrowed)?,
                 Ok(74) => msg.data = r.read_bytes(bytes).map(Cow::Borrowed)?,
@@ -55,10 +61,10 @@ impl<'a> MessageWrite for IpnsEntry<'a> {
         0
         + if self.value == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.value).len()) }
         + if self.signatureV1 == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.signatureV1).len()) }
-        + 1 + sizeof_varint(*(&self.validityType) as u64)
+        + self.validityType.map_or(0, |value| 1 + sizeof_varint(value as u64))
         + if self.validity == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.validity).len()) }
-        + 1 + sizeof_varint(*(&self.sequence) as u64)
-        + 1 + sizeof_varint(*(&self.ttl) as u64)
+        + self.sequence.map_or(0, |value| 1 + sizeof_varint(value))
+        + self.ttl.map_or(0, |value| 1 + sizeof_varint(value))
         + if self.pubKey == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.pubKey).len()) }
         + if self.signatureV2 == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.signatureV2).len()) }
         + if self.data == Cow::Borrowed(b"") { 0 } else { 1 + sizeof_len((&self.data).len()) }
@@ -67,10 +73,10 @@ impl<'a> MessageWrite for IpnsEntry<'a> {
     fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {
         if self.value != Cow::Borrowed(b"") { w.write_with_tag(10, |w| w.write_bytes(&**&self.value))?; }
         if self.signatureV1 != Cow::Borrowed(b"") { w.write_with_tag(18, |w| w.write_bytes(&**&self.signatureV1))?; }
-        w.write_with_tag(24, |w| w.write_enum(*&self.validityType as i32))?;
+        if let Some(value) = self.validityType { w.write_with_tag(24, |w| w.write_enum(value))?; }
         if self.validity != Cow::Borrowed(b"") { w.write_with_tag(34, |w| w.write_bytes(&**&self.validity))?; }
-        w.write_with_tag(40, |w| w.write_uint64(*&self.sequence))?;
-        w.write_with_tag(48, |w| w.write_uint64(*&self.ttl))?;
+        if let Some(value) = self.sequence { w.write_with_tag(40, |w| w.write_uint64(value))?; }
+        if let Some(value) = self.ttl { w.write_with_tag(48, |w| w.write_uint64(value))?; }
         if self.pubKey != Cow::Borrowed(b"") { w.write_with_tag(58, |w| w.write_bytes(&**&self.pubKey))?; }
         if self.signatureV2 != Cow::Borrowed(b"") { w.write_with_tag(66, |w| w.write_bytes(&**&self.signatureV2))?; }
         if self.data != Cow::Borrowed(b"") { w.write_with_tag(74, |w| w.write_bytes(&**&self.data))?; }
@@ -82,6 +88,7 @@ pub mod mod_IpnsEntry {
 
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[allow(dead_code)]
 pub enum ValidityType {
     EOL = 0,
 }
@@ -148,4 +155,3 @@ impl<'a> MessageWrite for IpnsSignatureV2Checker<'a> {
         Ok(())
     }
 }
-

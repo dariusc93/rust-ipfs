@@ -1,3 +1,7 @@
+# Unreleased
+
+- fix: accept V2-only IPNS records. `Record::data()` now returns canonical parsed signed V2 data, malformed DAG-CBOR fails during decode, and the internal protobuf representation preserves optional scalar presence for hybrid validation.
+
 # 0.9.0
 
 - feat: update ipns logic
