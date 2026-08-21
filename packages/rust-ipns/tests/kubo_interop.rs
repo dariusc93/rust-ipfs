@@ -15,6 +15,19 @@ const PUBLIC_KEY_BYTES_ZERO_SEQ: [u8; 32] = [
     226, 100, 124, 164, 163, 237, 105, 86, 156, 255, 180,
 ];
 
+fn decode_hex(hex: &str) -> Vec<u8> {
+    let hex = hex.trim();
+    assert_eq!(hex.len() % 2, 0);
+
+    hex.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let digits = std::str::from_utf8(pair).unwrap();
+            u8::from_str_radix(digits, 16).unwrap()
+        })
+        .collect()
+}
+
 fn boxo_fixture(label: &str) -> (PeerId, Vec<u8>) {
     let line = include_str!("boxo_0_42_2_records.txt")
         .lines()
@@ -25,17 +38,7 @@ fn boxo_fixture(label: &str) -> (PeerId, Vec<u8>) {
     let peer_id = PeerId::from_str(fields.next().unwrap()).unwrap();
     let hex = fields.next().unwrap();
     assert!(fields.next().is_none());
-    assert_eq!(hex.len() % 2, 0);
-
-    let bytes = hex
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let digits = std::str::from_utf8(pair).unwrap();
-            u8::from_str_radix(digits, 16).unwrap()
-        })
-        .collect();
-    (peer_id, bytes)
+    (peer_id, decode_hex(hex))
 }
 
 fn assert_boxo_fields(record: &Record, value: &[u8], sequence: u64, ttl: u64) {
@@ -89,6 +92,32 @@ fn parse_and_reconstruct_kubo_record_seq_zero() {
 
     let new_record_bytes = record.encode().unwrap();
     assert_eq!(original_record_bytes, new_record_bytes);
+}
+
+#[test]
+fn official_spec_v2_only_record_validates_and_reads_signed_fields() {
+    // Official IPNS Record specification vector 6:
+    // https://specs.ipfs.tech/ipns/ipns-record/#test-vectors
+    let bytes = decode_hex(include_str!("ipns_v2_only_spec_record.hex"));
+    let peer_id = PeerId::from_str("12D3KooWGuR5BdSqp23UeoeesuwYwW3ebQ9rZ8aVwfWEDU8kvCYJ").unwrap();
+    let record = Record::decode(&bytes).unwrap();
+
+    assert!(!record.has_signature_v1());
+    assert!(record.has_signature_v2());
+    assert_eq!(record.value(), b"/ipfs/bafkqadtwgiww63tmpeqhezldn5zgi");
+    assert_eq!(record.sequence(), 0);
+    assert_eq!(record.ttl(), 1_800_000_000_000);
+    assert_eq!(
+        record.validity().unwrap().to_rfc3339(),
+        "2123-08-14T12:17:03.694052+00:00"
+    );
+    record.verify(peer_id).unwrap();
+
+    let (wrong_name, _) = boxo_fixture("v2-ed25519");
+    assert!(matches!(
+        record.verify_signature(wrong_name),
+        Err(Error::InvalidSignature)
+    ));
 }
 
 #[test]

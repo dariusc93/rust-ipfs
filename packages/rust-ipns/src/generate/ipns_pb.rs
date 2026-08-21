@@ -1,4 +1,8 @@
 // Automatically generated rust module for 'ipns_pb.proto' file
+//
+// MANUAL PATCH: pb-rs currently does not preserve proto3 optional scalar presence here.
+// The Option<T> changes below are required for correct IPNS V2-only/hybrid semantics.
+// Re-apply this patch after regenerating this file with the current generator.
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -19,6 +23,8 @@ use std::borrow::Cow;
 pub struct IpnsEntry<'a> {
     pub value: Cow<'a, [u8]>,
     pub signatureV1: Cow<'a, [u8]>,
+    // MANUAL: keep these proto3 optional scalars as Option<T> so absence remains distinct
+    // from an encoded zero value when rust-ipns validates and re-encodes IPNS records.
     pub validityType: Option<i32>,
     pub validity: Cow<'a, [u8]>,
     pub sequence: Option<u64>,
