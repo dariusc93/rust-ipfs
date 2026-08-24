@@ -1836,7 +1836,7 @@ dependencies = [
  "idna",
  "ipnet",
  "once_cell",
- "rand 0.9.4",
+ "rand 0.9.5",
  "ring",
  "socket2 0.5.10",
  "thiserror 2.0.18",
@@ -1859,7 +1859,7 @@ dependencies = [
  "moka",
  "once_cell",
  "parking_lot",
- "rand 0.9.4",
+ "rand 0.9.5",
  "resolv-conf",
  "smallvec",
  "thiserror 2.0.18",
@@ -2189,7 +2189,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "log",
- "rand 0.9.4",
+ "rand 0.9.5",
  "tokio",
  "url",
  "xmltree",
@@ -2860,7 +2860,7 @@ dependencies = [
  "futures-timer",
  "getrandom 0.4.2",
  "libp2p",
- "rand 0.9.4",
+ "rand 0.10.2",
  "tokio",
 ]
 
@@ -4019,9 +4019,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
+checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.5",
@@ -4379,7 +4379,7 @@ dependencies = [
  "pollable-map",
  "quick-protobuf",
  "quick-protobuf-codec",
- "rand 0.9.4",
+ "rand 0.10.2",
  "rcgen 0.13.2",
  "reqwest",
  "rlimit 0.11.0",
@@ -6571,7 +6571,7 @@ dependencies = [
  "nohash-hasher",
  "parking_lot",
  "pin-project",
- "rand 0.9.4",
+ "rand 0.9.5",
  "static_assertions",
  "web-time",
 ]
