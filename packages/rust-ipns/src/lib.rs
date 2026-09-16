@@ -482,7 +482,9 @@ impl Record {
             return Err(Error::MissingSignature);
         }
 
-        if let Some(data) = self.data.as_ref() && data.is_empty() {
+        if let Some(data) = self.data.as_ref()
+            && data.is_empty()
+        {
             return Err(Error::EmptyData);
         }
 
@@ -499,7 +501,7 @@ impl Record {
         } else {
             PublicKey::try_decode_protobuf(public_key_bytes)
         }
-            .map_err(Error::InvalidPublicKey)?;
+        .map_err(Error::InvalidPublicKey)?;
 
         if PeerId::from_public_key(&public_key) != peer_id {
             return Err(Error::NameMismatch);
@@ -564,7 +566,7 @@ mod tests {
             0,
             std::time::Duration::ZERO,
         )
-            .unwrap()
+        .unwrap()
     }
 
     #[test]
@@ -625,7 +627,7 @@ mod tests {
                 0,
                 std::time::Duration::ZERO,
             )
-                .unwrap();
+            .unwrap();
             rec.verify(peer).unwrap();
             let decoded = Record::decode(rec.encode().unwrap()).unwrap();
             decoded.verify(peer).unwrap();
@@ -644,7 +646,7 @@ mod tests {
             0,
             std::time::Duration::ZERO,
         )
-            .unwrap();
+        .unwrap();
         let seq1 = Record::new(
             &kp,
             b"/ipfs/bafkqaaa",
@@ -652,7 +654,7 @@ mod tests {
             1,
             std::time::Duration::ZERO,
         )
-            .unwrap();
+        .unwrap();
         // higher sequence wins even with an earlier EOL
         assert_eq!(seq1.compare(&seq0).unwrap(), Ordering::Greater);
         assert_eq!(seq0.compare(&seq1).unwrap(), Ordering::Less);
@@ -664,7 +666,7 @@ mod tests {
             5,
             std::time::Duration::ZERO,
         )
-            .unwrap();
+        .unwrap();
         let far = Record::new(
             &kp,
             b"/ipfs/bafkqaaa",
@@ -672,7 +674,7 @@ mod tests {
             5,
             std::time::Duration::ZERO,
         )
-            .unwrap();
+        .unwrap();
         // equal sequence: the later EOL wins
         assert_eq!(far.compare(&near).unwrap(), Ordering::Greater);
     }
@@ -708,7 +710,7 @@ mod tests {
             std::time::Duration::ZERO,
             metadata.clone(),
         )
-            .unwrap();
+        .unwrap();
         rec.verify(peer).unwrap();
 
         // survives a wire round-trip, still verifies, and exposes the metadata unchanged

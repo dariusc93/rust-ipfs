@@ -26,17 +26,7 @@ pub struct IpnsEntry {
 }
 /// Nested message and enum types in `IpnsEntry`.
 pub mod ipns_entry {
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum ValidityType {
         /// setting an EOL says "this record is valid until..."
