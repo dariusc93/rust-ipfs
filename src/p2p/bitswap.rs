@@ -31,10 +31,8 @@ use pollable_map::stream::StreamMap;
 mod bitswap_pb {
     pub use super::pb::bitswap_pb::Message;
     pub mod message {
-        use super::super::pb::bitswap_pb::mod_Message as message;
-        pub use message::Wantlist;
-        pub use message::mod_Wantlist as wantlist;
-        pub use message::{Block, BlockPresence, BlockPresenceType};
+        use super::super::pb::bitswap_pb::message;
+        pub use message::{Block, BlockPresence};
     }
 }
 

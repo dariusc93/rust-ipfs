@@ -7,9 +7,7 @@ use ipld_core::ipld::Ipld;
 use libp2p_identity::PeerId;
 use libp2p_identity::PublicKey;
 use libp2p_identity::{DecodingError, Keypair, SigningError};
-use quick_protobuf::MessageWrite;
-use quick_protobuf::Writer;
-use quick_protobuf::{BytesReader, MessageRead};
+use prost::Message;
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::BTreeMap;
 
@@ -46,7 +44,9 @@ pub enum Error {
     /// Unrecognized validity type.
     InvalidValidityType,
     /// Malformed protobuf.
-    Protobuf(quick_protobuf::Error),
+    ProtoEncoding(prost::EncodeError),
+    /// Malformed protobuf.
+    ProtoDecoding(prost::DecodeError),
     /// Malformed dag-cbor data.
     Cbor(Box<dyn std::error::Error + Send + Sync + 'static>),
     /// Malformed EOL validity timestamp.
@@ -78,7 +78,8 @@ impl std::fmt::Display for Error {
             Error::Expired => write!(f, "record has expired"),
             Error::DataMismatch => write!(f, "dag-cbor data does not match the protobuf fields"),
             Error::InvalidValidityType => write!(f, "invalid validity type"),
-            Error::Protobuf(e) => write!(f, "protobuf error: {e}"),
+            Error::ProtoEncoding(e) => write!(f, "protobuf error: {e}"),
+            Error::ProtoDecoding(e) => write!(f, "protobuf error: {e}"),
             Error::Cbor(e) => write!(f, "dag-cbor error: {e}"),
             Error::InvalidValidity(e) => write!(f, "invalid validity timestamp: {e}"),
             Error::SigningError(e) => write!(f, "signing error: {e}"),
@@ -92,7 +93,8 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Protobuf(e) => Some(e),
+            Error::ProtoEncoding(e) => Some(e),
+            Error::ProtoDecoding(e) => Some(e),
             Error::SigningError(e) => Some(e),
             Error::InvalidPublicKey(e) => Some(e),
             Error::Multihash(e) => Some(e),
@@ -100,12 +102,6 @@ impl std::error::Error for Error {
             Error::InvalidValidity(e) => Some(e),
             _ => None,
         }
-    }
-}
-
-impl From<quick_protobuf::Error> for Error {
-    fn from(e: quick_protobuf::Error) -> Self {
-        Error::Protobuf(e)
     }
 }
 
@@ -118,6 +114,18 @@ impl From<chrono::ParseError> for Error {
 impl From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    }
+}
+
+impl From<prost::DecodeError> for Error {
+    fn from(e: prost::DecodeError) -> Self {
+        Error::ProtoDecoding(e)
+    }
+}
+
+impl From<prost::EncodeError> for Error {
+    fn from(e: prost::EncodeError) -> Self {
+        Error::ProtoEncoding(e)
     }
 }
 
@@ -168,58 +176,69 @@ impl From<ValidityType> for i32 {
     }
 }
 
-impl From<generate::ipns_pb::mod_IpnsEntry::ValidityType> for ValidityType {
-    fn from(v_ty: generate::ipns_pb::mod_IpnsEntry::ValidityType) -> Self {
-        match v_ty {
-            generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL => ValidityType::EOL,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Record {
-    data: Vec<u8>,
+    data: Option<Bytes>,
 
-    value: Vec<u8>,
+    value: Option<Bytes>,
     validity_type: ValidityType,
-    validity: Vec<u8>,
-    sequence: u64,
-    ttl: u64,
+    validity: Option<Bytes>,
+    sequence: Option<u64>,
+    ttl: Option<u64>,
 
-    public_key: Vec<u8>,
+    public_key: Option<Bytes>,
 
-    signature_v1: Vec<u8>,
-    signature_v2: Vec<u8>,
+    signature_v1: Option<Bytes>,
+    signature_v2: Option<Bytes>,
 }
 
-impl From<generate::ipns_pb::IpnsEntry<'_>> for Record {
-    fn from(entry: generate::ipns_pb::IpnsEntry<'_>) -> Self {
+impl From<generate::ipns_pb::IpnsEntry> for Record {
+    fn from(entry: generate::ipns_pb::IpnsEntry) -> Self {
         Record {
-            data: entry.data.into(),
-            value: entry.value.into(),
-            validity_type: entry.validityType.into(),
+            data: entry.data,
+            value: entry.value,
+            validity_type: entry
+                .validity_type
+                .and_then(|v| ValidityType::try_from(v).ok())
+                .unwrap_or(ValidityType::EOL),
             validity: entry.validity.into(),
             sequence: entry.sequence,
             ttl: entry.ttl,
-            public_key: entry.pubKey.into(),
-            signature_v1: entry.signatureV1.into(),
-            signature_v2: entry.signatureV2.into(),
+            public_key: entry.pub_key,
+            signature_v1: entry.signature_v1,
+            signature_v2: entry.signature_v2,
         }
     }
 }
 
-impl<'a> From<&'a Record> for generate::ipns_pb::IpnsEntry<'a> {
-    fn from(record: &'a Record) -> Self {
+impl From<Record> for generate::ipns_pb::IpnsEntry {
+    fn from(record: Record) -> Self {
         generate::ipns_pb::IpnsEntry {
-            validity: (&record.validity).into(),
-            validityType: generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL,
-            value: (&record.value).into(),
-            signatureV1: (&record.signature_v1).into(),
-            signatureV2: (&record.signature_v2).into(),
+            validity: record.validity.into(),
+            validity_type: Some(record.validity_type.into()),
+            value: record.value,
+            signature_v1: record.signature_v1,
+            signature_v2: record.signature_v2,
             sequence: record.sequence,
-            pubKey: (&record.public_key).into(),
+            pub_key: record.public_key,
             ttl: record.ttl,
-            data: (&record.data).into(),
+            data: record.data,
+        }
+    }
+}
+
+impl From<&Record> for generate::ipns_pb::IpnsEntry {
+    fn from(record: &Record) -> Self {
+        generate::ipns_pb::IpnsEntry {
+            validity: record.validity.clone(),
+            validity_type: Some(record.validity_type.into()),
+            value: record.value.clone(),
+            signature_v1: record.signature_v1.clone(),
+            signature_v2: record.signature_v2.clone(),
+            sequence: record.sequence,
+            pub_key: record.public_key.clone(),
+            ttl: record.ttl,
+            data: record.data.clone(),
         }
     }
 }
@@ -306,7 +325,7 @@ impl Record {
             }
         }
 
-        let value = value.as_ref().to_vec();
+        let value = Bytes::from(value.as_ref().to_vec());
 
         let ttl = u64::try_from(ttl.as_nanos()).unwrap_or(u64::MAX);
 
@@ -329,7 +348,7 @@ impl Record {
             .map_err(Error::SigningError)?;
 
         let document = Data {
-            value: Bytes::from(value.clone()),
+            value: value.clone(),
             validity_type,
             validity: Bytes::from(validity.clone()),
             sequence: seq,
@@ -337,7 +356,9 @@ impl Record {
             metadata,
         };
 
-        let data = serde_ipld_dagcbor::to_vec(&document).map_err(|e| Error::Cbor(Box::new(e)))?;
+        let data = serde_ipld_dagcbor::to_vec(&document)
+            .map(Bytes::from)
+            .map_err(|e| Error::Cbor(Box::new(e)))?;
 
         let signature_v2_construct = SIGNATURE_V2_BASE
             .iter()
@@ -357,15 +378,15 @@ impl Record {
         };
 
         Ok(Record {
-            data,
-            value,
+            data: Some(data),
+            value: Some(value),
             validity_type,
-            validity,
-            sequence: seq,
-            ttl,
-            public_key,
-            signature_v1,
-            signature_v2,
+            validity: Some(validity.into()),
+            sequence: Some(seq),
+            ttl: Some(ttl),
+            public_key: Some(public_key.into()),
+            signature_v1: (!signature_v1.is_empty()).then_some(signature_v1.into()),
+            signature_v2: (!signature_v2.is_empty()).then_some(signature_v2.into()),
         })
     }
 
@@ -375,28 +396,22 @@ impl Record {
         if data.len() > 10 * 1024 {
             return Err(Error::RecordTooLarge);
         }
+        let entry: generate::ipns_pb::IpnsEntry = prost::Message::decode(data)?;
 
-        let mut reader = BytesReader::from_bytes(data);
-        let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)?;
         let record = entry.into();
         Ok(record)
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, Error> {
         let entry: generate::ipns_pb::IpnsEntry = self.into();
-
-        let mut buf = Vec::with_capacity(entry.get_size());
-        let mut writer = Writer::new(&mut buf);
-
-        entry.write_message(&mut writer)?;
-
-        Ok(buf)
+        let buffer = entry.encode_to_vec();
+        Ok(buffer)
     }
 }
 
 impl Record {
     pub fn sequence(&self) -> u64 {
-        self.sequence
+        self.sequence.unwrap_or_default()
     }
 
     pub fn validity_type(&self) -> ValidityType {
@@ -404,33 +419,50 @@ impl Record {
     }
 
     pub fn validity(&self) -> Result<DateTime<FixedOffset>, Error> {
-        let time = String::from_utf8_lossy(&self.validity);
+        let validity_bytes = self.validity.as_deref().unwrap_or_default();
+        let time = String::from_utf8_lossy(validity_bytes);
         Ok(chrono::DateTime::parse_from_rfc3339(&time)?)
     }
 
     pub fn ttl(&self) -> u64 {
-        self.ttl
+        self.ttl.unwrap_or_default()
+    }
+
+    pub fn signature_v1(&self) -> &[u8] {
+        self.signature_v1.as_deref().unwrap_or_default()
+    }
+
+    pub fn signature_v2(&self) -> &[u8] {
+        self.signature_v2.as_deref().unwrap_or_default()
     }
 
     /// Whether the record carries a (legacy) V1 signature.
     pub fn has_signature_v1(&self) -> bool {
-        !self.signature_v1.is_empty()
+        self.signature_v1
+            .as_ref()
+            .is_some_and(|sig| !sig.is_empty())
     }
 
     /// Whether the record carries a V2 signature.
     pub fn has_signature_v2(&self) -> bool {
-        !self.signature_v2.is_empty()
+        self.signature_v2
+            .as_ref()
+            .is_some_and(|sig| !sig.is_empty())
     }
 
     pub fn data(&self) -> Result<Data, Error> {
-        let data: Data =
-            serde_ipld_dagcbor::from_slice(&self.data).map_err(|e| Error::Cbor(Box::new(e)))?;
+        let Some(data) = self.data.as_ref() else {
+            return Err(Error::EmptyData);
+        };
 
-        if data.value != self.value
-            || data.validity != self.validity
+        let data: Data =
+            serde_ipld_dagcbor::from_slice(data).map_err(|e| Error::Cbor(Box::new(e)))?;
+
+        if data.value != self.value.as_deref().unwrap_or_default()
+            || data.validity != self.validity.as_deref().unwrap_or_default()
             || data.validity_type != self.validity_type
-            || data.sequence != self.sequence
-            || data.ttl != self.ttl
+            || data.sequence != self.sequence()
+            || data.ttl != self.ttl()
         {
             return Err(Error::DataMismatch);
         }
@@ -440,21 +472,23 @@ impl Record {
 
     /// The raw IPNS value.
     pub fn value(&self) -> &[u8] {
-        &self.value
+        self.value.as_deref().unwrap_or_default()
     }
 
     pub fn verify_signature(&self, peer_id: PeerId) -> Result<(), Error> {
         use multihash::Multihash;
 
-        if self.signature_v2.is_empty() {
+        if !self.has_signature_v2() {
             return Err(Error::MissingSignature);
         }
 
-        if self.data.is_empty() {
+        if let Some(data) = self.data.as_ref() && data.is_empty() {
             return Err(Error::EmptyData);
         }
 
-        let public_key = if self.public_key.is_empty() {
+        let public_key_bytes = self.public_key.as_deref().unwrap_or_default();
+
+        let public_key = if public_key_bytes.is_empty() {
             let mh = Multihash::<64>::from_bytes(&peer_id.to_bytes()).map_err(Error::Multihash)?;
             // small keys are inlined in the name via an identity (code 0) multihash; anything
             // else (e.g. an RSA name) carries no inlined key, so the record must embed one.
@@ -463,9 +497,9 @@ impl Record {
             }
             PublicKey::try_decode_protobuf(mh.digest())
         } else {
-            PublicKey::try_decode_protobuf(&self.public_key)
+            PublicKey::try_decode_protobuf(public_key_bytes)
         }
-        .map_err(Error::InvalidPublicKey)?;
+            .map_err(Error::InvalidPublicKey)?;
 
         if PeerId::from_public_key(&public_key) != peer_id {
             return Err(Error::NameMismatch);
@@ -473,13 +507,15 @@ impl Record {
 
         self.data()?;
 
+        let data_bytes = self.data.as_deref().unwrap_or_default();
+
         let signature_v2 = SIGNATURE_V2_BASE
             .iter()
-            .chain(self.data.iter())
+            .chain(data_bytes.iter())
             .copied()
             .collect::<Vec<_>>();
 
-        if !public_key.verify(&signature_v2, &self.signature_v2) {
+        if !public_key.verify(&signature_v2, self.signature_v2()) {
             return Err(Error::InvalidSignature);
         }
 
@@ -528,7 +564,7 @@ mod tests {
             0,
             std::time::Duration::ZERO,
         )
-        .unwrap()
+            .unwrap()
     }
 
     #[test]
@@ -589,7 +625,7 @@ mod tests {
                 0,
                 std::time::Duration::ZERO,
             )
-            .unwrap();
+                .unwrap();
             rec.verify(peer).unwrap();
             let decoded = Record::decode(rec.encode().unwrap()).unwrap();
             decoded.verify(peer).unwrap();
@@ -608,7 +644,7 @@ mod tests {
             0,
             std::time::Duration::ZERO,
         )
-        .unwrap();
+            .unwrap();
         let seq1 = Record::new(
             &kp,
             b"/ipfs/bafkqaaa",
@@ -616,7 +652,7 @@ mod tests {
             1,
             std::time::Duration::ZERO,
         )
-        .unwrap();
+            .unwrap();
         // higher sequence wins even with an earlier EOL
         assert_eq!(seq1.compare(&seq0).unwrap(), Ordering::Greater);
         assert_eq!(seq0.compare(&seq1).unwrap(), Ordering::Less);
@@ -628,7 +664,7 @@ mod tests {
             5,
             std::time::Duration::ZERO,
         )
-        .unwrap();
+            .unwrap();
         let far = Record::new(
             &kp,
             b"/ipfs/bafkqaaa",
@@ -636,7 +672,7 @@ mod tests {
             5,
             std::time::Duration::ZERO,
         )
-        .unwrap();
+            .unwrap();
         // equal sequence: the later EOL wins
         assert_eq!(far.compare(&near).unwrap(), Ordering::Greater);
     }
@@ -648,7 +684,7 @@ mod tests {
 
         let with_v2 = record_for(&kp, 1);
         let mut v1_only = record_for(&kp, 48); // later EOL, but no V2
-        v1_only.signature_v2.clear();
+        v1_only.signature_v2 = None;
         assert!(with_v2.has_signature_v2() && !v1_only.has_signature_v2());
 
         // V2 presence outranks both sequence and the later validity
@@ -672,7 +708,7 @@ mod tests {
             std::time::Duration::ZERO,
             metadata.clone(),
         )
-        .unwrap();
+            .unwrap();
         rec.verify(peer).unwrap();
 
         // survives a wire round-trip, still verifies, and exposes the metadata unchanged

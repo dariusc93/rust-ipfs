@@ -19,7 +19,7 @@ const MAX_BUF_SIZE: usize = 2_097_152;
 const WRITE_ERROR_THRESHOLD: usize = 3;
 const WRITE_ERROR_WINDOW: Duration = Duration::from_secs(30);
 
-type Codec = quick_protobuf_codec::Codec<bitswap_pb::Message>;
+type Codec = prost_codec::Codec<bitswap_pb::Message>;
 type Channel = Framed<Stream, Codec>;
 
 #[derive(Debug)]
