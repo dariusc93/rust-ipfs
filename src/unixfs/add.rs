@@ -271,8 +271,7 @@ impl Stream for UnixfsAdd {
 
                         let mut path = IpfsPath::from(cid);
 
-                        if wrap {
-                            if let Some(name) = name {
+                        if wrap && let Some(name) = name {
                                 let result = {
                                     let repo = repo.clone();
                                     async move {
@@ -312,22 +311,15 @@ impl Stream for UnixfsAdd {
                                     }
                                 };
                             }
-                        }
 
                         let cid = path.root().cid().copied().expect("Cid is apart of the path");
 
-                        if pin && !repo.is_pinned(&cid).await.unwrap_or_default() {
-                            if let Err(e) = repo.pin(cid).recursive().await {
-                                error!("Unable to pin {cid}: {e}");
-                            }
+                        if pin && !repo.is_pinned(&cid).await.unwrap_or_default() && let Err(e) = repo.pin(cid).recursive().await {
+                            error!("Unable to pin {cid}: {e}");
                         }
 
-                        if provide {
-                            if let Some(ipfs) = ipfs {
-                                if let Err(e) = ipfs.provide(cid).await {
-                                    error!("Unable to provide {cid}: {e}");
-                                }
-                            }
+                        if provide &&  let Some(ipfs) = ipfs  && let Err(e) = ipfs.provide(cid).await {
+                            error!("Unable to provide {cid}: {e}");
                         }
 
 

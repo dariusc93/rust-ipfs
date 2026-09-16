@@ -1016,7 +1016,7 @@ impl Ipfs {
             .find_peer(peer_id)
             .await
             .map_err(Into::into)
-            .map(|list| list.into_iter().map(|info| info.addrs).flatten().collect())
+            .map(|list| list.into_iter().flat_map(|info| info.addrs).collect())
     }
 
     /// Performs a DHT lookup for providers of a value to the given key.
@@ -1397,7 +1397,7 @@ impl Ipfs {
 
     /// Returns the keychain
     pub fn keychain(&self) -> &Keychain<DefaultKeystore> {
-        &self.connexa.keychain()
+        self.connexa.keychain()
     }
 
     /// Exit daemon.
@@ -1670,10 +1670,10 @@ mod node {
         /// Connects to a peer at the given address.
         pub async fn connect(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
             let opts = opt.into();
-            if let Some(peer_id) = opts.get_peer_id() {
-                if self.ipfs.is_connected(peer_id).await? {
-                    return Ok(());
-                }
+            if let Some(peer_id) = opts.get_peer_id()
+                && self.ipfs.is_connected(peer_id).await?
+            {
+                return Ok(());
             }
             self.ipfs.connect(opts).await.map(|_| ())
         }
@@ -1706,10 +1706,10 @@ mod node {
             let mut addrs = ipfs.listening_addresses().await.unwrap();
 
             for addr in &mut addrs {
-                if let Some(proto) = addr.iter().last() {
-                    if !matches!(proto, Protocol::P2p(_)) {
-                        addr.push(Protocol::P2p(id));
-                    }
+                if let Some(proto) = addr.iter().last()
+                    && !matches!(proto, Protocol::P2p(_))
+                {
+                    addr.push(Protocol::P2p(id));
                 }
             }
 

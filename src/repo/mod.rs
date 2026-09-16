@@ -574,7 +574,7 @@ impl<S: RepoTypes> Repo<S> {
 
                             let st = crate::refs::IpldRefs::default()
                                 .with_only_unique()
-                                .refs_of_resolved(self, vec![(cid, block.clone())].into_iter())
+                                .refs_of_resolved(self, vec![(cid, block.clone())])
                                 .map_ok(|crate::refs::Edge { destination, .. }| destination)
                                 .into_stream()
                                 .boxed();
@@ -1300,10 +1300,10 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
             let (cid, res) = self.repo.inner.block_store.put(&block).await?;
 
             if let BlockPut::NewBlock = res {
-                if self.broadcast_on_new_block {
-                    if let Some(mut event) = self.repo.repo_channel() {
-                        _ = event.send(RepoEvent::NewBlock(block.clone())).await;
-                    }
+                if self.broadcast_on_new_block
+                    && let Some(mut event) = self.repo.repo_channel()
+                {
+                    _ = event.send(RepoEvent::NewBlock(block.clone())).await;
                 }
                 let list = self.repo.inner.subscriptions.lock().remove(&cid);
                 if let Some(list) = list {

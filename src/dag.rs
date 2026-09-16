@@ -627,18 +627,17 @@ impl IntoFuture for DagPut {
             let block = Block::new(cid, bytes)?;
             let cid = self.dag_ipld.repo.put_block(&block).await?;
 
-            if let Some(opt) = self.pinned {
-                if !self.dag_ipld.repo.is_pinned(&cid).await? {
-                    self.dag_ipld.repo.insert_pin(&cid, opt, true).await?;
-                }
+            if let Some(opt) = self.pinned
+                && !self.dag_ipld.repo.is_pinned(&cid).await?
+            {
+                self.dag_ipld.repo.insert_pin(&cid, opt, true).await?;
             }
 
-            if self.provide {
-                if let Some(ipfs) = &self.dag_ipld.ipfs {
-                    if let Err(e) = ipfs.provide(cid).await {
-                        error!("Failed to provide content over DHT: {e}")
-                    }
-                }
+            if self.provide
+                && let Some(ipfs) = &self.dag_ipld.ipfs
+                && let Err(e) = ipfs.provide(cid).await
+            {
+                error!("Failed to provide content over DHT: {e}")
             }
 
             Ok(cid)

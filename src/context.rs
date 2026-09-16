@@ -272,13 +272,13 @@ impl IpfsContext {
 
                 let ret_addr = addr.clone();
 
-                if self.bootstraps.insert(addr.clone()) {
-                    if let Some(peer_id) = addr.extract_peer_id() {
-                        kad.add_address(&peer_id, addr.clone());
-                        self.custom_behaviour(swarm).add_peer((peer_id, addr));
-                        // the return value of add_address doesn't implement Debug
-                        trace!(peer_id=%peer_id, "tried to add a bootstrapper");
-                    }
+                if self.bootstraps.insert(addr.clone())
+                    && let Some(peer_id) = addr.extract_peer_id()
+                {
+                    kad.add_address(&peer_id, addr.clone());
+                    self.custom_behaviour(swarm).add_peer((peer_id, addr));
+                    // the return value of add_address doesn't implement Debug
+                    trace!(peer_id=%peer_id, "tried to add a bootstrapper");
                 }
                 let _ = ret.send(Ok(ret_addr));
             }

@@ -163,5 +163,5 @@ where
     C: Send + Sync + 'static,
     <C as NetworkBehaviour>::ToSwarm: std::fmt::Debug + Send + Sync + 'static,
 {
-    behaviour::Behaviour::new(&keypair, options, repo, custom)
+    behaviour::Behaviour::new(keypair, options, repo, custom)
 }

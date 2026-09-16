@@ -190,7 +190,7 @@ impl BitswapMessage {
             let cid = prefix.to_cid(&payload.data).map_err(io::Error::other)?;
             bitswap_message
                 .responses
-                .insert(cid, BitswapResponse::Block(Bytes::from(payload.data)));
+                .insert(cid, BitswapResponse::Block(payload.data));
         }
 
         for presence in message.block_presences {

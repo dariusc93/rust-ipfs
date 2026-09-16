@@ -201,7 +201,7 @@ impl From<generate::ipns_pb::IpnsEntry> for Record {
                 .validity_type
                 .and_then(|v| ValidityType::try_from(v).ok())
                 .unwrap_or(ValidityType::EOL),
-            validity: entry.validity.into(),
+            validity: entry.validity,
             sequence: entry.sequence,
             ttl: entry.ttl,
             public_key: entry.pub_key,
@@ -214,7 +214,7 @@ impl From<generate::ipns_pb::IpnsEntry> for Record {
 impl From<Record> for generate::ipns_pb::IpnsEntry {
     fn from(record: Record) -> Self {
         generate::ipns_pb::IpnsEntry {
-            validity: record.validity.into(),
+            validity: record.validity,
             validity_type: Some(record.validity_type.into()),
             value: record.value,
             signature_v1: record.signature_v1,
