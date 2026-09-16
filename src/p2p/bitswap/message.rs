@@ -23,8 +23,8 @@ impl TryFrom<i32> for RequestType {
     type Error = io::Error;
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         let val = match value {
-            0 => RequestType::Have,
-            1 => RequestType::Block,
+            0 => RequestType::Block,
+            1 => RequestType::Have,
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -241,7 +241,7 @@ impl BitswapMessage {
                 .entries
                 .push(pb::bitswap_pb::message::wantlist::Entry {
                     block: cid.to_bytes().into(),
-                    want_type: ty as i32,
+                    want_type: WantType::from(ty) as i32,
                     send_dont_have,
                     cancel,
                     priority,
