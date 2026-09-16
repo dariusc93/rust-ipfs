@@ -249,7 +249,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
     }
 
     /// Enable port mapping (AKA UPnP)
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "upnp"))]
     pub fn with_upnp(mut self) -> Self {
         self.init = self.init.with_upnp();
         self
