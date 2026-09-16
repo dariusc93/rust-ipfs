@@ -1,6 +1,6 @@
 [package]
 name = "rust-ipns"
-rust-version = "1.93"
+rust-version = "1.85.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
