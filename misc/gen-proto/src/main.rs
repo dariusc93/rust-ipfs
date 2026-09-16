@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    collections::BTreeMap,
+    path::{Component, Path, PathBuf},
 };
 
 /// All `.proto` files to compile, relative to the workspace root.
@@ -12,17 +12,24 @@ const PROTO_FILES: &[&str] = &[
 
 #[derive(Debug, Parser)]
 struct Opt {
-    #[clap(long)]
+    #[arg(long)]
     root: Option<PathBuf>,
-    #[clap(long)]
-    proto_files: Option<Vec<PathBuf>>,
-    #[clap(long)]
+
+    #[arg(long, value_name = "PROTO", num_args = 1..)]
+    proto_files: Vec<PathBuf>,
+
+    #[arg(long)]
     enable_bytes: Vec<String>,
 }
 
 fn main() {
-    let opt = Opt::parse();
-    let root = opt.root.unwrap_or_else(|| {
+    let Opt {
+        root,
+        proto_files,
+        enable_bytes,
+    } = Opt::parse();
+
+    let root = root.unwrap_or_else(|| {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
@@ -36,17 +43,33 @@ fn main() {
         root.display(),
     );
 
-    // let proto_files = opt
-    //     .proto_files
-    //     .unwrap_or_else(|| PROTO_FILES.into_iter().map(PathBuf::from).collect());
+    let proto_files = if proto_files.is_empty() {
+        PROTO_FILES
+            .iter()
+            .map(|path| PathBuf::from(*path))
+            .collect()
+    } else {
+        proto_files
+    };
 
     // Group proto files by parent directory (= include dir = output dir).
-    let mut by_dir: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for proto in PROTO_FILES {
+    let mut by_dir: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
+
+    for proto in proto_files {
+        assert!(
+            !proto.is_absolute()
+                && !proto
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir)),
+            "proto path must be relative to and contained within the workspace root: {}",
+            proto.display(),
+        );
+
         let dir = proto
-            .rsplit_once('/')
-            .expect("proto path must contain '/'")
-            .0;
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
         by_dir.entry(dir).or_default().push(proto);
     }
 
@@ -55,26 +78,25 @@ fn main() {
         let abs_dir = root.join(dir);
         let abs_protos: Vec<PathBuf> = protos.iter().map(|p| root.join(p)).collect();
 
-        println!("  {} file(s) in {dir}", protos.len());
+        println!("  {} file(s) in {}", protos.len(), dir.display());
 
-        let protos_paths = &abs_protos.iter().map(|p| p.as_path()).collect::<Vec<_>>();
-        let file_descriptors = protox::compile(protos_paths, [abs_dir.as_path()]).unwrap();
+        let proto_paths = abs_protos.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+        let file_descriptors = protox::compile(&proto_paths, [abs_dir.as_path()]).unwrap();
 
         let mut config = prost_build::Config::new();
 
-        if !opt.enable_bytes.is_empty() {
-            config.bytes(opt.enable_bytes.iter());
+        if !enable_bytes.is_empty() {
+            config.bytes(enable_bytes.iter());
         }
 
         config
             .out_dir(&abs_dir)
             .compile_fds(file_descriptors)
-            .unwrap_or_else(|e| panic!("failed to compile protos in {dir}: {e}"));
+            .unwrap_or_else(|e| panic!("failed to compile protos in {}: {e}", dir.display()));
     }
 
     // Generate a `mod.rs` in every output directory.
-    let dirs: BTreeSet<&str> = by_dir.keys().copied().collect();
-    for dir in dirs {
+    for dir in by_dir.keys() {
         write_mod_rs(&root.join(dir));
     }
 
