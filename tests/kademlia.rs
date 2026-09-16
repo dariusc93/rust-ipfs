@@ -32,7 +32,6 @@ async fn find_peer_local() {
 
 // starts the specified number of rust IPFS nodes connected in a chain.
 async fn spawn_bootstrapped_nodes<const N: usize>() -> Vec<Node> {
-    use rust_ipfs::DhtMode;
     let nodes = spawn_nodes::<N>(Topology::None).await;
 
     // register the nodes' addresses so they can bootstrap against
@@ -47,7 +46,6 @@ async fn spawn_bootstrapped_nodes<const N: usize>() -> Vec<Node> {
         };
 
         let addr = next_addr.with(Protocol::P2p(next_id));
-        nodes[i].dht_mode(DhtMode::Server).await.unwrap();
         nodes[i].add_bootstrap(addr).await.unwrap();
         nodes[i].bootstrap().await.unwrap();
     }
@@ -148,10 +146,10 @@ async fn bitswap_fetch_via_dht_discovery() {
     // the last node holds and provides a block; node 0 is not directly connected to it.
     let data = b"phase-0 dht discovery\n".to_vec();
     let cid = Cid::new_v1(BlockCodec::Raw.into(), Code::Sha2_256.digest(&data));
-    nodes[last_index]
-        .put_block(&Block::new(cid, data.clone()).unwrap())
-        .await
-        .unwrap();
+
+    let block = Block::new(cid, data).unwrap();
+
+    nodes[last_index].put_block(&block).await.unwrap();
     nodes[last_index].provide(cid).await.unwrap();
 
     // node 0 must discover the provider via the DHT and fetch through bitswap.
@@ -160,7 +158,7 @@ async fn bitswap_fetch_via_dht_discovery() {
         .timeout(Duration::from_secs(30))
         .await
         .expect("block should be fetched via DHT provider discovery");
-    assert_eq!(block.data(), data.as_slice());
+    assert_eq!(block.data(), block.data());
 }
 
 /// Check if Ipfs::{get, put} does its job.

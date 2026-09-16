@@ -1696,22 +1696,24 @@ mod node {
 
             let ipfs = uninit.start().await.unwrap();
 
-            ipfs.dht_mode(DhtMode::Server).await.unwrap();
-
             let id = ipfs.keypair().public().to_peer_id();
             for addr in list {
-                ipfs.add_listening_address(addr).await.expect("To succeed");
+                ipfs.add_listening_address(addr.clone())
+                    .await
+                    .expect("To succeed");
             }
 
-            let mut addrs = ipfs.listening_addresses().await.unwrap();
+            let addrs = ipfs.listening_addresses().await.unwrap();
 
-            for addr in &mut addrs {
-                if let Some(proto) = addr.iter().last()
-                    && !matches!(proto, Protocol::P2p(_))
-                {
-                    addr.push(Protocol::P2p(id));
-                }
+            for addr in addrs {
+                let addr = addr.with_p2p(id).expect("doesnt contain peer_id");
+                ipfs.add_external_address(addr).await.expect("To succeed");
             }
+
+            let addrs = ipfs
+                .external_addresses()
+                .await
+                .expect("at least one address");
 
             Node { ipfs, id, addrs }
         }
