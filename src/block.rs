@@ -33,6 +33,11 @@ impl Block {
         self.data.len()
     }
 
+    /// Returns true if the block is empty.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     /// Returns the cid of the block.
     pub fn cid(&self) -> &Cid {
         &self.cid
