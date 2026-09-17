@@ -1,3 +1,7 @@
+# 0.10.0
+
+- refactor: use prost for handling protobuf.
+
 # 0.9.0
 
 - feat: update ipns logic
