@@ -18,6 +18,7 @@ mod generate;
 const SIGNATURE_V2_BASE: &[u8] = &[
     0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x3a,
 ];
+const MAX_RECORD_SIZE: usize = 10 * 1024;
 
 /// libp2p inlines a public key into the PeerID (via an `identity` multihash) when its protobuf
 /// encoding is at most this many bytes; larger keys are referenced by a sha2-256 hash instead.
@@ -168,23 +169,18 @@ impl From<ValidityType> for i32 {
     }
 }
 
-impl From<generate::ipns_pb::mod_IpnsEntry::ValidityType> for ValidityType {
-    fn from(v_ty: generate::ipns_pb::mod_IpnsEntry::ValidityType) -> Self {
-        match v_ty {
-            generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL => ValidityType::EOL,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Record {
+    // Keep the exact bytes for SignatureV2 verification and parse them once for semantic access.
     data: Vec<u8>,
+    signed_data: Option<Data>,
 
+    // Legacy V1 protobuf fields are retained for hybrid validation and wire encoding.
     value: Vec<u8>,
-    validity_type: ValidityType,
+    validity_type: Option<i32>,
     validity: Vec<u8>,
-    sequence: u64,
-    ttl: u64,
+    sequence: Option<u64>,
+    ttl: Option<u64>,
 
     public_key: Vec<u8>,
 
@@ -192,19 +188,31 @@ pub struct Record {
     signature_v2: Vec<u8>,
 }
 
-impl From<generate::ipns_pb::IpnsEntry<'_>> for Record {
-    fn from(entry: generate::ipns_pb::IpnsEntry<'_>) -> Self {
-        Record {
+impl TryFrom<generate::ipns_pb::IpnsEntry<'_>> for Record {
+    type Error = Error;
+
+    fn try_from(entry: generate::ipns_pb::IpnsEntry<'_>) -> Result<Self, Self::Error> {
+        let signed_data = if entry.data.is_empty() {
+            None
+        } else {
+            Some(
+                serde_ipld_dagcbor::from_slice(&entry.data)
+                    .map_err(|e| Error::Cbor(Box::new(e)))?,
+            )
+        };
+
+        Ok(Record {
             data: entry.data.into(),
+            signed_data,
             value: entry.value.into(),
-            validity_type: entry.validityType.into(),
+            validity_type: entry.validityType,
             validity: entry.validity.into(),
             sequence: entry.sequence,
             ttl: entry.ttl,
             public_key: entry.pubKey.into(),
             signature_v1: entry.signatureV1.into(),
             signature_v2: entry.signatureV2.into(),
-        }
+        })
     }
 }
 
@@ -212,7 +220,7 @@ impl<'a> From<&'a Record> for generate::ipns_pb::IpnsEntry<'a> {
     fn from(record: &'a Record) -> Self {
         generate::ipns_pb::IpnsEntry {
             validity: (&record.validity).into(),
-            validityType: generate::ipns_pb::mod_IpnsEntry::ValidityType::EOL,
+            validityType: record.validity_type,
             value: (&record.value).into(),
             signatureV1: (&record.signature_v1).into(),
             signatureV2: (&record.signature_v2).into(),
@@ -356,34 +364,44 @@ impl Record {
             Vec::new()
         };
 
-        Ok(Record {
+        let record = Record {
             data,
+            signed_data: Some(document),
             value,
-            validity_type,
+            validity_type: Some(validity_type.into()),
             validity,
-            sequence: seq,
-            ttl,
+            sequence: Some(seq),
+            ttl: Some(ttl),
             public_key,
             signature_v1,
             signature_v2,
-        })
+        };
+
+        if record.encoded_len() > MAX_RECORD_SIZE {
+            return Err(Error::RecordTooLarge);
+        }
+
+        Ok(record)
     }
 
     pub fn decode(data: impl AsRef<[u8]>) -> Result<Self, Error> {
         let data = data.as_ref();
 
-        if data.len() > 10 * 1024 {
+        if data.len() > MAX_RECORD_SIZE {
             return Err(Error::RecordTooLarge);
         }
 
         let mut reader = BytesReader::from_bytes(data);
         let entry = generate::ipns_pb::IpnsEntry::from_reader(&mut reader, data)?;
-        let record = entry.into();
-        Ok(record)
+        entry.try_into()
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, Error> {
         let entry: generate::ipns_pb::IpnsEntry = self.into();
+
+        if entry.get_size() > MAX_RECORD_SIZE {
+            return Err(Error::RecordTooLarge);
+        }
 
         let mut buf = Vec::with_capacity(entry.get_size());
         let mut writer = Writer::new(&mut buf);
@@ -396,20 +414,34 @@ impl Record {
 
 impl Record {
     pub fn sequence(&self) -> u64 {
-        self.sequence
+        self.signed_data
+            .as_ref()
+            .map_or_else(|| self.sequence.unwrap_or_default(), Data::sequence)
     }
 
     pub fn validity_type(&self) -> ValidityType {
-        self.validity_type
+        self.signed_data.as_ref().map_or_else(
+            || {
+                ValidityType::try_from(self.validity_type.unwrap_or_default())
+                    .unwrap_or(ValidityType::EOL)
+            },
+            Data::validity_type,
+        )
     }
 
     pub fn validity(&self) -> Result<DateTime<FixedOffset>, Error> {
-        let time = String::from_utf8_lossy(&self.validity);
+        let validity = self
+            .signed_data
+            .as_ref()
+            .map_or(self.validity.as_slice(), Data::validity);
+        let time = String::from_utf8_lossy(validity);
         Ok(chrono::DateTime::parse_from_rfc3339(&time)?)
     }
 
     pub fn ttl(&self) -> u64 {
-        self.ttl
+        self.signed_data
+            .as_ref()
+            .map_or_else(|| self.ttl.unwrap_or_default(), Data::ttl)
     }
 
     /// Whether the record carries a (legacy) V1 signature.
@@ -423,24 +455,14 @@ impl Record {
     }
 
     pub fn data(&self) -> Result<Data, Error> {
-        let data: Data =
-            serde_ipld_dagcbor::from_slice(&self.data).map_err(|e| Error::Cbor(Box::new(e)))?;
-
-        if data.value != self.value
-            || data.validity != self.validity
-            || data.validity_type != self.validity_type
-            || data.sequence != self.sequence
-            || data.ttl != self.ttl
-        {
-            return Err(Error::DataMismatch);
-        }
-
-        Ok(data)
+        self.signed_data.clone().ok_or(Error::EmptyData)
     }
 
-    /// The raw IPNS value.
+    /// The canonical IPNS value from signed V2 data, or the legacy value for a V1-only record.
     pub fn value(&self) -> &[u8] {
-        &self.value
+        self.signed_data
+            .as_ref()
+            .map_or(self.value.as_slice(), Data::value)
     }
 
     pub fn verify_signature(&self, peer_id: PeerId) -> Result<(), Error> {
@@ -471,8 +493,6 @@ impl Record {
             return Err(Error::NameMismatch);
         }
 
-        self.data()?;
-
         let signature_v2 = SIGNATURE_V2_BASE
             .iter()
             .chain(self.data.iter())
@@ -482,6 +502,8 @@ impl Record {
         if !public_key.verify(&signature_v2, &self.signature_v2) {
             return Err(Error::InvalidSignature);
         }
+
+        self.validate_legacy_fields()?;
 
         Ok(())
     }
@@ -507,11 +529,36 @@ impl Record {
         match self
             .has_signature_v2()
             .cmp(&other.has_signature_v2())
-            .then_with(|| self.sequence.cmp(&other.sequence))
+            .then_with(|| self.sequence().cmp(&other.sequence()))
         {
             Ordering::Equal => Ok(self.validity()?.cmp(&other.validity()?)),
             ord => Ok(ord),
         }
+    }
+
+    fn encoded_len(&self) -> usize {
+        let entry: generate::ipns_pb::IpnsEntry = self.into();
+        entry.get_size()
+    }
+
+    fn validate_legacy_fields(&self) -> Result<(), Error> {
+        // V2-only records omit fields 1-6. SignatureV1 or Value marks a hybrid record whose
+        // five legacy values must all match signed Data, per IPNS Record Verification step 7.
+        if self.signature_v1.is_empty() && self.value.is_empty() {
+            return Ok(());
+        }
+
+        let data = self.signed_data.as_ref().ok_or(Error::EmptyData)?;
+        if data.value != self.value
+            || data.validity != self.validity
+            || i32::from(data.validity_type) != self.validity_type.unwrap_or_default()
+            || data.sequence != self.sequence.unwrap_or_default()
+            || data.ttl != self.ttl.unwrap_or_default()
+        {
+            return Err(Error::DataMismatch);
+        }
+
+        Ok(())
     }
 }
 
@@ -529,6 +576,16 @@ mod tests {
             std::time::Duration::ZERO,
         )
         .unwrap()
+    }
+
+    fn without_v1(mut record: Record) -> Record {
+        record.value.clear();
+        record.validity_type = None;
+        record.validity.clear();
+        record.sequence = None;
+        record.ttl = None;
+        record.signature_v1.clear();
+        record
     }
 
     #[test]
@@ -654,6 +711,159 @@ mod tests {
         // V2 presence outranks both sequence and the later validity
         assert_eq!(with_v2.compare(&v1_only).unwrap(), Ordering::Greater);
         assert_eq!(v1_only.compare(&with_v2).unwrap(), Ordering::Less);
+    }
+
+    #[test]
+    fn v2_only_records_use_signed_data() {
+        use std::cmp::Ordering;
+
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let eol = Utc::now() + Duration::hours(24);
+        let record = without_v1(
+            Record::new(
+                &kp,
+                b"/ipfs/bafkqablimvwgy3y",
+                eol,
+                42,
+                std::time::Duration::from_secs(90),
+            )
+            .unwrap(),
+        );
+
+        assert!(!record.has_signature_v1());
+        assert_eq!(record.value(), b"/ipfs/bafkqablimvwgy3y");
+        assert_eq!(record.sequence(), 42);
+        assert_eq!(record.validity_type(), ValidityType::EOL);
+        assert_eq!(record.validity().unwrap(), eol.fixed_offset());
+        assert_eq!(record.ttl(), 90_000_000_000);
+        assert_eq!(record.data().unwrap().sequence(), 42);
+        record.verify_signature(peer).unwrap();
+
+        let newer = without_v1(
+            Record::new(
+                &kp,
+                b"/ipfs/bafkqablimvwgy3y",
+                eol - Duration::hours(1),
+                43,
+                std::time::Duration::from_secs(90),
+            )
+            .unwrap(),
+        );
+        assert_eq!(newer.compare(&record).unwrap(), Ordering::Greater);
+
+        let later = without_v1(
+            Record::new(
+                &kp,
+                b"/ipfs/bafkqablimvwgy3y",
+                eol + Duration::hours(1),
+                42,
+                std::time::Duration::from_secs(90),
+            )
+            .unwrap(),
+        );
+        assert_eq!(later.compare(&record).unwrap(), Ordering::Greater);
+
+        let roundtrip = Record::decode(record.encode().unwrap()).unwrap();
+        roundtrip.verify_signature(peer).unwrap();
+        assert_eq!(roundtrip.sequence(), 42);
+
+        let mut scalar_only = record;
+        scalar_only.sequence = Some(0);
+        let scalar_only_bytes = scalar_only.encode().unwrap();
+        let scalar_only_roundtrip = Record::decode(&scalar_only_bytes).unwrap();
+        scalar_only_roundtrip.verify_signature(peer).unwrap();
+        assert_eq!(scalar_only_roundtrip.sequence(), 42);
+        assert_eq!(scalar_only_roundtrip.encode().unwrap(), scalar_only_bytes);
+    }
+
+    #[test]
+    fn hybrid_mismatch_is_rejected_after_v2_signature_verification() {
+        let kp = Keypair::generate_ed25519();
+        let peer = PeerId::from_public_key(&kp.public());
+        let mut record = record_for(&kp, 24);
+
+        record.value = b"/ipfs/bafkqaaa-mismatch".to_vec();
+
+        assert_eq!(record.value(), b"/ipfs/bafkqaaa");
+        assert_eq!(record.data().unwrap().value(), b"/ipfs/bafkqaaa");
+        assert!(matches!(
+            record.verify_signature(peer),
+            Err(Error::DataMismatch)
+        ));
+
+        let mut invalid_signature = record.clone();
+        invalid_signature.signature_v2[0] ^= 1;
+        assert!(matches!(
+            invalid_signature.verify_signature(peer),
+            Err(Error::InvalidSignature)
+        ));
+
+        let mut invalid_validity_type = record_for(&kp, 24);
+        invalid_validity_type.validity_type = Some(1);
+        assert!(matches!(
+            invalid_validity_type.verify_signature(peer),
+            Err(Error::DataMismatch)
+        ));
+
+        let mut invalid_validity = record_for(&kp, 24);
+        invalid_validity.validity[0] ^= 1;
+        assert!(matches!(
+            invalid_validity.verify_signature(peer),
+            Err(Error::DataMismatch)
+        ));
+
+        let mut invalid_sequence = record_for(&kp, 24);
+        invalid_sequence.sequence = Some(1);
+        assert!(matches!(
+            invalid_sequence.verify_signature(peer),
+            Err(Error::DataMismatch)
+        ));
+
+        let mut invalid_ttl = record_for(&kp, 24);
+        invalid_ttl.ttl = Some(1);
+        assert!(matches!(
+            invalid_ttl.verify_signature(peer),
+            Err(Error::DataMismatch)
+        ));
+    }
+
+    #[test]
+    fn malformed_v2_data_is_rejected_during_decode() {
+        let kp = Keypair::generate_ed25519();
+        let mut record = record_for(&kp, 24);
+        record.data = vec![0xff];
+
+        let encoded = record.encode().unwrap();
+        assert!(matches!(Record::decode(encoded), Err(Error::Cbor(_))));
+    }
+
+    #[test]
+    fn record_size_limit_applies_to_creation_encoding_and_decode() {
+        let kp = Keypair::generate_ed25519();
+        let oversized_value = vec![b'x'; MAX_RECORD_SIZE];
+        assert!(matches!(
+            Record::new(
+                &kp,
+                oversized_value,
+                Utc::now() + Duration::hours(24),
+                0,
+                std::time::Duration::ZERO,
+            ),
+            Err(Error::RecordTooLarge)
+        ));
+
+        let mut record = record_for(&kp, 24);
+        record.data = vec![0; MAX_RECORD_SIZE];
+        assert!(matches!(record.encode(), Err(Error::RecordTooLarge)));
+        assert!(matches!(
+            Record::decode(vec![0; MAX_RECORD_SIZE + 1]),
+            Err(Error::RecordTooLarge)
+        ));
+        assert!(!matches!(
+            Record::decode(vec![0; MAX_RECORD_SIZE]),
+            Err(Error::RecordTooLarge)
+        ));
     }
 
     #[test]
