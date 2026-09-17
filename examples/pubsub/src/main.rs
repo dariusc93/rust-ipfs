@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::{FutureExt, StreamExt};
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{builder::IpfsBuilder, Ipfs, Keypair, Multiaddr};
+use rust_ipfs::{Ipfs, Keypair, Multiaddr, builder::IpfsBuilder};
 
 use pollable_map::stream::StreamMap;
 use rust_ipfs::prelude::{ConnexaSwarmEvent, GossipsubEvent};
@@ -363,10 +363,8 @@ mod ext_behaviour {
                         .expect("");
                     }
                 }
-                FromSwarm::ExternalAddrConfirmed(ev) => {
-                    if self.addrs.insert(ev.addr.clone()) {
-                        writeln!(self.stdout, "Listening on {}", ev.addr).expect("");
-                    }
+                FromSwarm::ExternalAddrConfirmed(ev) if self.addrs.insert(ev.addr.clone()) => {
+                    writeln!(self.stdout, "Listening on {}", ev.addr).expect("");
                 }
                 _ => {}
             }

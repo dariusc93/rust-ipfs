@@ -129,6 +129,7 @@ impl From<Block> for StartingPoint {
 
 impl Stream for UnixfsCat {
     type Item = Result<Bytes, TraversalFailed>;
+    #[allow(clippy::result_large_err)]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.core.is_none() && self.stream.is_none() {
             return Poll::Ready(None);
@@ -185,10 +186,8 @@ impl Stream for UnixfsCat {
                         if block.cid().codec() == 0x55 {
                             let content = visit.start_from_raw(block.data()).0;
                             if !content.is_empty() {
-                                if let Some(length) = length {
-                                    if content.len() > length {
-                                        Err::<(), TraversalFailed>(TraversalFailed::MaxLengthExceeded { size: content.len(), length })?;
-                                    }
+                                if let Some(length) = length && content.len() > length {
+                                    Err::<(), TraversalFailed>(TraversalFailed::MaxLengthExceeded { size: content.len(), length })?;
                                 }
                                 yield Bytes::copy_from_slice(content);
                             }
@@ -208,10 +207,8 @@ impl Stream for UnixfsCat {
                         }).and_then(|(visit, bytes)| {
                             if let Some(bytes) = &bytes {
                                 size += bytes.len();
-                                if let Some(length) = length {
-                                    if size > length {
-                                        return Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
-                                    }
+                                if let Some(length) = length && size > length {
+                                    return Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
                                 }
                             }
                             Ok::<_, TraversalFailed>((visit, bytes))
@@ -252,12 +249,10 @@ impl Stream for UnixfsCat {
 
                             size += bytes.len();
 
-                            if let Some(length) = length {
-                                if size > length {
+                            if let Some(length) = length && size > length {
                                     let fn_err = || Err::<_, TraversalFailed>(TraversalFailed::MaxLengthExceeded { size, length });
                                     fn_err()?;
                                     return;
-                                }
                             }
 
                             if !bytes.is_empty() {

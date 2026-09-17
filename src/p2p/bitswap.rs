@@ -31,10 +31,8 @@ use pollable_map::stream::StreamMap;
 mod bitswap_pb {
     pub use super::pb::bitswap_pb::Message;
     pub mod message {
-        use super::super::pb::bitswap_pb::mod_Message as message;
-        pub use message::Wantlist;
-        pub use message::mod_Wantlist as wantlist;
-        pub use message::{Block, BlockPresence, BlockPresenceType};
+        use super::super::pb::bitswap_pb::message;
+        pub use message::{Block, BlockPresence};
     }
 }
 
@@ -487,6 +485,16 @@ impl NetworkBehaviour for Behaviour {
                     }
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::BlockRetrieved { cid }));
                 }
+                PeerSessionEvent::StoreFailed { cid, error } => {
+                    self.candidates.remove(&cid);
+                    self.block_inflight.remove(&cid);
+                    self.wantlist.cancel(&cid);
+                    for session in self.sessions.values_mut() {
+                        session.sync();
+                    }
+                    tracing::error!(%cid, %error, "unable to store block from bitswap");
+                    self.store.notify_block_store_failed(cid, error);
+                }
             }
         }
 
@@ -761,10 +769,10 @@ mod test {
                     }
                 }
                 event = swarm2.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        if peer_id == peer1 {
-                            peer_2_connected = true;
-                        }
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event
+                        && peer_id == peer1
+                    {
+                        peer_2_connected = true;
                     }
                 }
 
@@ -878,10 +886,10 @@ mod test {
                     }
                 }
                 event = swarm2.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        if peer_id == peer1 {
-                            peer_2_connected = true;
-                        }
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event
+                        && peer_id == peer1
+                    {
+                        peer_2_connected = true;
                     }
                 }
             }

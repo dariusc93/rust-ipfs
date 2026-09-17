@@ -32,7 +32,7 @@ pub async fn resolve<'a>(
             None
         };
 
-        let searched = searched.into_iter().chain(prefixed.into_iter());
+        let searched = searched.into_iter().chain(prefixed);
 
         // FIXME: this uses caching trust-dns resolver even though it's discarded right away
         // when trust-dns support lands in future libp2p-dns investigate if we could share one, no need

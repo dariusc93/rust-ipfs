@@ -15,7 +15,7 @@ use common::{Topology, spawn_nodes};
 #[tokio::test]
 async fn subscribe_only_once() {
     let a = Node::new("test_node").await;
-    let _stream = a.pubsub_subscribe("some_topic").await.unwrap();
+    a.pubsub_subscribe("some_topic").await.unwrap();
 }
 
 // #[tokio::test]
@@ -135,8 +135,7 @@ async fn publish_between_two_nodes_single_topic() {
             nodes[0].id,
         ),
     ]
-    .iter()
-    .cloned()
+    .into_iter()
     .map(|(topic, sender, data, witness)| (topic.hash(), sender, data.to_vec(), witness))
     .collect::<Vec<_>>();
 
@@ -205,8 +204,8 @@ async fn pubsub_event() {
     let mut ev_a = node_a.pubsub_listener("test0".to_string()).await.unwrap();
     let mut ev_b = node_b.pubsub_listener("test0".to_string()).await.unwrap();
 
-    let _st_a = node_a.pubsub_subscribe("test0").await.unwrap();
-    let _st_b = node_b.pubsub_subscribe("test0").await.unwrap();
+    node_a.pubsub_subscribe("test0").await.unwrap();
+    node_b.pubsub_subscribe("test0").await.unwrap();
 
     let next_ev_a = ev_a.next().await.unwrap();
     let next_ev_b = ev_b.next().await.unwrap();
@@ -308,8 +307,7 @@ async fn publish_between_two_nodes_different_topics() {
             node_a.id,
         ),
     ]
-    .iter()
-    .cloned()
+    .into_iter()
     .map(|(topic, sender, data, witness)| (topic.hash(), sender, data.to_vec(), witness))
     .collect::<Vec<_>>();
 

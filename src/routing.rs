@@ -15,7 +15,7 @@ use connexa::prelude::swarm::dial_opts::DialOpts;
 use connexa::prelude::{Multiaddr, MultiaddrExt, PeerId};
 
 use crate::IpfsEvent;
-use crate::repo::DefaultKeystore;
+use crate::repo::{DefaultKeystore, DefaultStorage, Repo};
 
 type IpfsConnexa = Connexa<IpfsEvent, DefaultKeystore>;
 
@@ -81,6 +81,7 @@ pub(crate) async fn run(
     mut rx: futures::channel::mpsc::Receiver<Cid>,
     connexa: IpfsConnexa,
     routers: RouterList,
+    repo: Repo<DefaultStorage>,
 ) {
     let client = match reqwest::Client::builder().build() {
         Ok(client) => client,
@@ -94,13 +95,12 @@ pub(crate) async fn run(
 
     loop {
         tokio::select! {
-            maybe_cid = rx.next() => {
+            maybe_cid = rx.next(), if lookups.len() < MAX_INFLIGHT => {
                 let Some(cid) = maybe_cid else { break };
-                if !inflight.insert(cid) {
+                if !repo.is_block_wanted(&cid) {
                     continue;
                 }
-                if lookups.len() >= MAX_INFLIGHT {
-                    inflight.remove(&cid);
+                if !inflight.insert(cid) {
                     continue;
                 }
                 lookups.push(boxed_lookup(client.clone(), routers.list(), cid, connexa.clone()));

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use bytes::Bytes;
+use connexa::error::Error;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt};
@@ -108,6 +109,11 @@ pub enum PeerSessionEvent {
     Have(Cid),
     /// A wanted block arrived and is stored; the behaviour cancels the want.
     Stored(Cid),
+    /// A wanted block arrived but could not be persisted locally.
+    StoreFailed {
+        cid: Cid,
+        error: Error,
+    },
     /// The peer does not have this cid.
     DontHave(Cid),
 }
@@ -132,7 +138,7 @@ pub struct PeerSession {
     backlog_set: HashSet<Cid>,
     serve_seq: u64,
     serving: FuturesUnordered<BoxFuture<'static, (BitswapRequest, Option<Block>)>>,
-    storing: FuturesUnordered<BoxFuture<'static, Cid>>,
+    storing: FuturesUnordered<BoxFuture<'static, (Cid, Result<(), Error>)>>,
     budget: ServeBudget,
     budget_blocked: bool,
     ledger: Ledger,
@@ -290,8 +296,13 @@ impl PeerSession {
                             let repo = self.repo.clone();
                             self.storing.push(
                                 async move {
-                                    let _ = repo.put_block(&block).await;
-                                    cid
+                                    let result = repo
+                                        .put_block(&block)
+                                        .await
+                                        .map(|_| ())
+                                        .map_err(std::io::Error::other)
+                                        .map_err(Error::from);
+                                    (cid, result)
                                 }
                                 .boxed(),
                             );
@@ -420,8 +431,13 @@ impl Stream for PeerSession {
             this.budget.wake_waiters();
         }
 
-        while let Poll::Ready(Some(cid)) = this.storing.poll_next_unpin(cx) {
-            this.outbound.push_back(PeerSessionEvent::Stored(cid));
+        while let Poll::Ready(Some((cid, result))) = this.storing.poll_next_unpin(cx) {
+            match result {
+                Ok(()) => this.outbound.push_back(PeerSessionEvent::Stored(cid)),
+                Err(error) => this
+                    .outbound
+                    .push_back(PeerSessionEvent::StoreFailed { cid, error }),
+            }
         }
 
         if let Some(event) = this.outbound.pop_front() {

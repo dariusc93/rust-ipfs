@@ -1,7 +1,7 @@
 use rust_ipfs::Ipfs;
 
-use rust_ipfs::builder::IpfsBuilder;
 use rust_ipfs::Keypair;
+use rust_ipfs::builder::IpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -122,10 +122,8 @@ mod ext_behaviour {
                         println!("Listening on {addr}");
                     }
                 }
-                FromSwarm::ExternalAddrConfirmed(ev) => {
-                    if self.addrs.insert(ev.addr.clone()) {
-                        println!("Listening on {}", ev.addr);
-                    }
+                FromSwarm::ExternalAddrConfirmed(ev) if self.addrs.insert(ev.addr.clone()) => {
+                    println!("Listening on {}", ev.addr);
                 }
                 _ => {}
             }

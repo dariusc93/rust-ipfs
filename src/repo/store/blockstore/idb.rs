@@ -117,7 +117,7 @@ impl BlockStore for IdbBlockStore {
                 let block_size = store.get(cid_val)?.await.map(|val| {
                     val.and_then(|val| {
                         let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
-                        Block::new(*cid, bytes).map(|block| block.data().len()).ok()
+                        Block::new(*cid, bytes).map(|block| block.len()).ok()
                     })
                 })?;
 

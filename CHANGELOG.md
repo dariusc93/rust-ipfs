@@ -1,3 +1,8 @@
+# 0.17.0
+
+- refactor: use prost for handling protobuf.
+- chore: added `Block::{len, is_empty}`, cleanup logic and test, and optimize bitswap logic.
+
 # 0.16.0
 
 - update to connexa 0.5.
@@ -498,7 +503,7 @@
 # 0.3.9
 
 - fix: Use peer_connections for peers function [PR 54]
-- chore(repo): Added field to only check locally [PR 55]
+- chore (repo): Added field to only check locally [PR 55]
 - refactor: Remove Column from DataStore [PR 56]
 - feat: Add IpfsUnixfs [PR: 57]
 
@@ -513,7 +518,7 @@
 # 0.3.8
 
 - chore: Wait on identify before returning connection [PR 47]
-- feat(repo): Allow custom repo store [PR 46]
+- feat (repo): Allow custom repo store [PR 46]
 - chore: Make kademlia optional [PR 45]
 - chore: Make mplex optional [PR 51]
 - refactor: Provide peers when obtaining blocks [PR 52]
@@ -579,7 +584,7 @@
   This also re-enables quic-v1 that was disabled due to versioning issues after the release of 0.51.0
 - refactor/transport: Simplify TransportConfig and added additional options [PR 32]
 - feat: basic PeerBook implementation [PR 34]
-- refactor(repo): Remove RepoTypes and IpfsTypes [PR 35]
+- refactor (repo): Remove RepoTypes and IpfsTypes [PR 35]
 
 [PR 31]: https://github.com/dariusc93/rust-ipfs/pull/31
 

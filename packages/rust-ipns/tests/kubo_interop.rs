@@ -1,6 +1,6 @@
-use libp2p_identity::ed25519::PublicKey as Ed25519PublicKey;
 use libp2p_identity::PeerId;
 use libp2p_identity::PublicKey;
+use libp2p_identity::ed25519::PublicKey as Ed25519PublicKey;
 use rust_ipns::Record;
 use std::fs;
 

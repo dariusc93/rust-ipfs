@@ -88,5 +88,5 @@ impl Body {
 }
 
 fn js_error(msg: &str) -> JsError {
-    std::io::Error::new(std::io::ErrorKind::Other, msg).into()
+    std::io::Error::other(msg).into()
 }

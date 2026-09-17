@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use ipld_core::cid::{self, Cid, Version};
 use multihash_codetable::{Code, MultihashDigest};
 use unsigned_varint::{decode as varint_decode, encode as varint_encode};
@@ -31,7 +32,7 @@ impl Prefix {
         })
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Bytes {
         let mut res = Vec::with_capacity(4);
 
         let mut buf = varint_encode::u64_buffer();
@@ -47,7 +48,7 @@ impl Prefix {
         let mh_len = varint_encode::u64(self.mh_len as u64, &mut buf);
         res.extend_from_slice(mh_len);
 
-        res
+        res.into()
     }
 
     pub fn to_cid(&self, data: &[u8]) -> Result<Cid, cid::Error> {

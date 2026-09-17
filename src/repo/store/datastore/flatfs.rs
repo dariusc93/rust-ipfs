@@ -132,7 +132,11 @@ impl FsDataStore {
         if path.is_dir() {
             return Ok(None);
         }
-        tokio::fs::read(path).await.map(Some)
+        match tokio::fs::read(path).await.map(Some) {
+            Ok(bytes) => Ok(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -841,7 +845,7 @@ mod test {
 
         let contains = store.contains(&key).await?;
         assert!(!contains);
-        let get = store.get(&key).await.unwrap_or_default();
+        let get = store.get(&key).await?;
         assert_eq!(get, None);
         store.remove(&key).await?;
 
@@ -854,7 +858,7 @@ mod test {
         store.remove(&key).await?;
         let contains = store.contains(&key).await?;
         assert!(!contains);
-        let get = store.get(&key).await.unwrap_or_default();
+        let get = store.get(&key).await?;
         assert_eq!(get, None);
         drop(store);
         Ok(())

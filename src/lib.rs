@@ -51,10 +51,10 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use dag::{DagGet, DagPut};
 use futures::{
-    channel::oneshot::{self, channel as oneshot_channel, Sender as OneshotSender},
+    StreamExt,
+    channel::oneshot::{self, Sender as OneshotSender, channel as oneshot_channel},
     future::BoxFuture,
     stream::BoxStream,
-    StreamExt,
 };
 
 use p2p::{MultiaddrExt, PeerInfo};
@@ -83,13 +83,13 @@ pub use connexa::prelude::request_response::{
 pub use connexa::prelude::swarm::derive_prelude::{ConnectionId, ListenerId};
 pub use connexa::prelude::swarm::dial_opts::{DialOpts, PeerCondition};
 pub use connexa::prelude::{
-    connection_limits::ConnectionLimits, gossipsub,
-    identify,
-    ping, swarm::{self, NetworkBehaviour}, GossipsubMessage,
-    Stream,
+    ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol, identity::Keypair,
 };
 pub use connexa::prelude::{
-    identity::Keypair, ConnexaSwarmEvent, Multiaddr, PeerId, Protocol, StreamProtocol,
+    GossipsubMessage, Stream,
+    connection_limits::ConnectionLimits,
+    gossipsub, identify, ping,
+    swarm::{self, NetworkBehaviour},
 };
 pub use connexa::{behaviour::request_response::RequestResponseConfig, dummy};
 use ipld_core::cid::Cid;
@@ -1016,7 +1016,7 @@ impl Ipfs {
             .find_peer(peer_id)
             .await
             .map_err(Into::into)
-            .map(|list| list.into_iter().map(|info| info.addrs).flatten().collect())
+            .map(|list| list.into_iter().flat_map(|info| info.addrs).collect())
     }
 
     /// Performs a DHT lookup for providers of a value to the given key.
@@ -1397,7 +1397,7 @@ impl Ipfs {
 
     /// Returns the keychain
     pub fn keychain(&self) -> &Keychain<DefaultKeystore> {
-        &self.connexa.keychain()
+        self.connexa.keychain()
     }
 
     /// Exit daemon.
@@ -1635,6 +1635,8 @@ pub use node::Node;
 /// Node module provides an easy to use interface used in `tests/`.
 #[cfg(all(feature = "full", not(target_arch = "wasm32")))]
 mod node {
+    use other_error::ArcError;
+
     use super::*;
     use crate::builder::DefaultIpfsBuilder;
 
@@ -1668,10 +1670,10 @@ mod node {
         /// Connects to a peer at the given address.
         pub async fn connect(&self, opt: impl Into<DialOpts>) -> Result<(), Error> {
             let opts = opt.into();
-            if let Some(peer_id) = opts.get_peer_id() {
-                if self.ipfs.is_connected(peer_id).await? {
-                    return Ok(());
-                }
+            if let Some(peer_id) = opts.get_peer_id()
+                && self.ipfs.is_connected(peer_id).await?
+            {
+                return Ok(());
             }
             self.ipfs.connect(opts).await.map(|_| ())
         }
@@ -1694,22 +1696,24 @@ mod node {
 
             let ipfs = uninit.start().await.unwrap();
 
-            ipfs.dht_mode(DhtMode::Server).await.unwrap();
-
             let id = ipfs.keypair().public().to_peer_id();
             for addr in list {
-                ipfs.add_listening_address(addr).await.expect("To succeed");
+                ipfs.add_listening_address(addr.clone())
+                    .await
+                    .expect("To succeed");
             }
 
-            let mut addrs = ipfs.listening_addresses().await.unwrap();
+            let addrs = ipfs.listening_addresses().await.unwrap();
 
-            for addr in &mut addrs {
-                if let Some(proto) = addr.iter().last() {
-                    if !matches!(proto, Protocol::P2p(_)) {
-                        addr.push(Protocol::P2p(id));
-                    }
-                }
+            for addr in addrs {
+                let addr = addr.with_p2p(id).expect("doesnt contain peer_id");
+                ipfs.add_external_address(addr).await.expect("To succeed");
             }
+
+            let addrs = ipfs
+                .external_addresses()
+                .await
+                .expect("at least one address");
 
             Node { ipfs, id, addrs }
         }
@@ -1718,8 +1722,12 @@ mod node {
         #[allow(clippy::type_complexity)]
         pub fn get_subscriptions(
             &self,
-        ) -> &parking_lot::Mutex<HashMap<Cid, HashMap<u64, oneshot::Sender<Result<Block, String>>>>>
-        {
+        ) -> &parking_lot::Mutex<
+            HashMap<
+                Cid,
+                HashMap<u64, oneshot::Sender<Result<Block, ArcError<connexa::error::Error>>>>,
+            >,
+        > {
             &self.ipfs.repo.inner.subscriptions
         }
 

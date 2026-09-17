@@ -5,8 +5,8 @@ use rust_ipfs::prelude::ConnexaSwarmEvent;
 use rust_ipfs::{Ipfs, Multiaddr};
 use tokio::task::yield_now;
 
-use rust_ipfs::builder::DefaultIpfsBuilder;
 use rust_ipfs::Keypair;
+use rust_ipfs::builder::DefaultIpfsBuilder;
 
 #[derive(Debug, Parser)]
 #[clap(name = "relay-client")]

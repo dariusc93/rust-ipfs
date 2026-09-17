@@ -1,8 +1,8 @@
 use bytes::Bytes;
 use futures::StreamExt;
 
-use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 use rust_ipfs::RequestResponseConfig;
+use rust_ipfs::builder::DefaultIpfsBuilder as IpfsBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

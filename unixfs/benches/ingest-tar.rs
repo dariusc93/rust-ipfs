@@ -1,4 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use multihash::Multihash;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
@@ -90,7 +92,7 @@ fn ingest_tar(bytes: &[u8], buffer: &mut Vec<u8>, path: &mut String) {
                     needed -= zeros.len();
                 }
 
-                buffer.extend(std::iter::repeat(0).take(needed));
+                buffer.extend(std::iter::repeat_n(0, needed));
             }
 
             let mut total_written = 0usize;

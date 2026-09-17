@@ -1,5 +1,5 @@
-use super::{bitswap_pb, pb::bitswap_pb::mod_Message::mod_Wantlist::WantType, prefix::Prefix};
-use bitswap_pb::message::{BlockPresenceType, Wantlist};
+use super::{bitswap_pb, pb, pb::bitswap_pb::message::wantlist::WantType, prefix::Prefix};
+use crate::p2p::bitswap::pb::bitswap_pb::message::{BlockPresenceType, Wantlist};
 use bytes::Bytes;
 use ipld_core::cid::Cid;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, io};
@@ -16,6 +16,23 @@ impl From<WantType> for RequestType {
             WantType::Have => RequestType::Have,
             WantType::Block => RequestType::Block,
         }
+    }
+}
+
+impl TryFrom<i32> for RequestType {
+    type Error = io::Error;
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        let val = match value {
+            0 => RequestType::Block,
+            1 => RequestType::Have,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid RequestType value",
+                ));
+            }
+        };
+        Ok(val)
     }
 }
 
@@ -157,11 +174,11 @@ impl BitswapMessage {
         if let Some(list) = message.wantlist {
             bitswap_message.full = list.full;
             for entry in list.entries {
-                let cid = Cid::try_from(entry.block).map_err(io::Error::other)?;
+                let cid = Cid::try_from(entry.block.as_ref()).map_err(io::Error::other)?;
                 bitswap_message.requests.push(BitswapRequest {
-                    ty: entry.wantType.into(),
+                    ty: entry.want_type.try_into()?,
                     cid,
-                    send_dont_have: entry.sendDontHave,
+                    send_dont_have: entry.send_dont_have,
                     cancel: entry.cancel,
                     priority: entry.priority,
                 });
@@ -173,12 +190,12 @@ impl BitswapMessage {
             let cid = prefix.to_cid(&payload.data).map_err(io::Error::other)?;
             bitswap_message
                 .responses
-                .insert(cid, BitswapResponse::Block(Bytes::from(payload.data)));
+                .insert(cid, BitswapResponse::Block(payload.data));
         }
 
-        for presence in message.blockPresences {
-            let cid = Cid::try_from(presence.cid).map_err(io::Error::other)?;
-            let have = presence.type_pb == BlockPresenceType::Have;
+        for presence in message.block_presences {
+            let cid = Cid::try_from(presence.cid.as_ref()).map_err(io::Error::other)?;
+            let have = presence.r#type == BlockPresenceType::Have as i32;
             bitswap_message
                 .responses
                 .insert(cid, BitswapResponse::Have(have));
@@ -220,13 +237,15 @@ impl BitswapMessage {
             priority,
         } in requests
         {
-            wantlist.entries.push(bitswap_pb::message::wantlist::Entry {
-                block: cid.to_bytes(),
-                wantType: ty.into(),
-                sendDontHave: send_dont_have,
-                cancel,
-                priority,
-            });
+            wantlist
+                .entries
+                .push(pb::bitswap_pb::message::wantlist::Entry {
+                    block: cid.to_bytes().into(),
+                    want_type: WantType::from(ty) as i32,
+                    send_dont_have,
+                    cancel,
+                    priority,
+                });
         }
 
         msg.wantlist = Some(wantlist);
@@ -234,19 +253,20 @@ impl BitswapMessage {
         for (cid, response) in responses {
             match response {
                 BitswapResponse::Have(have) => {
-                    msg.blockPresences.push(bitswap_pb::message::BlockPresence {
-                        cid: cid.to_bytes(),
-                        type_pb: if have {
-                            BlockPresenceType::Have
-                        } else {
-                            BlockPresenceType::DontHave
-                        },
-                    });
+                    msg.block_presences
+                        .push(bitswap_pb::message::BlockPresence {
+                            cid: cid.to_bytes().into(),
+                            r#type: if have {
+                                BlockPresenceType::Have as i32
+                            } else {
+                                BlockPresenceType::DontHave as i32
+                            },
+                        });
                 }
                 BitswapResponse::Block(bytes) => {
                     msg.payload.push(bitswap_pb::message::Block {
                         prefix: Prefix::from(cid).to_bytes(),
-                        data: bytes.to_vec(),
+                        data: bytes,
                     });
                 }
             }
