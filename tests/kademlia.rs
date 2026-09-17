@@ -153,12 +153,12 @@ async fn bitswap_fetch_via_dht_discovery() {
     nodes[last_index].provide(cid).await.unwrap();
 
     // node 0 must discover the provider via the DHT and fetch through bitswap.
-    let block = nodes[0]
+    let new_block = nodes[0]
         .get_block(cid)
         .timeout(Duration::from_secs(30))
         .await
         .expect("block should be fetched via DHT provider discovery");
-    assert_eq!(block.data(), block.data());
+    assert_eq!(new_block.data(), block.data());
 }
 
 /// Check if Ipfs::{get, put} does its job.
