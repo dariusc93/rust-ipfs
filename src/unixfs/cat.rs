@@ -129,6 +129,7 @@ impl From<Block> for StartingPoint {
 
 impl Stream for UnixfsCat {
     type Item = Result<Bytes, TraversalFailed>;
+    #[allow(clippy::result_large_err)]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.core.is_none() && self.stream.is_none() {
             return Poll::Ready(None);

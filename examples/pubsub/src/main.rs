@@ -363,10 +363,8 @@ mod ext_behaviour {
                         .expect("");
                     }
                 }
-                FromSwarm::ExternalAddrConfirmed(ev) => {
-                    if self.addrs.insert(ev.addr.clone()) {
-                        writeln!(self.stdout, "Listening on {}", ev.addr).expect("");
-                    }
+                FromSwarm::ExternalAddrConfirmed(ev) if self.addrs.insert(ev.addr.clone()) => {
+                    writeln!(self.stdout, "Listening on {}", ev.addr).expect("");
                 }
                 _ => {}
             }

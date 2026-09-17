@@ -769,10 +769,10 @@ mod test {
                     }
                 }
                 event = swarm2.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        if peer_id == peer1 {
-                            peer_2_connected = true;
-                        }
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event
+                        && peer_id == peer1
+                    {
+                        peer_2_connected = true;
                     }
                 }
 
@@ -886,10 +886,10 @@ mod test {
                     }
                 }
                 event = swarm2.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        if peer_id == peer1 {
-                            peer_2_connected = true;
-                        }
+                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event
+                        && peer_id == peer1
+                    {
+                        peer_2_connected = true;
                     }
                 }
             }

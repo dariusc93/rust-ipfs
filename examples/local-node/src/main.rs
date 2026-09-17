@@ -122,10 +122,8 @@ mod ext_behaviour {
                         println!("Listening on {addr}");
                     }
                 }
-                FromSwarm::ExternalAddrConfirmed(ev) => {
-                    if self.addrs.insert(ev.addr.clone()) {
-                        println!("Listening on {}", ev.addr);
-                    }
+                FromSwarm::ExternalAddrConfirmed(ev) if self.addrs.insert(ev.addr.clone()) => {
+                    println!("Listening on {}", ev.addr);
                 }
                 _ => {}
             }

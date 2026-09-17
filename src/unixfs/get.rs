@@ -100,6 +100,7 @@ impl UnixfsGet {
 
 impl Stream for UnixfsGet {
     type Item = UnixfsStatus;
+    #[allow(clippy::result_large_err)]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         if self.core.is_none() && self.stream.is_none() {
             return Poll::Ready(None);

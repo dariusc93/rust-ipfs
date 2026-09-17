@@ -22,6 +22,7 @@ pub(crate) const DAG_PB_CODEC: u64 = 0x70;
 /// Describes the errors which can happen during a visit or lower level block-by-block walking of
 /// the DAG.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum FileReadFailed {
     /// Unsupported UnixFs file; these might exist, but currently there are no workarounds for
     /// handling them.

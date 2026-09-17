@@ -218,6 +218,7 @@ impl IpldDag {
         DagGet::new(self.clone())
     }
 
+    #[allow(clippy::result_large_err)]
     pub(crate) async fn _get(
         &self,
         path: IpfsPath,
@@ -259,6 +260,7 @@ impl IpldDag {
     /// as a "single step" in the given IpfsPath.
     ///
     /// Returns a node and the remaining path or the path inside the last document.
+    #[allow(clippy::result_large_err)]
     pub async fn resolve(
         &self,
         path: IpfsPath,
@@ -270,6 +272,7 @@ impl IpldDag {
             .await
     }
 
+    #[allow(clippy::result_large_err)]
     pub(crate) async fn _resolve(
         &self,
         path: IpfsPath,
@@ -647,6 +650,7 @@ impl IntoFuture for DagPut {
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn resolve_path(
     ipfs: Option<&Ipfs>,
     path: impl Borrow<IpfsPath>,

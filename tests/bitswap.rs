@@ -15,7 +15,7 @@ use rust_ipfs::block::BlockCodec;
 async fn bitswap_stress_test() {
     use multihash_codetable::{Code, MultihashDigest};
     fn filter(i: usize) -> bool {
-        i % 2 == 0
+        i.is_multiple_of(2)
     }
 
     tracing_subscriber::fmt::init();
