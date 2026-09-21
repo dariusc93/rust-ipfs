@@ -169,7 +169,7 @@ impl Stream for UnixfsAdd {
                     let wrap = self.wrap;
 
                     let stream = async_stream::stream! {
-                        let _g = repo.gc_guard().await;
+                        let guard = repo.gc_guard().await;
 
                         let mut written = 0;
 
@@ -230,7 +230,7 @@ impl Stream for UnixfsAdd {
                                         }
                                     }
                                 }
-                                if let Err(e) = repo.put_blocks(to_put).await {
+                                if let Err(e) = repo.put_blocks(to_put).with_gc_guard(guard.clone()).await {
                                     yield UnixfsStatus::FailedStatus { written, total_size, error: e };
                                     return;
                                 }
@@ -256,7 +256,7 @@ impl Stream for UnixfsAdd {
                             last_cid = Some(cid);
                         }
 
-                        if let Err(e) = repo.put_blocks(to_put).await {
+                        if let Err(e) = repo.put_blocks(to_put).with_gc_guard(guard.clone()).await {
                             yield UnixfsStatus::FailedStatus { written, total_size, error: e };
                             return;
                         }
@@ -274,6 +274,7 @@ impl Stream for UnixfsAdd {
                         if wrap && let Some(name) = name {
                                 let result = {
                                     let repo = repo.clone();
+                                    let guard = guard.clone();
                                     async move {
                                         let mut opts = rust_unixfs::dir::builder::TreeOptions::default();
                                         opts.wrap_with_directory();
@@ -295,7 +296,7 @@ impl Stream for UnixfsAdd {
                                             cids.push(cid);
                                         }
 
-                                        repo.put_blocks(to_put).await?;
+                                        repo.put_blocks(to_put).with_gc_guard(guard).await?;
                                         let cid = cids.last().ok_or(anyhow::anyhow!("no cid available"))?;
                                         let path = IpfsPath::from(*cid).sub_path(&name)?;
 
@@ -314,7 +315,7 @@ impl Stream for UnixfsAdd {
 
                         let cid = path.root().cid().copied().expect("Cid is apart of the path");
 
-                        if pin && !repo.is_pinned(&cid).await.unwrap_or_default() && let Err(e) = repo.pin(cid).recursive().await {
+                        if pin && !repo.is_pinned(&cid).await.unwrap_or_default() && let Err(e) = repo.pin(cid).with_gc_guard(guard.clone()).recursive().await {
                             error!("Unable to pin {cid}: {e}");
                         }
 

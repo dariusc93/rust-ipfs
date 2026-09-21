@@ -700,32 +700,8 @@ impl<S: RepoTypes> Repo<S> {
     }
 
     /// Puts multiple blocks into the block store in one batch, returning their cids in input order.
-    pub async fn put_blocks(&self, blocks: Vec<Block>) -> Result<Vec<Cid>, Error> {
-        if blocks.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let block_cids = blocks.iter().map(|block| *block.cid()).collect::<Vec<_>>();
-        let _guard = self.block_store_guard(&block_cids).await;
-        let results = self.inner.block_store.put_many(&blocks).await?;
-
-        let mut cids = Vec::with_capacity(results.len());
-        for ((cid, res), block) in results.into_iter().zip(blocks.iter()) {
-            let list = self.inner.subscriptions.lock().remove(&cid);
-            if let Some(list) = list {
-                for (_token, waiter) in list {
-                    let _ = waiter.sender.send(Ok(block.clone()));
-                }
-            }
-            if let BlockPut::NewBlock = res {
-                if let Some(mut event) = self.repo_channel() {
-                    _ = event.send(RepoEvent::NewBlock(block.clone())).await;
-                }
-            }
-            cids.push(cid);
-        }
-
-        Ok(cids)
+    pub fn put_blocks(&self, blocks: impl IntoIterator<Item = Block>) -> RepoPutBlocks<S> {
+        RepoPutBlocks::new(self).insert_blocks(blocks)
     }
 
     /// Retrives a block from the block store, or starts fetching it from the network and awaits
@@ -1426,6 +1402,100 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
     }
 }
 
+pub struct RepoPutBlocks<S: RepoTypes> {
+    repo: Repo<S>,
+    blocks: Vec<Block>,
+    span: Option<Span>,
+    broadcast_on_new_block: bool,
+    gc_guard: Option<GCGuard>,
+}
+
+impl<S: RepoTypes> RepoPutBlocks<S> {
+    fn new(repo: &Repo<S>) -> Self {
+        Self {
+            repo: Repo::clone(repo),
+            blocks: Vec::new(),
+            span: None,
+            broadcast_on_new_block: true,
+            gc_guard: None,
+        }
+    }
+
+    pub fn insert_block(mut self, block: Block) -> Self {
+        self.blocks.push(block);
+        self
+    }
+
+    pub fn insert_blocks(mut self, blocks: impl IntoIterator<Item = Block>) -> Self {
+        self.blocks.extend(blocks);
+        self
+    }
+
+    pub fn broadcast_on_new_block(mut self, v: bool) -> Self {
+        self.broadcast_on_new_block = v;
+        self
+    }
+
+    pub fn span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_gc_guard(mut self, gc_guard: GCGuard) -> Self {
+        self.gc_guard = Some(gc_guard);
+        self
+    }
+}
+
+impl<S: RepoTypes> IntoFuture for RepoPutBlocks<S> {
+    type IntoFuture = BoxFuture<'static, Self::Output>;
+    type Output = Result<Vec<Cid>, Error>;
+    fn into_future(mut self) -> Self::IntoFuture {
+        let gc_guard = self.gc_guard.take();
+        let span = self.span.unwrap_or(Span::current());
+        let blocks = self.blocks;
+        let repo = self.repo;
+        async move {
+            if blocks.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let _guard = match gc_guard {
+                Some(guard) => guard,
+                None => {
+                    let cids = blocks.iter().map(|block| *block.cid()).collect::<Vec<_>>();
+                    repo.block_store_guard(&cids).await
+                }
+            };
+            let results = repo.inner.block_store.put_many(&blocks).await?;
+
+            let mut cids = Vec::with_capacity(results.len());
+            for ((cid, res), block) in results.into_iter().zip(blocks.iter()) {
+                let list = repo.inner.subscriptions.lock().remove(&cid);
+                if let Some(list) = list {
+                    for (_token, waiter) in list {
+                        let _ = waiter.sender.send(Ok(block.clone()));
+                    }
+                }
+
+                if let BlockPut::NewBlock = res
+                    && self.broadcast_on_new_block
+                    && let Some(mut event) = repo.repo_channel()
+                {
+                    _ = event.send(RepoEvent::NewBlock(block.clone())).await;
+                }
+
+                cids.push(cid);
+            }
+
+            Ok(cids)
+        }
+        .instrument(span)
+        .boxed()
+    }
+}
+
 pub struct RepoFetch<S: RepoTypes> {
     repo: Repo<S>,
     cid: Cid,
@@ -1564,6 +1634,7 @@ pub struct RepoInsertPin<S: RepoTypes> {
     timeout: Option<Duration>,
     local: bool,
     refs: crate::refs::IpldRefs,
+    gc_guard: Option<GCGuard>,
 }
 
 impl<S: RepoTypes> RepoInsertPin<S> {
@@ -1578,6 +1649,7 @@ impl<S: RepoTypes> RepoInsertPin<S> {
             timeout: None,
             refs: Default::default(),
             span: None,
+            gc_guard: None,
         }
     }
 
@@ -1636,6 +1708,11 @@ impl<S: RepoTypes> RepoInsertPin<S> {
         self
     }
 
+    pub(crate) fn with_gc_guard(mut self, gc_guard: GCGuard) -> Self {
+        self.gc_guard = Some(gc_guard);
+        self
+    }
+
     /// Set tracing span
     pub fn span(mut self, span: Span) -> Self {
         self.span = Some(span);
@@ -1657,9 +1734,12 @@ impl<S: RepoTypes> IntoFuture for RepoInsertPin<S> {
         let span = debug_span!(parent: &span, "insert_pin", cid = %cid, recursive);
         let providers = self.providers;
         let timeout = self.timeout;
+        let gc_guard = self.gc_guard;
         async move {
-            // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
-            let _guard = repo.gc_guard().await;
+            let _guard = match gc_guard {
+                Some(guard) => guard,
+                None => repo.gc_guard().await,
+            };
             let block = repo
                 .get_block(cid)
                 .with_gc_guard(_guard.clone())

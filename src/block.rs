@@ -14,6 +14,7 @@ pub struct Block {
     cid: Cid,
     data: Bytes,
 }
+
 impl Block {
     /// Create a new block with the given cid and bytes.
     pub fn new(cid: Cid, data: impl Into<Bytes>) -> std::io::Result<Self> {
