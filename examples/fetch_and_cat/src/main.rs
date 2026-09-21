@@ -42,7 +42,9 @@ async fn main() -> anyhow::Result<()> {
     let ipfs: Ipfs = IpfsBuilder::new()
         .with_default()
         .enable_tcp()
-        .add_listening_addr("/ip4/0.0.0.0/tcp/0".parse()?)
+        .enable_quic()
+        .enable_dns()
+        .set_default_listener()
         .start()
         .await?;
 
