@@ -709,15 +709,15 @@ impl<S: RepoTypes> Repo<S> {
 
         let mut cids = Vec::with_capacity(results.len());
         for ((cid, res), block) in results.into_iter().zip(blocks.iter()) {
+            let list = self.inner.subscriptions.lock().remove(&cid);
+            if let Some(list) = list {
+                for (_token, waiter) in list {
+                    let _ = waiter.sender.send(Ok(block.clone()));
+                }
+            }
             if let BlockPut::NewBlock = res {
                 if let Some(mut event) = self.repo_channel() {
                     _ = event.send(RepoEvent::NewBlock(block.clone())).await;
-                }
-                let list = self.inner.subscriptions.lock().remove(&cid);
-                if let Some(list) = list {
-                    for (_token, waiter) in list {
-                        let _ = waiter.sender.send(Ok(block.clone()));
-                    }
                 }
             }
             cids.push(cid);
@@ -1256,6 +1256,13 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                                 token,
                             };
 
+                            // Recheck after subscribing to catch blocks stored during registration.
+                            if let Ok(Some(block)) = repo.get_block_now(cid).await {
+                                drop(guard);
+                                yield Ok(block);
+                                continue;
+                            }
+
                             let task = async move {
                                 // unregisters this waiter and emits UnwantBlock on every exit,
                                 // including this future being dropped before completion.
@@ -1285,14 +1292,16 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                             blocks.push(task);
                         }
 
-                        events
-                            .send(RepoEvent::WantBlock(
-                                wants,
-                                Vec::from_iter(providers),
-                                timeout,
-                            ))
-                            .await
-                            .ok();
+                        if !wants.is_empty() {
+                            events
+                                .send(RepoEvent::WantBlock(
+                                    wants,
+                                    Vec::from_iter(providers),
+                                    timeout,
+                                ))
+                                .await
+                                .ok();
+                        }
 
                         for await block in blocks {
                             yield block
@@ -1373,17 +1382,18 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
             };
             let (cid, res) = self.repo.inner.block_store.put(&block).await?;
 
+            let list = self.repo.inner.subscriptions.lock().remove(&cid);
+            if let Some(list) = list {
+                for (_token, waiter) in list {
+                    let _ = waiter.sender.send(Ok(block.clone()));
+                }
+            }
+
             if let BlockPut::NewBlock = res {
                 if self.broadcast_on_new_block
                     && let Some(mut event) = self.repo.repo_channel()
                 {
                     _ = event.send(RepoEvent::NewBlock(block.clone())).await;
-                }
-                let list = self.repo.inner.subscriptions.lock().remove(&cid);
-                if let Some(list) = list {
-                    for (_token, waiter) in list {
-                        let _ = waiter.sender.send(Ok(block.clone()));
-                    }
                 }
             }
 
