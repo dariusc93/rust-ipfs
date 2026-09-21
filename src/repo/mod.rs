@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{error, fmt, io};
-use tokio::sync::RwLockReadGuard;
+use tokio::sync::OwnedRwLockReadGuard;
 use tracing::{Instrument, Span};
 
 #[macro_use]
@@ -329,10 +329,14 @@ impl<C: Borrow<Cid>> PinKind<C> {
     }
 }
 
-type SubscriptionsMap = HashMap<
-    Cid,
-    HashMap<u64, futures::channel::oneshot::Sender<Result<Block, ArcError<connexa::error::Error>>>>,
->;
+#[derive(Debug)]
+#[doc(hidden)]
+pub struct BlockWaiter {
+    sender: futures::channel::oneshot::Sender<Result<Block, ArcError<connexa::error::Error>>>,
+    gc_guard: GCGuard,
+}
+
+type SubscriptionsMap = HashMap<Cid, HashMap<u64, BlockWaiter>>;
 
 static SUBSCRIPTION_TOKEN: AtomicU64 = AtomicU64::new(0);
 
@@ -386,8 +390,9 @@ pub(crate) struct RepoInner<S: RepoTypes> {
     data_store: S::TDataStore,
     events: RwLock<Option<Sender<RepoEvent>>>,
     pub(crate) subscriptions: Mutex<SubscriptionsMap>,
+    subscription_registered: tokio::sync::Notify,
     lockfile: S::TLock,
-    pub(crate) gclock: tokio::sync::RwLock<()>,
+    pub(crate) gclock: Arc<tokio::sync::RwLock<()>>,
     pub(crate) mfs_root: tokio::sync::Mutex<(bool, Option<Cid>)>,
 }
 
@@ -471,6 +476,7 @@ impl<S: RepoTypes> Repo<S> {
             data_store,
             events: Default::default(),
             subscriptions: Default::default(),
+            subscription_registered: Default::default(),
             lockfile,
             max_storage_size: Default::default(),
             gclock: Default::default(),
@@ -618,7 +624,7 @@ impl<S: RepoTypes> Repo<S> {
         let error = ArcError::from(error);
         if let Some(waiters) = waiters {
             for (_token, waiter) in waiters {
-                let _ = waiter.send(Err(error.clone()));
+                let _ = waiter.sender.send(Err(error.clone()));
             }
         }
     }
@@ -697,7 +703,8 @@ impl<S: RepoTypes> Repo<S> {
             return Ok(Vec::new());
         }
 
-        let _guard = self.inner.gclock.read().await;
+        let block_cids = blocks.iter().map(|block| *block.cid()).collect::<Vec<_>>();
+        let _guard = self.block_store_guard(&block_cids).await;
         let results = self.inner.block_store.put_many(&blocks).await?;
 
         let mut cids = Vec::with_capacity(results.len());
@@ -708,8 +715,8 @@ impl<S: RepoTypes> Repo<S> {
                 }
                 let list = self.inner.subscriptions.lock().remove(&cid);
                 if let Some(list) = list {
-                    for (_token, ch) in list {
-                        let _ = ch.send(Ok(block.clone()));
+                    for (_token, waiter) in list {
+                        let _ = waiter.sender.send(Ok(block.clone()));
                     }
                 }
             }
@@ -768,7 +775,7 @@ impl<S: RepoTypes> Repo<S> {
         cid: C,
         recursive: bool,
     ) -> Result<Vec<Cid>, Error> {
-        let _guard = self.inner.gclock.read().await;
+        let _guard = self.gc_guard().await;
         let cid = cid.borrow();
         if self.is_pinned(cid).await? {
             return Err(anyhow::anyhow!("block to remove is pinned"));
@@ -982,17 +989,49 @@ impl<S: RepoTypes> Repo<S> {
     }
 }
 
-pub struct GCGuard<'a> {
-    _g: RwLockReadGuard<'a, ()>,
+#[derive(Clone, Debug)]
+pub struct GCGuard {
+    _g: Arc<OwnedRwLockReadGuard<()>>,
 }
 
 impl<S: RepoTypes> Repo<S> {
     /// Hold a guard to prevent GC from running until this guard has dropped
     /// Note: Until this guard drops, the GC task, if enabled, would not perform any cleanup.
     ///       If the GC task is running, this guard will await until GC finishes
-    pub async fn gc_guard(&self) -> GCGuard<'_> {
-        let _g = self.inner.gclock.read().await;
+    pub async fn gc_guard(&self) -> GCGuard {
+        let _g = Arc::new(self.inner.gclock.clone().read_owned().await);
         GCGuard { _g }
+    }
+
+    async fn block_store_guard(&self, cids: &[Cid]) -> GCGuard {
+        let acquire = self.gc_guard();
+        tokio::pin!(acquire);
+
+        loop {
+            let registered = self.inner.subscription_registered.notified();
+            tokio::pin!(registered);
+            // Register before the lookup so a new waiter cannot be missed.
+            registered.as_mut().enable();
+
+            let existing = {
+                let subscriptions = self.inner.subscriptions.lock();
+                cids.iter().find_map(|cid| {
+                    subscriptions
+                        .get(cid)
+                        .and_then(|waiters| waiters.values().next())
+                        .map(|waiter| waiter.gc_guard.clone())
+                })
+            };
+
+            if let Some(guard) = existing {
+                return guard;
+            }
+
+            tokio::select! {
+                guard = &mut acquire => return guard,
+                _ = &mut registered => {}
+            }
+        }
     }
 
     pub fn data_store(&self) -> &S::TDataStore {
@@ -1041,6 +1080,11 @@ impl<S: RepoTypes> RepoGetBlock<S> {
         self.instance = self.instance.providers(providers);
         self
     }
+
+    pub(crate) fn with_gc_guard(mut self, guard: GCGuard) -> Self {
+        self.instance = self.instance.with_gc_guard(guard);
+        self
+    }
 }
 
 impl<S: RepoTypes> Future for RepoGetBlock<S> {
@@ -1062,6 +1106,7 @@ pub struct RepoGetBlocks<S: RepoTypes> {
     span: Span,
     timeout: Option<Duration>,
     stream: Option<BoxStream<'static, Result<Block, Error>>>,
+    gc_guard: Option<GCGuard>,
 }
 
 impl<S: RepoTypes> RepoGetBlocks<S> {
@@ -1074,6 +1119,7 @@ impl<S: RepoTypes> RepoGetBlocks<S> {
             span: Span::current(),
             timeout: None,
             stream: None,
+            gc_guard: None,
         }
     }
 
@@ -1116,6 +1162,11 @@ impl<S: RepoTypes> RepoGetBlocks<S> {
             .extend(providers.into_iter().map(|k| *k.borrow()));
         self
     }
+
+    pub(crate) fn with_gc_guard(mut self, guard: GCGuard) -> Self {
+        self.gc_guard = Some(guard);
+        self
+    }
 }
 
 impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
@@ -1146,9 +1197,13 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                     let cids = std::mem::take(&mut this.cids);
                     let local_only = this.local;
                     let timeout = this.timeout;
+                    let gc_guard = this.gc_guard.take();
 
                     let st = async_stream::stream! {
-                        let _guard = repo.gc_guard().await;
+                        let _guard = match gc_guard {
+                            Some(guard) => guard,
+                            None => repo.gc_guard().await,
+                        };
                         let mut missing: IndexSet<Cid> = cids.clone();
                         for cid in &cids {
                             if let Ok(Some(block)) = repo.get_block_now(cid).await {
@@ -1188,7 +1243,11 @@ impl<S: RepoTypes> Stream for RepoGetBlocks<S> {
                                 .lock()
                                 .entry(cid)
                                 .or_default()
-                                .insert(token, tx);
+                                .insert(token, BlockWaiter {
+                                    sender: tx,
+                                    gc_guard: _guard.clone(),
+                                });
+                            repo.inner.subscription_registered.notify_waiters();
 
                             let guard = WaiterGuard {
                                 repo: repo.clone(),
@@ -1264,6 +1323,7 @@ pub struct RepoPutBlock<S: RepoTypes> {
     block: Option<Block>,
     span: Option<Span>,
     broadcast_on_new_block: bool,
+    gc_guard: Option<GCGuard>,
 }
 
 impl<S: RepoTypes> RepoPutBlock<S> {
@@ -1274,6 +1334,7 @@ impl<S: RepoTypes> RepoPutBlock<S> {
             block,
             span: None,
             broadcast_on_new_block: true,
+            gc_guard: None,
         }
     }
 
@@ -1286,6 +1347,11 @@ impl<S: RepoTypes> RepoPutBlock<S> {
         self.span = Some(span);
         self
     }
+
+    pub(crate) fn with_gc_guard(mut self, gc_guard: GCGuard) -> Self {
+        self.gc_guard = Some(gc_guard);
+        self
+    }
 }
 
 impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
@@ -1293,10 +1359,18 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
     type Output = Result<Cid, Error>;
     fn into_future(mut self) -> Self::IntoFuture {
         let block = self.block.take().expect("valid block is set");
+        let gc_guard = self.gc_guard.take();
         let span = self.span.unwrap_or(Span::current());
         let span = debug_span!(parent: &span, "put_block", cid = %block.cid());
         async move {
-            let _guard = self.repo.inner.gclock.read().await;
+            let _guard = match gc_guard {
+                Some(guard) => guard,
+                None => {
+                    self.repo
+                        .block_store_guard(std::slice::from_ref(block.cid()))
+                        .await
+                }
+            };
             let (cid, res) = self.repo.inner.block_store.put(&block).await?;
 
             if let BlockPut::NewBlock = res {
@@ -1307,8 +1381,8 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
                 }
                 let list = self.repo.inner.subscriptions.lock().remove(&cid);
                 if let Some(list) = list {
-                    for (_token, ch) in list {
-                        let _ = ch.send(Ok(block.clone()));
+                    for (_token, waiter) in list {
+                        let _ = waiter.sender.send(Ok(block.clone()));
                     }
                 }
             }
@@ -1328,6 +1402,7 @@ pub struct RepoFetch<S: RepoTypes> {
     recursive: bool,
     timeout: Option<Duration>,
     refs: crate::refs::IpldRefs,
+    gc_guard: Option<GCGuard>,
 }
 
 impl<S: RepoTypes> RepoFetch<S> {
@@ -1341,6 +1416,7 @@ impl<S: RepoTypes> RepoFetch<S> {
             timeout: None,
             refs: Default::default(),
             span: None,
+            gc_guard: None,
         }
     }
 
@@ -1388,6 +1464,11 @@ impl<S: RepoTypes> RepoFetch<S> {
         self.span = Some(span);
         self
     }
+
+    pub(crate) fn with_gc_guard(mut self, gc_guard: GCGuard) -> Self {
+        self.gc_guard = Some(gc_guard);
+        self
+    }
 }
 
 impl<S: RepoTypes> IntoFuture for RepoFetch<S> {
@@ -1395,7 +1476,7 @@ impl<S: RepoTypes> IntoFuture for RepoFetch<S> {
 
     type IntoFuture = BoxFuture<'static, Self::Output>;
 
-    fn into_future(self) -> Self::IntoFuture {
+    fn into_future(mut self) -> Self::IntoFuture {
         let cid = self.cid;
         let span = self.span.unwrap_or(Span::current());
         let recursive = self.recursive;
@@ -1403,11 +1484,16 @@ impl<S: RepoTypes> IntoFuture for RepoFetch<S> {
         let span = debug_span!(parent: &span, "fetch", cid = %cid, recursive);
         let providers = self.providers;
         let timeout = self.timeout;
+        let gc_guard = self.gc_guard.take();
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
-            let _g = repo.inner.gclock.read().await;
+            let _guard = match gc_guard {
+                Some(guard) => guard,
+                None => repo.gc_guard().await,
+            };
             let block = repo
                 .get_block(cid)
+                .with_gc_guard(_guard.clone())
                 .providers(&providers)
                 .timeout(timeout)
                 .await?;
@@ -1419,6 +1505,7 @@ impl<S: RepoTypes> IntoFuture for RepoFetch<S> {
 
             let mut st = self
                 .refs
+                .with_gc_guard(_guard.clone())
                 .with_only_unique()
                 .providers(&providers)
                 .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
@@ -1539,9 +1626,10 @@ impl<S: RepoTypes> IntoFuture for RepoInsertPin<S> {
         let timeout = self.timeout;
         async move {
             // Although getting a block adds a guard, we will add a read guard here a head of time so we can hold it throughout this future
-            let _g = repo.inner.gclock.read().await;
+            let _guard = repo.gc_guard().await;
             let block = repo
                 .get_block(cid)
+                .with_gc_guard(_guard.clone())
                 .providers(&providers)
                 .set_local(local)
                 .timeout(timeout)
@@ -1554,6 +1642,7 @@ impl<S: RepoTypes> IntoFuture for RepoInsertPin<S> {
 
                 let st = self
                     .refs
+                    .with_gc_guard(_guard.clone())
                     .with_only_unique()
                     .providers(&providers)
                     .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
@@ -1616,7 +1705,7 @@ impl<S: RepoTypes> IntoFuture for RepoRemovePin<S> {
 
         let span = debug_span!(parent: &span, "remove_pin", cid = %cid, recursive);
         async move {
-            let _g = repo.inner.gclock.read().await;
+            let _guard = repo.gc_guard().await;
             if !recursive {
                 repo.remove_direct_pin(&cid).await
             } else {
@@ -1632,6 +1721,7 @@ impl<S: RepoTypes> IntoFuture for RepoRemovePin<S> {
                 let ipld = block.to_ipld()?;
                 let st = self
                     .refs
+                    .with_gc_guard(_guard.clone())
                     .with_only_unique()
                     .with_existing_blocks()
                     .refs_of_resolved(&repo, vec![(cid, ipld)])
@@ -1671,13 +1761,29 @@ mod repo_tests {
         let cid = *raw_block(b"failed block").cid();
         let (first_tx, first_rx) = futures::channel::oneshot::channel();
         let (second_tx, second_rx) = futures::channel::oneshot::channel();
+        let gc_guard = repo.gc_guard().await;
 
         repo.inner
             .subscriptions
             .lock()
             .entry(cid)
             .or_default()
-            .extend([(1, first_tx), (2, second_tx)]);
+            .extend([
+                (
+                    1,
+                    BlockWaiter {
+                        sender: first_tx,
+                        gc_guard: gc_guard.clone(),
+                    },
+                ),
+                (
+                    2,
+                    BlockWaiter {
+                        sender: second_tx,
+                        gc_guard,
+                    },
+                ),
+            ]);
 
         repo.notify_block_store_failed(cid, std::io::Error::other("disk full").into());
 

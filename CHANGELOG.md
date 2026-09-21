@@ -4,6 +4,8 @@
 - chore: added `Block::{len, is_empty}`, cleanup logic and test, and optimize bitswap logic.
 - chore: update connexa to 0.6.0.
 - fix: correctly gate wasm32 target.
+- refactor: Change GCGuard to own the rwlock guard and propagate it across different points to prevent GC from running,
+  which should prevent a potentional deadlock between the reader and writer.
 
 # 0.16.0
 

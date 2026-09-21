@@ -1,8 +1,7 @@
 //! `refs` or the references of dag-pb and other supported IPLD formats functionality.
 
 use crate::block::BlockCodec;
-use crate::repo::Repo;
-use crate::repo::RepoTypes;
+use crate::repo::{GCGuard, Repo, RepoTypes};
 use async_stream::stream;
 use connexa::prelude::identity::PeerId;
 use futures::stream::Stream;
@@ -49,6 +48,7 @@ pub(crate) struct IpldRefs {
     exit_on_error: bool,
     providers: Vec<PeerId>,
     timeout: Option<Duration>,
+    gc_guard: Option<GCGuard>,
 }
 
 impl Default for IpldRefs {
@@ -60,11 +60,17 @@ impl Default for IpldRefs {
             exit_on_error: false,
             providers: vec![],
             timeout: None,
+            gc_guard: None,
         }
     }
 }
 
 impl IpldRefs {
+    pub(crate) fn with_gc_guard(mut self, guard: GCGuard) -> Self {
+        self.gc_guard = Some(guard);
+        self
+    }
+
     /// Overrides the default maximum depth of "unlimited" with the given maximum depth. Zero is
     /// allowed and will result in an empty stream.
     #[allow(dead_code)]
@@ -158,6 +164,7 @@ where
         timeout: None,
         providers: vec![],
         exit_on_error: true,
+        gc_guard: None,
     };
     iplds_refs_inner(repo, iplds, opts).map_err(|e| match e {
         IpldRefsError::Loading(e) => e,
@@ -188,6 +195,7 @@ where
         timeout,
         exit_on_error,
         providers,
+        gc_guard,
     } = opts;
 
     let empty_stream = max_depth.map(|n| n == 0).unwrap_or(false);
@@ -209,9 +217,15 @@ where
     }
 
     stream! {
-        if empty_stream {
+        if empty_stream || work.is_empty() {
             return;
         }
+
+        let borrowed = repo.borrow();
+        let guard = match gc_guard {
+            Some(guard) => guard,
+            None => borrowed.gc_guard().await,
+        };
 
         while let Some((depth, cid, source, link_name)) = work.pop_front() {
             let traverse_links = match max_depth {
@@ -224,12 +238,8 @@ where
                 _ => true
             };
 
-            // if this is not bound to a local variable it'll introduce a Sync requirement on
-            // `MaybeOwned` which we don't necessarily need.
-            let borrowed = repo.borrow();
-
             let block = if download_blocks {
-                match borrowed.get_block(cid).providers(&providers).set_local(!download_blocks).timeout(timeout).await {
+                match borrowed.get_block(cid).with_gc_guard(guard.clone()).providers(&providers).set_local(!download_blocks).timeout(timeout).await {
                     Ok(block) => block,
                     Err(e) => {
                         warn!("failed to load {}, linked from {}: {}", cid, source, e);

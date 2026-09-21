@@ -1635,8 +1635,6 @@ pub use node::Node;
 /// Node module provides an easy to use interface used in `tests/`.
 #[cfg(all(feature = "full", not(target_arch = "wasm32")))]
 mod node {
-    use other_error::ArcError;
-
     use super::*;
     use crate::builder::DefaultIpfsBuilder;
 
@@ -1722,12 +1720,7 @@ mod node {
         #[allow(clippy::type_complexity)]
         pub fn get_subscriptions(
             &self,
-        ) -> &parking_lot::Mutex<
-            HashMap<
-                Cid,
-                HashMap<u64, oneshot::Sender<Result<Block, ArcError<connexa::error::Error>>>>,
-            >,
-        > {
+        ) -> &parking_lot::Mutex<HashMap<Cid, HashMap<u64, crate::repo::BlockWaiter>>> {
             &self.ipfs.repo.inner.subscriptions
         }
 
