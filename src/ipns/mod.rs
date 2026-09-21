@@ -187,38 +187,34 @@ impl Ipns {
         );
 
         let repo = self.ipfs.repo();
-
+        let _publish_guard = repo.ipns_publish_guard(&peer_id).await;
         let datastore = repo.data_store();
 
-        let record_data = datastore.get(mb.as_bytes()).await.unwrap_or_default();
-
+        let record_data = datastore.get(mb.as_bytes()).await?;
+        let path_bytes = path.to_string();
         let mut seq = 0;
+        let mut validity = chrono::Utc::now() + chrono::Duration::hours(48);
 
         if let Some(record) = record_data.as_ref() {
             let record = rust_ipns::Record::decode(record)?;
-            //Although stored locally, we should verify the record anyway
-            record.verify(peer_id)?;
+            // Verify the previous record even when it has expired.
+            record.verify_signature(peer_id)?;
+            validity = validity.max(record.validity()?.with_timezone(&chrono::Utc));
+            seq = record.sequence();
 
-            let data = record.data()?;
-
-            let ipfs_path = IpfsPath::from_str(&String::from_utf8_lossy(data.value()))?;
-
-            if ipfs_path.eq(path) {
-                return IpfsPath::from_str(&mb).map_err(IpnsError::from);
+            if record.value() != path_bytes.as_bytes() {
+                seq = seq
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow::anyhow!("IPNS sequence exhausted"))?;
             }
-
-            // inc req of the record
-            seq = record.sequence() + 1;
         }
-
-        let path_bytes = path.to_string();
 
         let record = rust_ipns::Record::new(
             &keypair,
             path_bytes.as_bytes(),
-            chrono::Utc::now() + chrono::Duration::try_hours(48).expect("shouldnt panic"),
+            validity,
             seq,
-            // IPNS TTL is a caching hint; 60s.
+            // IPNS TTL is a caching hint of 60 seconds.
             std::time::Duration::from_secs(60),
         )?;
 

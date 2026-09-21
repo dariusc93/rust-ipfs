@@ -8,6 +8,7 @@
   which should prevent a potential deadlock between the reader and writer.
 - fix: notify missing block to subscription between storage checks.
 - fix: correct ipns lookup key mismatch
+- feat: apply ipns renewal on expired records that the node provided.
 
 # 0.16.0
 

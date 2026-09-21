@@ -394,6 +394,7 @@ pub(crate) struct RepoInner<S: RepoTypes> {
     lockfile: S::TLock,
     pub(crate) gclock: Arc<tokio::sync::RwLock<()>>,
     pub(crate) mfs_root: tokio::sync::Mutex<(bool, Option<Cid>)>,
+    ipns_publish_locks: Mutex<HashMap<PeerId, std::sync::Weak<tokio::sync::Mutex<()>>>>,
 }
 
 /// Events used to communicate to the swarm on repo changes.
@@ -481,6 +482,7 @@ impl<S: RepoTypes> Repo<S> {
             max_storage_size: Default::default(),
             gclock: Default::default(),
             mfs_root: Default::default(),
+            ipns_publish_locks: Default::default(),
         };
         Repo {
             inner: Arc::new(inner),
@@ -1037,6 +1039,25 @@ impl<S: RepoTypes> Repo<S> {
     pub fn data_store(&self) -> &S::TDataStore {
         &self.inner.data_store
     }
+
+    pub(crate) async fn ipns_publish_guard(
+        &self,
+        peer: &PeerId,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.inner.ipns_publish_locks.lock();
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            match locks.get(peer).and_then(std::sync::Weak::upgrade) {
+                Some(lock) => lock,
+                None => {
+                    let lock = Arc::new(tokio::sync::Mutex::new(()));
+                    locks.insert(*peer, Arc::downgrade(&lock));
+                    lock
+                }
+            }
+        };
+        lock.lock_owned().await
+    }
 }
 
 pub struct RepoGetBlock<S: RepoTypes> {
@@ -1357,6 +1378,7 @@ impl<S: RepoTypes> RepoPutBlock<S> {
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_gc_guard(mut self, gc_guard: GCGuard) -> Self {
         self.gc_guard = Some(gc_guard);
         self
@@ -1475,6 +1497,7 @@ impl<S: RepoTypes> RepoFetch<S> {
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_gc_guard(mut self, gc_guard: GCGuard) -> Self {
         self.gc_guard = Some(gc_guard);
         self
