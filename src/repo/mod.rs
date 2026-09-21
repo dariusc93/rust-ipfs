@@ -1778,6 +1778,7 @@ pub struct RepoRemovePin<S: RepoTypes> {
     span: Option<Span>,
     recursive: bool,
     refs: crate::refs::IpldRefs,
+    gc_guard: Option<GCGuard>,
 }
 
 impl<S: RepoTypes> RepoRemovePin<S> {
@@ -1789,12 +1790,18 @@ impl<S: RepoTypes> RepoRemovePin<S> {
             recursive: false,
             refs: Default::default(),
             span: None,
+            gc_guard: None,
         }
     }
 
     /// Recursively unpin blocks
     pub fn recursive(mut self) -> Self {
         self.recursive = true;
+        self
+    }
+
+    pub(crate) fn with_gc_guard(mut self, gc_guard: GCGuard) -> Self {
+        self.gc_guard = Some(gc_guard);
         self
     }
 
@@ -1817,8 +1824,12 @@ impl<S: RepoTypes> IntoFuture for RepoRemovePin<S> {
         let repo = self.repo;
 
         let span = debug_span!(parent: &span, "remove_pin", cid = %cid, recursive);
+        let gc_guard = self.gc_guard;
         async move {
-            let _guard = repo.gc_guard().await;
+            let _guard = match gc_guard {
+                Some(guard) => guard,
+                None => repo.gc_guard().await,
+            };
             if !recursive {
                 repo.remove_direct_pin(&cid).await
             } else {

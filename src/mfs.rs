@@ -1,7 +1,7 @@
 //! A mutable filesystem (MFS) layer over immutable UnixFS DAGs.
 
 use crate::path::{IpfsPath, PathRoot};
-use crate::repo::{DataStore, DefaultStorage, Repo};
+use crate::repo::{DataStore, DefaultStorage, GCGuard, Repo};
 use crate::{Block, Error};
 use anyhow::anyhow;
 use bytes::Bytes;
@@ -215,7 +215,7 @@ impl Mfs {
     /// otherwise a missing parent is an error.
     pub async fn mkdir(&self, path: &str, parents: bool) -> Result<(), Error> {
         let (cid, tsize, blocks) = encode_dir(&DirMap::new(), self.shard_threshold)?;
-        self.set_entry(path, DirEntry { cid, tsize }, blocks, parents, false)
+        self.set_entry(path, DirEntry { cid, tsize }, blocks, parents, false, None)
             .await
     }
 
@@ -253,9 +253,12 @@ impl Mfs {
             return Err(MfsError::FileSizeLimit.into());
         }
 
+        let gc_guard = self.repo().gc_guard().await;
         let mut guard = self.repo().inner.mfs_root.lock().await;
 
-        let existing = self.resolve_file_locked(&mut guard, &comps).await?;
+        let existing = self
+            .resolve_file_locked(&mut guard, &comps, &gc_guard)
+            .await?;
         if existing.is_none() && !opts.create {
             return Err(MfsError::NotFound(path.to_string()).into());
         }
@@ -264,10 +267,7 @@ impl Mfs {
             && !opts.truncate
             && new_size <= filesize
         {
-            let edited = {
-                let _gc = self.repo().gc_guard().await;
-                self.overwrite_subtree(cid, 0, data, opts.offset).await?
-            };
+            let edited = self.overwrite_subtree(cid, 0, data, opts.offset).await?;
             if let Some((new_cid, blocks)) = edited {
                 return self
                     .set_entry_locked(
@@ -280,6 +280,7 @@ impl Mfs {
                         blocks,
                         opts.parents,
                         true,
+                        &gc_guard,
                     )
                     .await;
             }
@@ -288,8 +289,9 @@ impl Mfs {
         if let Some((cid, _, filesize)) = existing
             && !opts.truncate
             && new_size > filesize
-            && let Some((new_cid, new_tsize, blocks)) =
-                self.grow_file(cid, filesize, opts.offset, data).await?
+            && let Some((new_cid, new_tsize, blocks)) = self
+                .grow_file(cid, filesize, opts.offset, data, &gc_guard)
+                .await?
         {
             return self
                 .set_entry_locked(
@@ -302,6 +304,7 @@ impl Mfs {
                     blocks,
                     opts.parents,
                     true,
+                    &gc_guard,
                 )
                 .await;
         }
@@ -309,7 +312,7 @@ impl Mfs {
         let mut content = if opts.truncate || existing.is_none() {
             Vec::new()
         } else {
-            self.read_existing_file_locked(&mut guard, &comps)
+            self.read_existing_file_locked(&mut guard, &comps, &gc_guard)
                 .await?
                 .unwrap_or_default()
         };
@@ -328,6 +331,7 @@ impl Mfs {
             blocks,
             opts.parents,
             true,
+            &gc_guard,
         )
         .await
     }
@@ -342,9 +346,10 @@ impl Mfs {
             return Err(MfsError::FileSizeLimit.into());
         }
 
+        let gc_guard = self.repo().gc_guard().await;
         let mut guard = self.repo().inner.mfs_root.lock().await;
         let (file_cid, _, filesize) = self
-            .resolve_file_locked(&mut guard, &comps)
+            .resolve_file_locked(&mut guard, &comps, &gc_guard)
             .await?
             .ok_or_else(|| MfsError::NotFound(path.to_string()))?;
         if size == filesize {
@@ -354,7 +359,6 @@ impl Mfs {
         let boundary = (size.min(filesize) / CHUNK) * CHUNK;
         let read_end = size.min(filesize);
         let result = {
-            let _gc = self.repo().gc_guard().await;
             let mut new_tail = if boundary < read_end {
                 self.read_file_range(&file_cid, boundary, read_end).await?
             } else {
@@ -369,7 +373,7 @@ impl Mfs {
             Some(r) => r,
             None => {
                 let mut content = self
-                    .read_existing_file_locked(&mut guard, &comps)
+                    .read_existing_file_locked(&mut guard, &comps, &gc_guard)
                     .await?
                     .unwrap_or_default();
                 content.resize(size as usize, 0);
@@ -383,6 +387,7 @@ impl Mfs {
             blocks,
             false,
             true,
+            &gc_guard,
         )
         .await
     }
@@ -462,6 +467,7 @@ impl Mfs {
         total: Option<u64>,
     ) -> impl Stream<Item = WriteStatus> {
         async_stream::stream! {
+            let gc_guard = self.repo().gc_guard().await;
             let mut adder = FileAdder::builder()
                 .with_cid_version(VERSION)
                 .with_hasher(HASHER)
@@ -494,7 +500,7 @@ impl Mfs {
                         }
                     }
                     if !batch.is_empty()
-                        && let Err(e) = self.repo().put_blocks(batch).await
+                        && let Err(e) = self.repo().put_blocks(batch).with_gc_guard(gc_guard.clone()).await
                     {
                         yield WriteStatus::Failed { error: e };
                         return;
@@ -522,7 +528,7 @@ impl Mfs {
                 }
             }
             if !batch.is_empty()
-                && let Err(e) = self.repo().put_blocks(batch).await
+                && let Err(e) = self.repo().put_blocks(batch).with_gc_guard(gc_guard.clone()).await
             {
                 yield WriteStatus::Failed { error: e };
                 return;
@@ -537,7 +543,7 @@ impl Mfs {
             };
 
             match self
-                .set_entry(&path, DirEntry { cid, tsize }, Vec::new(), parents, true)
+                .set_entry(&path, DirEntry { cid, tsize }, Vec::new(), parents, true, Some(gc_guard))
                 .await
             {
                 Ok(()) => yield WriteStatus::Completed { cid },
@@ -589,14 +595,12 @@ impl Mfs {
             if comps.is_empty() {
                 Err::<(), _>(anyhow!("cannot read the root directory"))?;
             }
+            let _gc = mfs.repo().gc_guard().await;
             let root = mfs
                 .snapshot_root()
                 .await?
                 .ok_or_else(|| anyhow!("MFS is empty"))?;
-            let cid = {
-                let _gc = mfs.repo().gc_guard().await;
-                mfs.resolve_from(root, &comps).await?.0
-            };
+            let cid = mfs.resolve_from(root, &comps).await?.0;
 
             let block = mfs.get_block(&cid).await?;
             match describe(block.data()) {
@@ -718,6 +722,7 @@ impl Mfs {
             return Err(MfsError::RootImmutable.into());
         };
 
+        let gc_guard = self.repo().gc_guard().await;
         let mut guard = self.repo().inner.mfs_root.lock().await;
         let (mut frames, names) = match self.load_chain(&mut guard, dirs, false).await {
             Ok(chain) => chain,
@@ -739,7 +744,7 @@ impl Mfs {
         }
 
         frames.last_mut().expect("root frame").remove(name);
-        self.reencode_and_commit(&mut guard, frames, names, Vec::new())
+        self.reencode_and_commit(&mut guard, frames, names, Vec::new(), &gc_guard)
             .await
     }
 
@@ -762,8 +767,15 @@ impl Mfs {
         };
 
         let (dest, _) = self.resolve_dest(to, from).await?;
-        self.set_entry(&dest, DirEntry { cid, tsize }, Vec::new(), parents, false)
-            .await
+        self.set_entry(
+            &dest,
+            DirEntry { cid, tsize },
+            Vec::new(),
+            parents,
+            false,
+            None,
+        )
+        .await
     }
 
     /// Moves the MFS entry at `from` to `to`. Non-atomic: it links the destination then unlinks the
@@ -789,6 +801,7 @@ impl Mfs {
             Vec::new(),
             parents,
             !into_dir,
+            None,
         )
         .await?;
         self.rm(from, true).await
@@ -958,12 +971,26 @@ impl Mfs {
         entry_blocks: Vec<Block>,
         parents: bool,
         overwrite: bool,
+        gc_guard: Option<GCGuard>,
     ) -> Result<(), Error> {
+        let gc_guard = match gc_guard {
+            Some(guard) => guard,
+            None => self.repo().gc_guard().await,
+        };
         let mut guard = self.repo().inner.mfs_root.lock().await;
-        self.set_entry_locked(&mut guard, path, entry, entry_blocks, parents, overwrite)
-            .await
+        self.set_entry_locked(
+            &mut guard,
+            path,
+            entry,
+            entry_blocks,
+            parents,
+            overwrite,
+            &gc_guard,
+        )
+        .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn set_entry_locked(
         &self,
         guard: &mut (bool, Option<Cid>),
@@ -972,6 +999,7 @@ impl Mfs {
         entry_blocks: Vec<Block>,
         parents: bool,
         overwrite: bool,
+        gc_guard: &GCGuard,
     ) -> Result<(), Error> {
         let comps = split_path(path)?;
         let Some((name, dirs)) = comps.split_last() else {
@@ -986,7 +1014,7 @@ impl Mfs {
         }
         parent.insert(name.clone(), entry);
 
-        self.reencode_and_commit(guard, frames, names, entry_blocks)
+        self.reencode_and_commit(guard, frames, names, entry_blocks, gc_guard)
             .await
     }
 
@@ -1028,30 +1056,38 @@ impl Mfs {
         mut frames: Vec<DirMap>,
         names: Vec<String>,
         mut blocks: Vec<Block>,
+        gc_guard: &GCGuard,
     ) -> Result<(), Error> {
         for i in (0..frames.len()).rev() {
             let (cid, tsize, mut blks) = encode_dir(&frames[i], self.shard_threshold)?;
             blocks.append(&mut blks);
             if i == 0 {
-                return self.commit_root(guard, cid, blocks).await;
+                return self.commit_root(guard, cid, blocks, gc_guard).await;
             }
             frames[i - 1].insert(names[i - 1].clone(), DirEntry { cid, tsize });
         }
         unreachable!("frames always contains the root at index 0")
     }
 
-    /// Persists `new_root`: stores its blocks, recursively pins the new tree, unpins the old root,
-    /// writes the root Cid to the datastore, and updates the cache.
+    /// Stores and pins the new tree, saves its root, then unpins the old tree.
     async fn commit_root(
         &self,
         guard: &mut (bool, Option<Cid>),
         new_root: Cid,
         blocks: Vec<Block>,
+        gc_guard: &GCGuard,
     ) -> Result<(), Error> {
         let old = guard.1;
 
-        self.repo().put_blocks(blocks).await?;
-        self.repo().pin(new_root).recursive().await?;
+        self.repo()
+            .put_blocks(blocks)
+            .with_gc_guard(gc_guard.clone())
+            .await?;
+        self.repo()
+            .pin(new_root)
+            .with_gc_guard(gc_guard.clone())
+            .recursive()
+            .await?;
         self.repo()
             .data_store()
             .put(ROOT_KEY, &new_root.to_bytes())
@@ -1063,8 +1099,13 @@ impl Mfs {
         if let Some(old) = old
             && old != new_root
         {
-            // best-effort: the new tree is already pinned, so a failed unpin only delays GC
-            let _ = self.repo().remove_pin(old).recursive().await;
+            // The new tree is pinned, so a failed unpin only delays GC.
+            let _ = self
+                .repo()
+                .remove_pin(old)
+                .with_gc_guard(gc_guard.clone())
+                .recursive()
+                .await;
         }
         Ok(())
     }
@@ -1206,11 +1247,11 @@ impl Mfs {
         &self,
         guard: &mut (bool, Option<Cid>),
         comps: &[String],
+        _gc_guard: &GCGuard,
     ) -> Result<Option<(Cid, u64, u64)>, Error> {
         let Some(root) = self.cached_root(guard).await? else {
             return Ok(None);
         };
-        let _gc = self.repo().gc_guard().await;
         let (cid, tsize) = match self.resolve_from(root, comps).await {
             Ok(resolved) => resolved,
             Err(_) => return Ok(None),
@@ -1414,9 +1455,9 @@ impl Mfs {
         filesize: u64,
         offset: u64,
         data: &[u8],
+        _gc_guard: &GCGuard,
     ) -> Result<Option<(Cid, u64, Vec<Block>)>, Error> {
         let boundary = (offset.min(filesize) / CHUNK) * CHUNK;
-        let _gc = self.repo().gc_guard().await;
         let mut new_tail = if boundary < filesize {
             self.read_file_range(&file_cid, boundary, filesize).await?
         } else {
@@ -1436,11 +1477,11 @@ impl Mfs {
         &self,
         guard: &mut (bool, Option<Cid>),
         comps: &[String],
+        _gc_guard: &GCGuard,
     ) -> Result<Option<Vec<u8>>, Error> {
         let Some(root) = self.cached_root(guard).await? else {
             return Ok(None);
         };
-        let _gc = self.repo().gc_guard().await;
         let (cid, tsize) = match self.resolve_from(root, comps).await {
             Ok(resolved) => resolved,
             Err(_) => return Ok(None),
