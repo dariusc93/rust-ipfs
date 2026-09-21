@@ -40,14 +40,25 @@ pub struct Wantlist {
 impl Wantlist {
     pub fn want(&self, cid: Cid, want_type: RequestType, priority: i32, timeout: Option<Duration>) {
         let now = Instant::now();
-        self.inner.write().wants.entry(cid).or_insert(WantEntry {
-            want_type,
-            priority,
-            deadline: timeout.map(|d| now + d),
-            discovery_interval: timeout.map(|d| d / 2).unwrap_or(DEFAULT_DISCOVERY_INTERVAL),
-            last_discovery: None,
-            has_provider: false,
-        });
+        let deadline = timeout.map(|duration| now + duration);
+        self.inner
+            .write()
+            .wants
+            .entry(cid)
+            .and_modify(|entry| {
+                entry.deadline = match (entry.deadline, deadline) {
+                    (Some(existing), Some(incoming)) => Some(existing.max(incoming)),
+                    _ => None,
+                };
+            })
+            .or_insert(WantEntry {
+                want_type,
+                priority,
+                deadline,
+                discovery_interval: timeout.map(|d| d / 2).unwrap_or(DEFAULT_DISCOVERY_INTERVAL),
+                last_discovery: None,
+                has_provider: false,
+            });
     }
 
     pub fn cancel(&self, cid: &Cid) -> bool {

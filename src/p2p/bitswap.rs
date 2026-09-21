@@ -450,6 +450,9 @@ impl NetworkBehaviour for Behaviour {
                     return Poll::Ready(ToSwarm::GenerateEvent(Event::NeedBlock { cid }));
                 }
                 WantlistEvent::Expired(cid) => {
+                    if self.wantlist.contains(&cid) {
+                        continue;
+                    }
                     self.candidates.remove(&cid);
                     self.block_inflight.remove(&cid);
                     for session in self.sessions.values_mut() {
