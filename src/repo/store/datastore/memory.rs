@@ -135,10 +135,11 @@ impl PinStore for MemDataStore {
     async fn insert_recursive_pin(
         &self,
         target: &Cid,
-        mut refs: crate::repo::References<'_>,
+        refs: crate::repo::References<'_>,
     ) -> Result<(), Error> {
         use futures::stream::TryStreamExt;
 
+        let refs = refs.try_collect::<Vec<_>>().await?;
         let mut g = Mutex::lock_owned(Arc::clone(&self.pin)).await;
 
         // this must fail if it is already fully pinned
@@ -151,16 +152,10 @@ impl PinStore for MemDataStore {
             Cid::new_v1(target.codec(), target.hash().to_owned())
         };
 
-        // collect these before even if they are many ... not sure if this is a good idea but, the
-        // inmem version doesn't need to be all that great. this could be for nothing, if the root
-        // was already pinned.
-
-        let mut count = 0;
+        let count = refs.len();
         let kind = PinKind::IndirectFrom(&target_v1);
-        while let Some(next) = refs.try_next().await? {
-            // no rollback, nothing
+        for next in refs {
             Self::insert_pin(&mut g, &next, &kind)?;
-            count += 1;
         }
 
         let kind = PinKind::Recursive(count as u64);

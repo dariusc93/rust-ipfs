@@ -1757,6 +1757,7 @@ impl<S: RepoTypes> IntoFuture for RepoInsertPin<S> {
                     .refs
                     .with_gc_guard(_guard.clone())
                     .with_only_unique()
+                    .with_exit_on_error()
                     .providers(&providers)
                     .refs_of_resolved(&repo, vec![(cid, ipld.clone())])
                     .map_ok(|crate::refs::Edge { destination, .. }| destination)
