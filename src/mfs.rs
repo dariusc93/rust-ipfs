@@ -32,6 +32,7 @@ const ROOT_KEY: &[u8] = b"/mfs/root";
 const VERSION: Version = Version::V1;
 const HASHER: Code = Code::Sha2_256;
 const RAW_LEAF_CODEC: u64 = 0x55;
+const DAG_PB_CODEC: u64 = 0x70;
 const CHUNK: u64 = 256 * 1024;
 const MAX_FILE_SIZE: u64 = 8 << 30;
 
@@ -603,7 +604,7 @@ impl Mfs {
             let cid = mfs.resolve_from(root, &comps).await?.0;
 
             let block = mfs.get_block(&cid).await?;
-            match describe(block.data()) {
+            match describe_block(&block) {
                 NodeDescription::Directory { .. } | NodeDescription::HamtShard { .. } => {
                     Err::<(), _>(MfsError::IsDirectory(path.clone()))?;
                 }
@@ -822,7 +823,7 @@ impl Mfs {
         let (cid, tsize) = self.resolve_from(root, &comps).await?;
         let block = self.get_block(&cid).await?;
 
-        let map = match describe(block.data()) {
+        let map = match describe_block(&block) {
             NodeDescription::Directory { links } => links_to_map(links),
             NodeDescription::HamtShard { links } => {
                 let mut map = DirMap::new();
@@ -874,7 +875,7 @@ impl Mfs {
         let _gc = self.repo().gc_guard().await;
         let (cid, tsize) = self.resolve_from(root, &comps).await?;
         let block = self.get_block(&cid).await?;
-        let (kind, blocks, link_tsize) = match describe(block.data()) {
+        let (kind, blocks, link_tsize) = match describe_block(&block) {
             NodeDescription::Directory { links } | NodeDescription::HamtShard { links } => {
                 let sum = links.iter().map(|l| l.tsize).sum();
                 (MfsKind::Directory, links.len(), sum)
@@ -1140,7 +1141,7 @@ impl Mfs {
     /// Loads a directory's children, flattening a HAMT shard if present. Errors on a non-directory.
     async fn load_dir(&self, cid: &Cid) -> Result<DirMap, Error> {
         let block = self.get_block(cid).await?;
-        match describe(block.data()) {
+        match describe_block(&block) {
             NodeDescription::Directory { links } => Ok(links_to_map(links)),
             NodeDescription::HamtShard { links } => {
                 let mut map = DirMap::new();
@@ -1165,6 +1166,9 @@ impl Mfs {
     async fn resolve_name(&self, dir_cid: Cid, name: &str) -> Result<Option<Cid>, Error> {
         use rust_unixfs::dir::{MaybeResolved, resolve};
 
+        if dir_cid.codec() != DAG_PB_CODEC {
+            return Err(anyhow!("{dir_cid} is not a directory"));
+        }
         let block = self.repo().get_block(dir_cid).await?;
         let mut cache = None;
         let mut step = resolve(block.data(), name, &mut cache)?;
@@ -1174,6 +1178,9 @@ impl Mfs {
                 MaybeResolved::NotFound => return Ok(None),
                 MaybeResolved::NeedToLoadMore(lookup) => {
                     let next = *lookup.pending_links().0;
+                    if next.codec() != DAG_PB_CODEC {
+                        return Err(anyhow!("malformed HAMT shard under {next}"));
+                    }
                     let block = self.repo().get_block(next).await?;
                     step = lookup.continue_walk(block.data(), &mut cache)?;
                 }
@@ -1207,7 +1214,7 @@ impl Mfs {
             for link in links {
                 if is_shard_prefix(&link.name) {
                     let block = self.get_block(&link.target).await?;
-                    match describe(block.data()) {
+                    match describe_block(&block) {
                         NodeDescription::HamtShard { links } => {
                             self.collect_shard(links, map).await?;
                         }
@@ -1231,7 +1238,7 @@ impl Mfs {
 
     async fn classify(&self, cid: &Cid, _link_tsize: u64) -> Result<MfsKind, Error> {
         let block = self.get_block(cid).await?;
-        Ok(match describe(block.data()) {
+        Ok(match describe_block(&block) {
             NodeDescription::Directory { .. } | NodeDescription::HamtShard { .. } => {
                 MfsKind::Directory
             }
@@ -1276,7 +1283,9 @@ impl Mfs {
         async move {
             let block = self.get_block(&cid).await?;
 
-            if let Some(branch) = parse_file_branch(block.data()) {
+            if cid.codec() == DAG_PB_CODEC
+                && let Some(branch) = parse_file_branch(block.data())
+            {
                 let mut blocks = Vec::new();
                 let mut links: Vec<FileBranchLink> = branch.links.clone();
                 let write_end = data_start + data.len() as u64;
@@ -1303,7 +1312,7 @@ impl Mfs {
                 return Ok(Some((new_cid, blocks)));
             }
 
-            if !matches!(describe(block.data()), NodeDescription::Other) {
+            if cid.codec() != RAW_LEAF_CODEC {
                 return Ok(None);
             }
 
@@ -1325,7 +1334,7 @@ impl Mfs {
 
     async fn read_file_range(&self, cid: &Cid, start: u64, end: u64) -> Result<Vec<u8>, Error> {
         let block = self.get_block(cid).await?;
-        if matches!(describe(block.data()), NodeDescription::Other) {
+        if matches!(describe_block(&block), NodeDescription::Other) {
             let leaf = block.data();
             let s = (start as usize).min(leaf.len());
             let e = (end as usize).min(leaf.len());
@@ -1356,6 +1365,9 @@ impl Mfs {
         out: &'a mut Vec<FileBranchLink>,
     ) -> BoxFuture<'a, Result<bool, Error>> {
         async move {
+            if cid.codec() != DAG_PB_CODEC {
+                return Ok(false);
+            }
             let block = self.get_block(&cid).await?;
             let Some(branch) = parse_file_branch(block.data()) else {
                 return Ok(false);
@@ -1504,7 +1516,7 @@ impl Mfs {
         let block = self.get_block(cid).await?;
 
         // a single raw leaf is the content itself
-        if matches!(describe(block.data()), NodeDescription::Other) {
+        if matches!(describe_block(&block), NodeDescription::Other) {
             return Ok(block.data().to_vec());
         }
 
@@ -1529,6 +1541,13 @@ impl Mfs {
             .get_block_now(cid)
             .await?
             .ok_or_else(|| anyhow!("missing block {cid}"))
+    }
+}
+
+fn describe_block(block: &Block) -> NodeDescription {
+    match block.cid().codec() {
+        DAG_PB_CODEC => describe(block.data()),
+        _ => NodeDescription::Other,
     }
 }
 
