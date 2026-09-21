@@ -1,7 +1,8 @@
 use crate::context::IpfsContext;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::p2p::RelayConfig;
 use crate::p2p::{
-    AddressBookConfig, IdentifyConfiguration, PubsubConfig, RelayConfig, TSwarm,
-    create_create_behaviour,
+    AddressBookConfig, IdentifyConfiguration, PubsubConfig, TSwarm, create_create_behaviour,
 };
 use crate::repo::{DefaultKeystore, DefaultStorage, GCConfig, GCTrigger, Repo};
 use crate::{
@@ -240,6 +241,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         self
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Enable relay server
     pub fn with_relay_server(mut self, config: RelayConfig) -> Self {
         self.init = self

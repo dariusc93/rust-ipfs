@@ -137,7 +137,7 @@ pub async fn resolve<'a>(
     let endpoint = match resolver {
         DnsResolver::Google => "https://dns.google/resolve",
         DnsResolver::Cloudflare | DnsResolver::Local => "https://cloudflare-dns.com/dns-query",
-        DnsResolver::None => {
+        _ => {
             return Err(anyhow::anyhow!("no DNS resolver configured for {domain}"));
         }
     };

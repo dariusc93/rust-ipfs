@@ -3,6 +3,7 @@
 - refactor: use prost for handling protobuf.
 - chore: added `Block::{len, is_empty}`, cleanup logic and test, and optimize bitswap logic.
 - chore: update connexa to 0.6.0.
+- fix: correctly gate wasm32 target.
 
 # 0.16.0
 

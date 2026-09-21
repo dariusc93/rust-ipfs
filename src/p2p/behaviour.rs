@@ -12,9 +12,12 @@ use ipld_core::cid::Cid;
 
 use connexa::prelude::dht::Record;
 use connexa::prelude::identity::{Keypair, PublicKey};
+#[cfg(not(target_arch = "wasm32"))]
+use connexa::prelude::relay;
 use connexa::prelude::swarm::NetworkBehaviour;
 use connexa::prelude::swarm::behaviour::toggle::Toggle;
-use connexa::prelude::{Multiaddr, PeerId, identify, relay};
+use connexa::prelude::{Multiaddr, PeerId, identify};
+
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -139,6 +142,7 @@ impl IdentifyConfiguration {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<RelayConfig> for relay::server::Config {
     fn from(
         RelayConfig {
@@ -193,6 +197,7 @@ impl From<RelayConfig> for relay::server::Config {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn max_duration(duration: Duration) -> Duration {
     let start = web_time::Instant::now();
     if start.checked_add(duration).is_none() {
