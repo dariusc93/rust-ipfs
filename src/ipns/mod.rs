@@ -3,9 +3,9 @@
 use futures_timeout::TimeoutExt;
 use std::borrow::Borrow;
 
-use crate::Ipfs;
 use crate::path::{IpfsPath, PathRoot};
 use crate::repo::DataStore;
+use crate::{Ipfs, PeerId, RecordKey};
 
 #[cfg(feature = "dns")]
 mod dnslink;
@@ -26,6 +26,12 @@ pub enum IpnsOption {
     Local,
     #[default]
     DHT,
+}
+
+fn ipns_dht_key(peer: &PeerId) -> RecordKey {
+    let mut key = b"/ipns/".to_vec();
+    key.extend_from_slice(&peer.to_bytes());
+    RecordKey::from(key)
 }
 
 impl Ipns {
@@ -54,7 +60,6 @@ impl Ipns {
                 use std::str::FromStr;
                 use std::time::Duration;
 
-                use connexa::prelude::PeerId;
                 use futures::StreamExt;
                 use ipld_core::cid::Cid;
                 use multihash::Multihash;
@@ -70,9 +75,6 @@ impl Ipns {
                     cid.to_string_of_base(multibase::Base::Base36Lower)
                         .map_err(anyhow::Error::from)?
                 );
-
-                //TODO: Determine if we want to encode the cid of the multihash in base32 or if we can just use the peer id instead
-                // let mb = format!("/ipns/{}", peer);
 
                 let repo = self.ipfs.repo();
                 let datastore = repo.data_store();
@@ -104,15 +106,15 @@ impl Ipns {
                     return Ok(path);
                 }
 
-                let stream = self.ipfs.dht_get(mb).await?;
+                let key = ipns_dht_key(peer);
+                let stream = self.ipfs.dht_get(key.clone()).await?;
 
                 //TODO: Implement configurable timeout
                 let records = stream
+                    .filter(|record| futures::future::ready(record.key == key))
                     .filter_map(|record| async move {
-                        let key = &record.key.as_ref()[6..];
                         let record = rust_ipns::Record::decode(&record.value).ok()?;
-                        let peer_id = PeerId::from_bytes(key).ok()?;
-                        record.verify(peer_id).ok()?;
+                        record.verify(*peer).ok()?;
                         Some(record)
                     })
                     .collect::<Vec<_>>()
@@ -225,7 +227,11 @@ impl Ipns {
         datastore.put(mb.as_bytes(), &bytes).await?;
 
         match option {
-            IpnsOption::DHT => self.ipfs.dht_put(&mb, bytes, Quorum::One).await?,
+            IpnsOption::DHT => {
+                self.ipfs
+                    .dht_put_record(ipns_dht_key(&peer_id), bytes, Quorum::One)
+                    .await?;
+            }
             IpnsOption::Local => {}
         };
 

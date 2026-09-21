@@ -7,6 +7,7 @@
 - refactor: Change GCGuard to own the rwlock guard and propagate it across different points to prevent GC from running,
   which should prevent a potential deadlock between the reader and writer.
 - fix: notify missing block to subscription between storage checks.
+- fix: correct ipns lookup key mismatch
 
 # 0.16.0
 

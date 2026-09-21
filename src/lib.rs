@@ -1130,6 +1130,15 @@ impl Ipfs {
             RecordKey::from(key.to_vec())
         };
 
+        self.dht_put_record(key, value, quorum).await
+    }
+
+    pub(crate) async fn dht_put_record(
+        &self,
+        key: RecordKey,
+        value: impl Into<Bytes>,
+        quorum: Quorum,
+    ) -> Result<(), Error> {
         self.connexa
             .dht()
             .put(key, value, quorum)
