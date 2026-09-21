@@ -1,6 +1,6 @@
 [package]
 authors = ["Darius C", "Rust-IPFS contributors"]
-rust-version = "1.93.0"
+rust-version = "1.95.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 name = "rust-ipfs"
@@ -40,7 +40,7 @@ routing = ["dep:reqwest"]
 
 [workspace.dependencies]
 anyhow = "1.0.100"
-async-rt = "0.1.8"
+async-rt = "0.2.0"
 async-stream = { version = "0.3.6" }
 async-trait = { version = "0.1.89" }
 asynchronous-codec = "0.7.0"
@@ -49,15 +49,15 @@ bytes = "1.11.1"
 cid = "0.11.1"
 chrono = { version = "0.4.42" }
 clap = { version = "4.5.48", features = ["derive"] }
-connexa = { version = "0.5.3", features = ["identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "mdns", "fs", "indexeddb"], default-features = false }
+connexa = { version = "0.6.0", features = ["identify", "dcutr", "gossipsub", "autonat", "relay", "kad", "keypair_base64_encoding", "ping", "request-response", "request-response-misc", "rendezvous", "mdns", "fs", "indexeddb"], default-features = false }
 either = { version = "1.15.0" }
 fs2 = "0.4.3"
 futures = { version = "0.3.31" }
 futures-timeout = "0.1.3"
 futures-timer = "3.0.0"
 getrandom = { version = "0.4.2" }
-gloo-net = { version = "0.7", default-features = false, features = ["http", "json"] }
-hickory-resolver = "0.25.2"
+gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
+hickory-resolver = "0.26"
 idb = "0.6.4"
 indexmap = "2.13.0"
 ipld-core = { version = "0.4.1", features = ["serde"] }
