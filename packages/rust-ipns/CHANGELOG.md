@@ -1,6 +1,7 @@
 # 0.10.0
 
 - refactor: use prost for handling protobuf.
+- refactor: update libp2p to 0.57.
 
 # 0.9.0
 
