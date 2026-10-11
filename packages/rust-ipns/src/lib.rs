@@ -473,8 +473,8 @@ impl Record {
             .is_some_and(|sig| !sig.is_empty())
     }
 
-    pub fn data(&self) -> Result<Data, Error> {
-        self.signed_data.clone().ok_or(Error::EmptyData)
+    pub fn data(&self) -> Result<&Data, Error> {
+        self.signed_data.as_ref().ok_or(Error::EmptyData)
     }
 
     /// The signed V2 value, or the legacy value when signed data is absent.
@@ -516,7 +516,7 @@ impl Record {
             return Err(Error::NameMismatch);
         }
 
-        let data = self.signed_data.as_ref().ok_or(Error::EmptyData)?;
+        let data = self.data()?;
 
         let data_bytes = self.data.as_deref().unwrap_or_default();
 
