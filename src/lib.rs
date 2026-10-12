@@ -428,7 +428,6 @@ impl Ipfs {
     /// Note: This will prevent writing operations in [`Repo`] until it finish clearing unpinned
     ///       blocks.
     pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
-        let _g = self.repo.inner.gclock.write().await;
         self.repo.cleanup().instrument(self.span.clone()).await
     }
 

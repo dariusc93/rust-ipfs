@@ -690,54 +690,58 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                     loop {
                         tokio::select! {
                             _ = &mut interval => {
-                                let _g = repo.inner.gclock.write().await;
-                                tracing::debug!("preparing gc operation");
-                                let pinned = repo
-                                    .list_pins(None)
-                                    .await
-                                    .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
-                                    .try_collect::<BTreeSet<_>>()
-                                    .await
-                                    .unwrap_or_default();
-                                let pinned = Vec::from_iter(pinned);
-                                let total_size = repo.get_total_size().await.unwrap_or_default();
-                                let pinned_size = repo
-                                    .get_blocks_size(&pinned)
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                    .unwrap_or_default();
+                                let cleanup = repo.cleanup_when(async {
+                                    tracing::debug!("preparing gc operation");
+                                    let pinned = repo
+                                        .list_pins(None)
+                                        .await
+                                        .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
+                                        .try_collect::<BTreeSet<_>>()
+                                        .await
+                                        .unwrap_or_default();
+                                    let pinned = Vec::from_iter(pinned);
+                                    let total_size = repo.get_total_size().await.unwrap_or_default();
+                                    let pinned_size = repo
+                                        .get_blocks_size(&pinned)
+                                        .await
+                                        .ok()
+                                        .flatten()
+                                        .unwrap_or_default();
 
-                                let unpinned_blocks = total_size.saturating_sub(pinned_size);
+                                    let unpinned_blocks = total_size.saturating_sub(pinned_size);
 
-                                tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
+                                    tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
 
-                                let cleanup = match trigger {
-                                    GCTrigger::At { size } => {
-                                        total_size > 0 && unpinned_blocks >= size
-                                    }
-                                    GCTrigger::AtStorage => {
-                                        unpinned_blocks > 0
-                                            && unpinned_blocks >= repo.max_storage_size()
-                                    }
-                                    GCTrigger::None => unpinned_blocks > 0,
-                                };
-
-                                tracing::debug!(will_run = %cleanup);
-
-                                if cleanup {
-                                    tracing::debug!("running cleanup of unpinned blocks");
-                                    match repo.cleanup().await {
-                                        Ok(blocks) => {
-                                            tracing::debug!(
-                                                removed_blocks = blocks.len(),
-                                                "blocks removed"
-                                            );
-                                            tracing::debug!("cleanup finished");
+                                    let cleanup = match trigger {
+                                        GCTrigger::At { size } => {
+                                            total_size > 0 && unpinned_blocks >= size
                                         }
-                                        Err(e) => {
-                                            tracing::error!(error = %e, "gc cleanup failed");
+                                        GCTrigger::AtStorage => {
+                                            unpinned_blocks > 0
+                                                && unpinned_blocks >= repo.max_storage_size()
                                         }
+                                        GCTrigger::None => unpinned_blocks > 0,
+                                    };
+
+                                    tracing::debug!(will_run = %cleanup);
+
+                                    if cleanup {
+                                        tracing::debug!("running cleanup of unpinned blocks");
+                                    }
+                                    cleanup
+                                }).await;
+
+                                match cleanup {
+                                    Ok(Some(blocks)) => {
+                                        tracing::debug!(
+                                            removed_blocks = blocks.len(),
+                                            "blocks removed"
+                                        );
+                                        tracing::debug!("cleanup finished");
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "gc cleanup failed");
                                     }
                                 }
 

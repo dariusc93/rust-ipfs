@@ -605,7 +605,7 @@ impl IntoFuture for DagPut {
                 anyhow::bail!("Ipfs is offline");
             }
 
-            let _g = self.dag_ipld.repo.gc_guard().await;
+            let gc_guard = self.dag_ipld.repo.gc_guard().await;
 
             let data = (self.data)()?;
             let bytes = match self.codec {
@@ -628,12 +628,20 @@ impl IntoFuture for DagPut {
             };
             let cid = Cid::new(version, self.codec.into(), hash)?;
             let block = Block::new(cid, bytes)?;
-            let cid = self.dag_ipld.repo.put_block(&block).await?;
+            let cid = self
+                .dag_ipld
+                .repo
+                .put_block(&block)
+                .with_gc_guard(gc_guard.clone())
+                .await?;
 
             if let Some(opt) = self.pinned
                 && !self.dag_ipld.repo.is_pinned(&cid).await?
             {
-                self.dag_ipld.repo.insert_pin(&cid, opt, true).await?;
+                self.dag_ipld
+                    .repo
+                    .insert_pin(&cid, opt, true, gc_guard.clone())
+                    .await?;
             }
 
             if self.provide

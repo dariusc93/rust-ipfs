@@ -269,6 +269,7 @@ where
             }
         };
 
+        let gc_guard = dag.repo.gc_guard().await;
         let mut block_reader = (&mut reader).take(limit);
         let mut batch = Vec::with_capacity(IMPORT_BATCH);
         let mut blocks = 0usize;
@@ -279,6 +280,7 @@ where
                 Ok(Some(body)) => body,
                 Ok(None) => break,
                 Err(error) => {
+                    drop(gc_guard);
                     yield ImportStatus::Failed { error };
                     return;
                 }
@@ -287,6 +289,7 @@ where
             let cid = match Cid::read_bytes(&mut cursor) {
                 Ok(cid) => cid,
                 Err(e) => {
+                    drop(gc_guard);
                     yield ImportStatus::Failed { error: anyhow!("malformed cid in CAR: {e}") };
                     return;
                 }
@@ -295,6 +298,7 @@ where
             let block = match make_block(cid, data) {
                 Ok(block) => block,
                 Err(error) => {
+                    drop(gc_guard);
                     yield ImportStatus::Failed { error };
                     return;
                 }
@@ -303,7 +307,11 @@ where
             bytes += body.len() as u64;
             batch.push(block);
             if batch.len() >= IMPORT_BATCH {
-                if let Err(error) = dag.repo.put_blocks(std::mem::take(&mut batch)).await {
+                if let Err(error) = dag.repo.put_blocks(std::mem::take(&mut batch))
+                    .with_gc_guard(gc_guard.clone())
+                    .await
+                {
+                    drop(gc_guard);
                     yield ImportStatus::Failed { error };
                     return;
                 }
@@ -312,13 +320,17 @@ where
         }
 
         if !batch.is_empty()
-            && let Err(error) = dag.repo.put_blocks(batch).await
+            && let Err(error) = dag.repo.put_blocks(batch)
+                .with_gc_guard(gc_guard.clone())
+                .await
         {
+            drop(gc_guard);
             yield ImportStatus::Failed { error };
             return;
         }
 
         if limit != u64::MAX && block_reader.limit() != 0 {
+            drop(gc_guard);
             yield ImportStatus::Failed {
                 error: anyhow!("CARv2: inner archive shorter than its declared data size"),
             };
@@ -330,12 +342,17 @@ where
                 match dag.repo.is_pinned(root).await {
                     Ok(true) => {}
                     Ok(false) => {
-                        if let Err(error) = dag.repo.pin(*root).recursive().local().await {
+                        if let Err(error) = dag.repo.pin(*root).recursive().local()
+                            .with_gc_guard(gc_guard.clone())
+                            .await
+                        {
+                            drop(gc_guard);
                             yield ImportStatus::Failed { error };
                             return;
                         }
                     }
                     Err(error) => {
+                        drop(gc_guard);
                         yield ImportStatus::Failed { error };
                         return;
                     }
@@ -344,6 +361,7 @@ where
         }
 
         yield ImportStatus::Progress { blocks, bytes };
+        drop(gc_guard);
         yield ImportStatus::Completed { roots, blocks };
     }
 }

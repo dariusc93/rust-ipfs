@@ -392,7 +392,7 @@ pub(crate) struct RepoInner<S: RepoTypes> {
     pub(crate) subscriptions: Mutex<SubscriptionsMap>,
     subscription_registered: tokio::sync::Notify,
     lockfile: S::TLock,
-    pub(crate) gclock: Arc<tokio::sync::RwLock<()>>,
+    gclock: Arc<tokio::sync::RwLock<()>>,
     pub(crate) mfs_root: tokio::sync::Mutex<(bool, Option<Cid>)>,
     ipns_publish_locks: Mutex<HashMap<PeerId, std::sync::Weak<tokio::sync::Mutex<()>>>>,
 }
@@ -870,8 +870,9 @@ impl<S: RepoTypes> Repo<S> {
         cid: &Cid,
         recursive: bool,
         local_only: bool,
+        gc_guard: GCGuard,
     ) -> Result<(), Error> {
-        let mut pin_fut = self.pin(cid);
+        let mut pin_fut = self.pin(cid).with_gc_guard(gc_guard);
         if recursive {
             pin_fut = pin_fut.recursive();
         }
@@ -910,8 +911,24 @@ impl<S: RepoTypes> Repo<S> {
         self.inner.data_store.remove_recursive_pin(cid, refs).await
     }
 
-    /// Function to perform a basic cleanup of unpinned blocks
+    /// Remove unpinned blocks while holding the GC lock.
     pub(crate) async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
+        Ok(self
+            .cleanup_when(futures::future::ready(true))
+            .await?
+            .unwrap_or_default())
+    }
+
+    /// Check the condition and remove unpinned blocks under the same GC lock.
+    pub(crate) async fn cleanup_when(
+        &self,
+        condition: impl Future<Output = bool>,
+    ) -> Result<Option<Vec<Cid>>, Error> {
+        let _guard = self.inner.gclock.write().await;
+        if !condition.await {
+            return Ok(None);
+        }
+
         let repo = self.clone();
 
         let blocks = repo.list_blocks().await;
@@ -940,7 +957,7 @@ impl<S: RepoTypes> Repo<S> {
             .collect::<Vec<_>>()
             .await;
 
-        Ok(removed_blocks)
+        Ok(Some(removed_blocks))
     }
 
     /// Checks if a `Cid` is pinned.
