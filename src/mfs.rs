@@ -3,7 +3,6 @@
 use crate::path::{IpfsPath, PathRoot};
 use crate::repo::{DataStore, DefaultStorage, GCGuard, Repo};
 use crate::{Block, Error};
-use anyhow::anyhow;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
@@ -92,6 +91,36 @@ pub enum MfsError {
     FileSizeLimit,
     #[error("the root directory cannot be modified")]
     RootImmutable,
+    #[error("'{0}' is not a file")]
+    IsNotFile(String),
+    #[error("cannot read the root directory")]
+    CannotReadRoot,
+    #[error("MFS is empty")]
+    Empty,
+    #[error("cp source must resolve to an /ipfs or /ipld cid")]
+    CpSourceMustBeCid,
+    #[error("cannot move '{0}' into its own subdirectory")]
+    MoveIntoSelf(String),
+    #[error("cp/mv source has no name")]
+    SourceHasNoName,
+    #[error("path not found in source: {0}")]
+    PathNotFoundInSource(String),
+    #[error("path not found: {0}")]
+    PathNotFound(String),
+    #[error("{0} is not a directory")]
+    IsNotDirectory(String),
+    #[error("malformed HAMT shard under {0}")]
+    MalformedShard(String),
+    #[error("missing block {0}")]
+    MissingBlock(Cid),
+    #[error("'.' and '..' are not supported in MFS paths")]
+    DotSegments,
+    #[error("directory produced no node")]
+    DirectoryNoNode,
+    #[error("file produced no blocks")]
+    FileNoBlocks,
+    #[error("streaming write produced no result")]
+    StreamNoResult,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -136,7 +165,7 @@ impl IntoFuture for MfsWrite {
                     WriteStatus::Progress { .. } => {}
                 }
             }
-            cid.ok_or_else(|| anyhow!("streaming write produced no result"))
+            cid.ok_or(MfsError::StreamNoResult.into())
         }
         .boxed()
     }
@@ -352,7 +381,7 @@ impl Mfs {
         let (file_cid, _, filesize) = self
             .resolve_file_locked(&mut guard, &comps, &gc_guard)
             .await?
-            .ok_or_else(|| MfsError::NotFound(path.to_string()))?;
+            .ok_or(MfsError::NotFound(path.to_string()))?;
         if size == filesize {
             return Ok(());
         }
@@ -538,7 +567,7 @@ impl Mfs {
             let cid = match root {
                 Some(cid) => cid,
                 None => {
-                    yield WriteStatus::Failed { error: anyhow!("file produced no blocks") };
+                    yield WriteStatus::Failed { error: MfsError::FileNoBlocks.into() };
                     return;
                 }
             };
@@ -594,13 +623,13 @@ impl Mfs {
         async_stream::try_stream! {
             let comps = split_path(&path)?;
             if comps.is_empty() {
-                Err::<(), _>(anyhow!("cannot read the root directory"))?;
+                Err::<(), _>(MfsError::CannotReadRoot)?;
             }
             let _gc = mfs.repo().gc_guard().await;
             let root = mfs
                 .snapshot_root()
                 .await?
-                .ok_or_else(|| anyhow!("MFS is empty"))?;
+                .ok_or(MfsError::Empty)?;
             let cid = mfs.resolve_from(root, &comps).await?.0;
 
             let block = mfs.get_block(&cid).await?;
@@ -658,7 +687,7 @@ impl Mfs {
                 Ok(stat) => match stat.kind {
                     MfsKind::File { size } => size,
                     _ => {
-                        yield ReadStatus::Failed { error: anyhow!("'{path}' is not a file") };
+                        yield ReadStatus::Failed { error: MfsError::IsNotFile(path).into() };
                         return;
                     }
                 },
@@ -756,7 +785,7 @@ impl Mfs {
             let path = IpfsPath::from_str(from)?;
             let root = match path.root() {
                 PathRoot::Ipld(cid) => *cid,
-                _ => return Err(anyhow!("cp source must resolve to an /ipfs or /ipld cid")),
+                _ => return Err(MfsError::CpSourceMustBeCid.into()),
             };
             let sub: Vec<String> = path.iter().map(|s| s.to_string()).collect();
             let source = self.resolve_ipfs(root, &sub).await?;
@@ -793,7 +822,7 @@ impl Mfs {
             return Ok(());
         }
         if dest_comps.len() > from_comps.len() && dest_comps[..from_comps.len()] == from_comps[..] {
-            return Err(anyhow!("cannot move '{from}' into its own subdirectory"));
+            return Err(MfsError::MoveIntoSelf(from.to_string()).into());
         }
         // link at the destination first (safe to fail), then unlink the source
         self.set_entry(
@@ -816,7 +845,7 @@ impl Mfs {
             if comps.is_empty() {
                 return Ok(Vec::new());
             }
-            return Err(anyhow!("MFS is empty"));
+            return Err(MfsError::Empty.into());
         };
 
         let _gc = self.repo().gc_guard().await;
@@ -869,7 +898,7 @@ impl Mfs {
                     blocks: 0,
                 });
             }
-            return Err(anyhow!("MFS is empty"));
+            return Err(MfsError::Empty.into());
         };
 
         let _gc = self.repo().gc_guard().await;
@@ -937,7 +966,7 @@ impl Mfs {
         let into_dir =
             trailing || matches!(self.resolve_kind(&comps).await?, Some(MfsKind::Directory));
         if into_dir {
-            let name = base_name(source).ok_or_else(|| anyhow!("cp/mv source has no name"))?;
+            let name = base_name(source).ok_or(MfsError::SourceHasNoName)?;
             comps.push(name.to_string());
         }
         Ok((format!("/{}", comps.join("/")), into_dir))
@@ -1114,10 +1143,7 @@ impl Mfs {
     /// Resolves a path (component list, empty == root) to its `(cid, link tsize)`, holding off GC
     /// for the duration of the navigation.
     async fn resolve(&self, comps: &[String]) -> Result<(Cid, u64), Error> {
-        let root = self
-            .snapshot_root()
-            .await?
-            .ok_or_else(|| anyhow!("MFS is empty"))?;
+        let root = self.snapshot_root().await?.ok_or(MfsError::Empty)?;
         let _gc = self.repo().gc_guard().await;
         self.resolve_from(root, comps).await
     }
@@ -1129,9 +1155,7 @@ impl Mfs {
         let mut tsize = 0;
         for comp in comps {
             let map = self.load_dir(&cid).await?;
-            let entry = map
-                .get(comp)
-                .ok_or_else(|| anyhow!("path not found: {comp}"))?;
+            let entry = map.get(comp).ok_or(MfsError::PathNotFound(comp.clone()))?;
             cid = entry.cid;
             tsize = entry.tsize;
         }
@@ -1148,7 +1172,7 @@ impl Mfs {
                 self.collect_shard(links, &mut map).await?;
                 Ok(map)
             }
-            _ => Err(anyhow!("{cid} is not a directory")),
+            _ => Err(MfsError::IsNotDirectory(cid.to_string()).into()),
         }
     }
 
@@ -1158,7 +1182,7 @@ impl Mfs {
             cid = self
                 .resolve_name(cid, seg)
                 .await?
-                .ok_or_else(|| anyhow!("path not found in source: {seg}"))?;
+                .ok_or(MfsError::PathNotFoundInSource(seg.clone()))?;
         }
         Ok(cid)
     }
@@ -1167,7 +1191,7 @@ impl Mfs {
         use rust_unixfs::dir::{MaybeResolved, resolve};
 
         if dir_cid.codec() != DAG_PB_CODEC {
-            return Err(anyhow!("{dir_cid} is not a directory"));
+            return Err(MfsError::IsNotDirectory(dir_cid.to_string()).into());
         }
         let block = self.repo().get_block(dir_cid).await?;
         let mut cache = None;
@@ -1179,7 +1203,7 @@ impl Mfs {
                 MaybeResolved::NeedToLoadMore(lookup) => {
                     let next = *lookup.pending_links().0;
                     if next.codec() != DAG_PB_CODEC {
-                        return Err(anyhow!("malformed HAMT shard under {next}"));
+                        return Err(MfsError::MalformedShard(next.to_string()).into());
                     }
                     let block = self.repo().get_block(next).await?;
                     step = lookup.continue_walk(block.data(), &mut cache)?;
@@ -1218,7 +1242,7 @@ impl Mfs {
                         NodeDescription::HamtShard { links } => {
                             self.collect_shard(links, map).await?;
                         }
-                        _ => return Err(anyhow!("malformed HAMT shard under {}", link.target)),
+                        _ => return Err(MfsError::MalformedShard(link.target.to_string()).into()),
                     }
                 } else {
                     let name = link.name.get(2..).unwrap_or_default().to_string();
@@ -1540,7 +1564,7 @@ impl Mfs {
         self.repo()
             .get_block_now(cid)
             .await?
-            .ok_or_else(|| anyhow!("missing block {cid}"))
+            .ok_or(MfsError::MissingBlock(*cid).into())
     }
 }
 
@@ -1557,7 +1581,7 @@ fn split_path(path: &str) -> Result<Vec<String>, Error> {
     for segment in path.split('/') {
         match segment {
             "" => continue,
-            "." | ".." => return Err(anyhow!("'.' and '..' are not supported in MFS paths")),
+            "." | ".." => return Err(MfsError::DotSegments.into()),
             other => comps.push(other.to_string()),
         }
     }
@@ -1627,7 +1651,7 @@ fn encode_dir(
         blocks.push(Block::new(node.cid, node.block.into_vec())?);
     }
 
-    let (cid, tsize) = root.ok_or_else(|| anyhow!("directory produced no node"))?;
+    let (cid, tsize) = root.ok_or(MfsError::DirectoryNoNode)?;
     Ok((cid, tsize, blocks))
 }
 
@@ -1662,7 +1686,7 @@ fn encode_file(data: &[u8]) -> Result<(Cid, u64, Vec<Block>), Error> {
         push(cid, block)?;
     }
 
-    let cid = root.ok_or_else(|| anyhow!("file produced no blocks"))?;
+    let cid = root.ok_or(MfsError::FileNoBlocks)?;
     Ok((cid, tsize, blocks))
 }
 
