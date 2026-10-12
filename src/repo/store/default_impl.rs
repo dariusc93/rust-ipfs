@@ -160,6 +160,10 @@ impl BlockStore for DefaultStorage {
     async fn list(&self) -> BoxStream<'static, Cid> {
         self.blockstore.list().await
     }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        self.blockstore.list_with_sizes().await
+    }
 }
 
 impl DataStore for DefaultStorage {

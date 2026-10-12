@@ -22,9 +22,9 @@ use connexa::prelude::swarm::SwarmEvent;
 use connexa::prelude::transport::pnet::PreSharedKey;
 use connexa::prelude::{gossipsub, ping, swarm};
 use connexa::{behaviour, dummy};
-use futures::{StreamExt, TryStreamExt, stream::FuturesUnordered};
+use futures::{StreamExt, stream::FuturesUnordered};
 use ipld_core::cid::Cid;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::task::Poll;
@@ -669,89 +669,44 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
 
         let listening_addrs = options.listening_addrs.clone();
 
-        let gc_handle = gc_config.map(|config| {
-            async_rt::task::spawn_abortable({
-                let repo = Repo::clone(&repo);
-                async move {
-                    let GCConfig { duration, trigger } = config;
-                    let use_config_timer = duration != Duration::ZERO;
-                    if trigger == GCTrigger::None && !use_config_timer {
-                        tracing::warn!("GC does not have a set timer or a trigger. Disabling GC");
-                        return;
-                    }
+        let gc_handle = gc_config
+            .map(|config| {
+                async_rt::task::spawn_abortable({
+                    let repo = Repo::clone(&repo);
+                    async move {
+                        let GCConfig { duration, trigger } = config;
+                        let use_config_timer = duration != Duration::ZERO;
+                        if trigger == GCTrigger::None && !use_config_timer {
+                            tracing::warn!(
+                                "GC does not have a set timer or a trigger. Disabling GC"
+                            );
+                            return;
+                        }
 
-                    let time = match use_config_timer {
-                        true => duration,
-                        false => Duration::from_secs(60 * 60),
-                    };
+                        let time = match use_config_timer {
+                            true => duration,
+                            false => Duration::from_secs(60 * 60),
+                        };
 
-                    let mut interval = futures_timer::Delay::new(time);
+                        let mut interval = futures_timer::Delay::new(time);
+                        if trigger != GCTrigger::None {
+                            repo.request_gc();
+                        }
 
-                    loop {
-                        tokio::select! {
-                            _ = &mut interval => {
-                                let cleanup = repo.cleanup_when(async {
-                                    tracing::debug!("preparing gc operation");
-                                    let pinned = repo
-                                        .list_pins(None)
-                                        .await
-                                        .try_filter_map(|(cid, _)| futures::future::ready(Ok(Some(cid))))
-                                        .try_collect::<BTreeSet<_>>()
-                                        .await
-                                        .unwrap_or_default();
-                                    let pinned = Vec::from_iter(pinned);
-                                    let total_size = repo.get_total_size().await.unwrap_or_default();
-                                    let pinned_size = repo
-                                        .get_blocks_size(&pinned)
-                                        .await
-                                        .ok()
-                                        .flatten()
-                                        .unwrap_or_default();
-
-                                    let unpinned_blocks = total_size.saturating_sub(pinned_size);
-
-                                    tracing::debug!(total_size = %total_size, ?trigger, unpinned_blocks);
-
-                                    let cleanup = match trigger {
-                                        GCTrigger::At { size } => {
-                                            total_size > 0 && unpinned_blocks >= size
-                                        }
-                                        GCTrigger::AtStorage => {
-                                            unpinned_blocks > 0
-                                                && unpinned_blocks >= repo.max_storage_size()
-                                        }
-                                        GCTrigger::None => unpinned_blocks > 0,
-                                    };
-
-                                    tracing::debug!(will_run = %cleanup);
-
-                                    if cleanup {
-                                        tracing::debug!("running cleanup of unpinned blocks");
-                                    }
-                                    cleanup
-                                }).await;
-
-                                match cleanup {
-                                    Ok(Some(blocks)) => {
-                                        tracing::debug!(
-                                            removed_blocks = blocks.len(),
-                                            "blocks removed"
-                                        );
-                                        tracing::debug!("cleanup finished");
-                                    }
-                                    Ok(None) => {}
-                                    Err(e) => {
-                                        tracing::error!(error = %e, "gc cleanup failed");
-                                    }
-                                }
-
+                        loop {
+                            let refresh = tokio::select! {
+                                _ = &mut interval => true,
+                                _ = repo.gc_requested(), if trigger != GCTrigger::None => false,
+                            };
+                            let _ = repo.cleanup_with_trigger(Some(trigger), refresh).await;
+                            if refresh {
                                 interval.reset(time);
                             }
                         }
                     }
-                }
+                })
             })
-        }).unwrap_or(AbortableJoinHandle::empty());
+            .unwrap_or(AbortableJoinHandle::empty());
 
         let (discovery_tx, discovery_rx) = futures::channel::mpsc::channel::<Cid>(256);
 

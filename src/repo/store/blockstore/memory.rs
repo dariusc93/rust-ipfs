@@ -143,6 +143,16 @@ impl BlockStore for MemBlockStore {
         let inner = &*self.inner.read().await;
         stream::iter(inner.blocks.keys().copied().collect::<Vec<_>>()).boxed()
     }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        let inner = &*self.inner.read().await;
+        let entries = inner
+            .blocks
+            .iter()
+            .map(|(cid, data)| Ok((*cid, data.len())))
+            .collect::<Vec<_>>();
+        stream::iter(entries).boxed()
+    }
 }
 
 #[cfg(test)]

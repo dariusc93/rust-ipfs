@@ -41,6 +41,10 @@ impl<B: BlockStore> BlockStore for Arc<B> {
     async fn list(&self) -> BoxStream<'static, Cid> {
         (**self).list().await
     }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        (**self).list_with_sizes().await
+    }
 }
 
 impl<D: DataStore> DataStore for Arc<D> {

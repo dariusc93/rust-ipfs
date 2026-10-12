@@ -96,6 +96,19 @@ impl BlockStore for FsBlockStore {
         let inner = &*self.inner.read().await;
         inner.list().await
     }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        let entries = self.inner.read().await.list_stream().await;
+        async_stream::try_stream! {
+            let mut entries = entries?;
+            while let Some(entry) = entries.next().await {
+                let (cid, path) = entry?;
+                let size = usize::try_from(fs::metadata(path).await?.len())?;
+                yield (cid, size);
+            }
+        }
+        .boxed()
+    }
 }
 
 impl FsBlockStoreInner {

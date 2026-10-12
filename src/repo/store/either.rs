@@ -78,6 +78,13 @@ impl<L: BlockStore, R: BlockStore> BlockStore for Either<L, R> {
             Either::Right(blockstore) => blockstore.list().await,
         }
     }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        match self {
+            Either::Left(blockstore) => blockstore.list_with_sizes().await,
+            Either::Right(blockstore) => blockstore.list_with_sizes().await,
+        }
+    }
 }
 
 impl<L: DataStore, R: DataStore> DataStore for Either<L, R> {

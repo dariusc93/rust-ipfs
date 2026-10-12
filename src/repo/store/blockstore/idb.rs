@@ -223,6 +223,7 @@ impl BlockStore for IdbBlockStore {
                 return;
             };
 
+            let mut removed = Vec::new();
             while let Some(cid) = blocks.next().await {
                 let cid_val = JsValue::from_str(&cid.to_string());
 
@@ -234,11 +235,17 @@ impl BlockStore for IdbBlockStore {
                     continue;
                 }
 
-                yield cid;
+                removed.push(cid);
             }
 
-            if let Ok(commit) = transaction.commit() {
-                let _ = commit.await;
+            let Ok(commit) = transaction.commit() else {
+                return;
+            };
+            if commit.await.is_err() {
+                return;
+            }
+            for cid in removed {
+                yield cid;
             }
         })
         .boxed()
@@ -268,5 +275,38 @@ impl BlockStore for IdbBlockStore {
             }
         })
         .boxed()
+    }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        let entries = SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["blockstore"], TransactionMode::ReadOnly)?;
+            let store = transaction.object_store("blockstore")?;
+            let keys = store.get_all_keys(None, None)?.await?;
+            let mut entries = Vec::with_capacity(keys.len());
+
+            for key in keys {
+                let cid = key
+                    .as_string()
+                    .ok_or_else(|| std::io::Error::other("invalid block key"))?;
+                let cid = Cid::from_str(&cid)?;
+                let value = store
+                    .get(key)?
+                    .await?
+                    .ok_or_else(|| std::io::Error::other(format!("missing block {cid}")))?;
+                let data: Vec<u8> = serde_wasm_bindgen::from_value(value)?;
+                entries.push((cid, data.len()));
+            }
+
+            transaction.await?;
+            Ok::<_, Box<dyn std::error::Error>>(entries)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"));
+
+        match entries {
+            Ok(entries) => futures::stream::iter(entries.into_iter().map(Ok)).boxed(),
+            Err(error) => futures::stream::once(futures::future::ready(Err(error))).boxed(),
+        }
     }
 }
