@@ -1,6 +1,6 @@
 # 0.17.0
 
-- test: fix `listening_addresses` using the unlinked `libp2p` crate (left over from the connexa migration, #448); parse the multiaddrs like the rest of the file so `cargo test` compiles.
+- fix: parse multiaddr directly in `listening_addresses` test
 - refactor: use prost for handling protobuf.
 - chore: added `Block::{len, is_empty}`, cleanup logic and test, and optimize bitswap logic.
 - chore: update connexa to 0.6.0.
