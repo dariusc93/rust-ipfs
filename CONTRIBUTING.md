@@ -86,6 +86,8 @@ Including this in the project root would cause the compiler to error out on syst
 
 ## Contributing
 
+Please read the [AI policy](./AI_POLICY.md) before submitting a pull request.
+
 We welcome all forms of contribution. Please open issues and PRs for:
 
 - Reporting Bugs
