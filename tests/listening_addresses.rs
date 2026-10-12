@@ -55,9 +55,9 @@ async fn multiple_concurrent_ephemeral_listening_addresses_on_different_ip() {
 
     // it doesnt work on mac os x as 127.0.0.2 is not enabled by default.
     let first =
-        node.add_listening_address(libp2p::build_multiaddr!(Ip4([127, 0, 0, 1]), Tcp(0u16)));
+        node.add_listening_address("/ip4/127.0.0.1/tcp/0".parse().expect("valid multiaddr"));
     let second =
-        node.add_listening_address(libp2p::build_multiaddr!(Ip4([127, 0, 0, 2]), Tcp(0u16)));
+        node.add_listening_address("/ip4/127.0.0.2/tcp/0".parse().expect("valid multiaddr"));
 
     let (first, second) = futures::future::join(first, second).await;
 
