@@ -26,6 +26,8 @@ use std::{error, fmt, io};
 use tokio::sync::OwnedRwLockReadGuard;
 use tracing::{Instrument, Span};
 
+use temp_pins::TemporaryPins;
+
 #[macro_use]
 #[cfg(test)]
 mod common_tests;
@@ -40,6 +42,7 @@ pub mod lock;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod paths;
 mod store;
+mod temp_pins;
 
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
@@ -417,6 +420,7 @@ pub(crate) struct RepoInner<S: RepoTypes> {
     gclock: Arc<tokio::sync::RwLock<()>>,
     gc_requested: tokio::sync::Notify,
     gc_total_size: Mutex<Option<usize>>,
+    temp_pins: Mutex<TemporaryPins>,
     pub(crate) mfs_root: tokio::sync::Mutex<(bool, Option<Cid>)>,
     ipns_publish_locks: Mutex<HashMap<PeerId, std::sync::Weak<tokio::sync::Mutex<()>>>>,
 }
@@ -513,6 +517,7 @@ impl<S: RepoTypes> Repo<S> {
             gclock: Default::default(),
             gc_requested: Default::default(),
             gc_total_size: Default::default(),
+            temp_pins: Default::default(),
             mfs_root: Default::default(),
             ipns_publish_locks: Default::default(),
         };
@@ -530,6 +535,15 @@ impl<S: RepoTypes> Repo<S> {
         self.inner.max_storage_size.load(Ordering::SeqCst)
     }
 
+    pub(crate) fn set_temp_pin_duration(&self, duration: Duration) {
+        self.inner.temp_pins.lock().set_duration(duration);
+        self.request_gc();
+    }
+
+    pub(crate) fn next_temp_pin_expiry(&self) -> Option<Duration> {
+        self.inner.temp_pins.lock().next_expiry()
+    }
+
     pub(crate) fn request_gc(&self) {
         self.inner.gc_requested.notify_one();
     }
@@ -538,7 +552,8 @@ impl<S: RepoTypes> Repo<S> {
         self.inner.gc_requested.notified().await;
     }
 
-    fn blocks_stored(&self, added_bytes: usize) {
+    fn blocks_stored(&self, cids: impl IntoIterator<Item = Cid>, added_bytes: usize) {
+        self.inner.temp_pins.lock().record(cids);
         if let Some(total_size) = self.inner.gc_total_size.lock().as_mut() {
             *total_size = total_size.saturating_add(added_bytes);
         }
@@ -562,7 +577,9 @@ impl<S: RepoTypes> Repo<S> {
                 while let Some(cid) = stream.next().await {
                     match self.get_block_now(&cid).await {
                         Ok(Some(block)) => {
-                            if let Err(e) = repo.inner.block_store.put(&block).await {
+                            if let Err(e) =
+                                repo.put_block(&block).broadcast_on_new_block(false).await
+                            {
                                 error!("Error migrating {cid}: {e}");
                                 errors += 1;
                             }
@@ -835,6 +852,7 @@ impl<S: RepoTypes> Repo<S> {
         .boxed();
 
         self.invalidate_gc_size();
+        let removal_started = web_time::Instant::now();
         let removed = self
             .inner
             .block_store
@@ -842,6 +860,13 @@ impl<S: RepoTypes> Repo<S> {
             .await
             .collect::<Vec<_>>()
             .await;
+
+        {
+            let mut temp_pins = self.inner.temp_pins.lock();
+            for cid in &removed {
+                temp_pins.remove_before(cid, removal_started);
+            }
+        }
 
         for cid in &removed {
             // notify ipfs task about the removed blocks
@@ -988,6 +1013,7 @@ impl<S: RepoTypes> Repo<S> {
         trigger: Option<GCTrigger>,
         refresh: bool,
     ) -> Result<Option<Vec<Cid>>, Error> {
+        self.inner.temp_pins.lock().prune();
         if !refresh && self.gc_size_below_threshold(trigger) {
             tracing::debug!(
                 ?trigger,
@@ -1089,6 +1115,12 @@ impl<S: RepoTypes> Repo<S> {
         drop(blocks);
         *self.inner.gc_total_size.lock() = Some(total_size);
 
+        if trigger.is_some() {
+            let mut temp_pins = self.inner.temp_pins.lock();
+            temp_pins.prune();
+            candidates.retain(|cid, _| !temp_pins.contains(cid));
+        }
+
         let cleanup = !candidates.is_empty()
             && match trigger {
                 Some(GCTrigger::At { size }) => unpinned_bytes >= size,
@@ -1111,6 +1143,7 @@ impl<S: RepoTypes> Repo<S> {
         while let Some(cid) = removed.next().await {
             if let Some(size) = candidates.remove(&cid) {
                 reclaimed_bytes = reclaimed_bytes.saturating_add(size);
+                self.inner.temp_pins.lock().remove(&cid);
                 removed_blocks.push(cid);
             }
         }
@@ -1566,9 +1599,11 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
                 }
             };
 
-            if matches!(res, BlockPut::NewBlock) {
-                self.repo.blocks_stored(block.len());
-            }
+            let added_bytes = match res {
+                BlockPut::NewBlock => block.len(),
+                BlockPut::Existed => 0,
+            };
+            self.repo.blocks_stored([cid], added_bytes);
 
             let list = self.repo.inner.subscriptions.lock().remove(&cid);
             if let Some(list) = list {
@@ -1661,21 +1696,22 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlocks<S> {
             let results = match repo.inner.block_store.put_many(&blocks).await {
                 Ok(results) => results,
                 Err(error) => {
+                    // A failed batch can leave some blocks committed.
+                    repo.inner
+                        .temp_pins
+                        .lock()
+                        .record(blocks.iter().map(|block| *block.cid()));
                     repo.invalidate_gc_size();
                     return Err(error);
                 }
             };
-            let mut new_blocks = 0usize;
             let mut added_bytes = 0usize;
             for ((_, result), block) in results.iter().zip(&blocks) {
                 if matches!(result, BlockPut::NewBlock) {
-                    new_blocks += 1;
                     added_bytes = added_bytes.saturating_add(block.len());
                 }
             }
-            if new_blocks > 0 {
-                repo.blocks_stored(added_bytes);
-            }
+            repo.blocks_stored(results.iter().map(|(cid, _)| *cid), added_bytes);
 
             let mut cids = Vec::with_capacity(results.len());
             for ((cid, res), block) in results.into_iter().zip(blocks.iter()) {

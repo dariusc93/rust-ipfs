@@ -348,8 +348,11 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
         self
     }
 
-    /// Set a duration for which blocks are not removed due to the garbage collector
-    /// Defaults: 2 mins
+    /// Protects recently stored blocks from automatic garbage collection.
+    /// The default is two minutes. A zero duration disables temporary retention.
+    /// Successful stores refresh the deadline, including stores of existing blocks.
+    /// Deadlines are kept in memory and do not survive a process restart.
+    /// Manual garbage collection ignores these deadlines.
     pub fn set_temp_pin_duration(mut self, duration: Duration) -> Self {
         self.gc_repo_duration = Some(duration);
         self
@@ -590,6 +593,7 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
             record_key_validator,
             repo_handle,
             gc_config,
+            gc_repo_duration,
             init,
             custom_behaviour,
             swarm_event,
@@ -638,6 +642,10 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                 Some(ns) => Repo::<DefaultStorage>::new_idb(ns),
                 None => repo,
             };
+        }
+
+        if let Some(duration) = gc_repo_duration {
+            repo.set_temp_pin_duration(duration);
         }
 
         repo.init().instrument(init_span.clone()).await?;
@@ -694,9 +702,28 @@ impl<C: NetworkBehaviour<ToSwarm = Infallible> + Send + Sync + 'static> IpfsBuil
                         }
 
                         loop {
+                            let next_expiry = repo.next_temp_pin_expiry();
+                            let expiry = async move {
+                                match next_expiry {
+                                    Some(duration) => {
+                                        let started = web_time::Instant::now();
+                                        let mut remaining = duration;
+                                        while !remaining.is_zero() {
+                                            let wait = remaining.clamp(
+                                                Duration::from_millis(1),
+                                                Duration::from_secs(24 * 60 * 60),
+                                            );
+                                            futures_timer::Delay::new(wait).await;
+                                            remaining = duration.saturating_sub(started.elapsed());
+                                        }
+                                    }
+                                    None => std::future::pending::<()>().await,
+                                }
+                            };
                             let refresh = tokio::select! {
                                 _ = &mut interval => true,
                                 _ = repo.gc_requested(), if trigger != GCTrigger::None => false,
+                                _ = expiry, if trigger != GCTrigger::None => false,
                             };
                             let _ = repo.cleanup_with_trigger(Some(trigger), refresh).await;
                             if refresh {

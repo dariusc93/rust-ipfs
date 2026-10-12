@@ -424,9 +424,8 @@ impl Ipfs {
             .await
     }
 
-    /// Cleans up of all unpinned blocks
-    /// Note: This will prevent writing operations in [`Repo`] until it finish clearing unpinned
-    ///       blocks.
+    /// Removes all unpinned blocks, including blocks under temporary retention.
+    /// Writes to [`Repo`] wait until cleanup finishes.
     pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
         self.repo.cleanup().instrument(self.span.clone()).await
     }
