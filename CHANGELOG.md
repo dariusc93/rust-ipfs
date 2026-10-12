@@ -1,6 +1,7 @@
 # 0.17.0
 
 - fix: parse multiaddr directly in `listening_addresses` test
+- chore: type all ad-hoc errors into `MfsError`.
 - refactor: use prost for handling protobuf.
 - chore: added `Block::{len, is_empty}`, cleanup logic and test, and optimize bitswap logic.
 - chore: update connexa to 0.6.0.
