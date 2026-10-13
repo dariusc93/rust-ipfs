@@ -821,8 +821,6 @@ impl<S: RepoTypes> Repo<S> {
         if self.inner.initialized.load(Ordering::SeqCst) {
             return Ok(());
         }
-        // Dropping the guard (even though not strictly necessary to compile) to avoid potential
-        // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
             tracing::debug!("Trying lockfile");
             self.inner.lockfile.try_exclusive()?;

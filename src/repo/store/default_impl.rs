@@ -171,7 +171,14 @@ impl BlockStore for DefaultStorage {
 
 impl DataStore for DefaultStorage {
     async fn init(&self) -> Result<(), Error> {
-        self.datastore.init().await
+        self.datastore.init().await?;
+
+        #[cfg(target_arch = "wasm32")]
+        if let Either::Right(datastore) = &self.datastore {
+            datastore.rebuild_pins(&self.blockstore).await?;
+        }
+
+        Ok(())
     }
 
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {
