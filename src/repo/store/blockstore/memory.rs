@@ -124,24 +124,36 @@ impl BlockStore for MemBlockStore {
         }
     }
 
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+    async fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> BoxStream<'_, Result<Cid, Error>> {
         let inner = self.inner.clone();
-
-        let stream = async_stream::stream! {
-            let inner = &mut *inner.write().await;
+        async_stream::stream! {
+            let mut inner = inner.write().await;
             for await cid in blocks {
-                if inner.blocks.remove(&cid).is_some() {
-                    yield cid;
-                }
+                yield inner.blocks.remove(&cid)
+                    .map(|_| cid)
+                    .ok_or_else(|| Error::from(std::io::Error::from(std::io::ErrorKind::NotFound))
+                        .context(format!("failed to remove block {cid}")));
             }
-        };
-
-        stream.boxed()
+        }
+        .boxed()
     }
 
     async fn list(&self) -> BoxStream<'static, Cid> {
         let inner = &*self.inner.read().await;
         stream::iter(inner.blocks.keys().copied().collect::<Vec<_>>()).boxed()
+    }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        let inner = &*self.inner.read().await;
+        let entries = inner
+            .blocks
+            .iter()
+            .map(|(cid, data)| Ok((*cid, data.len())))
+            .collect::<Vec<_>>();
+        stream::iter(entries).boxed()
     }
 }
 

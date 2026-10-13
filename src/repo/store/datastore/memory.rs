@@ -110,14 +110,14 @@ impl PinStore for MemDataStore {
 
         let g = self.pin.lock().await;
 
-        // the use of PinKind::RecursiveIntention necessitates the only return fast for
-        // only the known pins; we should somehow now query to see if there are any
-        // RecursiveIntention's. If there are any, we must walk the refs of each to see if the
-        // `block` is amongst of those recursive references which are not yet written to disk.
-        //
-        // doing this without holding a repo lock is not possible, so leaving this as partial
-        // implementation right now.
-        Ok(g.contains_key(&key))
+        match g.get(&key) {
+            Some(raw) => {
+                let doc: PinDocument = serde_json::from_slice(raw)?;
+                doc.validate(block)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 
     async fn insert_direct_pin(&self, target: &Cid) -> Result<(), Error> {
@@ -230,6 +230,10 @@ impl PinStore for MemDataStore {
             .map(|(key, value)| {
                 let cid = Cid::try_from(key.as_slice())?;
                 let doc: PinDocument = serde_json::from_slice(value)?;
+                doc.validate(&cid)?;
+                if matches!(doc.recursive, Recursive::Intent) {
+                    anyhow::bail!("recursive pin is incomplete for {cid}");
+                }
                 let mode = doc.mode().ok_or_else(|| anyhow::anyhow!("invalid mode"))?;
 
                 Ok((cid, mode))
@@ -263,6 +267,7 @@ impl PinStore for MemDataStore {
                             Ok(doc) => doc,
                             Err(e) => return Err(e.into()),
                         };
+                        doc.validate(&cid)?;
                         // None from document is bad result, since the document shouldn't exist in the
                         // first place
                         let mode = match doc.pick_kind() {
@@ -387,6 +392,22 @@ struct PinDocument {
 }
 
 impl PinDocument {
+    fn validate(&self, cid: &Cid) -> Result<(), Error> {
+        let cid_version = match cid.version() {
+            cid::Version::V0 => 0,
+            cid::Version::V1 => 1,
+        };
+        if self.version != 0 || self.cid_version != cid_version || self.mode().is_none() {
+            anyhow::bail!("invalid pin document for {cid}");
+        }
+        for root in &self.indirect_by {
+            Cid::try_from(root.as_str()).map_err(|error| {
+                Error::from(error).context(format!("invalid pin source for {cid}"))
+            })?;
+        }
+        Ok(())
+    }
+
     fn update(&mut self, add: bool, kind: &PinKind<&'_ Cid>) -> Result<bool, PinUpdateError> {
         // these update rules are a bit complex and there are cases we don't need to handle.
         // Updating on upon `PinKind` forces the caller to inspect what the current state is for

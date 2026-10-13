@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::repo::paths::{block_path, filestem_to_block_cid};
 use crate::repo::{BlockPut, BlockStore};
 use futures::stream::{self, BoxStream};
-use futures::{StreamExt, TryFutureExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use ipld_core::cid::Cid;
 use std::io::{self, ErrorKind, Read};
 use std::path::PathBuf;
@@ -52,12 +52,12 @@ impl BlockStore for FsBlockStore {
 
     async fn size(&self, cid: &[Cid]) -> Result<Option<usize>, Error> {
         let inner = &*self.inner.read().await;
-        Ok(inner.size(cid).await)
+        inner.size(cid).await
     }
 
     async fn total_size(&self) -> Result<usize, Error> {
         let inner = &*self.inner.read().await;
-        Ok(inner.total_size().await)
+        inner.total_size().await
     }
 
     //TODO: Allow multiple puts without holding a lock. We could probably hold a read lock instead
@@ -77,24 +77,40 @@ impl BlockStore for FsBlockStore {
         inner.remove(cid).await
     }
 
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+    async fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> BoxStream<'_, Result<Cid, Error>> {
         let inner = self.inner.clone();
-        let stream = async_stream::stream! {
-            let inner = &mut *inner.write().await;
-            let path = inner.path.clone();
-            for await cid in blocks
-                .map(move |cid| (cid, block_path(path.clone(), &cid)))
-                .filter_map(|(cid, path)| async move { fs::remove_file(path).await.ok().map(|_| cid) }) {
-                    yield cid;
-                }
-        };
-
-        stream.boxed()
+        async_stream::stream! {
+            let inner = inner.write().await;
+            for await cid in blocks {
+                let path = block_path(inner.path.clone(), &cid);
+                yield fs::remove_file(path)
+                    .await
+                    .map(|()| cid)
+                    .map_err(|error| Error::from(error).context(format!("failed to remove block {cid}")));
+            }
+        }
+        .boxed()
     }
 
     async fn list(&self) -> BoxStream<'static, Cid> {
         let inner = &*self.inner.read().await;
         inner.list().await
+    }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        let entries = self.inner.read().await.list_stream().await;
+        async_stream::try_stream! {
+            let mut entries = entries?;
+            while let Some(entry) = entries.next().await {
+                let (cid, path) = entry?;
+                let size = usize::try_from(fs::metadata(path).await?.len())?;
+                yield (cid, size);
+            }
+        }
+        .boxed()
     }
 }
 
@@ -188,34 +204,32 @@ impl FsBlockStoreInner {
         Ok(out)
     }
 
-    async fn size(&self, cids: &[Cid]) -> Option<usize> {
-        let mut block_sizes = 0;
+    async fn size(&self, cids: &[Cid]) -> Result<Option<usize>, Error> {
+        let mut block_sizes = 0usize;
 
         for cid in cids {
             let path = block_path(self.path.clone(), cid);
-            if let Ok(size) = fs::metadata(path).await.map(|m| m.len() as usize) {
-                block_sizes += size;
+            match fs::metadata(path).await {
+                Ok(metadata) => {
+                    block_sizes = block_sizes.saturating_add(usize::try_from(metadata.len())?);
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
             }
         }
 
-        Some(block_sizes)
+        Ok(Some(block_sizes))
     }
 
-    async fn total_size(&self) -> usize {
+    async fn total_size(&self) -> Result<usize, Error> {
         self.list_stream()
-            .and_then(|blocks| async move {
-                let list = blocks
-                    .try_filter_map(|(_, path)| async move {
-                        let meta = fs::metadata(path).await?;
-                        Ok(Some(meta.len()))
-                    })
-                    .try_collect::<Vec<_>>()
-                    .await
-                    .unwrap_or_default();
-                Ok(list.into_iter().sum::<u64>() as usize)
+            .await?
+            .map_err(Error::from)
+            .try_fold(0usize, |total, (_, path)| async move {
+                let size = usize::try_from(fs::metadata(path).await?.len())?;
+                Ok(total.saturating_add(size))
             })
             .await
-            .unwrap_or_default()
     }
 
     async fn remove(&mut self, cid: &Cid) -> Result<(), Error> {

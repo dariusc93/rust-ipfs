@@ -35,11 +35,18 @@ impl<B: BlockStore> BlockStore for Arc<B> {
     async fn remove(&self, cid: &Cid) -> Result<(), Error> {
         (**self).remove(cid).await
     }
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+    async fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> BoxStream<'_, Result<Cid, Error>> {
         (**self).remove_many(blocks).await
     }
     async fn list(&self) -> BoxStream<'static, Cid> {
         (**self).list().await
+    }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        (**self).list_with_sizes().await
     }
 }
 

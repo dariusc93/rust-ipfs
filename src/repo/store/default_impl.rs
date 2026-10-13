@@ -153,18 +153,32 @@ impl BlockStore for DefaultStorage {
         self.blockstore.remove(cid).await
     }
 
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+    async fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> BoxStream<'_, Result<Cid, Error>> {
         self.blockstore.remove_many(blocks).await
     }
 
     async fn list(&self) -> BoxStream<'static, Cid> {
         self.blockstore.list().await
     }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        self.blockstore.list_with_sizes().await
+    }
 }
 
 impl DataStore for DefaultStorage {
     async fn init(&self) -> Result<(), Error> {
-        self.datastore.init().await
+        self.datastore.init().await?;
+
+        #[cfg(target_arch = "wasm32")]
+        if let Either::Right(datastore) = &self.datastore {
+            datastore.rebuild_pins(&self.blockstore).await?;
+        }
+
+        Ok(())
     }
 
     async fn contains(&self, key: &[u8]) -> Result<bool, Error> {

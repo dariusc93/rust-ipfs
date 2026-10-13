@@ -1,10 +1,11 @@
 use std::{rc::Rc, str::FromStr, sync::OnceLock};
 
+use crate::repo::store::idb::finish_transaction;
 use crate::{
     Block, Error,
     repo::{BlockPut, BlockStore},
 };
-use futures::{StreamExt, stream::BoxStream};
+use futures::{StreamExt, TryStreamExt, stream::BoxStream};
 use idb::{Database, DatabaseEvent, Factory, ObjectStoreParams, TransactionMode};
 use ipld_core::cid::Cid;
 use send_wrapper::SendWrapper;
@@ -72,7 +73,7 @@ impl BlockStore for IdbBlockStore {
             let cid = JsValue::from_str(&cid.to_string());
 
             let val = store.get(cid)?.await?;
-            transaction.await?;
+            finish_transaction(transaction).await?;
             Ok(val.is_some())
         })
         .await
@@ -88,14 +89,16 @@ impl BlockStore for IdbBlockStore {
 
             let cid_val = JsValue::from_str(&cid.to_string());
 
-            let block = store.get(cid_val)?.await.map(|val| {
-                val.and_then(|val| {
-                    let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
-                    Block::new(*cid, bytes).ok()
+            let block = store
+                .get(cid_val)?
+                .await?
+                .map(|value| {
+                    let bytes: Vec<u8> = serde_wasm_bindgen::from_value(value)?;
+                    Ok::<_, Box<dyn std::error::Error>>(Block::new(*cid, bytes)?)
                 })
-            })?;
+                .transpose()?;
 
-            transaction.await?;
+            finish_transaction(transaction).await?;
             Ok(block)
         })
         .await
@@ -114,19 +117,21 @@ impl BlockStore for IdbBlockStore {
             for cid in cid {
                 let cid_val = JsValue::from_str(&cid.to_string());
 
-                let block_size = store.get(cid_val)?.await.map(|val| {
-                    val.and_then(|val| {
-                        let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
-                        Block::new(*cid, bytes).map(|block| block.len()).ok()
+                let block_size = store
+                    .get(cid_val)?
+                    .await?
+                    .map(|value| {
+                        let bytes: Vec<u8> = serde_wasm_bindgen::from_value(value)?;
+                        Ok::<_, Box<dyn std::error::Error>>(Block::new(*cid, bytes)?.len())
                     })
-                })?;
+                    .transpose()?;
 
                 if let Some(b_size) = block_size {
-                    size += b_size;
+                    size = size.saturating_add(b_size);
                 }
             }
 
-            transaction.await?;
+            finish_transaction(transaction).await?;
 
             Ok(Some(size))
         })
@@ -135,36 +140,12 @@ impl BlockStore for IdbBlockStore {
     }
 
     async fn total_size(&self) -> Result<usize, Error> {
-        SendWrapper::new(async move {
-            let mut block_list = self.list().await;
-            let database = self.get_db();
-            let transaction = database.transaction(&["blockstore"], TransactionMode::ReadOnly)?;
-
-            let store = transaction.object_store("blockstore")?;
-
-            let mut size: usize = 0;
-
-            while let Some(cid) = block_list.next().await {
-                let cid_val = JsValue::from_str(&cid.to_string());
-
-                let block_size = store.get(cid_val)?.await.map(|val| {
-                    val.and_then(|val| {
-                        let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
-                        Block::new(cid, bytes).map(|block| block.data().len()).ok()
-                    })
-                })?;
-
-                if let Some(b_size) = block_size {
-                    size += b_size;
-                }
-            }
-
-            transaction.await?;
-
-            Ok::<_, Box<dyn std::error::Error>>(size)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
+        self.list_with_sizes()
+            .await
+            .try_fold(0usize, |total, (_, size)| {
+                futures::future::ready(Ok(total.saturating_add(size)))
+            })
+            .await
     }
 
     async fn put(&self, block: &Block) -> Result<(Cid, BlockPut), Error> {
@@ -184,7 +165,7 @@ impl BlockStore for IdbBlockStore {
 
             store.put(&block_val, Some(&cid_val))?.await?;
 
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
 
             Ok((*block.cid(), BlockPut::NewBlock))
         })
@@ -203,7 +184,7 @@ impl BlockStore for IdbBlockStore {
 
             store.delete(cid_val)?.await?;
 
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
 
             Ok(())
         })
@@ -211,37 +192,53 @@ impl BlockStore for IdbBlockStore {
         .map_err(|e: Box<dyn std::error::Error>| anyhow::anyhow!("{e}"))
     }
 
-    async fn remove_many(&self, mut blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
-        let database = self.get_db().clone();
-        SendWrapper::new(async_stream::stream! {
-            let Ok(transaction) =
-                database.transaction(&["blockstore"], TransactionMode::ReadWrite)
-            else {
-                return;
-            };
-            let Ok(store) = transaction.object_store("blockstore") else {
-                return;
-            };
+    async fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> BoxStream<'_, Result<Cid, Error>> {
+        let cids = blocks.collect::<Vec<_>>().await;
+        if cids.is_empty() {
+            return futures::stream::empty().boxed();
+        }
 
-            while let Some(cid) = blocks.next().await {
-                let cid_val = JsValue::from_str(&cid.to_string());
+        let removed = SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["blockstore"], TransactionMode::ReadWrite)?;
+            let store = transaction.object_store("blockstore")?;
 
-                let Ok(request) = store.delete(cid_val) else {
-                    continue;
-                };
-
-                if request.await.is_err() {
-                    continue;
+            let result = async {
+                for cid in &cids {
+                    let key = JsValue::from_str(&cid.to_string());
+                    if store.count(Some(key.clone().into()))?.await? == 0 {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("missing block {cid}"),
+                        )
+                        .into());
+                    }
+                    store.delete(key)?.await?;
                 }
+                Ok::<_, Box<dyn std::error::Error>>(())
+            }
+            .await;
 
-                yield cid;
+            if let Err(error) = result {
+                if let Ok(abort) = transaction.abort() {
+                    let _ = abort.await;
+                }
+                return Err(error);
             }
 
-            if let Ok(commit) = transaction.commit() {
-                let _ = commit.await;
-            }
+            finish_transaction(transaction.commit()?).await?;
+            Ok(cids)
         })
-        .boxed()
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"));
+
+        match removed {
+            Ok(cids) => futures::stream::iter(cids.into_iter().map(Ok)).boxed(),
+            Err(error) => futures::stream::once(futures::future::ready(Err(error))).boxed(),
+        }
     }
 
     async fn list(&self) -> BoxStream<'static, Cid> {
@@ -268,5 +265,38 @@ impl BlockStore for IdbBlockStore {
             }
         })
         .boxed()
+    }
+
+    async fn list_with_sizes(&self) -> BoxStream<'_, Result<(Cid, usize), Error>> {
+        let entries = SendWrapper::new(async move {
+            let database = self.get_db();
+            let transaction = database.transaction(&["blockstore"], TransactionMode::ReadOnly)?;
+            let store = transaction.object_store("blockstore")?;
+            let keys = store.get_all_keys(None, None)?.await?;
+            let mut entries = Vec::with_capacity(keys.len());
+
+            for key in keys {
+                let cid = key
+                    .as_string()
+                    .ok_or_else(|| std::io::Error::other("invalid block key"))?;
+                let cid = Cid::from_str(&cid)?;
+                let value = store
+                    .get(key)?
+                    .await?
+                    .ok_or_else(|| std::io::Error::other(format!("missing block {cid}")))?;
+                let data: Vec<u8> = serde_wasm_bindgen::from_value(value)?;
+                entries.push((cid, data.len()));
+            }
+
+            finish_transaction(transaction).await?;
+            Ok::<_, Box<dyn std::error::Error>>(entries)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"));
+
+        match entries {
+            Ok(entries) => futures::stream::iter(entries.into_iter().map(Ok)).boxed(),
+            Err(error) => futures::stream::once(futures::future::ready(Err(error))).boxed(),
+        }
     }
 }

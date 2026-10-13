@@ -240,12 +240,9 @@ impl DataStore for FsDataStore {
 
         // disk is the source of truth; rebuild the indirect-pin reverse index from it once.
         let mut index: HashMap<Cid, HashSet<Cid>> = HashMap::new();
-        let recursives = self.list_pinfiles().await.try_filter_map(|(cid, mode)| {
-            futures::future::ready(Ok((mode == PinMode::Recursive).then_some(cid)))
-        });
-        futures::pin_mut!(recursives);
-        while let Some(root) = TryStreamExt::try_next(&mut recursives).await? {
-            let (_, refs) = read_recursively_pinned(self.path.join("pins"), root).await?;
+        let pins = self.list_pinfiles().await;
+        futures::pin_mut!(pins);
+        while let Some((root, _, refs)) = TryStreamExt::try_next(&mut pins).await? {
             for r in refs {
                 index.entry(r).or_default().insert(root);
             }
@@ -312,8 +309,7 @@ impl PinStore for FsDataStore {
             let _entered = span.enter();
 
             std::fs::create_dir_all(path.parent().expect("shard parent has to exist"))?;
-            path.set_extension("recursive");
-            if path.is_file() {
+            if sync_read_direct_or_recursive(&mut path)? == Some(PinMode::Recursive) {
                 return Err(anyhow::anyhow!("already pinned recursively"));
             }
 
@@ -351,7 +347,7 @@ impl PinStore for FsDataStore {
             std::fs::create_dir_all(path.parent().expect("shard parent has to exist"))?;
 
             // previous refs, if re-pinning, so the reverse index can drop stale entries
-            let old_refs = sync_read_recursive_refs(&path.with_extension("recursive"));
+            let old_refs = sync_read_recursive_refs(&path.with_extension("recursive"))?;
 
             let count = set.len();
             let new_refs: Vec<Cid> = set.iter().copied().collect();
@@ -425,9 +421,7 @@ impl PinStore for FsDataStore {
             let _permit = permit; // move in to threadpool thread
             let _entered = span.enter();
 
-            path.set_extension("recursive");
-
-            if path.is_file() {
+            if sync_read_direct_or_recursive(&mut path)? == Some(PinMode::Recursive) {
                 return Err(anyhow::anyhow!("is pinned recursively"));
             }
 
@@ -462,6 +456,8 @@ impl PinStore for FsDataStore {
             let _permit = permit; // move into threadpool thread
             let _entered = span.enter();
 
+            let refs = sync_read_recursive_refs(&path.with_extension("recursive"))?;
+
             path.set_extension("direct");
 
             let mut any = false;
@@ -479,8 +475,6 @@ impl PinStore for FsDataStore {
                 Err(e) => return Err(Error::new(e)),
             }
 
-            // read the refs before removing so the reverse index can be reconciled
-            let refs = sync_read_recursive_refs(&path.with_extension("recursive"));
             path.set_extension("recursive");
 
             let mut removed_recursive = false;
@@ -524,10 +518,7 @@ impl PinStore for FsDataStore {
         &self,
         requirement: Option<PinMode>,
     ) -> BoxStream<'static, Result<(Cid, PinMode), Error>> {
-        // no locking, dirty reads are probably good enough until gc
         let cids = self.list_pinfiles().await;
-
-        let pin_index = self.pin_index.clone();
 
         let requirement = PinModeRequirement::from(requirement);
 
@@ -544,16 +535,20 @@ impl PinStore for FsDataStore {
             let mut returned: HashSet<Cid> = HashSet::default();
 
             let mut direct: HashSet<Cid> = HashSet::default();
+            let mut indirect: HashSet<Cid> = HashSet::default();
 
             let collect_recursive_for_indirect = requirement.is_indirect_or_any();
 
             futures::pin_mut!(cids);
 
-            while let Some((cid, mode)) = TryStreamExt::try_next(&mut cids).await? {
+            while let Some((cid, mode, refs)) = TryStreamExt::try_next(&mut cids).await? {
 
                 let matches = requirement.matches(&mode);
 
                 if mode == PinMode::Recursive {
+                    if collect_recursive_for_indirect {
+                        indirect.extend(refs);
+                    }
                     if matches && returned.insert(cid) {
                         // the recursive pins can always be returned right away since they have
                         // the highest priority in this listing or output
@@ -582,7 +577,6 @@ impl PinStore for FsDataStore {
                 return;
             }
 
-            let indirect: Vec<Cid> = pin_index.read().keys().copied().collect();
             for cid in indirect {
                 if returned.insert(cid) {
                     yield (cid, PinMode::Indirect);
@@ -622,7 +616,7 @@ impl PinStore for FsDataStore {
                 for (i, cid) in ids.into_iter().enumerate() {
                     let mut path = pin_path(base.clone(), &cid);
 
-                    if let Some(mode) = sync_read_direct_or_recursive(&mut path)
+                    if let Some(mode) = sync_read_direct_or_recursive(&mut path)?
                         && searched_suffix.matches(&mode)
                     {
                         response[i] = Some((
@@ -692,8 +686,10 @@ impl PinStore for FsDataStore {
 impl FsDataStore {
     async fn list_pinfiles(
         &self,
-    ) -> impl futures::stream::Stream<Item = Result<(Cid, PinMode), Error>> + 'static {
-        let stream = match tokio::fs::read_dir(self.path.join("pins")).await {
+    ) -> impl futures::stream::Stream<Item = Result<(Cid, PinMode, Vec<Cid>), Error>> + 'static
+    {
+        let pins_path = self.path.join("pins");
+        let stream = match tokio::fs::read_dir(&pins_path).await {
             Ok(st) => Either::Left(ReadDirStream::new(st)),
             // make this into a stream which will only yield the initial error
             Err(e) => Either::Right(futures::stream::once(futures::future::ready(Err(e)))),
@@ -711,92 +707,100 @@ impl FsDataStore {
             // flatten each
             .try_flatten()
             .map_err(Error::new)
-            // convert the paths ending in ".data" into cid
-            .try_filter_map(|d| {
-                let name = d.file_name();
-                let path: &std::path::Path = name.as_ref();
+            .try_filter_map(move |entry| {
+                let pins_path = pins_path.clone();
+                async move {
+                    let path = entry.path();
+                    let (mode, extension) = match path.extension().and_then(|ext| ext.to_str()) {
+                        Some("recursive") => (PinMode::Recursive, "recursive"),
+                        Some("direct") => (PinMode::Direct, "direct"),
+                        _ => return Ok(None),
+                    };
+                    let cid = filestem_to_pin_cid(path.file_stem())
+                        .ok_or_else(|| anyhow::anyhow!("invalid pin file {}", path.display()))?;
+                    let expected = pin_path(pins_path, &cid).with_extension(extension);
+                    let metadata = fs::metadata(&path).await.map_err(|error| {
+                        Error::from(error)
+                            .context(format!("failed to read pin file {}", path.display()))
+                    })?;
+                    if path != expected || !metadata.is_file() {
+                        anyhow::bail!("invalid pin file {}", path.display());
+                    }
 
-                let mode = if path.extension() == Some("recursive".as_ref()) {
-                    Some(PinMode::Recursive)
-                } else if path.extension() == Some("direct".as_ref()) {
-                    Some(PinMode::Direct)
-                } else {
-                    None
-                };
-
-                let maybe_tuple = mode.and_then(move |mode| {
-                    filestem_to_pin_cid(path.file_stem()).map(move |cid| (cid, mode))
-                });
-
-                futures::future::ready(Ok(maybe_tuple))
+                    let refs = match mode {
+                        PinMode::Recursive => {
+                            let contents = fs::read(&path).await.map_err(|error| {
+                                Error::from(error)
+                                    .context(format!("failed to read recursive pin {cid}"))
+                            })?;
+                            parse_recursive_refs(&contents).map_err(|error| {
+                                error.context(format!("invalid recursive pin {cid}"))
+                            })?
+                        }
+                        PinMode::Direct => {
+                            if metadata.len() != 0 {
+                                anyhow::bail!("invalid direct pin file {}", path.display());
+                            }
+                            Vec::new()
+                        }
+                        PinMode::Indirect => unreachable!(),
+                    };
+                    Ok(Some((cid, mode, refs)))
+                }
             })
     }
 }
 
-/// Reads our serialized format for recusive pins, which is JSON array of stringified Cids.
-///
-/// On file not found error returns an empty Vec as if nothing had happened. This is because we
-/// do "atomic writes" and file removals are expected to be atomic, but reads don't synchronize on
-/// writes, so while iterating it's possible that recursive pin is removed.
-async fn read_recursively_pinned(path: PathBuf, cid: Cid) -> Result<(Cid, Vec<Cid>), Error> {
-    // our fancy format is a Vec<Cid> as json
-    let mut path = pin_path(path, &cid);
-    path.set_extension("recursive");
-    let contents = match tokio::fs::read(path).await {
-        Ok(vec) => vec,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // per method comment, return empty Vec; the pins may have seemed to be present earlier
-            // but no longer are.
-            return Ok((cid, Vec::new()));
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    let cids: Vec<&str> = serde_json::from_slice(&contents)?;
-
-    // returning a stream which is updated 8kB at time or such might be better, but this should
-    // scale quite up as well.
-    let found = cids
+fn parse_recursive_refs(contents: &[u8]) -> Result<Vec<Cid>, Error> {
+    let cids: Vec<&str> = serde_json::from_slice(contents)?;
+    Ok(cids
         .into_iter()
         .map(Cid::try_from)
-        .collect::<Result<Vec<Cid>, _>>()?;
-
-    trace!(cid = %cid, count = found.len(), "read indirect pins");
-    Ok((cid, found))
+        .collect::<Result<Vec<Cid>, _>>()?)
 }
 
-/// Reads a `<cid>.recursive` pin file's referenced cids, returning an empty Vec if the file is
-/// missing or unparseable (same tolerance as `read_recursively_pinned`).
-fn sync_read_recursive_refs(recursive_path: &Path) -> Vec<Cid> {
-    let Ok(contents) = std::fs::read(recursive_path) else {
-        return Vec::new();
+/// Reads recursive pin references and returns an empty list only when the file is absent.
+fn sync_read_recursive_refs(recursive_path: &Path) -> Result<Vec<Cid>, Error> {
+    let contents = match std::fs::read(recursive_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
     };
-    let Ok(cids) = serde_json::from_slice::<Vec<&str>>(&contents) else {
-        return Vec::new();
-    };
-    cids.into_iter()
-        .filter_map(|s| Cid::try_from(s).ok())
-        .collect()
+    parse_recursive_refs(&contents).map_err(|error| {
+        error.context(format!(
+            "invalid recursive pin file {}",
+            recursive_path.display()
+        ))
+    })
 }
 
 async fn read_direct_or_recursive(mut block_path: PathBuf) -> Result<Option<PinMode>, Error> {
-    tokio::task::spawn_blocking(move || Ok(sync_read_direct_or_recursive(&mut block_path))).await?
+    tokio::task::spawn_blocking(move || sync_read_direct_or_recursive(&mut block_path)).await?
 }
 
-fn sync_read_direct_or_recursive(block_path: &mut PathBuf) -> Option<PinMode> {
-    // important to first check the recursive then only the direct; the latter might be a left over
+fn sync_read_direct_or_recursive(block_path: &mut PathBuf) -> Result<Option<PinMode>, Error> {
     for (ext, mode) in &[
         ("recursive", PinMode::Recursive),
         ("direct", PinMode::Direct),
     ] {
         block_path.set_extension(ext);
-        // Path::is_file calls fstat and coerces errors to false; this might be enough, as
-        // we are holding the lock
-        if block_path.is_file() {
-            return Some(*mode);
+        match std::fs::metadata(&*block_path) {
+            Ok(metadata) => {
+                if !metadata.is_file() {
+                    anyhow::bail!("invalid pin file {}", block_path.display());
+                }
+                if *mode == PinMode::Recursive {
+                    sync_read_recursive_refs(block_path)?;
+                } else if metadata.len() != 0 {
+                    anyhow::bail!("invalid direct pin file {}", block_path.display());
+                }
+                return Ok(Some(*mode));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
     }
-    None
+    Ok(None)
 }
 
 fn sync_write_recursive_pin(

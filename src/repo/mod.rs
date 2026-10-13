@@ -6,7 +6,7 @@ use core::fmt::Debug;
 use futures::channel::mpsc::{Receiver, Sender, channel};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
-use futures::stream::{self, BoxStream, FuturesOrdered, FuturesUnordered};
+use futures::stream::{self, BoxStream, FuturesUnordered};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
@@ -26,6 +26,8 @@ use std::{error, fmt, io};
 use tokio::sync::OwnedRwLockReadGuard;
 use tracing::{Instrument, Span};
 
+use temp_pins::TemporaryPins;
+
 #[macro_use]
 #[cfg(test)]
 mod common_tests;
@@ -40,6 +42,7 @@ pub mod lock;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod paths;
 mod store;
+mod temp_pins;
 
 /// Describes the outcome of `BlockStore::put_block`.
 #[derive(Debug, PartialEq, Eq)]
@@ -65,6 +68,38 @@ pub enum BlockRmError {
     // TODO: Pinned(Cid),
     /// The `Cid` doesn't correspond to a block in the blockstore.
     NotFound(Cid),
+}
+
+/// Reports failed block removals and any removals that succeeded.
+#[derive(Debug)]
+pub struct BlockRemovalError {
+    /// Blocks confirmed as removed.
+    pub removed_blocks: Vec<Cid>,
+    /// Blocks whose removal was not confirmed.
+    pub failed_blocks: Vec<Cid>,
+    /// Errors returned by the block store.
+    pub errors: Vec<Error>,
+}
+
+impl fmt::Display for BlockRemovalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "failed to remove {} blocks after removing {} blocks",
+            self.failed_blocks.len(),
+            self.removed_blocks.len()
+        )?;
+        if let Some(error) = self.errors.first() {
+            write!(f, " because {}", error.root_cause())?;
+        }
+        Ok(())
+    }
+}
+
+impl error::Error for BlockRemovalError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        self.errors.first().map(|error| error.as_ref())
+    }
 }
 
 pub trait StoreOpt {
@@ -100,13 +135,48 @@ pub trait BlockStore: Debug + Send + Sync {
     }
     /// Removes a block from the blockstore.
     fn remove(&self, cid: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
-    /// Remove multiple blocks from the blockstore
+    /// Reports each confirmed removal or error.
+    /// The default removes blocks one at a time through [`BlockStore::remove`].
+    /// Batch implementations must wait for commit before reporting success.
     fn remove_many(
         &self,
         blocks: BoxStream<'static, Cid>,
-    ) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
+    ) -> impl Future<Output = BoxStream<'_, Result<Cid, Error>>> + Send {
+        async move {
+            blocks
+                .then(move |cid| async move {
+                    self.remove(&cid)
+                        .await
+                        .map(|()| cid)
+                        .map_err(|error| error.context(format!("failed to remove block {cid}")))
+                })
+                .boxed()
+        }
+    }
     /// Returns a list of the blocks (Cids), in the blockstore.
     fn list(&self) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
+
+    /// Lists each block with its size in bytes.
+    fn list_with_sizes(
+        &self,
+    ) -> impl Future<Output = BoxStream<'_, Result<(Cid, usize), Error>>> + Send {
+        async move {
+            self.list()
+                .await
+                .then(move |cid| async move {
+                    let size = match self.size(std::slice::from_ref(&cid)).await? {
+                        Some(size) => size,
+                        None => self
+                            .get(&cid)
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("missing block {cid}"))?
+                            .len(),
+                    };
+                    Ok((cid, size))
+                })
+                .boxed()
+        }
+    }
 }
 
 /// Generic layer of abstraction for a key-value data store.
@@ -128,8 +198,9 @@ pub trait DataStore: PinStore + Debug + Send + Sync {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GCConfig {
-    /// How long until GC runs
-    /// If duration is not set, it will not run at a timer
+    /// Interval between fallback checks.
+    /// A zero duration disables GC unless a size trigger is set.
+    /// Size triggers use an hourly fallback when this is zero.
     pub duration: Duration,
 
     /// What will trigger GC
@@ -147,14 +218,13 @@ impl Default for GCConfig {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GCTrigger {
-    /// At a specific size. If the size is at or exceeds, it will trigger GC
-    At {
-        size: usize,
-    },
+    /// Run GC when unpinned blocks reach this size in bytes.
+    At { size: usize },
 
+    /// Run GC when total block storage reaches the repository limit.
     AtStorage,
 
-    /// No trigger
+    /// Run GC only on the configured timer.
     #[default]
     None,
 }
@@ -393,8 +463,41 @@ pub(crate) struct RepoInner<S: RepoTypes> {
     subscription_registered: tokio::sync::Notify,
     lockfile: S::TLock,
     gclock: Arc<tokio::sync::RwLock<()>>,
+    gc_requested: tokio::sync::Notify,
+    gc_total_size: Mutex<Option<usize>>,
+    temp_pins: Mutex<TemporaryPins>,
     pub(crate) mfs_root: tokio::sync::Mutex<(bool, Option<Cid>)>,
     ipns_publish_locks: Mutex<HashMap<PeerId, std::sync::Weak<tokio::sync::Mutex<()>>>>,
+}
+
+struct GCReport {
+    removal: BlockRemovalReport,
+    reclaimed_bytes: usize,
+}
+
+struct BlockRemovalReport {
+    removed_blocks: Vec<Cid>,
+    failed_blocks: Vec<Cid>,
+    errors: Vec<Error>,
+}
+
+impl BlockRemovalReport {
+    fn failed_count(&self) -> usize {
+        self.failed_blocks.len().max(self.errors.len())
+    }
+
+    fn into_result(self) -> Result<Vec<Cid>, Error> {
+        if self.failed_count() == 0 {
+            Ok(self.removed_blocks)
+        } else {
+            Err(BlockRemovalError {
+                removed_blocks: self.removed_blocks,
+                failed_blocks: self.failed_blocks,
+                errors: self.errors,
+            }
+            .into())
+        }
+    }
 }
 
 /// Events used to communicate to the swarm on repo changes.
@@ -481,6 +584,9 @@ impl<S: RepoTypes> Repo<S> {
             lockfile,
             max_storage_size: Default::default(),
             gclock: Default::default(),
+            gc_requested: Default::default(),
+            gc_total_size: Default::default(),
+            temp_pins: Default::default(),
             mfs_root: Default::default(),
             ipns_publish_locks: Default::default(),
         };
@@ -491,16 +597,48 @@ impl<S: RepoTypes> Repo<S> {
 
     pub fn set_max_storage_size(&self, size: usize) {
         self.inner.max_storage_size.store(size, Ordering::SeqCst);
+        self.request_gc();
     }
 
     pub fn max_storage_size(&self) -> usize {
         self.inner.max_storage_size.load(Ordering::SeqCst)
     }
 
+    pub(crate) fn set_temp_pin_duration(&self, duration: Duration) {
+        self.inner.temp_pins.lock().set_duration(duration);
+        self.request_gc();
+    }
+
+    pub(crate) fn next_temp_pin_expiry(&self) -> Option<Duration> {
+        self.inner.temp_pins.lock().next_expiry()
+    }
+
+    pub(crate) fn request_gc(&self) {
+        self.inner.gc_requested.notify_one();
+    }
+
+    pub(crate) async fn gc_requested(&self) {
+        self.inner.gc_requested.notified().await;
+    }
+
+    fn blocks_stored(&self, cids: impl IntoIterator<Item = Cid>, added_bytes: usize) {
+        self.inner.temp_pins.lock().record(cids);
+        if let Some(total_size) = self.inner.gc_total_size.lock().as_mut() {
+            *total_size = total_size.saturating_add(added_bytes);
+        }
+        self.request_gc();
+    }
+
+    fn invalidate_gc_size(&self) {
+        self.inner.gc_total_size.lock().take();
+        self.request_gc();
+    }
+
     pub async fn migrate(&self, repo: &Self) -> Result<(), Error> {
         if self.is_online() || repo.is_online() {
             anyhow::bail!("Repository cannot be online");
         }
+        repo.invalidate_gc_size();
         let block_migration = {
             async move {
                 let mut errors = 0usize;
@@ -508,7 +646,9 @@ impl<S: RepoTypes> Repo<S> {
                 while let Some(cid) = stream.next().await {
                     match self.get_block_now(&cid).await {
                         Ok(Some(block)) => {
-                            if let Err(e) = repo.inner.block_store.put(&block).await {
+                            if let Err(e) =
+                                repo.put_block(&block).broadcast_on_new_block(false).await
+                            {
                                 error!("Error migrating {cid}: {e}");
                                 errors += 1;
                             }
@@ -601,6 +741,7 @@ impl<S: RepoTypes> Repo<S> {
 
         let (block_errors, data_errors, pin_errors) =
             futures::join!(block_migration, data_migration, pins_migration);
+        repo.invalidate_gc_size();
 
         let total = block_errors + data_errors + pin_errors;
         if total > 0 {
@@ -680,8 +821,6 @@ impl<S: RepoTypes> Repo<S> {
         if self.inner.initialized.load(Ordering::SeqCst) {
             return Ok(());
         }
-        // Dropping the guard (even though not strictly necessary to compile) to avoid potential
-        // deadlocks if `block_store` or `data_store` were to try to access `Repo.lockfile`.
         {
             tracing::debug!("Trying lockfile");
             self.inner.lockfile.try_exclusive()?;
@@ -747,7 +886,9 @@ impl<S: RepoTypes> Repo<S> {
         self.inner.block_store.list().await
     }
 
-    /// Remove block from the block store.
+    /// Removes unpinned blocks from the block store.
+    /// Pin checks and recursive reads must succeed before any deletion starts.
+    /// Partial failures return a [`BlockRemovalError`].
     pub async fn remove_block<C: Borrow<Cid>>(
         &self,
         cid: C,
@@ -761,7 +902,7 @@ impl<S: RepoTypes> Repo<S> {
 
         let list = match recursive {
             true => {
-                let mut list = self.recursive_collections(*cid).await;
+                let mut list = self.recursive_collections(*cid).await?;
                 // ensure the first root block is apart of the list
                 list.insert(*cid);
                 list
@@ -769,42 +910,74 @@ impl<S: RepoTypes> Repo<S> {
             false => BTreeSet::from_iter(std::iter::once(*cid)),
         };
 
-        let list = stream::iter(
-            FuturesOrdered::from_iter(list.into_iter().map(|cid| async move { cid }))
-                .filter_map(|cid| async move {
-                    matches!(self.is_pinned(&cid).await, Ok(false)).then_some(cid)
-                })
-                .collect::<Vec<Cid>>()
-                .await,
-        )
-        .boxed();
+        let mut unpinned = Vec::with_capacity(list.len());
+        for cid in list {
+            if !self.is_pinned(&cid).await? {
+                unpinned.push(cid);
+            }
+        }
 
-        let removed = self
-            .inner
-            .block_store
-            .remove_many(list)
-            .await
-            .collect::<Vec<_>>()
-            .await;
+        self.invalidate_gc_size();
+        let removal_started = web_time::Instant::now();
+        let report = self.remove_blocks_checked(unpinned).await;
 
-        for cid in &removed {
+        {
+            let mut temp_pins = self.inner.temp_pins.lock();
+            for cid in &report.removed_blocks {
+                temp_pins.remove_before(cid, removal_started);
+            }
+        }
+
+        for cid in &report.removed_blocks {
             // notify ipfs task about the removed blocks
             if let Some(mut events) = self.repo_channel() {
                 let _ = events.send(RepoEvent::RemovedBlock(*cid)).await;
             }
         }
-        Ok(removed)
+        report.into_result()
+    }
+
+    async fn remove_blocks_checked(&self, cids: Vec<Cid>) -> BlockRemovalReport {
+        let mut pending = BTreeSet::from_iter(cids.iter().copied());
+        let mut results = self
+            .inner
+            .block_store
+            .remove_many(stream::iter(cids).boxed())
+            .await;
+        let mut removed_blocks = Vec::new();
+        let mut errors = Vec::new();
+
+        while let Some(result) = results.next().await {
+            match result {
+                Ok(cid) if pending.remove(&cid) => removed_blocks.push(cid),
+                Ok(cid) => errors.push(anyhow::anyhow!(
+                    "block removal returned an unexpected CID {cid}"
+                )),
+                Err(error) => errors.push(error),
+            }
+        }
+        if !pending.is_empty() && errors.is_empty() {
+            errors.push(anyhow::anyhow!(
+                "block removal ended before reporting every result"
+            ));
+        }
+
+        BlockRemovalReport {
+            removed_blocks,
+            failed_blocks: Vec::from_iter(pending),
+            errors,
+        }
     }
 
     /// Collects the transitive references of `cid` (excluding `cid` itself). The accumulator doubles
     /// as a visited set, so shared subtrees are walked once and any malformed cycle terminates.
-    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, BTreeSet<Cid>> {
+    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, Result<BTreeSet<Cid>, Error>> {
         async move {
             let mut visited = BTreeSet::new();
             visited.insert(cid);
-            self.collect_references(cid, &mut visited).await;
+            self.collect_references(cid, &mut visited).await?;
             visited.remove(&cid);
-            visited
+            Ok(visited)
         }
         .boxed()
     }
@@ -813,23 +986,22 @@ impl<S: RepoTypes> Repo<S> {
         &'a self,
         cid: Cid,
         visited: &'a mut BTreeSet<Cid>,
-    ) -> BoxFuture<'a, ()> {
+    ) -> BoxFuture<'a, Result<(), Error>> {
         async move {
-            let block = match self.get_block_now(&cid).await {
-                Ok(Some(block)) => block,
-                _ => return,
+            let block = match self.get_block_now(&cid).await? {
+                Some(block) => block,
+                None => return Ok(()),
             };
 
             let mut references: BTreeSet<Cid> = BTreeSet::new();
-            if block.references(&mut references).is_err() {
-                return;
-            }
+            block.references(&mut references)?;
 
             for reference in references {
                 if visited.insert(reference) {
-                    self.collect_references(reference, visited).await;
+                    self.collect_references(reference, visited).await?;
                 }
             }
+            Ok(())
         }
         .boxed()
     }
@@ -898,7 +1070,9 @@ impl<S: RepoTypes> Repo<S> {
 
     /// Removes a direct pin for a `Cid`.
     pub(crate) async fn remove_direct_pin(&self, cid: &Cid) -> Result<(), Error> {
-        self.inner.data_store.remove_direct_pin(cid).await
+        self.inner.data_store.remove_direct_pin(cid).await?;
+        self.request_gc();
+        Ok(())
     }
 
     /// Removes a recursive pin for a `Cid`.
@@ -908,56 +1082,172 @@ impl<S: RepoTypes> Repo<S> {
         refs: References<'_>,
     ) -> Result<(), Error> {
         // FIXME: not really sure why is there not an easier way to to transfer control
-        self.inner.data_store.remove_recursive_pin(cid, refs).await
+        self.inner
+            .data_store
+            .remove_recursive_pin(cid, refs)
+            .await?;
+        self.request_gc();
+        Ok(())
     }
 
     /// Remove unpinned blocks while holding the GC lock.
     pub(crate) async fn cleanup(&self) -> Result<Vec<Cid>, Error> {
         Ok(self
-            .cleanup_when(futures::future::ready(true))
+            .cleanup_with_trigger(None, true)
             .await?
             .unwrap_or_default())
     }
 
-    /// Check the condition and remove unpinned blocks under the same GC lock.
-    pub(crate) async fn cleanup_when(
+    /// Check the trigger and remove unpinned blocks under the same GC lock.
+    pub(crate) async fn cleanup_with_trigger(
         &self,
-        condition: impl Future<Output = bool>,
+        trigger: Option<GCTrigger>,
+        refresh: bool,
     ) -> Result<Option<Vec<Cid>>, Error> {
-        let _guard = self.inner.gclock.write().await;
-        if !condition.await {
+        self.inner.temp_pins.lock().prune();
+        if !refresh && self.gc_size_below_threshold(trigger) {
+            tracing::debug!(
+                ?trigger,
+                guard_waits = 0,
+                guard_wait_ms = 0.0,
+                "gc cleanup skipped"
+            );
             return Ok(None);
         }
 
-        let repo = self.clone();
+        let started = web_time::Instant::now();
+        let (_guard, guard_waits) = match self.inner.gclock.try_write() {
+            Ok(guard) => (guard, 0usize),
+            Err(_) => (self.inner.gclock.write().await, 1usize),
+        };
+        let guard_wait_ms = started.elapsed().as_secs_f64() * 1000.0;
 
-        let blocks = repo.list_blocks().await;
-        let pins = repo
+        match self.cleanup_locked(trigger, refresh).await {
+            Ok(Some(report)) => {
+                let failures = report.removal.failed_count();
+                if failures > 0 {
+                    self.inner.gc_total_size.lock().take();
+                    tracing::error!(
+                        ?trigger,
+                        guard_waits,
+                        guard_wait_ms,
+                        reclaimed_bytes = report.reclaimed_bytes,
+                        removed_blocks = report.removal.removed_blocks.len(),
+                        failures,
+                        errors = ?report.removal.errors,
+                        "gc cleanup failed"
+                    );
+                } else {
+                    tracing::debug!(
+                        ?trigger,
+                        guard_waits,
+                        guard_wait_ms,
+                        reclaimed_bytes = report.reclaimed_bytes,
+                        removed_blocks = report.removal.removed_blocks.len(),
+                        failures,
+                        "gc cleanup finished"
+                    );
+                }
+                report.removal.into_result().map(Some)
+            }
+            Ok(None) => {
+                tracing::debug!(?trigger, guard_waits, guard_wait_ms, "gc cleanup skipped");
+                Ok(None)
+            }
+            Err(error) => {
+                self.inner.gc_total_size.lock().take();
+                tracing::error!(
+                    ?trigger,
+                    guard_waits,
+                    guard_wait_ms,
+                    failures = 1,
+                    %error,
+                    cause = %error.root_cause(),
+                    "gc cleanup failed"
+                );
+                Err(error)
+            }
+        }
+    }
+
+    fn gc_size_below_threshold(&self, trigger: Option<GCTrigger>) -> bool {
+        let threshold = match trigger {
+            Some(GCTrigger::At { size }) => Some(size),
+            Some(GCTrigger::AtStorage) => Some(self.max_storage_size()),
+            Some(GCTrigger::None) | None => None,
+        };
+        let cached_size = *self.inner.gc_total_size.lock();
+        if let (Some(total_size), Some(threshold)) = (cached_size, threshold)
+            && total_size < threshold
+        {
+            tracing::debug!(total_size, threshold, will_run = false);
+            return true;
+        }
+        false
+    }
+
+    async fn cleanup_locked(
+        &self,
+        trigger: Option<GCTrigger>,
+        refresh: bool,
+    ) -> Result<Option<GCReport>, Error> {
+        if !refresh && self.gc_size_below_threshold(trigger) {
+            return Ok(None);
+        }
+
+        let pins = self
             .list_pins(None)
             .await
             .map_ok(|(cid, _)| cid)
             .try_collect::<HashSet<Cid>>()
             .await?;
+        let mut blocks = self.inner.block_store.list_with_sizes().await;
+        let mut total_size = 0usize;
+        let mut unpinned_bytes = 0usize;
+        let mut candidates = HashMap::new();
 
-        let stream = async_stream::stream! {
-            for await cid in blocks {
-                if pins.contains(&cid) {
-                    continue;
-                }
-                yield cid;
+        while let Some((cid, size)) = blocks.try_next().await? {
+            total_size = total_size.saturating_add(size);
+            if !pins.contains(&cid) {
+                unpinned_bytes = unpinned_bytes.saturating_add(size);
+                candidates.insert(cid, size);
             }
         }
-        .boxed();
+        drop(blocks);
+        *self.inner.gc_total_size.lock() = Some(total_size);
 
-        let removed_blocks = self
-            .inner
-            .block_store
-            .remove_many(stream)
-            .await
-            .collect::<Vec<_>>()
-            .await;
+        if trigger.is_some() {
+            let mut temp_pins = self.inner.temp_pins.lock();
+            temp_pins.prune();
+            candidates.retain(|cid, _| !temp_pins.contains(cid));
+        }
 
-        Ok(Some(removed_blocks))
+        let cleanup = !candidates.is_empty()
+            && match trigger {
+                Some(GCTrigger::At { size }) => unpinned_bytes >= size,
+                Some(GCTrigger::AtStorage) => total_size >= self.max_storage_size(),
+                Some(GCTrigger::None) | None => true,
+            };
+        tracing::debug!(?trigger, total_size, unpinned_bytes, will_run = cleanup);
+        if !cleanup {
+            return Ok(None);
+        }
+
+        let cids = Vec::from_iter(candidates.keys().copied());
+        let removal = self.remove_blocks_checked(cids).await;
+        let mut reclaimed_bytes = 0usize;
+        for cid in &removal.removed_blocks {
+            if let Some(size) = candidates.remove(cid) {
+                reclaimed_bytes = reclaimed_bytes.saturating_add(size);
+                self.inner.temp_pins.lock().remove(cid);
+            }
+        }
+        *self.inner.gc_total_size.lock() = Some(total_size.saturating_sub(reclaimed_bytes));
+
+        Ok(Some(GCReport {
+            removal,
+            reclaimed_bytes,
+        }))
     }
 
     /// Checks if a `Cid` is pinned.
@@ -1395,7 +1685,19 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlock<S> {
                         .await
                 }
             };
-            let (cid, res) = self.repo.inner.block_store.put(&block).await?;
+            let (cid, res) = match self.repo.inner.block_store.put(&block).await {
+                Ok(result) => result,
+                Err(error) => {
+                    self.repo.invalidate_gc_size();
+                    return Err(error);
+                }
+            };
+
+            let added_bytes = match res {
+                BlockPut::NewBlock => block.len(),
+                BlockPut::Existed => 0,
+            };
+            self.repo.blocks_stored([cid], added_bytes);
 
             let list = self.repo.inner.subscriptions.lock().remove(&cid);
             if let Some(list) = list {
@@ -1485,7 +1787,25 @@ impl<S: RepoTypes> IntoFuture for RepoPutBlocks<S> {
                     repo.block_store_guard(&cids).await
                 }
             };
-            let results = repo.inner.block_store.put_many(&blocks).await?;
+            let results = match repo.inner.block_store.put_many(&blocks).await {
+                Ok(results) => results,
+                Err(error) => {
+                    // A failed batch can leave some blocks committed.
+                    repo.inner
+                        .temp_pins
+                        .lock()
+                        .record(blocks.iter().map(|block| *block.cid()));
+                    repo.invalidate_gc_size();
+                    return Err(error);
+                }
+            };
+            let mut added_bytes = 0usize;
+            for ((_, result), block) in results.iter().zip(&blocks) {
+                if matches!(result, BlockPut::NewBlock) {
+                    added_bytes = added_bytes.saturating_add(block.len());
+                }
+            }
+            repo.blocks_stored(results.iter().map(|(cid, _)| *cid), added_bytes);
 
             let mut cids = Vec::with_capacity(results.len());
             for ((cid, res), block) in results.into_iter().zip(blocks.iter()) {
