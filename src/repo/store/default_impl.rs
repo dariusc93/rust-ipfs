@@ -153,7 +153,10 @@ impl BlockStore for DefaultStorage {
         self.blockstore.remove(cid).await
     }
 
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+    async fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> BoxStream<'_, Result<Cid, Error>> {
         self.blockstore.remove_many(blocks).await
     }
 

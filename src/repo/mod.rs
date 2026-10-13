@@ -6,7 +6,7 @@ use core::fmt::Debug;
 use futures::channel::mpsc::{Receiver, Sender, channel};
 use futures::future::{BoxFuture, Either};
 use futures::sink::SinkExt;
-use futures::stream::{self, BoxStream, FuturesOrdered, FuturesUnordered};
+use futures::stream::{self, BoxStream, FuturesUnordered};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use indexmap::IndexSet;
 use ipld_core::cid::Cid;
@@ -70,6 +70,38 @@ pub enum BlockRmError {
     NotFound(Cid),
 }
 
+/// Reports failed block removals and any removals that succeeded.
+#[derive(Debug)]
+pub struct BlockRemovalError {
+    /// Blocks confirmed as removed.
+    pub removed_blocks: Vec<Cid>,
+    /// Blocks whose removal was not confirmed.
+    pub failed_blocks: Vec<Cid>,
+    /// Errors returned by the block store.
+    pub errors: Vec<Error>,
+}
+
+impl fmt::Display for BlockRemovalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "failed to remove {} blocks after removing {} blocks",
+            self.failed_blocks.len(),
+            self.removed_blocks.len()
+        )?;
+        if let Some(error) = self.errors.first() {
+            write!(f, " because {}", error.root_cause())?;
+        }
+        Ok(())
+    }
+}
+
+impl error::Error for BlockRemovalError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        self.errors.first().map(|error| error.as_ref())
+    }
+}
+
 pub trait StoreOpt {
     fn into_opt(self) -> Self;
 }
@@ -103,11 +135,24 @@ pub trait BlockStore: Debug + Send + Sync {
     }
     /// Removes a block from the blockstore.
     fn remove(&self, cid: &Cid) -> impl Future<Output = Result<(), Error>> + Send;
-    /// Remove multiple blocks from the blockstore
+    /// Reports each confirmed removal or error.
+    /// The default removes blocks one at a time through [`BlockStore::remove`].
+    /// Batch implementations must wait for commit before reporting success.
     fn remove_many(
         &self,
         blocks: BoxStream<'static, Cid>,
-    ) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
+    ) -> impl Future<Output = BoxStream<'_, Result<Cid, Error>>> + Send {
+        async move {
+            blocks
+                .then(move |cid| async move {
+                    self.remove(&cid)
+                        .await
+                        .map(|()| cid)
+                        .map_err(|error| error.context(format!("failed to remove block {cid}")))
+                })
+                .boxed()
+        }
+    }
     /// Returns a list of the blocks (Cids), in the blockstore.
     fn list(&self) -> impl Future<Output = BoxStream<'static, Cid>> + Send;
 
@@ -426,9 +471,33 @@ pub(crate) struct RepoInner<S: RepoTypes> {
 }
 
 struct GCReport {
-    removed_blocks: Vec<Cid>,
+    removal: BlockRemovalReport,
     reclaimed_bytes: usize,
-    failed_blocks: usize,
+}
+
+struct BlockRemovalReport {
+    removed_blocks: Vec<Cid>,
+    failed_blocks: Vec<Cid>,
+    errors: Vec<Error>,
+}
+
+impl BlockRemovalReport {
+    fn failed_count(&self) -> usize {
+        self.failed_blocks.len().max(self.errors.len())
+    }
+
+    fn into_result(self) -> Result<Vec<Cid>, Error> {
+        if self.failed_count() == 0 {
+            Ok(self.removed_blocks)
+        } else {
+            Err(BlockRemovalError {
+                removed_blocks: self.removed_blocks,
+                failed_blocks: self.failed_blocks,
+                errors: self.errors,
+            }
+            .into())
+        }
+    }
 }
 
 /// Events used to communicate to the swarm on repo changes.
@@ -819,7 +888,9 @@ impl<S: RepoTypes> Repo<S> {
         self.inner.block_store.list().await
     }
 
-    /// Remove block from the block store.
+    /// Removes unpinned blocks from the block store.
+    /// Pin checks and recursive reads must succeed before any deletion starts.
+    /// Partial failures return a [`BlockRemovalError`].
     pub async fn remove_block<C: Borrow<Cid>>(
         &self,
         cid: C,
@@ -833,7 +904,7 @@ impl<S: RepoTypes> Repo<S> {
 
         let list = match recursive {
             true => {
-                let mut list = self.recursive_collections(*cid).await;
+                let mut list = self.recursive_collections(*cid).await?;
                 // ensure the first root block is apart of the list
                 list.insert(*cid);
                 list
@@ -841,51 +912,74 @@ impl<S: RepoTypes> Repo<S> {
             false => BTreeSet::from_iter(std::iter::once(*cid)),
         };
 
-        let list = stream::iter(
-            FuturesOrdered::from_iter(list.into_iter().map(|cid| async move { cid }))
-                .filter_map(|cid| async move {
-                    matches!(self.is_pinned(&cid).await, Ok(false)).then_some(cid)
-                })
-                .collect::<Vec<Cid>>()
-                .await,
-        )
-        .boxed();
+        let mut unpinned = Vec::with_capacity(list.len());
+        for cid in list {
+            if !self.is_pinned(&cid).await? {
+                unpinned.push(cid);
+            }
+        }
 
         self.invalidate_gc_size();
         let removal_started = web_time::Instant::now();
-        let removed = self
-            .inner
-            .block_store
-            .remove_many(list)
-            .await
-            .collect::<Vec<_>>()
-            .await;
+        let report = self.remove_blocks_checked(unpinned).await;
 
         {
             let mut temp_pins = self.inner.temp_pins.lock();
-            for cid in &removed {
+            for cid in &report.removed_blocks {
                 temp_pins.remove_before(cid, removal_started);
             }
         }
 
-        for cid in &removed {
+        for cid in &report.removed_blocks {
             // notify ipfs task about the removed blocks
             if let Some(mut events) = self.repo_channel() {
                 let _ = events.send(RepoEvent::RemovedBlock(*cid)).await;
             }
         }
-        Ok(removed)
+        report.into_result()
+    }
+
+    async fn remove_blocks_checked(&self, cids: Vec<Cid>) -> BlockRemovalReport {
+        let mut pending = BTreeSet::from_iter(cids.iter().copied());
+        let mut results = self
+            .inner
+            .block_store
+            .remove_many(stream::iter(cids).boxed())
+            .await;
+        let mut removed_blocks = Vec::new();
+        let mut errors = Vec::new();
+
+        while let Some(result) = results.next().await {
+            match result {
+                Ok(cid) if pending.remove(&cid) => removed_blocks.push(cid),
+                Ok(cid) => errors.push(anyhow::anyhow!(
+                    "block removal returned an unexpected CID {cid}"
+                )),
+                Err(error) => errors.push(error),
+            }
+        }
+        if !pending.is_empty() && errors.is_empty() {
+            errors.push(anyhow::anyhow!(
+                "block removal ended before reporting every result"
+            ));
+        }
+
+        BlockRemovalReport {
+            removed_blocks,
+            failed_blocks: Vec::from_iter(pending),
+            errors,
+        }
     }
 
     /// Collects the transitive references of `cid` (excluding `cid` itself). The accumulator doubles
     /// as a visited set, so shared subtrees are walked once and any malformed cycle terminates.
-    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, BTreeSet<Cid>> {
+    fn recursive_collections(&self, cid: Cid) -> BoxFuture<'_, Result<BTreeSet<Cid>, Error>> {
         async move {
             let mut visited = BTreeSet::new();
             visited.insert(cid);
-            self.collect_references(cid, &mut visited).await;
+            self.collect_references(cid, &mut visited).await?;
             visited.remove(&cid);
-            visited
+            Ok(visited)
         }
         .boxed()
     }
@@ -894,23 +988,22 @@ impl<S: RepoTypes> Repo<S> {
         &'a self,
         cid: Cid,
         visited: &'a mut BTreeSet<Cid>,
-    ) -> BoxFuture<'a, ()> {
+    ) -> BoxFuture<'a, Result<(), Error>> {
         async move {
-            let block = match self.get_block_now(&cid).await {
-                Ok(Some(block)) => block,
-                _ => return,
+            let block = match self.get_block_now(&cid).await? {
+                Some(block) => block,
+                None => return Ok(()),
             };
 
             let mut references: BTreeSet<Cid> = BTreeSet::new();
-            if block.references(&mut references).is_err() {
-                return;
-            }
+            block.references(&mut references)?;
 
             for reference in references {
                 if visited.insert(reference) {
-                    self.collect_references(reference, visited).await;
+                    self.collect_references(reference, visited).await?;
                 }
             }
+            Ok(())
         }
         .boxed()
     }
@@ -1033,22 +1126,31 @@ impl<S: RepoTypes> Repo<S> {
 
         match self.cleanup_locked(trigger, refresh).await {
             Ok(Some(report)) => {
-                tracing::debug!(
-                    ?trigger,
-                    guard_waits,
-                    guard_wait_ms,
-                    reclaimed_bytes = report.reclaimed_bytes,
-                    removed_blocks = report.removed_blocks.len(),
-                    failures = report.failed_blocks,
-                    "gc cleanup finished"
-                );
-                if report.failed_blocks > 0 {
-                    tracing::warn!(
-                        failures = report.failed_blocks,
-                        "some gc blocks were not removed"
+                let failures = report.removal.failed_count();
+                if failures > 0 {
+                    self.inner.gc_total_size.lock().take();
+                    tracing::error!(
+                        ?trigger,
+                        guard_waits,
+                        guard_wait_ms,
+                        reclaimed_bytes = report.reclaimed_bytes,
+                        removed_blocks = report.removal.removed_blocks.len(),
+                        failures,
+                        errors = ?report.removal.errors,
+                        "gc cleanup failed"
+                    );
+                } else {
+                    tracing::debug!(
+                        ?trigger,
+                        guard_waits,
+                        guard_wait_ms,
+                        reclaimed_bytes = report.reclaimed_bytes,
+                        removed_blocks = report.removal.removed_blocks.len(),
+                        failures,
+                        "gc cleanup finished"
                     );
                 }
-                Ok(Some(report.removed_blocks))
+                report.removal.into_result().map(Some)
             }
             Ok(None) => {
                 tracing::debug!(?trigger, guard_waits, guard_wait_ms, "gc cleanup skipped");
@@ -1062,6 +1164,7 @@ impl<S: RepoTypes> Repo<S> {
                     guard_wait_ms,
                     failures = 1,
                     %error,
+                    cause = %error.root_cause(),
                     "gc cleanup failed"
                 );
                 Err(error)
@@ -1133,26 +1236,19 @@ impl<S: RepoTypes> Repo<S> {
         }
 
         let cids = Vec::from_iter(candidates.keys().copied());
-        let mut removed = self
-            .inner
-            .block_store
-            .remove_many(stream::iter(cids).boxed())
-            .await;
-        let mut removed_blocks = Vec::new();
+        let removal = self.remove_blocks_checked(cids).await;
         let mut reclaimed_bytes = 0usize;
-        while let Some(cid) = removed.next().await {
-            if let Some(size) = candidates.remove(&cid) {
+        for cid in &removal.removed_blocks {
+            if let Some(size) = candidates.remove(cid) {
                 reclaimed_bytes = reclaimed_bytes.saturating_add(size);
-                self.inner.temp_pins.lock().remove(&cid);
-                removed_blocks.push(cid);
+                self.inner.temp_pins.lock().remove(cid);
             }
         }
         *self.inner.gc_total_size.lock() = Some(total_size.saturating_sub(reclaimed_bytes));
 
         Ok(Some(GCReport {
-            removed_blocks,
+            removal,
             reclaimed_bytes,
-            failed_blocks: candidates.len(),
         }))
     }
 

@@ -1,5 +1,6 @@
 use std::{collections::BTreeSet, rc::Rc, str::FromStr, sync::OnceLock};
 
+use crate::repo::store::idb::finish_transaction;
 use crate::{
     Error, PinKind, PinMode,
     repo::{DataStore, PinModeRequirement, PinStore, References},
@@ -76,7 +77,7 @@ impl DataStore for IdbDataStore {
             let key = serde_wasm_bindgen::to_value(&key)?;
 
             let val = store.get(key)?.await?;
-            transaction.await?;
+            finish_transaction(transaction).await?;
             Ok::<_, Box<dyn std::error::Error>>(val.is_some())
         })
         .await
@@ -93,14 +94,13 @@ impl DataStore for IdbDataStore {
 
             let key = serde_wasm_bindgen::to_value(&key)?;
 
-            let block = store.get(key)?.await.map(|val| {
-                val.and_then(|val| {
-                    let bytes: Vec<u8> = serde_wasm_bindgen::from_value(val).ok()?;
-                    Some(bytes)
-                })
-            })?;
+            let block = store
+                .get(key)?
+                .await?
+                .map(serde_wasm_bindgen::from_value::<Vec<u8>>)
+                .transpose()?;
 
-            transaction.await?;
+            finish_transaction(transaction).await?;
             Ok::<_, Box<dyn std::error::Error>>(block)
         })
         .await
@@ -120,7 +120,7 @@ impl DataStore for IdbDataStore {
 
             store.put(&val, Some(&key))?.await?;
 
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
 
             Ok::<_, Box<dyn std::error::Error>>(())
         })
@@ -140,7 +140,7 @@ impl DataStore for IdbDataStore {
 
             store.delete(key)?.await?;
 
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
 
             Ok::<_, Box<dyn std::error::Error>>(())
         })
@@ -192,11 +192,9 @@ impl PinStore for IdbDataStore {
 
             let store = transaction.object_store("pinstore")?;
 
-            let key = JsValue::from_str(&cid.to_string());
-
-            let val = store.get(key)?.await?;
-            transaction.await?;
-            Ok::<_, Box<dyn std::error::Error>>(val.is_some())
+            let pinned = get_pinned_mode(&transaction, &store, cid).await?.is_some();
+            finish_transaction(transaction).await?;
+            Ok::<_, Box<dyn std::error::Error>>(pinned)
         })
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))
@@ -212,7 +210,10 @@ impl PinStore for IdbDataStore {
             let already_pinned = get_pinned_mode(&transaction, &store, target).await?;
 
             match already_pinned {
-                Some((PinMode::Direct, _)) => return Ok(()),
+                Some((PinMode::Direct, _)) => {
+                    finish_transaction(transaction).await?;
+                    return Ok(());
+                }
                 Some((PinMode::Recursive, _)) => {
                     let r = || Err(anyhow::anyhow!("already pinned recursively"));
                     r()?;
@@ -226,11 +227,11 @@ impl PinStore for IdbDataStore {
             }
 
             let direct_key = get_pin_key(target, &PinMode::Direct);
-            let key = serde_wasm_bindgen::to_value(&direct_key).unwrap();
-            let val = serde_wasm_bindgen::to_value(direct_value()).unwrap();
+            let key = serde_wasm_bindgen::to_value(&direct_key)?;
+            let val = serde_wasm_bindgen::to_value(direct_value())?;
 
             store.put(&val, Some(&key))?.await?;
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
 
             Ok::<_, Box<dyn std::error::Error>>(())
         })
@@ -257,7 +258,10 @@ impl PinStore for IdbDataStore {
             let already_pinned = get_pinned_mode(&transaction, &store, target).await?;
 
             match already_pinned {
-                Some((PinMode::Recursive, _)) => return Ok(()),
+                Some((PinMode::Recursive, _)) => {
+                    finish_transaction(transaction).await?;
+                    return Ok(());
+                }
                 Some((PinMode::Direct, key)) | Some((PinMode::Indirect, key)) => {
                     // FIXME: this is probably another lapse in tests that both direct and
                     // indirect can be removed when inserting recursive?
@@ -288,7 +292,7 @@ impl PinStore for IdbDataStore {
                 store.put(&target_value, Some(&indirect_key))?.await?;
             }
 
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
             Ok::<_, Box<dyn std::error::Error>>(())
         })
         .await
@@ -312,7 +316,7 @@ impl PinStore for IdbDataStore {
 
             store.delete(key)?.await?;
 
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
             Ok::<_, Box<dyn std::error::Error>>(())
         })
         .await
@@ -357,7 +361,7 @@ impl PinStore for IdbDataStore {
                 }
             }
 
-            transaction.commit()?.await?;
+            finish_transaction(transaction.commit()?).await?;
 
             Ok::<_, Box<dyn std::error::Error>>(())
         })
@@ -372,49 +376,40 @@ impl PinStore for IdbDataStore {
         let db = self.get_db().to_owned();
         let requirement = PinModeRequirement::from(requirement);
 
-        SendWrapper::new(async_stream::stream! {
-            let Ok(transaction) = db.transaction(&["pinstore"], TransactionMode::ReadOnly) else {
-                return;
-            };
-            let Ok(store) = transaction.object_store("pinstore") else {
-                return;
-            };
-            let Ok(request) = store.get_all_keys(None, None) else {
-                return;
-            };
-            let res = request.await.unwrap_or_default();
+        let pins = SendWrapper::new(async move {
+            let transaction = db.transaction(&["pinstore"], TransactionMode::ReadOnly)?;
+            let store = transaction.object_store("pinstore")?;
+            let key_request = store.get_all_keys(None, None)?;
+            let value_request = store.get_all(None, None)?;
+            let keys = key_request.await?;
+            let values = value_request.await?;
+            if keys.len() != values.len() {
+                return Err(std::io::Error::other("pin keys and values do not match").into());
+            }
 
-            for k in res.into_iter().filter_map(|val| val.as_string()) {
-                let k = k.as_bytes();
-                if !k.starts_with(b"pin.") || k.len() < 7 {
-                    yield Err(anyhow::anyhow!("invalid pin: {:?}", k));
-                    return;
-                }
-
-                let mode = match k[4] {
-                    b'd' => PinMode::Direct,
-                    b'r' => PinMode::Recursive,
-                    b'i' => PinMode::Indirect,
-                    x => {
-                        yield Err(anyhow::anyhow!("invalid pinmode: {}", x as char));
-                        return;
-                    }
-                };
-
-                if !requirement.matches(&mode) {
-                    continue;
-                } else {
-                    let cid = std::str::from_utf8(&k[6..])
-                        .map_err(Error::from)
-                        .and_then(|x| Cid::from_str(x).map_err(Error::from))
-                        .map_err(|e| e.context("failed to read pin:".to_string()))
-                        .map(move |cid| (cid, mode));
-
-                    yield cid;
+            let mut pins = Vec::with_capacity(keys.len());
+            for (key, value) in keys.into_iter().zip(values) {
+                let key = key
+                    .as_string()
+                    .ok_or_else(|| std::io::Error::other("invalid pin key"))?;
+                let (cid, mode) = parse_pin_key(&key)?;
+                validate_pin_value(mode, value)
+                    .map_err(|error| error.context(format!("invalid pin value for {cid}")))?;
+                if requirement.matches(&mode) {
+                    pins.push((cid, mode));
                 }
             }
+
+            finish_transaction(transaction).await?;
+            Ok::<_, Box<dyn std::error::Error>>(pins)
         })
-        .boxed()
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"));
+
+        match pins {
+            Ok(pins) => futures::stream::iter(pins.into_iter().map(Ok)).boxed(),
+            Err(error) => futures::stream::once(futures::future::ready(Err(error))).boxed(),
+        }
     }
 
     async fn query(
@@ -441,23 +436,14 @@ impl PinStore for IdbDataStore {
                         PinMode::Recursive => Some(PinKind::Recursive(0)),
                         PinMode::Indirect => {
                             let key = serde_wasm_bindgen::to_value(&key)?;
-                            store
-                                .get(key)?
-                                .await?
-                                .and_then(|root| {
-                                    serde_wasm_bindgen::from_value::<Vec<u8>>(root).ok()
-                                })
-                                .map(|root| {
-                                    cid_from_indirect_value(&root)
-                                        .map(PinKind::IndirectFrom)
-                                        .map_err(|e| {
-                                            e.context(format!(
-                                                "failed to read indirect pin source: {:?}",
-                                                String::from_utf8_lossy(root.as_ref()).as_ref(),
-                                            ))
-                                        })
-                                })
-                                .transpose()?
+                            let value = store.get(key)?.await?.ok_or_else(|| {
+                                std::io::Error::other(format!("missing pin {id}"))
+                            })?;
+                            validate_pin_value(pin_mode, value)
+                                .map_err(|error| {
+                                    error.context(format!("invalid pin value for {id}"))
+                                })?
+                                .map(PinKind::IndirectFrom)
                         }
                     },
                     Some(_) | None => None,
@@ -468,6 +454,7 @@ impl PinStore for IdbDataStore {
                 modes.push(matched);
             }
 
+            finish_transaction(transaction).await?;
             Ok::<_, Box<dyn std::error::Error>>(
                 ids.into_iter()
                     .zip(modes.into_iter())
@@ -480,7 +467,7 @@ impl PinStore for IdbDataStore {
     }
 }
 
-/// Name the empty value stored for direct pins; the pin key itself describes the mode and the cid.
+/// The empty value stored for direct pins.
 fn direct_value() -> &'static [u8] {
     Default::default()
 }
@@ -522,6 +509,40 @@ fn get_pin_key(cid: &Cid, pin_mode: &PinMode) -> String {
     format!("pin.{}.{}", pin_mode_literal(pin_mode), cid)
 }
 
+fn parse_pin_key(key: &str) -> Result<(Cid, PinMode), Error> {
+    let (mode, cid) = key
+        .strip_prefix("pin.")
+        .and_then(|suffix| suffix.split_once('.'))
+        .ok_or_else(|| anyhow::anyhow!("invalid pin key {key}"))?;
+    let mode = match mode {
+        "d" => PinMode::Direct,
+        "r" => PinMode::Recursive,
+        "i" => PinMode::Indirect,
+        _ => anyhow::bail!("invalid pin mode in key {key}"),
+    };
+    let cid = Cid::from_str(cid)
+        .map_err(|error| Error::from(error).context(format!("invalid CID in pin key {key}")))?;
+    Ok((cid, mode))
+}
+
+fn validate_pin_value(mode: PinMode, value: JsValue) -> Result<Option<Cid>, Error> {
+    match mode {
+        PinMode::Indirect => {
+            let root: String = serde_wasm_bindgen::from_value(value)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            Ok(Some(cid_from_indirect_value(root.as_bytes())?))
+        }
+        PinMode::Direct | PinMode::Recursive => {
+            let value: Vec<u8> = serde_wasm_bindgen::from_value(value)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            if !value.is_empty() {
+                anyhow::bail!("invalid value for {mode:?} pin");
+            }
+            Ok(None)
+        }
+    }
+}
+
 /// Returns a tuple of the parsed mode and the key used
 async fn get_pinned_mode(
     _: &Transaction,
@@ -535,7 +556,9 @@ async fn get_pinned_mode(
 
         let val = tree.get(key_val)?.await?;
 
-        if val.is_some() {
+        if let Some(value) = val {
+            validate_pin_value(*mode, value)
+                .map_err(|error| error.context(format!("invalid pin value for {block}")))?;
             return Ok(Some((*mode, key)));
         }
     }

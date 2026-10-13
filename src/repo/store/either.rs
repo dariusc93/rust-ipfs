@@ -65,7 +65,10 @@ impl<L: BlockStore, R: BlockStore> BlockStore for Either<L, R> {
         }
     }
 
-    async fn remove_many(&self, blocks: BoxStream<'static, Cid>) -> BoxStream<'static, Cid> {
+    async fn remove_many(
+        &self,
+        blocks: BoxStream<'static, Cid>,
+    ) -> BoxStream<'_, Result<Cid, Error>> {
         match self {
             Either::Left(blockstore) => blockstore.remove_many(blocks).await,
             Either::Right(blockstore) => blockstore.remove_many(blocks).await,

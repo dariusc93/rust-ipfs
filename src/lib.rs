@@ -413,6 +413,7 @@ impl Ipfs {
     }
 
     /// Remove block from the ipfs repo. A pinned block cannot be removed.
+    /// Partial failures return a [`repo::BlockRemovalError`] with confirmed removals.
     pub async fn remove_block(
         &self,
         cid: impl Borrow<Cid>,
@@ -426,6 +427,8 @@ impl Ipfs {
 
     /// Removes all unpinned blocks, including blocks under temporary retention.
     /// Writes to [`Repo`] wait until cleanup finishes.
+    /// Pin errors stop cleanup before any blocks are deleted.
+    /// Partial failures return a [`repo::BlockRemovalError`] with confirmed removals.
     pub async fn gc(&self) -> Result<Vec<Cid>, Error> {
         self.repo.cleanup().instrument(self.span.clone()).await
     }
