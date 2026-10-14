@@ -1,5 +1,6 @@
 # 0.17.0
 
+- fix: store flatfs keys as valid file names on all platforms (Windows-safe percent-encoding, exact non-UTF-8 round-trip) and rebuild iterated keys from path components so `iter` agrees with `put`/`get` on Windows.
 - fix: parse multiaddr directly in `listening_addresses` test
 - chore: type all ad-hoc errors into `MfsError`.
 - refactor: use prost for handling protobuf.
