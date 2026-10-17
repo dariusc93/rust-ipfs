@@ -53,8 +53,8 @@ impl IdbDataStore {
         self.database.get().expect("initialized")
     }
 
-    /// Rebuilds pin ownership after both stores are initialized.
-    /// Note that should run before pin operations or GC.
+    /// Validates pin ownership and rebuilds legacy records.
+    /// Run after initializing both stores and before pin operations or GC.
     pub async fn rebuild_pins(&self, block_store: &impl BlockStore) -> Result<(), Error> {
         self.pins_ready.store(false, Ordering::SeqCst);
         SendWrapper::new(async move {
@@ -65,11 +65,15 @@ impl IdbDataStore {
                 let snapshot = read_pin_records(&store, true).await?;
                 finish_transaction(transaction).await?;
 
+                if !snapshot.legacy {
+                    snapshot.validate()?;
+                    self.pins_ready.store(true, Ordering::SeqCst);
+                    return Ok(());
+                }
+
                 let mut rebuilt = snapshot.clone();
                 for (root, references) in &mut rebuilt.recursive {
-                    if references.is_none() {
-                        *references = Some(collect_block_references(block_store, *root).await?);
-                    }
+                    *references = Some(collect_block_references(block_store, *root).await?);
                 }
                 rebuilt.indirect = rebuilt.owners()?;
                 rebuilt.legacy = false;
@@ -110,6 +114,7 @@ impl IdbDataStore {
 
 impl DataStore for IdbDataStore {
     async fn init(&self) -> Result<(), Error> {
+        self.pins_ready.store(false, Ordering::SeqCst);
         SendWrapper::new(async move {
             let mut request = self.factory.open(&self.namespace, None)?;
 
@@ -131,8 +136,10 @@ impl DataStore for IdbDataStore {
             let store = transaction.object_store("pinstore")?;
             let pins = read_pin_records(&store, true).await?;
             finish_transaction(transaction).await?;
-            self.pins_ready
-                .store(pins.validate().is_ok(), Ordering::SeqCst);
+            if !pins.legacy {
+                pins.validate()?;
+                self.pins_ready.store(true, Ordering::SeqCst);
+            }
             Ok(())
         })
         .await
