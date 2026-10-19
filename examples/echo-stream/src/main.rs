@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
-use rand::RngCore;
+use rand::Rng;
 use rust_ipfs::{Ipfs, Keypair, builder::DefaultIpfsBuilder as IpfsBuilder, p2p::MultiaddrExt};
 
 #[derive(Debug, Parser)]

@@ -4,7 +4,7 @@
 /// or create a random one without providing any argument
 /// example: cargo run --example ipfs-pnet
 use clap::Parser;
-use rand::Rng;
+use rand::RngExt;
 use rust_ipfs::prelude::transport::pnet::PreSharedKey;
 use rust_ipfs::{Ipfs, Keypair, builder::IpfsBuilder};
 use std::str::FromStr;
