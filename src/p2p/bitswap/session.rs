@@ -21,6 +21,7 @@ use crate::repo::{DefaultStorage, Repo};
 
 const MAX_INFLIGHT_SERVES: usize = 32;
 const SERVE_BATCH_LIMIT: usize = 1 << 20;
+pub(super) const DEFAULT_MAX_WANTLIST_ENTRIES_PER_PEER: usize = 1024;
 
 #[derive(Clone)]
 pub struct ServeBudget {
@@ -140,13 +141,19 @@ pub struct PeerSession {
     serving: FuturesUnordered<BoxFuture<'static, (BitswapRequest, Option<Block>)>>,
     storing: FuturesUnordered<BoxFuture<'static, (Cid, Result<(), Error>)>>,
     budget: ServeBudget,
+    max_peer_wants: usize,
     budget_blocked: bool,
     ledger: Ledger,
     waker: Option<Waker>,
 }
 
 impl PeerSession {
-    pub fn new(wantlist: Wantlist, repo: Repo<DefaultStorage>, budget: ServeBudget) -> Self {
+    pub fn new(
+        wantlist: Wantlist,
+        repo: Repo<DefaultStorage>,
+        budget: ServeBudget,
+        max_peer_wants: usize,
+    ) -> Self {
         let mut session = Self {
             wantlist,
             repo,
@@ -159,6 +166,7 @@ impl PeerSession {
             serving: FuturesUnordered::new(),
             storing: FuturesUnordered::new(),
             budget,
+            max_peer_wants,
             budget_blocked: false,
             ledger: Ledger::default(),
             waker: None,
@@ -266,6 +274,9 @@ impl PeerSession {
             let cid = request.cid;
             if request.cancel {
                 self.peer_wants.remove(&cid);
+                continue;
+            }
+            if !self.peer_wants.contains_key(&cid) && self.peer_wants.len() >= self.max_peer_wants {
                 continue;
             }
             self.peer_wants.insert(cid, request);
@@ -479,7 +490,12 @@ mod tests {
 
         let wantlist = Wantlist::default();
         wantlist.want(cid, RequestType::Have, 1, None);
-        let mut session = PeerSession::new(wantlist, repo.clone(), ServeBudget::new(1024));
+        let mut session = PeerSession::new(
+            wantlist,
+            repo.clone(),
+            ServeBudget::new(1024),
+            DEFAULT_MAX_WANTLIST_ENTRIES_PER_PEER,
+        );
         assert!(
             matches!(session.next().await, Some(PeerSessionEvent::Send(_))),
             "an unprovided want should be solicited"
@@ -488,7 +504,12 @@ mod tests {
         let wantlist = Wantlist::default();
         wantlist.want(cid, RequestType::Have, 1, None);
         wantlist.note_have(&cid);
-        let mut session = PeerSession::new(wantlist, repo, ServeBudget::new(1024));
+        let mut session = PeerSession::new(
+            wantlist,
+            repo,
+            ServeBudget::new(1024),
+            DEFAULT_MAX_WANTLIST_ENTRIES_PER_PEER,
+        );
         let polled = futures::poll!(std::pin::pin!(session.next()));
         assert!(
             polled.is_pending(),
@@ -509,7 +530,12 @@ mod tests {
             cids.push(cid);
         }
 
-        let mut session = PeerSession::new(Wantlist::default(), repo, ServeBudget::new(1024));
+        let mut session = PeerSession::new(
+            Wantlist::default(),
+            repo,
+            ServeBudget::new(1024),
+            DEFAULT_MAX_WANTLIST_ENTRIES_PER_PEER,
+        );
         let requests = cids.iter().map(|cid| BitswapRequest::block(*cid)).collect();
         session.on_message(BitswapMessage::new(false).set_requests(requests));
 
@@ -577,7 +603,12 @@ mod tests {
             cids.push(cid);
         }
 
-        let mut session = PeerSession::new(Wantlist::default(), repo, ServeBudget::new(1));
+        let mut session = PeerSession::new(
+            Wantlist::default(),
+            repo,
+            ServeBudget::new(1),
+            DEFAULT_MAX_WANTLIST_ENTRIES_PER_PEER,
+        );
         let requests = cids.iter().map(|cid| BitswapRequest::block(*cid)).collect();
         session.on_message(BitswapMessage::new(false).set_requests(requests));
 
@@ -628,7 +659,12 @@ mod tests {
     #[test]
     fn full_wantlist_prunes_withdrawn_wants() {
         let repo = Repo::new_memory();
-        let mut session = PeerSession::new(Wantlist::default(), repo, ServeBudget::new(1024));
+        let mut session = PeerSession::new(
+            Wantlist::default(),
+            repo,
+            ServeBudget::new(1024),
+            DEFAULT_MAX_WANTLIST_ENTRIES_PER_PEER,
+        );
         let x = Cid::new_v1(0x55, Code::Sha2_256.digest(b"full x"));
         let y = Cid::new_v1(0x55, Code::Sha2_256.digest(b"full y"));
 

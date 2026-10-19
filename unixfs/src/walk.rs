@@ -71,7 +71,15 @@ fn convert_sharded_link(
         Err(e) => return Err(InvalidCidInLink::from((nth, link, e)).into()),
     };
     let (depth, name) = match link.Name {
-        Some(Cow::Borrowed(s)) if s.len() > 2 => (nested_depth, s[2..].to_owned()),
+        Some(Cow::Borrowed(s)) if s.len() > 2 => match s.get(2..) {
+            Some(name) => (nested_depth, name.to_owned()),
+            None => {
+                return Err(Error::InvalidLinkName {
+                    nth,
+                    name: s.to_owned(),
+                });
+            }
+        },
         Some(Cow::Borrowed(s)) if s.len() == 2 => (sibling_depth, String::from("")),
         None | Some(Cow::Borrowed(_)) => {
             return Err(Error::InvalidLinkName {

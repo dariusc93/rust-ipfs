@@ -24,6 +24,8 @@
 
 #[macro_use]
 extern crate tracing;
+#[cfg(not(target_arch = "wasm32"))]
+mod atomic_file;
 pub mod block;
 pub mod builder;
 pub mod config;

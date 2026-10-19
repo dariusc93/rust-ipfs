@@ -126,17 +126,6 @@ impl Stream for UnixfsGet {
                         let mut total_size = None;
                         let mut written = 0;
 
-                        let file = match tokio::fs::File::create(dest)
-                            .await
-                            .map_err(TraversalFailed::Io) {
-                                Ok(f) => f,
-                                Err(e) => {
-                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
-                                    return;
-                                }
-                            };
-                        let mut file = BufWriter::new(file);
-
                         let block  = match dag
                             ._resolve(path.clone(), true, &providers, local_only, timeout)
                             .await
@@ -148,6 +137,18 @@ impl Stream for UnixfsGet {
                                     return;
                                 }
                         };
+
+                        let created = match crate::atomic_file::create(&dest)
+                            .map_err(TraversalFailed::Io) {
+                                Ok(created) => created,
+                                Err(e) => {
+                                    yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
+                                    return;
+                                }
+                            };
+                        let temporary = created.0;
+                        let file = created.1;
+                        let mut file = BufWriter::new(file);
 
                         let cid = block.cid();
                         let root_name = block.cid().to_string();
@@ -222,6 +223,11 @@ impl Stream for UnixfsGet {
                             return;
                         }
                         if let Err(e) = file.get_ref().sync_all().await {
+                            yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
+                            return;
+                        }
+                        drop(file);
+                        if let Err(e) = crate::atomic_file::persist(temporary, &dest) {
                             yield UnixfsStatus::FailedStatus { written, total_size, error: e.into() };
                             return;
                         }

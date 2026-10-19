@@ -172,7 +172,7 @@ impl<'needle> ShardedLookup<'needle> {
         for (i, link) in iter.enumerate() {
             let name = link.Name.as_deref().unwrap_or_default();
 
-            if name.len() > 2 && &name[2..] == needle {
+            if name.len() > 2 && name.get(2..) == Some(needle) {
                 if let Some(first) = found.take() {
                     return Err(MultipleMatchingLinks::from((first, (i, link))).into());
                 } else {

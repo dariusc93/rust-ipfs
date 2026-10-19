@@ -79,12 +79,16 @@ impl CarExport {
     /// Writes the archive to `path`, streaming without buffering the whole thing.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn to_file(self, path: impl AsRef<Path>) -> Result<(), Error> {
-        let mut file = tokio::fs::File::create(path.as_ref()).await?;
+        let path = path.as_ref().to_path_buf();
+        let (temporary, mut file) = crate::atomic_file::create(&path)?;
         let mut stream = export_stream(self.dag, self.roots, self.fetch);
         while let Some(chunk) = stream.next().await {
             file.write_all(&chunk?).await?;
         }
         file.flush().await?;
+        file.sync_all().await?;
+        drop(file);
+        crate::atomic_file::persist(temporary, &path)?;
         Ok(())
     }
 

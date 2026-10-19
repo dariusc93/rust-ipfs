@@ -67,12 +67,14 @@ pub struct BitswapStats {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub global_serve_limit: usize,
+    pub max_wantlist_entries_per_peer: usize,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             global_serve_limit: 1024,
+            max_wantlist_entries_per_peer: session::DEFAULT_MAX_WANTLIST_ENTRIES_PER_PEER,
         }
     }
 }
@@ -86,6 +88,7 @@ pub struct Behaviour {
     driver: WantlistDriver,
     sessions: StreamMap<PeerId, PeerSession>,
     budget: ServeBudget,
+    max_wantlist_entries_per_peer: usize,
     candidates: HashMap<Cid, VecDeque<PeerId>>,
     block_inflight: HashMap<Cid, (PeerId, Instant)>,
     block_timer: Delay,
@@ -104,6 +107,7 @@ impl Behaviour {
             wantlist,
             sessions: StreamMap::new(),
             budget: ServeBudget::new(config.global_serve_limit),
+            max_wantlist_entries_per_peer: config.max_wantlist_entries_per_peer,
             candidates: HashMap::new(),
             block_inflight: HashMap::new(),
             block_timer: Delay::new(BLOCK_TIMER_TICK),
@@ -314,6 +318,7 @@ impl Behaviour {
             self.wantlist.clone(),
             self.store.clone(),
             self.budget.clone(),
+            self.max_wantlist_entries_per_peer,
         );
         self.sessions.insert(peer_id, session);
         self.wake();

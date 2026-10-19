@@ -148,6 +148,7 @@ rcgen = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 rlimit.workspace = true
 simple_x509 = { workspace = true, optional = true }
+tempfile = "3.17.1"
 tokio = { features = ["full"], workspace = true }
 tokio-stream = { workspace = true, features = ["fs"] }
 tokio-util = { workspace = true, features = ["full"] }
@@ -170,7 +171,6 @@ hex-literal = { default-features = false, version = "1.0.0" }
 tokio = { features = ["full"], workspace = true }
 tracing-subscriber.workspace = true
 rand = { workspace = true }
-tempfile = "3.17.1"
 
 [profile.dev.build-override]
 debug = true

@@ -108,7 +108,7 @@ impl MultiaddrExt for Multiaddr {
         self.iter().any(|proto| match proto {
             Protocol::Ip4(ip) => ip.is_private(),
             Protocol::Ip6(ip) => {
-                (ip.segments()[0] & 0xffc0) != 0xfe80 && (ip.segments()[0] & 0xfe00) != 0xfc00
+                (ip.segments()[0] & 0xffc0) == 0xfe80 && (ip.segments()[0] & 0xfe00) == 0xfc00
             }
             _ => false,
         })
