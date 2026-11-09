@@ -2,6 +2,7 @@
 
 use futures_timeout::TimeoutFutureExt;
 use std::borrow::Borrow;
+use std::time::Duration;
 
 use crate::path::{IpfsPath, PathRoot};
 use crate::repo::DataStore;
@@ -53,12 +54,20 @@ impl Ipns {
     // TODO: Implement ipns pubsub
     // TODO: Maybe implement a check to the dht store itself too?
     pub async fn resolve(&self, path: impl Borrow<IpfsPath>) -> Result<IpfsPath, IpnsError> {
+        self.resolve_with_timeout(path, Duration::from_secs(60 * 2))
+            .await
+    }
+
+    pub async fn resolve_with_timeout(
+        &self,
+        path: impl Borrow<IpfsPath>,
+        timeout: Duration,
+    ) -> Result<IpfsPath, IpnsError> {
         let path = path.borrow();
         match path.root() {
             PathRoot::Ipld(_) => Ok(path.clone()),
             PathRoot::Ipns(peer) => {
                 use std::str::FromStr;
-                use std::time::Duration;
 
                 use futures::StreamExt;
                 use ipld_core::cid::Cid;
@@ -109,7 +118,6 @@ impl Ipns {
                 let key = ipns_dht_key(peer);
                 let stream = self.ipfs.dht_get(key.clone()).await?;
 
-                //TODO: Implement configurable timeout
                 let records = stream
                     .filter(|record| futures::future::ready(record.key == key))
                     .filter_map(|record| async move {
@@ -118,7 +126,7 @@ impl Ipns {
                         Some(record)
                     })
                     .collect::<Vec<_>>()
-                    .timeout(Duration::from_secs(60 * 2))
+                    .timeout(timeout)
                     .await
                     .unwrap_or_default();
 
@@ -156,6 +164,16 @@ impl Ipns {
         key: Option<&str>,
         path: impl Borrow<IpfsPath>,
         option: IpnsOption,
+    ) -> Result<IpfsPath, IpnsError> {
+        self.publish_with_timeout(key, path, option, None).await
+    }
+
+    pub async fn publish_with_timeout(
+        &self,
+        key: Option<&str>,
+        path: impl Borrow<IpfsPath>,
+        option: IpnsOption,
+        timeout: Option<Duration>,
     ) -> Result<IpfsPath, IpnsError> {
         use connexa::prelude::dht::Quorum;
         use ipld_core::cid::Cid;
@@ -215,7 +233,7 @@ impl Ipns {
             validity,
             seq,
             // IPNS TTL is a caching hint of 60 seconds.
-            std::time::Duration::from_secs(60),
+            timeout.unwrap_or(std::time::Duration::from_secs(60)),
         )?;
 
         let bytes = record.encode()?;
