@@ -44,7 +44,7 @@ async-rt = "0.2.0"
 async-stream = { version = "0.3.6" }
 async-trait = { version = "0.1.89" }
 asynchronous-codec = "0.7.0"
-base64 = { version = "0.22.1" }
+base64 = { version = "0.23.1" }
 bytes = "1.11.1"
 cid = "0.11.1"
 chrono = { version = "0.4.42" }
