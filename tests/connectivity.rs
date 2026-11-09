@@ -1,4 +1,4 @@
-use futures_timeout::TimeoutExt;
+use futures_timeout::TimeoutFutureExt;
 use rust_ipfs::Node;
 use rust_ipfs::{Multiaddr, Protocol};
 use std::time::Duration;

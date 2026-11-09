@@ -3,7 +3,7 @@ use connexa::prelude::gossipsub::{IdentTopic, IntoGossipsubTopic, TopicHash};
 use futures::future::pending;
 use futures::stream::{BoxStream, StreamExt};
 use futures::{Stream, TryFutureExt};
-use futures_timeout::TimeoutExt;
+use futures_timeout::TimeoutFutureExt;
 use rust_ipfs::{Node, PeerId};
 use std::pin::Pin;
 use std::task::{Context, Poll};
