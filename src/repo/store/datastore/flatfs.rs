@@ -49,31 +49,35 @@ impl FsDataStore {
 
     // Instead of having the file be the key itself, we would split the key into segements with all but the last representing as a directory
     // with the final item being a file.
+    //
+    // Each segment is percent-encoded by [`encode_segment`] so every accepted key maps
+    // to a file name that is valid on both POSIX and Windows. Segments that are already
+    // safe keep their existing on-disk spelling, so ordinary keys (`/blocks/<cid>`,
+    // `/mfs/root`) are stored exactly as before.
     fn key(&self, key: &[u8]) -> Option<(String, String)> {
-        let key = String::from_utf8_lossy(key);
-        let mut key_segments = key.split('/').collect::<Vec<_>>();
+        let mut key_segments = key.split(|&b| b == b'/').collect::<Vec<_>>();
 
         for (i, segment) in key_segments.iter().enumerate() {
-            if *segment == "."
-                || *segment == ".."
-                || segment.contains('\0')
-                || segment.contains('\\')
-            {
+            if segment.is_empty() && i != 0 {
                 return None;
             }
-            if segment.is_empty() && i != 0 {
+            if matches!(*segment, b"." | b"..")
+                || segment.contains(&b'\0')
+                || segment.contains(&b'\\')
+            {
                 return None;
             }
         }
 
         let last = key_segments.pop().filter(|segment| !segment.is_empty())?;
-        let key_val = format!("{last}.data");
+        let key_val = format!("{}.data", encode_segment(last));
 
-        let key_path_raw = key_segments.join("/");
-        let key_path = match key_path_raw.strip_prefix('/') {
-            Some(rest) => rest.to_string(),
-            None => key_path_raw,
-        };
+        let key_path = key_segments
+            .iter()
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| encode_segment(segment))
+            .collect::<Vec<_>>()
+            .join("/");
 
         Some((key_path, key_val))
     }
@@ -140,6 +144,88 @@ impl FsDataStore {
     }
 }
 
+/// Percent-escapes a key segment into a file-name that is valid on both POSIX and
+/// Windows.
+///
+/// Bytes that Windows rejects in file names are escaped as `%XX`: control
+/// characters, non-ASCII bytes, `%` itself (so decoding is unambiguous), and the
+/// reserved characters `<>:"|?*`. Trailing dots and spaces are escaped as well,
+/// because Win32 strips them from path components, which would make distinct keys
+/// collide on disk. A segment whose stem is a Windows device name (`CON`, `NUL`,
+/// `COM1`, ...) is escaped in its first byte, because e.g. `NUL.data` still resolves
+/// to the device. Everything else is stored literally, so segments made of
+/// ordinary characters (base32 CIDs, path names) keep their existing spelling.
+fn encode_segment(segment: &[u8]) -> String {
+    fn unsafe_byte(b: u8) -> bool {
+        !(0x21..=0x7e).contains(&b)
+            || matches!(b, b'%' | b'<' | b'>' | b':' | b'"' | b'|' | b'?' | b'*')
+    }
+
+    let mut out = String::with_capacity(segment.len());
+    for (i, &b) in segment.iter().enumerate() {
+        let is_trailing_dot_or_space =
+            (b == b'.' || b == b' ') && segment[i + 1..].iter().all(|&r| r == b'.' || r == b' ');
+        if unsafe_byte(b) || is_trailing_dot_or_space || (i == 0 && is_device_stem(segment)) {
+            out.push('%');
+            const HEX: &[u8; 16] = b"0123456789ABCDEF";
+            out.push(HEX[(b >> 4) as usize] as char);
+            out.push(HEX[(b & 0x0f) as usize] as char);
+        } else {
+            out.push(b as char);
+        }
+    }
+    out
+}
+
+/// Inverse of [`encode_segment`]: turns a stored segment back into the raw key
+/// bytes. A `%` that is not followed by two hex digits is kept literally, so file
+/// names written by older versions of this code remain readable.
+fn decode_segment(segment: &str) -> Vec<u8> {
+    fn hex_value(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let bytes = segment.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let (Some(h), Some(l)) = (
+                bytes.get(i + 1).copied().and_then(hex_value),
+                bytes.get(i + 2).copied().and_then(hex_value),
+            )
+        {
+            out.push(h * 16 + l);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Whether the segment's stem (the part before its first dot) is a reserved
+/// Windows device name, which cannot be used as a file name even with an
+/// extension.
+fn is_device_stem(segment: &[u8]) -> bool {
+    let stem = &segment[..segment
+        .iter()
+        .position(|&b| b == b'.')
+        .unwrap_or(segment.len())];
+    const DEVICES: [&[u8]; 22] = [
+        b"CON", b"PRN", b"AUX", b"NUL", b"COM1", b"COM2", b"COM3", b"COM4", b"COM5", b"COM6",
+        b"COM7", b"COM8", b"COM9", b"LPT1", b"LPT2", b"LPT3", b"LPT4", b"LPT5", b"LPT6", b"LPT7",
+        b"LPT8", b"LPT9",
+    ];
+    DEVICES.iter().any(|d| stem.eq_ignore_ascii_case(d))
+}
+
 fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
     data_path: R,
     path: P,
@@ -168,19 +254,43 @@ fn build_kv<R: AsRef<Path>, P: AsRef<Path>>(
                     continue;
                 }
 
-                let root_str = data_path.to_string_lossy().to_string();
-                let path_str = path.to_string_lossy().to_string();
-                let raw_key = &path_str[root_str.len()..];
-                if raw_key.is_empty() {
-                    continue;
-                }
-
-                let Some(key) = raw_key.strip_suffix(".data") else {
+                // Rebuild the key from the path components relative to the data
+                // root instead of slicing the string representation, which would
+                // produce `\`-separated keys on Windows where `/` was used to
+                // write them. Each component is percent-decoded back into the raw
+                // key bytes by `decode_segment`.
+                let Some(key) = path
+                    .strip_prefix(&data_path)
+                    .ok()
+                    .and_then(|rel| {
+                        let mut segments = rel
+                            .components()
+                            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                            .collect::<Vec<_>>();
+                        let file_name = segments.pop()?;
+                        let file = file_name.strip_suffix(".data")?;
+                        let mut key = vec![b'/'];
+                        for (i, segment) in segments.iter().enumerate() {
+                            if i > 0 {
+                                key.push(b'/');
+                            }
+                            key.extend_from_slice(&decode_segment(segment));
+                        }
+                        if !segments.is_empty() {
+                            key.push(b'/');
+                        }
+                        key.extend_from_slice(&decode_segment(file));
+                        Some(key)
+                    })
+                else {
                     continue;
                 };
 
+                if key.len() <= 1 {
+                    continue;
+                }
+
                 if let Ok(bytes) = tokio::fs::read(path).await {
-                    let key = key.as_bytes().to_vec();
                     yield (key, bytes)
                 }
             }
@@ -900,6 +1010,59 @@ mod test {
             Some(&vec![1]),
             "iter must round-trip the exact key bytes"
         );
+
+        drop(store);
+        let _ = std::fs::remove_dir_all(&tmp);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn kv_round_trips_windows_unsafe_keys() -> anyhow::Result<()> {
+        use futures::StreamExt;
+        let tmp =
+            std::env::temp_dir().join(format!("rust_ipfs_kv_win_unsafe_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = FsDataStore::new(tmp.clone());
+        store.init().await?;
+
+        let cases: Vec<(Vec<u8>, Vec<u8>)> = vec![
+            // Win32 strips trailing dots and spaces from file names; literal
+            // names would collide with the plain key below.
+            (b"/ns/a.".to_vec(), vec![1]),
+            (b"/ns/a ".to_vec(), vec![2]),
+            (b"/ns/a".to_vec(), vec![3]),
+            // Reserved device names are not usable as file names.
+            (b"/CON".to_vec(), vec![4]),
+            // `:` is not valid in a Windows file name.
+            (b"/x/y:z".to_vec(), vec![5]),
+            // Not valid UTF-8; the lossy conversion used to mangle it silently.
+            // iter() normalizes root-level keys to a leading `/`, like every
+            // other key it yields, so the key below is spelled with one.
+            (vec![b'/', 0xff, 0xfe], vec![6]),
+        ];
+
+        for (k, v) in &cases {
+            store.put(k, v).await?;
+        }
+
+        for (k, v) in &cases {
+            assert_eq!(store.get(k).await?, Some(v.clone()), "get({k:?})");
+        }
+
+        let mut found = std::collections::HashMap::new();
+        let mut stream = store.iter().await;
+        while let Some((k, v)) = stream.next().await {
+            found.insert(k, v);
+        }
+
+        for (k, v) in &cases {
+            assert_eq!(found.get(k), Some(v), "iter({k:?})");
+        }
+
+        for (k, _) in &cases {
+            store.remove(k).await?;
+            assert_eq!(store.get(k).await?, None, "removed({k:?})");
+        }
 
         drop(store);
         let _ = std::fs::remove_dir_all(&tmp);
