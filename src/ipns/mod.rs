@@ -1,6 +1,6 @@
 //! IPNS functionality around [`Ipfs`].
 
-use futures_timeout::TimeoutExt;
+use futures_timeout::TimeoutFutureExt;
 use std::borrow::Borrow;
 
 use crate::path::{IpfsPath, PathRoot};
