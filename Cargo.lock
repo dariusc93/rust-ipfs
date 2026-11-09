@@ -5066,7 +5066,7 @@ dependencies = [
  "either",
  "fs2",
  "futures",
- "futures-timeout 0.1.3",
+ "futures-timeout 0.2.1",
  "futures-timer",
  "getrandom 0.4.3",
  "gloo-net",
