@@ -44,7 +44,7 @@ async-rt = "0.2.0"
 async-stream = { version = "0.3.6" }
 async-trait = { version = "0.1.89" }
 asynchronous-codec = "0.7.0"
-base64 = { version = "0.22.1" }
+base64 = { version = "0.23.1" }
 bytes = "1.11.1"
 cid = "0.11.1"
 chrono = { version = "0.4.42" }
@@ -81,7 +81,7 @@ rust-unixfs = { version = "0.6.0", path = "unixfs" }
 rustyline-async = "0.4.6"
 send_wrapper = "0.6.0"
 serde = { version = "1.0.228" }
-serde_ipld_dagcbor = "0.6.3"
+serde_ipld_dagcbor = "0.7.0"
 serde_ipld_dagjson = "0.2.1"
 serde_json = { version = "1.0.145" }
 serde-wasm-bindgen = "0.6.5"
