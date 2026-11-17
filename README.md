@@ -1,5 +1,5 @@
 <h1>
-  <img src="https://ipfs.io/ipfs/QmRcFsCvTgGrB52UGpp9P2bSDmnYNTAATdRf4NBj8SKf77/rust-ipfs-logo-256w.png" width="128" /><br />
+  <img src="https://pbs.twimg.com/profile_images/570059057197625344/h4Bvj_8p.png" width="128" /><br />
   Rust IPFS
 </h1>
 
